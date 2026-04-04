@@ -1,0 +1,43 @@
+# version: '3'
+name: dyadia
+services:
+  fdb-coordinator:
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    ports:
+      - 4500:4500/tcp
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+    platform: "linux/amd64"
+
+  fdb-server-1:
+    depends_on:
+      - fdb-coordinator
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+    platform: "linux/amd64"
+
+  fdb-server-2:
+    depends_on:
+      - fdb-coordinator
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+    platform: "linux/amd64"
+
+
+  debug:
+    image: alpine/curl
+    tty: true
+    stdin_open: true
+    command: sh
+
+  richter:
+    image: busybox:musl
+    command: ["sleep", "infinity"]
