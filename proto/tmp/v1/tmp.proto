@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package tmp.v1;
+
+import "buf/validate/validate.proto";
+
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_ADMIN = 1;
+  USER_ROLE_USER = 2;
+}
+
+message PutUserRequest {
+  string user_id = 1;
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 50
+  }];
+  int32 age = 3;
+  UserRole role = 4;
+}
+
+message PutUserResponse {
+  string user_id = 1;
+  string name = 2;
+  int32 age = 3;
+  UserRole role = 4;
+}
+
+service UserStoreService {
+  rpc PutUser(PutUserRequest) returns (PutUserResponse) {}
+}
