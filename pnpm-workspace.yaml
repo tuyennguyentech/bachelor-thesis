@@ -1,6 +1,7 @@
 packages:
   - typescript/*
 allowBuilds:
+  '@bufbuild/buf': true
   sharp: true
   unrs-resolver: true
 engineStrict: true

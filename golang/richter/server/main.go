@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	tmpv1 "example.com/buf/tmp/v1"
-	"example.com/buf/tmp/v1/tmpv1connect"
+	tmpv1 "example.com/buf/gen/tmp/v1"
+	"example.com/buf/gen/tmp/v1/tmpv1connect"
 
 	"connectrpc.com/connect"
+	connectcors "connectrpc.com/cors"
 	"connectrpc.com/validate"
+	"github.com/rs/cors"
 )
-
-const address = "localhost:8080"
 
 type UserServer struct{}
 
@@ -42,14 +42,21 @@ func main() {
 		connect.WithInterceptors(validate.NewInterceptor()),
 	)
 
+	// http.StripPrefix()
 	mux.Handle(path, handler)
+	corsHandler := cors.New(cors.Options{
+		AllowedOrigins: []string{"http://localhost:3000"},
+		AllowedMethods: connectcors.AllowedMethods(),
+		AllowedHeaders: connectcors.AllowedHeaders(),
+		ExposedHeaders: connectcors.ExposedHeaders(),
+	}).Handler(mux)
 	p := new(http.Protocols)
 	p.SetHTTP1(true)
 	// Use h2c so we can serve HTTP/2 without TLS.
 	p.SetUnencryptedHTTP2(true)
 	s := http.Server{
 		Addr:      "localhost:8080",
-		Handler:   mux,
+		Handler:   corsHandler,
 		Protocols: p,
 	}
 	s.ListenAndServe()

@@ -4,10 +4,15 @@ go 1.26.1
 
 require (
 	connectrpc.com/connect v1.19.1
+	connectrpc.com/cors v0.1.0
 	connectrpc.com/validate v0.6.0
+	example.com/buf v0.0.0-00010101000000-000000000000
 	github.com/apple/foundationdb/bindings/go v0.0.0-20250918235822-341404ebaa37
+	github.com/rs/cors v1.11.1
 	github.com/spf13/viper v1.21.0
 )
+
+replace example.com/buf => ../buf
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1 // indirect

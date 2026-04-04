@@ -1,5 +1,6 @@
 .claude
 
-golang/buf
+golang/buf/gen
 
-/node_modules
+node_modules
+typescript/buf/gen
