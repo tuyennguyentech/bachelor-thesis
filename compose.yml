@@ -31,6 +31,15 @@ services:
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
 
+  postgres:
+    image: postgres:18.3-alpine3.23
+    environment:
+      - POSTGRES_PASSWORD=dyadia
+      - POSTGRES_USER=dyadia
+      - POSTGRES_DB=dyadia
+    ports:
+      - 5432:5432
+
 
   debug:
     image: alpine/curl

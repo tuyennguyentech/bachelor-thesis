@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"reflect"
+	"sync"
 
 	tmpv1 "example.com/buf/gen/tmp/v1"
 	"example.com/buf/gen/tmp/v1/tmpv1connect"
@@ -11,6 +14,9 @@ import (
 	"connectrpc.com/connect"
 	connectcors "connectrpc.com/cors"
 	"connectrpc.com/validate"
+	"example.com/sqlc/gen"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rs/cors"
 )
 
@@ -27,7 +33,7 @@ func (s *UserServer) PutUser(ctx context.Context, req *tmpv1.PutUserRequest) (*t
 	}, nil
 }
 
-func main() {
+func runConnectRpcServer() {
 	user := &tmpv1.PutUserRequest{
 		UserId: "1",
 		Name:   "Alice",
@@ -41,7 +47,6 @@ func main() {
 		&UserServer{},
 		connect.WithInterceptors(validate.NewInterceptor()),
 	)
-
 	// http.StripPrefix()
 	mux.Handle(path, handler)
 	corsHandler := cors.New(cors.Options{
@@ -60,4 +65,55 @@ func main() {
 		Protocols: p,
 	}
 	s.ListenAndServe()
+}
+
+func sqlc() {
+	run := func() error {
+		ctx := context.Background()
+
+		conn, err := pgx.Connect(ctx, "user=pqgotest dbname=pqgotest sslmode=verify-full")
+		if err != nil {
+			return err
+		}
+		defer conn.Close(ctx)
+
+		queries := gen.New(conn)
+
+		// list all authors
+		authors, err := queries.ListAuthors(ctx)
+		if err != nil {
+			return err
+		}
+		log.Println(authors)
+
+		// create an author
+		insertedAuthor, err := queries.CreateAuthor(ctx, gen.CreateAuthorParams{
+			Name: "Brian Kernighan",
+			Bio:  pgtype.Text{String: "Co-author of The C Programming Language and The Go Programming Language", Valid: true},
+		})
+		if err != nil {
+			return err
+		}
+		log.Println(insertedAuthor)
+
+		// get the author we just inserted
+		fetchedAuthor, err := queries.GetAuthor(ctx, insertedAuthor.ID)
+		if err != nil {
+			return err
+		}
+
+		// prints true
+		log.Println(reflect.DeepEqual(insertedAuthor, fetchedAuthor))
+		return nil
+	}
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func main() {
+	var wg sync.WaitGroup
+	wg.Go(runConnectRpcServer)
+	wg.Go(sqlc)
+	wg.Wait()
 }
