@@ -55,8 +55,16 @@ echo "Entering namespace of $CONTAINER ($DEV_IP on $NETWORK)"
 # Layer 1: podman unshare    — rootless user ns (see container PIDs)
 # Layer 2: nsenter -t -n     — container network ns (get IP on bridge)
 # Layer 3: unshare --mount   — private mount ns (override resolv.conf safely)
+# podman unshare --rootless-netns nsenter -t "$PID" -n unshare --mount sh -c "
 podman unshare nsenter -t "$PID" -n unshare --mount sh -c "
-  cp /proc/$PID/root/etc/resolv.conf /tmp/dev-resolv.conf &&
-  mount --bind /tmp/dev-resolv.conf /etc/resolv.conf &&
-  exec \"\$@\"
+set -eu
+if [ -f /proc/$PID/root/etc/resolv.conf ]; then
+  cp /proc/$PID/root/etc/resolv.conf /tmp/dev-resolv.conf
+  mount --bind /tmp/dev-resolv.conf /etc/resolv.conf
+fi
+if [ -f /proc/$PID/root/etc/nsswitch.conf ]; then
+  cp /proc/$PID/root/etc/nsswitch.conf /tmp/dev-nsswitch.conf
+  mount --bind /tmp/dev-nsswitch.conf /etc/nsswitch.conf
+fi
+exec \"\$@\"
 " -- "$@"
