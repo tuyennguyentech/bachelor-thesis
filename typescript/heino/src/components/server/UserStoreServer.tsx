@@ -5,7 +5,7 @@ import { toBinary, toJson, toJsonString } from "@bufbuild/protobuf";
 
 const transport = createConnectTransport({
   httpVersion: "2",
-  baseUrl: "http://localhost:8080",
+  baseUrl: "http://richter:8080/api",
 })
 
 export default async function UserStoreServer() {

@@ -7,7 +7,7 @@ import { createClient, type Client } from "@connectrpc/connect"
 import { UserRole, UserStoreService } from "buf/gen/tmp/v1/tmp_pb"
 
 const transport = createConnectTransport({
-  baseUrl: "http://localhost:8080"
+  baseUrl: "/api"
 })
 
 export function useClient<T extends DescService>(service: T): Client<T> {
