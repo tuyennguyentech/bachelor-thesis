@@ -40,6 +40,18 @@ services:
     ports:
       - 5432:5432
 
+  caddy:
+    image: caddy:2.11.2-alpine
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./conf/caddy:/etc/caddy:Z
+      - caddy_data:/data
+      - caddy_config:/config
 
   debug:
     image: alpine/curl
@@ -50,3 +62,11 @@ services:
   richter:
     image: busybox:musl
     command: ["sleep", "infinity"]
+
+  heino:
+    image: busybox:musl
+    command: ["sleep", "infinity"]
+
+volumes:
+  caddy_data:
+  caddy_config:

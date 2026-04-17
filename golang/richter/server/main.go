@@ -42,15 +42,19 @@ func runConnectRpcServer() {
 	}
 	fmt.Println("User:", user.GetName(), "Role:", user.GetRole())
 
-	mux := http.NewServeMux()
+	api := http.NewServeMux()
 	path, handler := tmpv1connect.NewUserStoreServiceHandler(
 		&UserServer{},
 		connect.WithInterceptors(validate.NewInterceptor()),
 	)
-	// http.StripPrefix()
-	mux.Handle(path, handler)
+	api.Handle(path, handler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Hello API\n"))
+	})
+	mux.Handle("/api/", http.StripPrefix("/api", api))
 	corsHandler := cors.New(cors.Options{
-		AllowedOrigins: []string{"http://localhost:3000"},
+		AllowedOrigins: []string{"*"},
 		AllowedMethods: connectcors.AllowedMethods(),
 		AllowedHeaders: connectcors.AllowedHeaders(),
 		ExposedHeaders: connectcors.ExposedHeaders(),
@@ -60,7 +64,7 @@ func runConnectRpcServer() {
 	// Use h2c so we can serve HTTP/2 without TLS.
 	p.SetUnencryptedHTTP2(true)
 	s := http.Server{
-		Addr:      "localhost:8080",
+		Addr:      ":8080",
 		Handler:   corsHandler,
 		Protocols: p,
 	}
@@ -114,6 +118,6 @@ func sqlc() {
 func main() {
 	var wg sync.WaitGroup
 	wg.Go(runConnectRpcServer)
-	wg.Go(sqlc)
+	// wg.Go(sqlc)
 	wg.Wait()
 }

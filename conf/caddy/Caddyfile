@@ -1,0 +1,4 @@
+localhost {
+  reverse_proxy /api* richter:8080
+  reverse_proxy heino:3000
+}
