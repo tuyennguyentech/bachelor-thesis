@@ -60,11 +60,15 @@ podman unshare nsenter -t "$PID" -n unshare --mount sh -c "
 set -eu
 if [ -f /proc/$PID/root/etc/resolv.conf ]; then
   cp /proc/$PID/root/etc/resolv.conf /tmp/dev-resolv.conf
-  mount --bind /tmp/dev-resolv.conf /etc/resolv.conf
+else
+  : > /tmp/dev-resolv.conf
 fi
+mount --bind /tmp/dev-resolv.conf /etc/resolv.conf
 if [ -f /proc/$PID/root/etc/nsswitch.conf ]; then
   cp /proc/$PID/root/etc/nsswitch.conf /tmp/dev-nsswitch.conf
-  mount --bind /tmp/dev-nsswitch.conf /etc/nsswitch.conf
+else
+  : > /tmp/dev-nsswitch.conf
 fi
+mount --bind /tmp/dev-nsswitch.conf /etc/nsswitch.conf
 exec \"\$@\"
 " -- "$@"
