@@ -14,7 +14,7 @@ import (
 	"connectrpc.com/connect"
 	connectcors "connectrpc.com/cors"
 	"connectrpc.com/validate"
-	"example.com/sqlc/gen"
+	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rs/cors"
@@ -75,7 +75,7 @@ func sqlc() {
 	run := func() error {
 		ctx := context.Background()
 
-		conn, err := pgx.Connect(ctx, "user=pqgotest dbname=pqgotest sslmode=verify-full")
+		conn, err := pgx.Connect(ctx, "postgres://dyadia:dyadia@postgres:5432/dyadia")
 		if err != nil {
 			return err
 		}
@@ -83,31 +83,32 @@ func sqlc() {
 
 		queries := gen.New(conn)
 
-		// list all authors
-		authors, err := queries.ListAuthors(ctx)
+		// list all users
+		users, err := queries.ListUsers(ctx)
 		if err != nil {
 			return err
 		}
-		log.Println(authors)
+		log.Println(users)
 
-		// create an author
-		insertedAuthor, err := queries.CreateAuthor(ctx, gen.CreateAuthorParams{
-			Name: "Brian Kernighan",
-			Bio:  pgtype.Text{String: "Co-author of The C Programming Language and The Go Programming Language", Valid: true},
+		// create an User
+		insertedUser, err := queries.CreateUser(ctx, gen.CreateUserParams{
+			Username: "Brian Kernighan",
+			Password: "123456",
+			Email:    pgtype.Text{},
 		})
 		if err != nil {
 			return err
 		}
-		log.Println(insertedAuthor)
+		log.Println(insertedUser)
 
-		// get the author we just inserted
-		fetchedAuthor, err := queries.GetAuthor(ctx, insertedAuthor.ID)
+		// get the User we just inserted
+		fetchedUser, err := queries.GetUser(ctx, insertedUser.ID)
 		if err != nil {
 			return err
 		}
 
 		// prints true
-		log.Println(reflect.DeepEqual(insertedAuthor, fetchedAuthor))
+		log.Println(reflect.DeepEqual(insertedUser, fetchedUser))
 		return nil
 	}
 	if err := run(); err != nil {
@@ -117,7 +118,7 @@ func sqlc() {
 
 func main() {
 	var wg sync.WaitGroup
-	wg.Go(runConnectRpcServer)
-	// wg.Go(sqlc)
+	// wg.Go(runConnectRpcServer)
+	wg.Go(sqlc)
 	wg.Wait()
 }

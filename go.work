@@ -4,5 +4,5 @@ use (
 	./golang/arthur
 	./golang/buf
 	./golang/richter
-	./golang/sqlc
+	./golang/sql
 )

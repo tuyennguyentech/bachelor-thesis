@@ -7,7 +7,7 @@ require (
 	connectrpc.com/cors v0.1.0
 	connectrpc.com/validate v0.6.0
 	example.com/buf v0.0.0-00010101000000-000000000000
-	example.com/sqlc v0.0.0-00010101000000-000000000000
+	example.com/sql v0.0.0-00010101000000-000000000000
 	github.com/apple/foundationdb/bindings/go v0.0.0-20250918235822-341404ebaa37
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/rs/cors v1.11.1
@@ -16,7 +16,7 @@ require (
 
 replace example.com/buf => ../buf
 
-replace example.com/sqlc => ../sqlc
+replace example.com/sql => ../sql
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1 // indirect

@@ -1,6 +1,7 @@
 .claude
 
 golang/buf/gen
+golang/sql/gen
 
 node_modules
 typescript/buf/gen

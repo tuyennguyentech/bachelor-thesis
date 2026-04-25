@@ -1,4 +1,4 @@
-module example.com/sqlc
+module example.com/sql
 
 go 1.25.8
 
