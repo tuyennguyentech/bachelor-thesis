@@ -1,0 +1,169 @@
+---
+title: ERD
+config:
+  layout: elk
+  theme: redux-dark-color
+---
+erDiagram
+    direction LR
+
+    ORGANIZATION ||--|{ ORGANIZATION_MEMBER : has
+    USER ||--|{ ORGANIZATION_MEMBER : joins
+    USER ||--o{ ORGANIZATION : creates
+
+    %% ORGANIZATION ||--o{ COURSE : owns
+    %% USER ||--o{ COURSE : creates
+    %% COURSE ||--|{ COURSE_MEMBER : has
+    %% USER ||--o{ COURSE_MEMBER : enrolls
+
+    %% COURSE ||--o{ COURSE_MODULE : contains
+    %% COURSE_MODULE ||--o{ LESSON : contains
+    %% LESSON ||--o{ CONTENT_ITEM : contains
+
+    %% CONTENT_ITEM ||--o{ CONTENT_ITEM_OBJECT : uses
+    %% STORAGE_OBJECT ||--o{ CONTENT_ITEM_OBJECT : referenced_by
+
+    %% USER ||--o{ STORAGE_OBJECT : uploads
+    %% USER ||--o{ UPLOAD_SESSION : starts
+    %% ORGANIZATION ||--o{ UPLOAD_SESSION : scopes
+    %% UPLOAD_SESSION |o..o| STORAGE_OBJECT : finalizes
+
+    %% CONTENT_ITEM ||--o{ PROCESSING_TASK : schedules
+    %% USER ||--o{ PROCESSING_TASK : requested_by
+
+    ORGANIZATION {
+        uuid id PK
+        uuid created_by FK
+        text name
+        text slug UK
+        organization_status status "active suspended archived"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    USER {
+        uuid id PK
+        citext email UK
+        text password_hash
+        text first_name
+        text middle_name
+        text last_name
+        user_role role "normal admin"
+        user_status status "active disabled pending"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    ORGANIZATION_MEMBER {
+        uuid organization_id PK,FK
+        uuid user_id PK,FK
+        organization_role role "owner admin teacher student"
+        member_status status "active invited suspended"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    %% COURSE {
+    %%     uuid id PK
+    %%     uuid organization_id FK
+    %%     uuid owner_id FK
+    %%     text title
+    %%     text description
+    %%     course_status status "draft published archived"
+    %%     timestamptz created_at
+    %%     timestamptz updated_at
+    %% }
+
+    %% COURSE_MEMBER {
+    %%     uuid course_id PK,FK
+    %%     uuid user_id PK,FK
+    %%     course_role role "owner teacher assistant student"
+    %%     timestamptz joined_at
+    %% }
+
+    %% COURSE_MODULE {
+    %%     uuid id PK
+    %%     uuid course_id FK
+    %%     text title
+    %%     int order_index
+    %%     timestamptz created_at
+    %%     timestamptz updated_at
+    %% }
+
+    %% LESSON {
+    %%     uuid id PK
+    %%     uuid module_id FK
+    %%     text title
+    %%     text description
+    %%     int order_index
+    %%     timestamptz created_at
+    %%     timestamptz updated_at
+    %% }
+
+    %% CONTENT_ITEM {
+    %%     uuid id PK
+    %%     uuid lesson_id FK
+    %%     content_item_type type "video audio reading coding_lab"
+    %%     text title
+    %%     text description
+    %%     bigint duration_ms
+    %%     content_processing_status processing_status "uploaded queued processing ready failed"
+    %%     text processing_error
+    %%     int order_index
+    %%     jsonb metadata
+    %%     timestamptz created_at
+    %%     timestamptz updated_at
+    %% }
+
+    %% CONTENT_ITEM_OBJECT {
+    %%     uuid content_item_id PK,FK
+    %%     uuid storage_object_id PK,FK
+    %%     content_object_role role "source thumbnail attachment preview transcript_raw"
+    %%     bool is_primary
+    %%     int order_index
+    %%     timestamptz created_at
+    %% }
+
+    %% STORAGE_OBJECT {
+    %%     uuid id PK
+    %%     text bucket
+    %%     text object_key UK
+    %%     text original_filename
+    %%     text content_type
+    %%     bigint size_bytes
+    %%     text sha256
+    %%     storage_object_purpose purpose "video audio image document transcript submission other"
+    %%     uuid created_by FK
+    %%     timestamptz created_at
+    %% }
+
+    %% UPLOAD_SESSION {
+    %%     uuid id PK
+    %%     uuid organization_id FK
+    %%     uuid created_by FK
+    %%     uuid storage_object_id FK
+    %%     text bucket
+    %%     text object_key
+    %%     text original_filename
+    %%     text content_type
+    %%     bigint expected_size_bytes
+    %%     upload_session_status status "pending completed aborted expired"
+    %%     timestamptz expires_at
+    %%     timestamptz created_at
+    %%     timestamptz completed_at
+    %% }
+
+    %% PROCESSING_TASK {
+    %%     uuid id PK
+    %%     uuid content_item_id FK
+    %%     uuid requested_by FK
+    %%     processing_task_type type "extract_metadata generate_thumbnail prepare_stream"
+    %%     processing_task_status status "queued running succeeded failed cancelled"
+    %%     int attempt_count
+    %%     text error_message
+    %%     timestamptz scheduled_at
+    %%     timestamptz started_at
+    %%     timestamptz finished_at
+    %%     jsonb parameters
+    %%     jsonb result
+    %% }

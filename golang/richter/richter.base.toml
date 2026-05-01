@@ -1,0 +1,8 @@
+[api]
+host = "0.0.0.0"
+port = 8080
+
+[jwt]
+# openssl rand -hex 32
+secret = "388599b8ac7ee580229b8aff11e004a538f73e28c8d37412a1341434d8416643"
+leeway = "5s"

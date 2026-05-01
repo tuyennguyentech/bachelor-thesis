@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package richter.jwt.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "richter/v1/users.proto";
+
+// JWTClaims defines the structure of JWT token payload
+message JWTClaims {
+  // Standard JWT claims
+  string sub = 1; // Subject (user ID)
+  string iss = 2; // Issuer
+  string aud = 3; // Audience
+  int64 exp = 4; // Expiration time (unix timestamp)
+  int64 iat = 5; // Issued at (unix timestamp)
+  int64 nbf = 6; // Not before (unix timestamp)
+  string jti = 7; // JWT ID
+
+  string email = 8 [(buf.validate.field).string.email = true];
+  richter.v1.UserRole role = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string first_name = 10 [(buf.validate.field).string.min_len = 1];
+  optional string middle_name = 11;
+  string last_name = 12 [(buf.validate.field).string.min_len = 1];
+  richter.v1.UserStatus status = 13 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

@@ -8,15 +8,15 @@ managed:
     - file_option: go_package
       module: buf.build/bufbuild/protovalidate
 plugins:
-  - remote: buf.build/protocolbuffers/go
+  - remote: buf.build/protocolbuffers/go:v1.36.11
     out: golang/buf/gen
     opt: paths=source_relative
-  - remote: buf.build/connectrpc/gosimple
+  - remote: buf.build/connectrpc/gosimple:v1.19.2
     out: golang/buf/gen
     opt:
       - paths=source_relative
       - simple
-  - local: protoc-gen-es
+  - remote: buf.build/bufbuild/es
     out: typescript/buf/gen
     # Also generate any imported dependencies
     include_imports: true

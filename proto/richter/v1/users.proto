@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_NORMAL = 1;
+  USER_ROLE_ADMIN = 2;
+}
+
+enum UserStatus {
+  USER_STATUS_UNSPECIFIED = 0;
+  USER_STATUS_PENDING = 1;
+  USER_STATUS_ACTIVE = 2;
+  USER_STATUS_DISABLED = 3;
+}
+
+message User {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string email = 2 [(buf.validate.field).string.email = true];
+  string first_name = 3 [(buf.validate.field).string.min_len = 1];
+  optional string middle_name = 4;
+  string last_name = 5 [(buf.validate.field).string.min_len = 1];
+  UserRole role = 6 [(buf.validate.field).enum.defined_only = true];
+  UserStatus status = 7 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message CreateUserRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+  string password = 2 [(buf.validate.field).string.min_len = 8];
+  string first_name = 3 [(buf.validate.field).string.min_len = 1];
+  optional string middle_name = 4;
+  string last_name = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message CreateUserWithRoleAndStatusRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+  string password = 2 [(buf.validate.field).string.min_len = 8];
+  string first_name = 3 [(buf.validate.field).string.min_len = 1];
+  optional string middle_name = 4;
+  string last_name = 5 [(buf.validate.field).string.min_len = 1];
+  UserRole role = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  UserStatus status = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message CreateUserWithRoleAndStatusResponse {
+  User user = 1;
+}
+
+message GetUserByIdRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetUserByIdResponse {
+  User user = 1;
+}
+
+message GetUserByEmailRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+}
+
+message GetUserByEmailResponse {
+  User user = 1;
+}
+
+message ListUsersRequest {
+  int32 limit = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+}
+
+message UpdateUserProfileRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string first_name = 2 [(buf.validate.field).string.min_len = 1];
+  optional string middle_name = 3;
+  string last_name = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+message UpdateUserProfileResponse {
+  User user = 1;
+}
+
+message UpdateUserPasswordRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string password = 2 [(buf.validate.field).string.min_len = 8];
+}
+
+message UpdateUserPasswordResponse {
+  User user = 1;
+}
+
+message UpdateUserRoleRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  UserRole role = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message UpdateUserRoleResponse {
+  User user = 1;
+}
+
+message UpdateUserStatusRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  UserStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message UpdateUserStatusResponse {
+  User user = 1;
+}
+
+message DeleteUserRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteUserResponse {}
+
+service UserService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {}
+  rpc CreateUserWithRoleAndStatus(CreateUserWithRoleAndStatusRequest) returns (CreateUserWithRoleAndStatusResponse) {}
+  rpc GetUserById(GetUserByIdRequest) returns (GetUserByIdResponse) {}
+  rpc GetUserByEmail(GetUserByEmailRequest) returns (GetUserByEmailResponse) {}
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {}
+  rpc UpdateUserProfile(UpdateUserProfileRequest) returns (UpdateUserProfileResponse) {}
+  rpc UpdateUserPassword(UpdateUserPasswordRequest) returns (UpdateUserPasswordResponse) {}
+  rpc UpdateUserRole(UpdateUserRoleRequest) returns (UpdateUserRoleResponse) {}
+  rpc UpdateUserStatus(UpdateUserStatusRequest) returns (UpdateUserStatusResponse) {}
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {}
+}

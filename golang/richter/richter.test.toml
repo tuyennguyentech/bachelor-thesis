@@ -1,0 +1,9 @@
+[log]
+level = "error" # debug|info|warn|error
+
+[db.postgres]
+host = "postgres"
+port = "5432"
+database = "dyadia_test"
+user = "dyadia_test"
+password = "dyadia_test"
