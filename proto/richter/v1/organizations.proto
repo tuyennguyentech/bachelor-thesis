@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+enum OrganizationStatus {
+  ORGANIZATION_STATUS_UNSPECIFIED = 0;
+  ORGANIZATION_STATUS_ACTIVE = 1;
+  ORGANIZATION_STATUS_SUSPENDED = 2;
+  ORGANIZATION_STATUS_ARCHIVED = 3;
+}
+
+message Organization {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string created_by = 2 [(buf.validate.field).string.uuid = true];
+  string name = 3 [(buf.validate.field).string.min_len = 1];
+  string slug = 4 [(buf.validate.field).string.min_len = 1];
+  OrganizationStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message CreateOrganizationRequest {
+  string created_by = 1 [(buf.validate.field).string.uuid = true];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  string slug = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+  }];
+}
+
+message CreateOrganizationResponse {
+  Organization organization = 1;
+}
+
+message GetOrganizationByIdRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetOrganizationByIdResponse {
+  Organization organization = 1;
+}
+
+message GetOrganizationBySlugRequest {
+  string slug = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message GetOrganizationBySlugResponse {
+  Organization organization = 1;
+}
+
+message ListOrganizationsRequest {
+  int32 limit = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 2 [(buf.validate.field).int32.gte = 0];
+  optional string query = 3;
+}
+
+message ListOrganizationsResponse {
+  repeated Organization organizations = 1;
+}
+
+message ListOrganizationsByUserRequest {
+  string user_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListOrganizationsByUserResponse {
+  repeated Organization organizations = 1;
+}
+
+message UpdateOrganizationRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  string slug = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+  }];
+}
+
+message UpdateOrganizationResponse {
+  Organization organization = 1;
+}
+
+message UpdateOrganizationStatusRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  OrganizationStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message UpdateOrganizationStatusResponse {
+  Organization organization = 1;
+}
+
+message DeleteOrganizationRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteOrganizationResponse {}
+
+service OrganizationService {
+  rpc CreateOrganization(CreateOrganizationRequest) returns (CreateOrganizationResponse) {}
+  rpc GetOrganizationById(GetOrganizationByIdRequest) returns (GetOrganizationByIdResponse) {}
+  rpc GetOrganizationBySlug(GetOrganizationBySlugRequest) returns (GetOrganizationBySlugResponse) {}
+  rpc ListOrganizations(ListOrganizationsRequest) returns (ListOrganizationsResponse) {}
+  rpc ListOrganizationsByUser(ListOrganizationsByUserRequest) returns (ListOrganizationsByUserResponse) {}
+  rpc UpdateOrganization(UpdateOrganizationRequest) returns (UpdateOrganizationResponse) {}
+  rpc UpdateOrganizationStatus(UpdateOrganizationStatusRequest) returns (UpdateOrganizationStatusResponse) {}
+  rpc DeleteOrganization(DeleteOrganizationRequest) returns (DeleteOrganizationResponse) {}
+}

@@ -16,7 +16,7 @@ plugins:
     opt:
       - paths=source_relative
       - simple
-  - remote: buf.build/bufbuild/es
+  - remote: buf.build/bufbuild/es:v2.12.0
     out: typescript/buf/gen
     # Also generate any imported dependencies
     include_imports: true

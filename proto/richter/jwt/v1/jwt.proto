@@ -6,6 +6,12 @@ import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "richter/v1/users.proto";
 
+enum TokenType {
+  TOKEN_TYPE_UNSPECIFIED = 0;
+  TOKEN_TYPE_ACCESS = 1;
+  TOKEN_TYPE_REFRESH = 2;
+}
+
 // JWTClaims defines the structure of JWT token payload
 message JWTClaims {
   // Standard JWT claims
@@ -26,6 +32,10 @@ message JWTClaims {
   optional string middle_name = 11;
   string last_name = 12 [(buf.validate.field).string.min_len = 1];
   richter.v1.UserStatus status = 13 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  TokenType token_type = 14 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];

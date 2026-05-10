@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+enum OrganizationRole {
+  ORGANIZATION_ROLE_UNSPECIFIED = 0;
+  ORGANIZATION_ROLE_OWNER = 1;
+  ORGANIZATION_ROLE_ADMIN = 2;
+  ORGANIZATION_ROLE_TEACHER = 3;
+  ORGANIZATION_ROLE_STUDENT = 4;
+}
+
+enum MemberStatus {
+  MEMBER_STATUS_UNSPECIFIED = 0;
+  MEMBER_STATUS_ACTIVE = 1;
+  MEMBER_STATUS_INVITED = 2;
+  MEMBER_STATUS_SUSPENDED = 3;
+}
+
+message OrganizationMember {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  OrganizationRole role = 3 [(buf.validate.field).enum.defined_only = true];
+  MemberStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message AddOrganizationMemberRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  OrganizationRole role = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  MemberStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message AddOrganizationMemberResponse {
+  OrganizationMember member = 1;
+}
+
+message GetOrganizationMemberRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetOrganizationMemberResponse {
+  OrganizationMember member = 1;
+}
+
+message ListOrganizationMembersRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListOrganizationMembersResponse {
+  repeated OrganizationMember members = 1;
+}
+
+message ListUserMembershipsRequest {
+  string user_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListUserMembershipsResponse {
+  repeated OrganizationMember members = 1;
+}
+
+message UpdateOrganizationMemberRoleRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  OrganizationRole role = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message UpdateOrganizationMemberRoleResponse {
+  OrganizationMember member = 1;
+}
+
+message UpdateOrganizationMemberStatusRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  MemberStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message UpdateOrganizationMemberStatusResponse {
+  OrganizationMember member = 1;
+}
+
+message RemoveOrganizationMemberRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message RemoveOrganizationMemberResponse {}
+
+service OrganizationMemberService {
+  rpc AddOrganizationMember(AddOrganizationMemberRequest) returns (AddOrganizationMemberResponse) {}
+  rpc GetOrganizationMember(GetOrganizationMemberRequest) returns (GetOrganizationMemberResponse) {}
+  rpc ListOrganizationMembers(ListOrganizationMembersRequest) returns (ListOrganizationMembersResponse) {}
+  rpc ListUserMemberships(ListUserMembershipsRequest) returns (ListUserMembershipsResponse) {}
+  rpc UpdateOrganizationMemberRole(UpdateOrganizationMemberRoleRequest) returns (UpdateOrganizationMemberRoleResponse) {}
+  rpc UpdateOrganizationMemberStatus(UpdateOrganizationMemberStatusRequest) returns (UpdateOrganizationMemberStatusResponse) {}
+  rpc RemoveOrganizationMember(RemoveOrganizationMemberRequest) returns (RemoveOrganizationMemberResponse) {}
+}

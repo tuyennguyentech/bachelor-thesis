@@ -84,6 +84,7 @@ message ListUsersRequest {
     lte: 100
   }];
   int32 offset = 2 [(buf.validate.field).int32.gte = 0];
+  optional string query = 3;
 }
 
 message ListUsersResponse {
@@ -140,7 +141,20 @@ message DeleteUserRequest {
 
 message DeleteUserResponse {}
 
+message RegisterUserRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+  string password = 2 [(buf.validate.field).string.min_len = 8];
+  string first_name = 3 [(buf.validate.field).string.min_len = 1];
+  optional string middle_name = 4;
+  string last_name = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message RegisterUserResponse {
+  User user = 1;
+}
+
 service UserService {
+  rpc RegisterUser(RegisterUserRequest) returns (RegisterUserResponse) {}
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {}
   rpc CreateUserWithRoleAndStatus(CreateUserWithRoleAndStatusRequest) returns (CreateUserWithRoleAndStatusResponse) {}
   rpc GetUserById(GetUserByIdRequest) returns (GetUserByIdResponse) {}
