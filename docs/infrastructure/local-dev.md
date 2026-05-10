@@ -1,6 +1,6 @@
 # dev-shell.sh — Local dev with compose DNS (one-way)
 
-![Layers](./assets/dev_shell_layers.svg)
+![Layers](../assets/dev_shell_layers.svg)
 
 ## Problem
 
@@ -13,7 +13,7 @@ When running an app on the host:
 
 Enter Podman's **rootless network namespace** and override `resolv.conf` to point at `aardvark-dns`.
 
-> **Note:** This approach is **one-way** — the host process can reach containers, but containers cannot reach the host process. For bidirectional connectivity, see [ContainerShell.md](./ContainerShell.md).
+> **Note:** This approach is **one-way** — the host process can reach containers, but containers cannot reach the host process. For bidirectional connectivity, see [container-shell.md](./container-shell.md).
 
 ---
 
@@ -89,7 +89,7 @@ This approach enters the rootless netns "above" the bridge. The process can see 
 | Host process → container | Yes    |
 | Container → host process | **No** |
 
-For bidirectional connectivity, use [container-shell.sh](./ContainerShell.md) which `nsenter`s into a container's network namespace instead.
+For bidirectional connectivity, use [container-shell.md](./container-shell.md) which `nsenter`s into a container's network namespace instead.
 
 ---
 
@@ -110,4 +110,4 @@ For bidirectional connectivity, use [container-shell.sh](./ContainerShell.md) wh
 
 ## Script
 
-[dev-shell.sh](../scripts/setup/environment.dev/dev-shell.sh)
+[dev-shell.sh](../../scripts/setup/environment.dev/dev-shell.sh)

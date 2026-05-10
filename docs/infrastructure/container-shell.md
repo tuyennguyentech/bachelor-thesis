@@ -1,6 +1,6 @@
 # container-shell.sh — Local dev inside compose network
 
-![Layers](./assets/container_shell_layers.svg)
+![Layers](../assets/container_shell_layers.svg)
 
 ## Problem
 
@@ -157,4 +157,4 @@ This container holds a network namespace slot with an IP on the bridge. The actu
 
 ## Script
 
-[container-shell.sh](../scripts/setup/environment.dev/container-shell.sh)
+[container-shell.sh](../../scripts/setup/environment.dev/container-shell.sh)
