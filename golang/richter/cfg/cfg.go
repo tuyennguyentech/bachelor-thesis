@@ -26,6 +26,9 @@ var (
 			),
 			do.Lazy(NewApiCfgSvc),
 			do.Lazy(NewJwtCfgSvc),
+			do.Lazy(NewAuthCfgSvc),
+			do.Lazy(NewAdminCfgSvc),
+			do.Lazy(NewSeedCfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -37,7 +40,7 @@ func init() {
 		do.Override(internal.Injector, func(i do.Injector) (*CfgFile, error) {
 			flag.Parse()
 			testConfigFile := strings.Split(*testConfigFileStr, ",")
-			fmt.Println(testConfigFile)
+			// fmt.Println(testConfigFile)
 			return (*CfgFile)(&testConfigFile), nil
 		})
 	}
@@ -46,17 +49,21 @@ func init() {
 }
 
 type RichterCfg struct {
-	LogCfg `mapstructure:"log"`
-	DbCfg  `mapstructure:"db"`
-	ApiCfg `mapstructure:"api"`
-	JwtCfg `mapstructure:"jwt"`
+	LogCfg   `mapstructure:"log"`
+	DbCfg    `mapstructure:"db"`
+	ApiCfg   `mapstructure:"api"`
+	JwtCfg   `mapstructure:"jwt"`
+	AuthCfg  `mapstructure:"auth"`
+	AdminCfg `mapstructure:"admin"`
+	SeedCfg  `mapstructure:"seed"`
 }
 
 func NewConfig() RichterCfg {
 	return RichterCfg{
-		LogCfg: NewLogCfg(),
-		ApiCfg: NewApiCfg(),
-		JwtCfg: NewJwtCfg(),
+		LogCfg:  NewLogCfg(),
+		ApiCfg:  NewApiCfg(),
+		JwtCfg:  NewJwtCfg(),
+		AuthCfg: NewAuthCfg(),
 	}
 }
 
@@ -66,7 +73,7 @@ func NewRichterCfgSvc(i do.Injector) (richterCfg *RichterCfg, err error) {
 		err = fmt.Errorf("Viper cannot be invoked: %w", err)
 		return
 	}
-	fmt.Println(v.AllSettings())
+	// fmt.Println(v.AllSettings())
 	// if readErr := v.ReadInConfig(); readErr != nil {
 	// 	if configFileNotFoundError, ok := errors.AsType[viper.ConfigFileNotFoundError](readErr); ok {
 	// 		err = errors.Join(errors.New("config file is not found error"), configFileNotFoundError)
@@ -94,7 +101,7 @@ func NewViperSvc(i do.Injector) (v *viper.Viper, err error) {
 			if err := v.MergeInConfig(); err != nil {
 				log.Fatalln(fmt.Sprintf("load config from %s error: ", file), err)
 			}
-			log.Println("read config in", file)
+			// log.Println("read config in", file)
 		}
 	} else {
 		v.SetConfigName("richter")

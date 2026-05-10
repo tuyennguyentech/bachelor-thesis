@@ -7,6 +7,7 @@ import (
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
 	"example.com/richter/internal/api"
+	"example.com/richter/internal/seed"
 	"example.com/richter/log"
 	"github.com/samber/do/v2"
 	"github.com/spf13/cobra"
@@ -93,6 +94,14 @@ func preRunE(ctx *context.Context, i do.Injector) (err error) {
 
 	_ = log.FromCtx(*ctx)
 	logSvc.DebugContext(*ctx, "preRunE succeeds")
+
+	seeder, err := do.Invoke[*seed.SeederSvc](i)
+	if err != nil {
+		return fmt.Errorf("SeederSvc cannot be invoked: %w", err)
+	}
+	if err = seeder.Seed(*ctx); err != nil {
+		return fmt.Errorf("seed failed: %w", err)
+	}
 	return
 }
 

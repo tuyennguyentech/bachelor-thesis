@@ -9,21 +9,21 @@ import (
 	"example.com/sql/gen"
 )
 
-func userToProto(user gen.User) *richterv1.User {
+func UserToProto(user gen.User) *richterv1.User {
 	return &richterv1.User{
 		Id:         user.ID.String(),
 		Email:      user.Email,
 		FirstName:  user.FirstName,
 		MiddleName: svc.PgTextToOptionalString(user.MiddleName),
 		LastName:   user.LastName,
-		Role:       userRoleToProto(user.Role),
-		Status:     userStatusToProto(user.Status),
+		Role:       UserRoleToProto(user.Role),
+		Status:     UserStatusToProto(user.Status),
 		CreatedAt:  svc.TimestampToProto(user.CreatedAt),
 		UpdatedAt:  svc.TimestampToProto(user.UpdatedAt),
 	}
 }
 
-func userRoleToProto(role gen.UserRole) richterv1.UserRole {
+func UserRoleToProto(role gen.UserRole) richterv1.UserRole {
 	switch role {
 	case gen.UserRoleNormal:
 		return richterv1.UserRole_USER_ROLE_NORMAL
@@ -34,7 +34,7 @@ func userRoleToProto(role gen.UserRole) richterv1.UserRole {
 	}
 }
 
-func userRoleToSQL(role richterv1.UserRole) (gen.UserRole, error) {
+func UserRoleToSQL(role richterv1.UserRole) (gen.UserRole, error) {
 	switch role {
 	case richterv1.UserRole_USER_ROLE_NORMAL:
 		return gen.UserRoleNormal, nil
@@ -45,7 +45,7 @@ func userRoleToSQL(role richterv1.UserRole) (gen.UserRole, error) {
 	}
 }
 
-func userStatusToProto(status gen.UserStatus) richterv1.UserStatus {
+func UserStatusToProto(status gen.UserStatus) richterv1.UserStatus {
 	switch status {
 	case gen.UserStatusPending:
 		return richterv1.UserStatus_USER_STATUS_PENDING
@@ -58,7 +58,7 @@ func userStatusToProto(status gen.UserStatus) richterv1.UserStatus {
 	}
 }
 
-func userStatusToSQL(status richterv1.UserStatus) (gen.UserStatus, error) {
+func UserStatusToSQL(status richterv1.UserStatus) (gen.UserStatus, error) {
 	switch status {
 	case richterv1.UserStatus_USER_STATUS_PENDING:
 		return gen.UserStatusPending, nil

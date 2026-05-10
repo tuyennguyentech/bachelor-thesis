@@ -55,6 +55,7 @@ func FromCtx(ctx context.Context) *LogSvc {
 	if l, ok := ctx.Value(logSvcKey).(*LogSvc); ok {
 		return l
 	}
+	base.Warn("Not found LogSvc in context")
 	return base
 }
 

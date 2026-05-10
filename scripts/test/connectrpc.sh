@@ -17,3 +17,6 @@ buf curl \
 
 buf curl --schema proto/ --data '{"limit": 10, "offset": 0}' http://richter:8080/richter.v1.UserService/ListUsers
 
+buf curl --schema proto/ --data '{"limit": 10, "offset": 0}' https://localhost/api/richter/richter.v1.UserService/ListUsers -k
+
+

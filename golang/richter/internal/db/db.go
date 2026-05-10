@@ -47,11 +47,14 @@ func NewPostgresSvc(i do.Injector) (p *PostgresSvc, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse config error: %w", err)
 	}
-	p.Pool, err = pgxpool.NewWithConfig(context.TODO(), config)
+	ctx, cancel := context.WithTimeout(context.Background(), postgreCfg.ConnectTimeout)
+	defer cancel()
+
+	p.Pool, err = pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("Cannot create postgres pool: %w", err)
 	}
-	if err = p.Ping(context.TODO()); err != nil {
+	if err = p.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("Cannot ping after create postgres pool: %w", err)
 	}
 	return

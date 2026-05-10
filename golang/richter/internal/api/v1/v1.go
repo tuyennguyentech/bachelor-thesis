@@ -4,6 +4,9 @@ import (
 	"net/http"
 
 	"example.com/richter/internal"
+	"example.com/richter/internal/svc/auth"
+	"example.com/richter/internal/svc/orgmembers"
+	"example.com/richter/internal/svc/organizations"
 	"example.com/richter/internal/svc/users"
 	"github.com/samber/do/v2"
 )
@@ -21,15 +24,33 @@ type V1Svc struct {
 }
 
 func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
-	users, err := do.Invoke[*users.UsersSvc](i)
+	authSvc, err := do.Invoke[*auth.AuthSvc](i)
 	if err != nil {
 		return
 	}
-	path, handler := users.Handler()
-	mux := http.NewServeMux()
-	mux.Handle(path, handler)
-	v1 = &V1Svc{
-		Mux: mux,
+	usersSvc, err := do.Invoke[*users.UsersSvc](i)
+	if err != nil {
+		return
 	}
+	orgsSvc, err := do.Invoke[*organizations.OrganizationsSvc](i)
+	if err != nil {
+		return
+	}
+	orgMembersSvc, err := do.Invoke[*orgmembers.OrgMembersSvc](i)
+	if err != nil {
+		return
+	}
+
+	mux := http.NewServeMux()
+	path, handler := authSvc.Handler()
+	mux.Handle(path, handler)
+	path, handler = usersSvc.Handler()
+	mux.Handle(path, handler)
+	path, handler = orgsSvc.Handler()
+	mux.Handle(path, handler)
+	path, handler = orgMembersSvc.Handler()
+	mux.Handle(path, handler)
+
+	v1 = &V1Svc{Mux: mux}
 	return
 }

@@ -36,7 +36,7 @@ func TestGenerateAndValidateToken(t *testing.T) {
 	svc := setupJWTService(t)
 	user := createTestUser()
 
-	token, err := svc.GenerateToken(user, 1*time.Hour)
+	token, err := svc.GenerateToken(user, 1*time.Hour, jwtv1.TokenType_TOKEN_TYPE_ACCESS)
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}
@@ -70,6 +70,9 @@ func TestGenerateAndValidateToken(t *testing.T) {
 	if claims.MiddleName == nil || *claims.MiddleName != *user.MiddleName {
 		t.Errorf("expected middleName %s, got %v", *user.MiddleName, claims.MiddleName)
 	}
+	if claims.TokenType != jwtv1.TokenType_TOKEN_TYPE_ACCESS {
+		t.Errorf("expected token type %v, got %v", jwtv1.TokenType_TOKEN_TYPE_ACCESS, claims.TokenType)
+	}
 }
 
 func TestValidateToken_InvalidSignature(t *testing.T) {
@@ -100,7 +103,7 @@ func TestValidateToken_Expired(t *testing.T) {
 	svc := setupJWTService(t)
 	user := createTestUser()
 
-	token, err := svc.GenerateToken(user, -1*time.Hour) // Already expired
+	token, err := svc.GenerateToken(user, -1*time.Hour, jwtv1.TokenType_TOKEN_TYPE_ACCESS)
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}
@@ -115,14 +118,14 @@ func TestGenerateToken_WithoutMiddleName(t *testing.T) {
 	svc := setupJWTService(t)
 	user := &v1.User{
 		Id:        gofakeit.UUID(),
-		Email:      gofakeit.Email(),
-		FirstName:  gofakeit.FirstName(),
-		LastName:   gofakeit.LastName(),
-		Role:       v1.UserRole_USER_ROLE_NORMAL,
-		Status:     v1.UserStatus_USER_STATUS_PENDING,
+		Email:     gofakeit.Email(),
+		FirstName: gofakeit.FirstName(),
+		LastName:  gofakeit.LastName(),
+		Role:      v1.UserRole_USER_ROLE_NORMAL,
+		Status:    v1.UserStatus_USER_STATUS_PENDING,
 	}
 
-	token, err := svc.GenerateToken(user, 1*time.Hour)
+	token, err := svc.GenerateToken(user, 1*time.Hour, jwtv1.TokenType_TOKEN_TYPE_ACCESS)
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}
@@ -134,6 +137,33 @@ func TestGenerateToken_WithoutMiddleName(t *testing.T) {
 
 	if claims.MiddleName != nil {
 		t.Errorf("expected no middleName, got %v", *claims.MiddleName)
+	}
+}
+
+func TestGenerateToken_TokenTypePreserved(t *testing.T) {
+	svc := setupJWTService(t)
+	user := createTestUser()
+
+	for _, tt := range []struct {
+		name      string
+		tokenType jwtv1.TokenType
+	}{
+		{"Access", jwtv1.TokenType_TOKEN_TYPE_ACCESS},
+		{"Refresh", jwtv1.TokenType_TOKEN_TYPE_REFRESH},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			token, err := svc.GenerateToken(user, 1*time.Hour, tt.tokenType)
+			if err != nil {
+				t.Fatalf("failed to generate token: %v", err)
+			}
+			claims, err := svc.ValidateToken(token)
+			if err != nil {
+				t.Fatalf("failed to validate token: %v", err)
+			}
+			if claims.TokenType != tt.tokenType {
+				t.Errorf("expected token type %v, got %v", tt.tokenType, claims.TokenType)
+			}
+		})
 	}
 }
 

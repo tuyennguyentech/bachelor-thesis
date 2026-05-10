@@ -73,7 +73,7 @@ func (c *JWTClaims) GetAudience() (jwt.ClaimStrings, error) {
 	return jwt.ClaimStrings{c.Aud}, nil
 }
 
-func (s *JWTService) GenerateToken(user *v1.User, duration time.Duration) (string, error) {
+func (s *JWTService) GenerateToken(user *v1.User, duration time.Duration, tokenType jwtv1.TokenType) (string, error) {
 	now := time.Now()
 	claims := &JWTClaims{
 		JWTClaims: &jwtv1.JWTClaims{
@@ -83,12 +83,13 @@ func (s *JWTService) GenerateToken(user *v1.User, duration time.Duration) (strin
 			Iat:       now.Unix(),
 			Exp:       now.Add(duration).Unix(),
 			Nbf:       now.Unix(),
-			Jti:       fmt.Sprintf("%s-%d", user.Id, now.Unix()),
+			Jti:       fmt.Sprintf("%s-%d", user.Id, now.UnixNano()),
 			Email:     user.Email,
 			Role:      user.Role,
 			FirstName: user.FirstName,
 			LastName:  user.LastName,
 			Status:    user.Status,
+			TokenType: tokenType,
 		},
 	}
 	if user.MiddleName != nil {

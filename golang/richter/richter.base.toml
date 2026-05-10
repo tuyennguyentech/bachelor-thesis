@@ -1,3 +1,6 @@
+[db.postgres]
+connect_timeout = "10s"
+
 [api]
 host = "0.0.0.0"
 port = 8080
@@ -6,3 +9,14 @@ port = 8080
 # openssl rand -hex 32
 secret = "388599b8ac7ee580229b8aff11e004a538f73e28c8d37412a1341434d8416643"
 leeway = "5s"
+
+[auth]
+access_token_duration = "15m"
+refresh_token_duration = "168h"
+
+[admin]
+email = "admin@dyadia.local"
+password = "changeme123"
+first_name = "System"
+last_name = "Admin"
+
