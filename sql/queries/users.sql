@@ -70,3 +70,16 @@ RETURNING *;
 -- name: DeleteUser :execrows
 DELETE FROM users
 WHERE id = $1;
+
+-- name: BulkCreateUsers :copyfrom
+INSERT INTO users (
+  email,
+  password_hash,
+  first_name,
+  middle_name,
+  last_name,
+  role,
+  status
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7
+);
