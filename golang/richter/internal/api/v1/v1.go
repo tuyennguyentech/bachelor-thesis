@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"example.com/richter/internal"
+	"example.com/richter/internal/svc/ai"
 	"example.com/richter/internal/svc/auth"
 	"example.com/richter/internal/svc/coursemodules"
 	"example.com/richter/internal/svc/courses"
@@ -60,6 +61,10 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	if err != nil {
 		return
 	}
+	aiSvc, err := do.Invoke[*ai.AISvc](i)
+	if err != nil {
+		return
+	}
 
 	mux := http.NewServeMux()
 	path, handler := authSvc.Handler()
@@ -77,6 +82,8 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	path, handler = lessonsSvc.Handler()
 	mux.Handle(path, handler)
 	path, handler = storageSvc.Handler()
+	mux.Handle(path, handler)
+	path, handler = aiSvc.Handler()
 	mux.Handle(path, handler)
 
 	v1 = &V1Svc{Mux: mux}

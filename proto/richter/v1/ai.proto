@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+enum AnalysisStatus {
+  ANALYSIS_STATUS_UNSPECIFIED = 0;
+  ANALYSIS_STATUS_PENDING = 1;
+  ANALYSIS_STATUS_PROCESSING = 2;
+  ANALYSIS_STATUS_DONE = 3;
+  ANALYSIS_STATUS_ERROR = 4;
+}
+
+message MCQOption {
+  string text = 1;
+}
+
+message LessonQuestion {
+  string id = 1;
+  string lesson_id = 2;
+  string question_text = 3;
+  repeated MCQOption options = 4;
+  int32 correct_answer = 5;
+  string explanation = 6;
+  int32 order_index = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message LessonAnalysis {
+  string lesson_id = 1;
+  AnalysisStatus status = 2;
+  string transcript = 3;
+  string error_msg = 4;
+  repeated LessonQuestion questions = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message AnalyzeLessonRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message AnalyzeLessonResponse {
+  LessonAnalysis analysis = 1;
+}
+
+message GetLessonAnalysisRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetLessonAnalysisResponse {
+  LessonAnalysis analysis = 1;
+}
+
+service AIService {
+  // AnalyzeLesson triggers video transcription + MCQ generation for a lesson.
+  // Synchronous — may take up to 120s for longer videos.
+  rpc AnalyzeLesson(AnalyzeLessonRequest) returns (AnalyzeLessonResponse) {}
+  rpc GetLessonAnalysis(GetLessonAnalysisRequest) returns (GetLessonAnalysisResponse) {}
+}

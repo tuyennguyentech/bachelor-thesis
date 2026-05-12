@@ -29,6 +29,7 @@ var (
 			do.Lazy(NewAuthCfgSvc),
 			do.Lazy(NewAdminCfgSvc),
 			do.Lazy(NewS3CfgSvc),
+			do.Lazy(NewGeminiCfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -49,22 +50,24 @@ func init() {
 }
 
 type RichterCfg struct {
-	LogCfg   `mapstructure:"log"`
-	DbCfg    `mapstructure:"db"`
-	ApiCfg   `mapstructure:"api"`
-	JwtCfg   `mapstructure:"jwt"`
-	AuthCfg  `mapstructure:"auth"`
-	AdminCfg `mapstructure:"admin"`
-	S3Cfg    `mapstructure:"s3"`
+	LogCfg    `mapstructure:"log"`
+	DbCfg     `mapstructure:"db"`
+	ApiCfg    `mapstructure:"api"`
+	JwtCfg    `mapstructure:"jwt"`
+	AuthCfg   `mapstructure:"auth"`
+	AdminCfg  `mapstructure:"admin"`
+	S3Cfg     `mapstructure:"s3"`
+	GeminiCfg `mapstructure:"gemini"`
 }
 
 func NewConfig() RichterCfg {
 	return RichterCfg{
-		LogCfg:  NewLogCfg(),
-		ApiCfg:  NewApiCfg(),
-		JwtCfg:  NewJwtCfg(),
-		AuthCfg: NewAuthCfg(),
-		S3Cfg:   NewS3Cfg(),
+		LogCfg:    NewLogCfg(),
+		ApiCfg:    NewApiCfg(),
+		JwtCfg:    NewJwtCfg(),
+		AuthCfg:   NewAuthCfg(),
+		S3Cfg:     NewS3Cfg(),
+		GeminiCfg: NewGeminiCfg(),
 	}
 }
 

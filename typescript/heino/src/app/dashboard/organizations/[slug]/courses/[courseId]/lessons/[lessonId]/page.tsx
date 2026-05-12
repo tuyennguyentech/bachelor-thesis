@@ -5,13 +5,26 @@ import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, LessonService, CourseModuleService } from "buf/gen/richter/v1/courses_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
+import { AnalysisStatus } from "buf/gen/richter/v1/ai_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, VideoIcon, PlayCircleIcon } from "lucide-react";
+import { ChevronLeftIcon, VideoIcon, PlayCircleIcon, SparklesIcon, FileTextIcon } from "lucide-react";
 import { VideoUpload } from "./video-upload";
+import { AnalyzeButton } from "./analyze-button";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
+
+function statusLabel(s: AnalysisStatus): string {
+  switch (s) {
+    case AnalysisStatus.PENDING: return "Chờ xử lý";
+    case AnalysisStatus.PROCESSING: return "Đang xử lý…";
+    case AnalysisStatus.DONE: return "Hoàn thành";
+    case AnalysisStatus.ERROR: return "Lỗi";
+    default: return "";
+  }
+}
 
 export default async function LessonDetailPage({
   params,
@@ -65,20 +78,21 @@ export default async function LessonDetailPage({
   }
   if (!module_ || module_.courseId !== courseId) notFound();
 
-  // Get presigned download URL if video exists
-  let videoUrl: string | null = null;
-  if (lesson.videoStorageKey) {
-    try {
-      const storageClient = createRichterClient(StorageService, token);
-      const res = await storageClient.getDownloadUrl({
-        key: lesson.videoStorageKey,
-        expiresInSeconds: 3600,
-      });
-      videoUrl = res.downloadUrl;
-    } catch {
-      // storage unavailable — degrade gracefully
-    }
-  }
+  // Fetch video URL and AI analysis in parallel
+  const [videoUrl, analysis] = await Promise.all([
+    lesson.videoStorageKey
+      ? createRichterClient(StorageService, token)
+          .getDownloadUrl({ key: lesson.videoStorageKey, expiresInSeconds: 3600 })
+          .then((r) => r.downloadUrl)
+          .catch(() => null)
+      : Promise.resolve(null),
+    createRichterClient(AIService, token)
+      .getLessonAnalysis({ lessonId })
+      .then((r) => r.analysis ?? null)
+      .catch(() => null),
+  ]);
+
+  const isDone = analysis?.status === AnalysisStatus.DONE;
 
   return (
     <div className="mx-auto max-w-3xl flex flex-col gap-6">
@@ -106,12 +120,7 @@ export default async function LessonDetailPage({
       {/* Video player */}
       <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
         {videoUrl ? (
-          <video
-            src={videoUrl}
-            controls
-            className="w-full h-full"
-            preload="metadata"
-          />
+          <video src={videoUrl} controls className="w-full h-full" preload="metadata" />
         ) : (
           <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
             {canManage ? (
@@ -129,9 +138,9 @@ export default async function LessonDetailPage({
         )}
       </div>
 
-      {/* Teacher/admin upload controls */}
+      {/* Teacher/admin: upload + analyze controls */}
       {canManage && (
-        <div className="rounded-lg border p-4 flex flex-col gap-3">
+        <div className="rounded-lg border p-4 flex flex-col gap-4">
           <h2 className="font-medium text-sm">Quản lý video</h2>
           <VideoUpload
             lessonId={lesson.id}
@@ -141,10 +150,78 @@ export default async function LessonDetailPage({
             hasVideo={!!lesson.videoStorageKey}
           />
           {lesson.videoStorageKey && (
-            <p className="text-xs text-muted-foreground font-mono break-all">
-              Key: {lesson.videoStorageKey}
-            </p>
+            <>
+              <p className="text-xs text-muted-foreground font-mono break-all">
+                Key: {lesson.videoStorageKey}
+              </p>
+              <div className="border-t pt-3 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <SparklesIcon className="size-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">AI Phân tích</span>
+                  {analysis && (
+                    <span className="text-xs text-muted-foreground">
+                      ({statusLabel(analysis.status)})
+                    </span>
+                  )}
+                </div>
+                <AnalyzeButton lessonId={lesson.id} slug={slug} courseId={courseId} />
+                {analysis?.status === AnalysisStatus.ERROR && (
+                  <p className="text-xs text-destructive">{analysis.errorMsg}</p>
+                )}
+              </div>
+            </>
           )}
+        </div>
+      )}
+
+      {/* Transcript */}
+      {isDone && analysis?.transcript && (
+        <div className="rounded-lg border p-4 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <FileTextIcon className="size-4 text-muted-foreground" />
+            <h2 className="font-medium text-sm">Phiên âm nội dung</h2>
+          </div>
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+            {analysis.transcript}
+          </p>
+        </div>
+      )}
+
+      {/* MCQ Questions */}
+      {isDone && analysis?.questions && analysis.questions.length > 0 && (
+        <div className="rounded-lg border p-4 flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <SparklesIcon className="size-4 text-muted-foreground" />
+            <h2 className="font-medium text-sm">
+              Câu hỏi trắc nghiệm ({analysis.questions.length} câu)
+            </h2>
+          </div>
+          <div className="flex flex-col gap-6">
+            {analysis.questions.map((q, qi) => (
+              <div key={q.id} className="flex flex-col gap-2">
+                <p className="text-sm font-medium">
+                  {qi + 1}. {q.questionText}
+                </p>
+                <div className="grid grid-cols-1 gap-1 ml-4">
+                  {q.options.map((opt, oi) => (
+                    <div
+                      key={oi}
+                      className={`text-sm px-3 py-1.5 rounded-md border ${
+                        oi === q.correctAnswer
+                          ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
+                          : "border-transparent text-muted-foreground"
+                      }`}
+                    >
+                      {String.fromCharCode(65 + oi)}. {opt.text}
+                    </div>
+                  ))}
+                </div>
+                {q.explanation && (
+                  <p className="text-xs text-muted-foreground ml-4 italic">{q.explanation}</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
