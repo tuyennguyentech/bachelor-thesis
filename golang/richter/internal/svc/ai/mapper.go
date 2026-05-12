@@ -44,14 +44,33 @@ func analysisToProto(a gen.LessonAnalysis, questions []gen.LessonQuestion) *rich
 		updatedAt = svc.TimestampToProto(a.UpdatedAt)
 	}
 
+	var segments []*richterv1.TranscriptSegment
+	if len(a.TranscriptSegments) > 0 {
+		var raw []struct {
+			StartSeconds float32 `json:"start_seconds"`
+			EndSeconds   float32 `json:"end_seconds"`
+			Text         string  `json:"text"`
+		}
+		if err := json.Unmarshal(a.TranscriptSegments, &raw); err == nil {
+			for _, seg := range raw {
+				segments = append(segments, &richterv1.TranscriptSegment{
+					StartSeconds: seg.StartSeconds,
+					EndSeconds:   seg.EndSeconds,
+					Text:         seg.Text,
+				})
+			}
+		}
+	}
+
 	return &richterv1.LessonAnalysis{
-		LessonId:  a.LessonID.String(),
-		Status:    status,
-		Transcript: transcript,
-		ErrorMsg:  errMsg,
-		Questions: protoQs,
-		CreatedAt: createdAt,
-		UpdatedAt: updatedAt,
+		LessonId:            a.LessonID.String(),
+		Status:              status,
+		Transcript:          transcript,
+		ErrorMsg:            errMsg,
+		Questions:           protoQs,
+		CreatedAt:           createdAt,
+		UpdatedAt:           updatedAt,
+		TranscriptSegments:  segments,
 	}
 }
 

@@ -119,20 +119,21 @@ func (s *AISvc) AnalyzeLesson(
 	}
 
 	// Mark as processing
-	analysis, err := s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusProcessing, "", "")
+	analysis, err := s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusProcessing, "", nil, "")
 	if err != nil {
 		return nil, err
 	}
 
 	// Run analysis (may take up to 2 min)
-	transcript, questions, analyzeErr := s.runGeminiAnalysis(ctx, lesson.VideoStorageKey.String)
+	transcript, segments, questions, analyzeErr := s.runGeminiAnalysis(ctx, lesson.VideoStorageKey.String)
 
 	if analyzeErr != nil {
-		analysis, _ = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusError, "", analyzeErr.Error())
+		analysis, _ = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusError, "", nil, analyzeErr.Error())
 		return &richterv1.AnalyzeLessonResponse{Analysis: analysisToProto(analysis, nil)}, nil
 	}
 
-	analysis, err = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusDone, transcript, "")
+	segmentsJSON, _ := json.Marshal(segments)
+	analysis, err = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusDone, transcript, segmentsJSON, "")
 	if err != nil {
 		return nil, err
 	}
@@ -184,9 +185,15 @@ type mcqQuestion struct {
 	Explanation   string   `json:"explanation"`
 }
 
-func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (transcript string, questions []mcqQuestion, err error) {
+type transcriptSegment struct {
+	StartSeconds float32 `json:"start_seconds"`
+	EndSeconds   float32 `json:"end_seconds"`
+	Text         string  `json:"text"`
+}
+
+func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (transcript string, segments []transcriptSegment, questions []mcqQuestion, err error) {
 	if s.geminiCfg.APIKey == "" {
-		return "", nil, fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
+		return "", nil, nil, fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
 	}
 
 	// Download video bytes from S3
@@ -195,18 +202,18 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 
 	obj, err := s.s3client.GetObject(ctx2, s.s3cfg.Bucket, storageKey, minio.GetObjectOptions{})
 	if err != nil {
-		return "", nil, fmt.Errorf("download video from storage: %w", err)
+		return "", nil, nil, fmt.Errorf("download video from storage: %w", err)
 	}
 	defer obj.Close()
 
 	videoBytes, err := io.ReadAll(obj)
 	if err != nil {
-		return "", nil, fmt.Errorf("read video bytes: %w", err)
+		return "", nil, nil, fmt.Errorf("read video bytes: %w", err)
 	}
 
 	client, err := genai.NewClient(ctx2, option.WithAPIKey(s.geminiCfg.APIKey))
 	if err != nil {
-		return "", nil, fmt.Errorf("create gemini client: %w", err)
+		return "", nil, nil, fmt.Errorf("create gemini client: %w", err)
 	}
 	defer client.Close()
 
@@ -228,7 +235,7 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 		MIMEType: mimeType,
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("upload to gemini file api: %w", err)
+		return "", nil, nil, fmt.Errorf("upload to gemini file api: %w", err)
 	}
 
 	// Wait until file is ACTIVE
@@ -236,11 +243,11 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 		time.Sleep(3 * time.Second)
 		uploadedFile, err = client.GetFile(ctx2, uploadedFile.Name)
 		if err != nil {
-			return "", nil, fmt.Errorf("poll file state: %w", err)
+			return "", nil, nil, fmt.Errorf("poll file state: %w", err)
 		}
 	}
 	if uploadedFile.State != genai.FileStateActive {
-		return "", nil, fmt.Errorf("file upload failed with state: %v", uploadedFile.State)
+		return "", nil, nil, fmt.Errorf("file upload failed with state: %v", uploadedFile.State)
 	}
 	defer client.DeleteFile(ctx2, uploadedFile.Name) //nolint:errcheck
 
@@ -250,13 +257,17 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 
 	prompt := `Bạn là trợ lý giáo dục. Hãy phân tích video bài giảng này và thực hiện 2 nhiệm vụ:
 
-1. PHIÊN ÂM: Viết lại toàn bộ nội dung âm thanh/lời nói trong video thành văn bản tiếng Việt.
+1. PHIÊN ÂM CÓ TIMESTAMP: Chia nội dung video thành các đoạn ngắn (khoảng 15-30 giây mỗi đoạn) với thời gian bắt đầu và kết thúc chính xác.
 
 2. CÂU HỎI TRẮC NGHIỆM: Tạo 5 câu hỏi trắc nghiệm (MCQ) từ nội dung video để kiểm tra hiểu biết của học sinh. Mỗi câu có 4 lựa chọn (A, B, C, D), chỉ có 1 đáp án đúng.
 
-Trả về kết quả dưới dạng JSON với cấu trúc:
+Trả về kết quả dưới dạng JSON với cấu trúc sau (transcript là toàn bộ nội dung ghép lại, transcript_segments là mảng các đoạn có timestamp):
 {
-  "transcript": "Nội dung phiên âm đầy đủ...",
+  "transcript": "Nội dung phiên âm đầy đủ ghép từ tất cả các đoạn...",
+  "transcript_segments": [
+    {"start_seconds": 0.0, "end_seconds": 15.0, "text": "Nội dung đoạn 1..."},
+    {"start_seconds": 15.0, "end_seconds": 32.0, "text": "Nội dung đoạn 2..."}
+  ],
   "questions": [
     {
       "question_text": "Câu hỏi 1?",
@@ -272,11 +283,11 @@ Trả về kết quả dưới dạng JSON với cấu trúc:
 		genai.Text(prompt),
 	)
 	if err != nil {
-		return "", nil, fmt.Errorf("generate content: %w", err)
+		return "", nil, nil, fmt.Errorf("generate content: %w", err)
 	}
 
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return "", nil, fmt.Errorf("empty gemini response")
+		return "", nil, nil, fmt.Errorf("empty gemini response")
 	}
 
 	raw := ""
@@ -287,26 +298,27 @@ Trả về kết quả dưới dạng JSON với cấu trúc:
 	}
 
 	var result struct {
-		Transcript string        `json:"transcript"`
-		Questions  []mcqQuestion `json:"questions"`
+		Transcript         string              `json:"transcript"`
+		TranscriptSegments []transcriptSegment `json:"transcript_segments"`
+		Questions          []mcqQuestion       `json:"questions"`
 	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		// Try to extract transcript at minimum
-		return raw, nil, nil
+		return raw, nil, nil, nil
 	}
 
-	return result.Transcript, result.Questions, nil
+	return result.Transcript, result.TranscriptSegments, result.Questions, nil
 }
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
-func (s *AISvc) upsertAnalysis(ctx context.Context, lessonID pgtype.UUID, status gen.LessonAnalysisStatus, transcript, errMsg string) (gen.LessonAnalysis, error) {
+func (s *AISvc) upsertAnalysis(ctx context.Context, lessonID pgtype.UUID, status gen.LessonAnalysisStatus, transcript string, segments []byte, errMsg string) (gen.LessonAnalysis, error) {
 	return db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
 		return q.UpsertLessonAnalysis(ctx, gen.UpsertLessonAnalysisParams{
-			LessonID:   lessonID,
-			Status:     status,
-			Transcript: pgtype.Text{String: transcript, Valid: transcript != ""},
-			ErrorMsg:   pgtype.Text{String: errMsg, Valid: errMsg != ""},
+			LessonID:           lessonID,
+			Status:             status,
+			Transcript:         pgtype.Text{String: transcript, Valid: transcript != ""},
+			TranscriptSegments: segments,
+			ErrorMsg:           pgtype.Text{String: errMsg, Valid: errMsg != ""},
 		})
 	})
 }

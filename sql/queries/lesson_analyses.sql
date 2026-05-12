@@ -1,9 +1,10 @@
 -- name: UpsertLessonAnalysis :one
-INSERT INTO lesson_analyses (lesson_id, status, transcript, error_msg)
-VALUES ($1, $2, $3, $4)
+INSERT INTO lesson_analyses (lesson_id, status, transcript, transcript_segments, error_msg)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (lesson_id) DO UPDATE
   SET status = EXCLUDED.status,
       transcript = EXCLUDED.transcript,
+      transcript_segments = EXCLUDED.transcript_segments,
       error_msg = EXCLUDED.error_msg
 RETURNING *;
 

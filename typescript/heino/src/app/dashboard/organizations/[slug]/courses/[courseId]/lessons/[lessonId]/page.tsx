@@ -15,13 +15,13 @@ import {
   VideoIcon,
   PlayCircleIcon,
   SparklesIcon,
-  FileTextIcon,
   UsersIcon,
 } from "lucide-react";
 import { VideoUpload } from "./video-upload";
 import { AnalyzeButton } from "./analyze-button";
 import { QuizForm } from "./quiz-form";
 import { LessonAttempts } from "./lesson-attempts";
+import { VideoPlayer } from "./video-player";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 
@@ -142,10 +142,14 @@ export default async function LessonDetailPage({
       </div>
 
       {/* Video player */}
-      <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
-        {videoUrl ? (
-          <video src={videoUrl} controls className="w-full h-full" preload="metadata" />
-        ) : (
+      {videoUrl ? (
+        <VideoPlayer
+          videoUrl={videoUrl}
+          segments={analysis?.transcriptSegments ?? []}
+          transcript={analysis?.transcript ?? ""}
+        />
+      ) : (
+        <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
           <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
             {canManage ? (
               <>
@@ -159,8 +163,8 @@ export default async function LessonDetailPage({
               </>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Teacher/admin: upload + analyze controls */}
       {canManage && (
@@ -195,19 +199,6 @@ export default async function LessonDetailPage({
               </div>
             </>
           )}
-        </div>
-      )}
-
-      {/* Transcript — visible to all */}
-      {isDone && analysis?.transcript && (
-        <div className="rounded-lg border p-4 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <FileTextIcon className="size-4 text-muted-foreground" />
-            <h2 className="font-medium text-sm">Phiên âm nội dung</h2>
-          </div>
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-            {analysis.transcript}
-          </p>
         </div>
       )}
 

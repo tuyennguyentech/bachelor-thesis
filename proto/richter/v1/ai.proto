@@ -28,6 +28,12 @@ message LessonQuestion {
   google.protobuf.Timestamp created_at = 8;
 }
 
+message TranscriptSegment {
+  float start_seconds = 1;
+  float end_seconds = 2;
+  string text = 3;
+}
+
 message LessonAnalysis {
   string lesson_id = 1;
   AnalysisStatus status = 2;
@@ -36,6 +42,7 @@ message LessonAnalysis {
   repeated LessonQuestion questions = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  repeated TranscriptSegment transcript_segments = 8;
 }
 
 message AnalyzeLessonRequest {
