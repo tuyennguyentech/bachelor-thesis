@@ -964,6 +964,37 @@ func TestLessonLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("UpdateLessonVideo", func(t *testing.T) {
+		key := "lessons/" + lessonID + "/video.mp4"
+		res, err := c.lessons.UpdateLessonVideo(ctx, &richterv1.UpdateLessonVideoRequest{
+			Id:              lessonID,
+			VideoStorageKey: key,
+			DurationSeconds: 120,
+		})
+		if err != nil {
+			t.Fatalf("update lesson video: %v", err)
+		}
+		if res.Lesson.VideoStorageKey != key {
+			t.Errorf("expected video_storage_key %q, got %q", key, res.Lesson.VideoStorageKey)
+		}
+		if res.Lesson.DurationSeconds != 120 {
+			t.Errorf("expected duration_seconds 120, got %d", res.Lesson.DurationSeconds)
+		}
+	})
+
+	t.Run("GetLesson_HasVideoFields", func(t *testing.T) {
+		res, err := c.lessons.GetLessonById(ctx, &richterv1.GetLessonByIdRequest{Id: lessonID})
+		if err != nil {
+			t.Fatalf("get lesson: %v", err)
+		}
+		if res.Lesson.VideoStorageKey == "" {
+			t.Error("expected video_storage_key to be set after UpdateLessonVideo")
+		}
+		if res.Lesson.DurationSeconds != 120 {
+			t.Errorf("expected duration_seconds 120, got %d", res.Lesson.DurationSeconds)
+		}
+	})
+
 	t.Run("DeleteLesson", func(t *testing.T) {
 		_, err := c.lessons.DeleteLesson(ctx, &richterv1.DeleteLessonRequest{Id: lessonID})
 		if err != nil {
@@ -1155,6 +1186,29 @@ func TestLessonsAuthz(t *testing.T) {
 		})
 		t.Run("Teacher/OK", func(t *testing.T) {
 			if _, err := teacherLessons.UpdateLesson(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
+			}
+		})
+	})
+
+	// --- UpdateLessonVideo ---
+	t.Run("UpdateLessonVideo", func(t *testing.T) {
+		req := &richterv1.UpdateLessonVideoRequest{
+			Id:              lessonID,
+			VideoStorageKey: "lessons/" + lessonID + "/video.mp4",
+			DurationSeconds: 60,
+		}
+		t.Run("Anon/Unauthenticated", func(t *testing.T) {
+			assertCode(t, func() error { _, e := anonLessons.UpdateLessonVideo(ctx, req); return e }(), connect.CodeUnauthenticated)
+		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberLessons.UpdateLessonVideo(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Student/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := studentLessons.UpdateLessonVideo(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Teacher/OK", func(t *testing.T) {
+			if _, err := teacherLessons.UpdateLessonVideo(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
 		})

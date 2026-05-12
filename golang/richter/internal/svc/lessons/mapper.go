@@ -11,13 +11,23 @@ func LessonToProto(l gen.Lesson) *richterv1.Lesson {
 	if l.Description.Valid {
 		desc = l.Description.String
 	}
+	videoKey := ""
+	if l.VideoStorageKey.Valid {
+		videoKey = l.VideoStorageKey.String
+	}
+	duration := int32(0)
+	if l.DurationSeconds.Valid {
+		duration = l.DurationSeconds.Int32
+	}
 	return &richterv1.Lesson{
-		Id:          l.ID.String(),
-		ModuleId:    l.ModuleID.String(),
-		Title:       l.Title,
-		Description: desc,
-		OrderIndex:  l.OrderIndex,
-		CreatedAt:   svc.TimestampToProto(l.CreatedAt),
-		UpdatedAt:   svc.TimestampToProto(l.UpdatedAt),
+		Id:              l.ID.String(),
+		ModuleId:        l.ModuleID.String(),
+		Title:           l.Title,
+		Description:     desc,
+		OrderIndex:      l.OrderIndex,
+		VideoStorageKey: videoKey,
+		DurationSeconds: duration,
+		CreatedAt:       svc.TimestampToProto(l.CreatedAt),
+		UpdatedAt:       svc.TimestampToProto(l.UpdatedAt),
 	}
 }

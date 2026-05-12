@@ -162,6 +162,8 @@ message Lesson {
   int32 order_index = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  string video_storage_key = 8;
+  int32 duration_seconds = 9;
 }
 
 message CreateLessonRequest {
@@ -220,11 +222,22 @@ message DeleteLessonRequest {
 
 message DeleteLessonResponse {}
 
+message UpdateLessonVideoRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string video_storage_key = 2 [(buf.validate.field).string.min_len = 1];
+  int32 duration_seconds = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message UpdateLessonVideoResponse {
+  Lesson lesson = 1;
+}
+
 service LessonService {
   rpc CreateLesson(CreateLessonRequest) returns (CreateLessonResponse) {}
   rpc GetLessonById(GetLessonByIdRequest) returns (GetLessonByIdResponse) {}
   rpc ListLessons(ListLessonsRequest) returns (ListLessonsResponse) {}
   rpc ListLessonsByCourse(ListLessonsByCourseRequest) returns (ListLessonsByCourseResponse) {}
   rpc UpdateLesson(UpdateLessonRequest) returns (UpdateLessonResponse) {}
+  rpc UpdateLessonVideo(UpdateLessonVideoRequest) returns (UpdateLessonVideoResponse) {}
   rpc DeleteLesson(DeleteLessonRequest) returns (DeleteLessonResponse) {}
 }

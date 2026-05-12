@@ -264,6 +264,48 @@ func (s *LessonsSvc) UpdateLesson(
 	return &richterv1.UpdateLessonResponse{Lesson: LessonToProto(l)}, nil
 }
 
+func (s *LessonsSvc) UpdateLessonVideo(
+	ctx context.Context,
+	req *richterv1.UpdateLessonVideoRequest,
+) (*richterv1.UpdateLessonVideoResponse, error) {
+	existing, err := s.fetchLesson(ctx, req.GetId())
+	if err != nil {
+		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("UpdateLessonVideo.fetch", err)...)
+		return nil, err
+	}
+	module, err := s.fetchModule(ctx, existing.ModuleID.String())
+	if err != nil {
+		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("UpdateLessonVideo.fetchModule", err)...)
+		return nil, err
+	}
+	course, err := s.fetchCourse(ctx, module.CourseID)
+	if err != nil {
+		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("UpdateLessonVideo.fetchCourse", err)...)
+		return nil, err
+	}
+	if _, err := s.authz.RequireOrgRole(ctx, course.OrganizationID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	); err != nil {
+		return nil, err
+	}
+
+	l, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
+			ID:              existing.ID,
+			VideoStorageKey: pgtype.Text{String: req.GetVideoStorageKey(), Valid: true},
+			DurationSeconds: pgtype.Int4{Int32: req.GetDurationSeconds(), Valid: req.GetDurationSeconds() > 0},
+		})
+	})
+	if err != nil {
+		err = svc.ConnectDBError(err)
+		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("UpdateLessonVideo", err)...)
+		return nil, err
+	}
+	return &richterv1.UpdateLessonVideoResponse{Lesson: LessonToProto(l)}, nil
+}
+
 func (s *LessonsSvc) DeleteLesson(
 	ctx context.Context,
 	req *richterv1.DeleteLessonRequest,

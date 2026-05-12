@@ -55,6 +55,14 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
+  storage:
+    image: chrislusf/seaweedfs:3.88
+    command: server -s3 -s3.port=9000 -dir=/data -s3.allowEmptyFolder=false
+    ports:
+      - "9000:9000"
+    volumes:
+      - storage_data:/data
+
   debug:
     image: alpine/curl
     tty: true
@@ -72,3 +80,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  storage_data:

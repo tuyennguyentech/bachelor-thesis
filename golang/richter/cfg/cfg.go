@@ -28,6 +28,7 @@ var (
 			do.Lazy(NewJwtCfgSvc),
 			do.Lazy(NewAuthCfgSvc),
 			do.Lazy(NewAdminCfgSvc),
+			do.Lazy(NewS3CfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -54,6 +55,7 @@ type RichterCfg struct {
 	JwtCfg   `mapstructure:"jwt"`
 	AuthCfg  `mapstructure:"auth"`
 	AdminCfg `mapstructure:"admin"`
+	S3Cfg    `mapstructure:"s3"`
 }
 
 func NewConfig() RichterCfg {
@@ -62,6 +64,7 @@ func NewConfig() RichterCfg {
 		ApiCfg:  NewApiCfg(),
 		JwtCfg:  NewJwtCfg(),
 		AuthCfg: NewAuthCfg(),
+		S3Cfg:   NewS3Cfg(),
 	}
 }
 

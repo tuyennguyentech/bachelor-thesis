@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+
+// StorageService issues presigned S3 URLs so clients can upload/download
+// files directly from SeaweedFS without routing large payloads through richter.
+
+message GetUploadUrlRequest {
+  // object key (e.g. "lessons/<lesson-id>/video.mp4")
+  string key = 1 [(buf.validate.field).string.min_len = 1];
+  string content_type = 2 [(buf.validate.field).string.min_len = 1];
+  // expires_in_seconds defaults to 3600 if zero
+  int32 expires_in_seconds = 3 [(buf.validate.field).int32 = {gte: 0, lte: 86400}];
+}
+
+message GetUploadUrlResponse {
+  string upload_url = 1;
+  string key = 2;
+}
+
+message GetDownloadUrlRequest {
+  string key = 1 [(buf.validate.field).string.min_len = 1];
+  int32 expires_in_seconds = 2 [(buf.validate.field).int32 = {gte: 0, lte: 86400}];
+}
+
+message GetDownloadUrlResponse {
+  string download_url = 1;
+}
+
+service StorageService {
+  rpc GetUploadUrl(GetUploadUrlRequest) returns (GetUploadUrlResponse) {}
+  rpc GetDownloadUrl(GetDownloadUrlRequest) returns (GetDownloadUrlResponse) {}
+}

@@ -172,15 +172,18 @@ export default async function DashboardCourseDetailPage({
                     key={lesson.id}
                     className="flex items-center justify-between px-4 py-2 ml-4 rounded-md border"
                   >
-                    <div className="flex items-center gap-2">
+                    <Link
+                      href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
+                      className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80"
+                    >
                       <span className="text-sm text-muted-foreground font-mono w-6">{li + 1}.</span>
-                      <div className="flex flex-col">
-                        <span className="text-sm">{lesson.title}</span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-sm truncate">{lesson.title}</span>
                         {lesson.description && (
-                          <span className="text-xs text-muted-foreground">{lesson.description}</span>
+                          <span className="text-xs text-muted-foreground truncate">{lesson.description}</span>
                         )}
                       </div>
-                    </div>
+                    </Link>
                     {canManage && (
                       <LessonActions
                         id={lesson.id}

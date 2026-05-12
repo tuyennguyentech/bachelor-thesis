@@ -57,6 +57,26 @@ export async function updateLesson(_state: ActionState, formData: FormData): Pro
   }
 }
 
+export async function updateLessonVideo(
+  id: string,
+  videoStorageKey: string,
+  durationSeconds: number,
+  slug: string,
+  courseId: string,
+  moduleId: string,
+): Promise<ActionState> {
+  const { token } = await requireAnyUser();
+  const client = createRichterClient(LessonService, token);
+  try {
+    await client.updateLessonVideo({ id, videoStorageKey, durationSeconds });
+    revalidateLessonPaths(slug, courseId, moduleId);
+    revalidatePath(`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${id}`);
+    return { success: true };
+  } catch {
+    return { error: "Không thể cập nhật video bài học" };
+  }
+}
+
 export async function deleteLesson(
   id: string,
   slug: string,

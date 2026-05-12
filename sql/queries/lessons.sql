@@ -25,5 +25,11 @@ SET title = $2, description = $3, order_index = $4
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateLessonVideo :one
+UPDATE lessons
+SET video_storage_key = $2, duration_seconds = $3
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteLesson :execrows
 DELETE FROM lessons WHERE id = $1;

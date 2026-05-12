@@ -7,3 +7,11 @@ port = "5432"
 database = "dyadia_test"
 user = "dyadia_test"
 password = "dyadia_test"
+
+[s3]
+endpoint = "storage:9000"
+access_key_id = ""
+secret_access_key = ""
+bucket = "dyadia-test"
+use_ssl = false
+public_endpoint = "http://localhost:9000"
