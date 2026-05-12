@@ -50,8 +50,8 @@ function AddMemberForm({
       <input type="hidden" name="slug" value={slug} />
       {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
       <div className="space-y-1.5">
-        <Label htmlFor="userId">User ID</Label>
-        <Input id="userId" name="userId" required placeholder="uuid của user" />
+        <Label htmlFor="email">Email</Label>
+        <Input id="email" name="email" type="email" required placeholder="user@example.com" />
       </div>
       <div className="space-y-1.5">
         <Label>Vai trò</Label>

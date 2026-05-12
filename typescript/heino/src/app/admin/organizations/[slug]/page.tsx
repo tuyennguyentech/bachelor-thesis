@@ -3,7 +3,7 @@ import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { ChevronLeftIcon, UsersIcon } from "lucide-react";
+import { BookOpenIcon, ChevronLeftIcon, UsersIcon } from "lucide-react";
 import { DeleteOrgButton } from "./delete-org-button";
 import { OrgStatusSelect } from "./org-status-select";
 import { EditOrgForm } from "./edit-org-form";
@@ -41,12 +41,20 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
           <h1 className="text-xl font-semibold">{org.name}</h1>
           <p className="text-sm font-mono text-muted-foreground">{org.slug}</p>
         </div>
-        <Button variant="outline" size="sm" asChild className="gap-2">
-          <Link href={`/admin/organizations/${slug}/members`}>
-            <UsersIcon className="size-4" />
-            Thành viên
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild className="gap-2">
+            <Link href={`/admin/organizations/${slug}/members`}>
+              <UsersIcon className="size-4" />
+              Thành viên
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild className="gap-2">
+            <Link href={`/admin/organizations/${slug}/courses`}>
+              <BookOpenIcon className="size-4" />
+              Khóa học
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Edit info */}

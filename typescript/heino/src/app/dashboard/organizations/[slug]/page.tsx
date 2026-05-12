@@ -5,7 +5,7 @@ import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon } from "lucide-react";
+import { BookOpenIcon, ChevronLeftIcon, UsersIcon } from "lucide-react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { roleName, memberStatusBadge, orgStatusBadge } from "@/lib/org-utils";
 
@@ -61,6 +61,32 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-lg border p-4 flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+          <h2 className="font-medium">Khóa học</h2>
+          <p className="text-sm text-muted-foreground">Xem các khóa học của tổ chức</p>
+        </div>
+        <Button variant="outline" size="sm" asChild className="gap-2">
+          <Link href={`/dashboard/organizations/${slug}/courses`}>
+            <BookOpenIcon className="size-4" />
+            Xem khóa học
+          </Link>
+        </Button>
+      </div>
+
+      <div className="rounded-lg border p-4 flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+          <h2 className="font-medium">Thành viên</h2>
+          <p className="text-sm text-muted-foreground">Xem và quản lý thành viên tổ chức</p>
+        </div>
+        <Button variant="outline" size="sm" asChild className="gap-2">
+          <Link href={`/dashboard/organizations/${slug}/members`}>
+            <UsersIcon className="size-4" />
+            Xem thành viên
+          </Link>
+        </Button>
       </div>
 
       <div className="rounded-lg border p-4 flex flex-col gap-3">
