@@ -37,7 +37,8 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
   }
 
   function handleSubmit() {
-    const answers = selected.map((v) => v ?? 0);
+    if (!selected.every((v) => v !== null)) return;
+    const answers = selected as number[];
     setError(null);
     startTransition(async () => {
       const res = await submitQuiz(lessonId, answers, slug, courseId);

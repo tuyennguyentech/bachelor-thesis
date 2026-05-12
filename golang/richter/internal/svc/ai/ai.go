@@ -22,6 +22,7 @@ import (
 	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/google/generative-ai-go/genai"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
@@ -196,11 +197,11 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 		return "", nil, nil, fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
 	}
 
-	// Download video bytes from S3
-	ctx2, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
+	// Download video bytes from S3 (budget separate from Gemini to avoid starvation)
+	s3ctx, s3cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer s3cancel()
 
-	obj, err := s.s3client.GetObject(ctx2, s.s3cfg.Bucket, storageKey, minio.GetObjectOptions{})
+	obj, err := s.s3client.GetObject(s3ctx, s.s3cfg.Bucket, storageKey, minio.GetObjectOptions{})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("download video from storage: %w", err)
 	}
@@ -210,6 +211,11 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read video bytes: %w", err)
 	}
+	s3cancel()
+
+	// Gemini upload + polling + generation get their own budget
+	ctx2, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
 
 	client, err := genai.NewClient(ctx2, option.WithAPIKey(s.geminiCfg.APIKey))
 	if err != nil {
@@ -303,7 +309,7 @@ Trả về kết quả dưới dạng JSON với cấu trúc sau (transcript là
 		Questions          []mcqQuestion       `json:"questions"`
 	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return raw, nil, nil, nil
+		return "", nil, nil, fmt.Errorf("parse gemini response: %w", err)
 	}
 
 	return result.Transcript, result.TranscriptSegments, result.Questions, nil
@@ -324,7 +330,7 @@ func (s *AISvc) upsertAnalysis(ctx context.Context, lessonID pgtype.UUID, status
 }
 
 func (s *AISvc) saveQuestions(ctx context.Context, lessonID pgtype.UUID, questions []mcqQuestion) ([]gen.LessonQuestion, error) {
-	return db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
+	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonQuestion, error) {
 		if err := q.DeleteLessonQuestions(ctx, lessonID); err != nil {
 			return nil, err
 		}
