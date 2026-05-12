@@ -121,7 +121,9 @@ func TestQuizLifecycle(t *testing.T) {
 	// Create student
 	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
 	_, err = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
-		OrganizationId: orgID, UserId: studentID, Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		OrganizationId: orgID, UserId: studentID,
+		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
 	})
 	if err != nil {
 		t.Fatalf("add student: %v", err)
@@ -324,7 +326,8 @@ func TestQuizAuthz(t *testing.T) {
 	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
 	_, _ = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
 		OrganizationId: orgID, UserId: studentID,
-		Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
 	})
 	_, nonMemberPassword, _ := createActiveUser(t, c.users)
 	_ = nonMemberPassword
