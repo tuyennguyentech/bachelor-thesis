@@ -124,3 +124,39 @@ test.describe("Lesson detail — student read-only", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" })).not.toBeVisible();
   });
 });
+
+// ── Teacher sees progress section ──────────────────────────────────────────
+
+test.describe("Lesson detail — progress section", () => {
+  test("teacher sees student progress section", async ({ teacherPage: page }) => {
+    const courseTitle = uid("Khóa học Tiến độ E2E");
+    await page.goto(COURSES_URL);
+    await page.getByRole("button", { name: "Tạo khóa học" }).click();
+    await page.getByLabel("Tên khóa học").fill(courseTitle);
+    await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+
+    const row = page.getByRole("row").filter({ hasText: courseTitle });
+    const courseHref = await row.getByRole("link").getAttribute("href");
+    await page.goto(`http://localhost:3000${courseHref}`);
+
+    const moduleName = uid("Chương Tiến độ E2E");
+    await page.getByRole("button", { name: "Thêm chương" }).click();
+    await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
+    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+
+    const lessonTitle = uid("Bài Tiến độ E2E");
+    await page.getByRole("button", { name: "Thêm bài học" }).click();
+    await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
+    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+
+    const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
+    const href = await lessonRow.getByRole("link").getAttribute("href");
+    await page.goto(`http://localhost:3000${href}`);
+
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.getByText("Tiến độ học viên")).toBeVisible();
+  });
+});

@@ -13,7 +13,7 @@ type GeminiCfg struct {
 
 func NewGeminiCfg() GeminiCfg {
 	return GeminiCfg{
-		Model: "gemini-2.0-flash",
+		Model: "gemini-2.5-flash",
 	}
 }
 
