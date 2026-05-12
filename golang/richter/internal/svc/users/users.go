@@ -192,12 +192,8 @@ func (u *UsersSvc) GetUserByEmail(
 	ctx context.Context,
 	req *richterv1.GetUserByEmailRequest,
 ) (*richterv1.GetUserByEmailResponse, error) {
-	claims, err := u.authz.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := u.authz.RequireAuthenticated(ctx); err != nil {
 		return nil, err
-	}
-	if claims.GetEmail() != req.GetEmail() && claims.GetRole() != richterv1.UserRole_USER_ROLE_ADMIN {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("permission denied"))
 	}
 	user, err := db.WithConnection(u.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.User, error) {
 		return q.GetUserByEmail(ctx, req.GetEmail())

@@ -4,10 +4,8 @@ package v1
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -16,7 +14,6 @@ import (
 	"example.com/buf/gen/richter/v1/richterv1connect"
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
-	"example.com/richter/internal/seed"
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/samber/do/v2"
 )
@@ -46,18 +43,6 @@ func newV1Server(t *testing.T) string {
 	ts := httptest.NewServer(v1.Mux)
 	t.Cleanup(ts.Close)
 	return ts.URL
-}
-
-// TestMain seeds the admin account once before all tests in the package run.
-func TestMain(m *testing.M) {
-	seeder, err := do.Invoke[*seed.SeederSvc](internal.Injector)
-	if err != nil {
-		log.Fatalf("seed setup: invoke seeder: %v", err)
-	}
-	if err = seeder.Seed(context.Background()); err != nil {
-		log.Fatalf("seed setup: %v", err)
-	}
-	os.Exit(m.Run())
 }
 
 // getAdminToken logs in as the configured system admin and returns an access token.
@@ -495,8 +480,10 @@ func TestUsersAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonUsers.GetUserByEmail(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("OtherUser/PermissionDenied", func(t *testing.T) {
-			assertCode(t, func() error { _, e := otherUsers.GetUserByEmail(ctx, req); return e }(), connect.CodePermissionDenied)
+		t.Run("OtherUser/OK", func(t *testing.T) {
+			if _, err := otherUsers.GetUserByEmail(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
+			}
 		})
 		t.Run("Self/OK", func(t *testing.T) {
 			if _, err := selfUsers.GetUserByEmail(ctx, req); err != nil {

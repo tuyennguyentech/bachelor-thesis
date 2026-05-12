@@ -444,6 +444,12 @@ func TestOrgMembersAuthz(t *testing.T) {
 			OrganizationId: orgID, UserId: teacherID,
 			Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER,
 		}
+		t.Run("Anon/Unauthenticated", func(t *testing.T) {
+			assertCode(t, func() error { _, e := anonMembers.UpdateOrganizationMemberRole(ctx, req); return e }(), connect.CodeUnauthenticated)
+		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberMembers.UpdateOrganizationMemberRole(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
 		t.Run("Student/PermissionDenied", func(t *testing.T) {
 			assertCode(t, func() error { _, e := studentMembers.UpdateOrganizationMemberRole(ctx, req); return e }(), connect.CodePermissionDenied)
 		})
@@ -480,6 +486,12 @@ func TestOrgMembersAuthz(t *testing.T) {
 			OrganizationId: orgID, UserId: studentID,
 			Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
 		}
+		t.Run("Anon/Unauthenticated", func(t *testing.T) {
+			assertCode(t, func() error { _, e := anonMembers.UpdateOrganizationMemberStatus(ctx, req); return e }(), connect.CodeUnauthenticated)
+		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberMembers.UpdateOrganizationMemberStatus(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
 		t.Run("Student/PermissionDenied", func(t *testing.T) {
 			assertCode(t, func() error { _, e := studentMembers.UpdateOrganizationMemberStatus(ctx, req); return e }(), connect.CodePermissionDenied)
 		})
