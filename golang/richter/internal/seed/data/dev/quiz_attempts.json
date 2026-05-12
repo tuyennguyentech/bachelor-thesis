@@ -1,0 +1,98 @@
+[
+  {
+    "user_email": "bob@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 1: Big-O, Omega, Theta notation",
+    "answers": [1, 0, 2, 1, 3]
+  },
+  {
+    "user_email": "bob@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 2: Phân tích đệ quy với Master Theorem",
+    "answers": [0, 1, 0, 2, 1]
+  },
+  {
+    "user_email": "bob@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 2: Danh sách và Stack/Queue",
+    "lesson_title": "Bài 1: Mảng và Linked List",
+    "answers": [0, 2, 1, 0, 3]
+  },
+  {
+    "user_email": "dave@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 1: Big-O, Omega, Theta notation",
+    "answers": [1, 2, 2, 1, 3]
+  },
+  {
+    "user_email": "dave@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 2: Phân tích đệ quy với Master Theorem",
+    "answers": [0, 1, 2, 2, 1]
+  },
+  {
+    "user_email": "eve@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 1: Big-O, Omega, Theta notation",
+    "answers": [1, 0, 2, 1, 3]
+  },
+  {
+    "user_email": "grace@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 1: Big-O, Omega, Theta notation",
+    "answers": [0, 0, 2, 1, 3]
+  },
+  {
+    "user_email": "iris@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 1: Độ phức tạp thuật toán",
+    "lesson_title": "Bài 1: Big-O, Omega, Theta notation",
+    "answers": [1, 0, 0, 1, 3]
+  },
+  {
+    "user_email": "jack@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Cấu trúc dữ liệu và Giải thuật",
+    "module_title": "Chương 2: Danh sách và Stack/Queue",
+    "lesson_title": "Bài 1: Mảng và Linked List",
+    "answers": [0, 2, 1, 3, 3]
+  },
+  {
+    "user_email": "kate@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [0, 1, 2, 0, 1]
+  },
+  {
+    "user_email": "liam@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [0, 1, 0, 0, 1]
+  },
+  {
+    "user_email": "mia@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [0, 1, 2, 1, 1]
+  }
+]

@@ -66,14 +66,11 @@ func isDuplicate(err error) bool {
 
 // ── orchestration ─────────────────────────────────────────────────────────────
 
-// SeedAdmin seeds the system admin account. Idempotent — safe to call repeatedly.
 func (s *SeederSvc) SeedAdmin(ctx context.Context) error {
 	s.log.InfoContext(ctx, "seed: running seeder", "name", "admin")
 	return s.seedAdmin(ctx)
 }
 
-// SeedDev seeds the full dev dataset (users, orgs, members, courses).
-// Idempotent — safe to call repeatedly.
 func (s *SeederSvc) SeedDev(ctx context.Context) error {
 	data, err := parseDevData()
 	if err != nil {
@@ -88,6 +85,7 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 		{"dev.organizations", func(ctx context.Context) error { return s.seedDevOrganizations(ctx, data.Organizations) }},
 		{"dev.org_members", func(ctx context.Context) error { return s.seedDevOrgMembers(ctx, data.OrgMembers) }},
 		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses) }},
+		{"dev.quiz_attempts", func(ctx context.Context) error { return s.seedDevQuizAttempts(ctx, data.QuizAttempts) }},
 	}
 	for _, st := range steps {
 		s.log.InfoContext(ctx, "seed: running seeder", "name", st.name)
@@ -134,6 +132,7 @@ type devSeedData struct {
 	Organizations []devOrgSpec
 	OrgMembers    []devOrgMemberSpec
 	Courses       []devCourseSpec
+	QuizAttempts  []devQuizAttemptSpec
 }
 
 type devUserSpec struct {
@@ -173,8 +172,30 @@ type devModuleSpec struct {
 }
 
 type devLessonSpec struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title       string           `json:"title"`
+	Description string           `json:"description"`
+	Analysis    *devAnalysisSpec `json:"analysis,omitempty"`
+}
+
+type devAnalysisSpec struct {
+	Transcript string            `json:"transcript"`
+	Questions  []devQuestionSpec `json:"questions"`
+}
+
+type devQuestionSpec struct {
+	QuestionText  string   `json:"question_text"`
+	Options       []string `json:"options"`
+	CorrectAnswer int32    `json:"correct_answer"`
+	Explanation   string   `json:"explanation"`
+}
+
+type devQuizAttemptSpec struct {
+	UserEmail   string  `json:"user_email"`
+	OrgSlug     string  `json:"org_slug"`
+	CourseTitle string  `json:"course_title"`
+	ModuleTitle string  `json:"module_title"`
+	LessonTitle string  `json:"lesson_title"`
+	Answers     []int32 `json:"answers"`
 }
 
 func readDevJSON(path string, v any) error {
@@ -212,6 +233,9 @@ func parseDevData() (devSeedData, error) {
 			return devSeedData{}, err
 		}
 		data.Courses = append(data.Courses, courses...)
+	}
+	if err := readDevJSON("data/dev/quiz_attempts.json", &data.QuizAttempts); err != nil {
+		return devSeedData{}, err
 	}
 	return data, nil
 }
@@ -322,7 +346,6 @@ func (s *SeederSvc) seedDevOrgMembers(ctx context.Context, members []devOrgMembe
 }
 
 func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec) error {
-	// Cache org lookups and existing course titles per org to avoid repeated queries.
 	type orgCache struct {
 		org    gen.Organization
 		titles map[string]struct{}
@@ -404,21 +427,177 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 			}
 
 			for j, l := range m.Lessons {
-				if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+				lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
 					return q.CreateLesson(ctx, gen.CreateLessonParams{
 						ModuleID:    module.ID,
 						Title:       l.Title,
 						Description: devDescToPgText(l.Description),
 						OrderIndex:  int32(j),
 					})
-				}); err != nil {
+				})
+				if err != nil {
 					return fmt.Errorf("create lesson %d %q in module %q: %w", j, l.Title, m.Title, err)
+				}
+
+				if l.Analysis != nil {
+					if err := s.seedLessonAnalysis(ctx, lesson.ID, l.Analysis); err != nil {
+						s.log.ErrorContext(ctx, "seed: failed to seed analysis", "lesson", l.Title, "err", err)
+					}
 				}
 			}
 		}
 		oc.titles[c.Title] = struct{}{}
 		s.log.InfoContext(ctx, "seed: dev course created", "org", c.OrgSlug, "title", c.Title,
 			"modules", len(c.Modules))
+	}
+	return nil
+}
+
+func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID, a *devAnalysisSpec) error {
+	analysis, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
+		return q.UpsertLessonAnalysis(ctx, gen.UpsertLessonAnalysisParams{
+			LessonID:   lessonID,
+			Status:     gen.LessonAnalysisStatusDone,
+			Transcript: pgtype.Text{String: a.Transcript, Valid: true},
+			ErrorMsg:   pgtype.Text{},
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("upsert analysis: %w", err)
+	}
+	_ = analysis
+
+	// Delete old questions, then insert fresh ones
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.DeleteLessonQuestions(ctx, lessonID)
+	}); err != nil {
+		return fmt.Errorf("delete old questions: %w", err)
+	}
+
+	for i, qspec := range a.Questions {
+		optJSON, _ := json.Marshal(qspec.Options)
+		if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
+			return q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
+				LessonID:      lessonID,
+				QuestionText:  qspec.QuestionText,
+				Options:       optJSON,
+				CorrectAnswer: qspec.CorrectAnswer,
+				Explanation:   pgtype.Text{String: qspec.Explanation, Valid: qspec.Explanation != ""},
+				OrderIndex:    int32(i),
+			})
+		}); err != nil {
+			return fmt.Errorf("create question %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// seedDevQuizAttempts seeds quiz attempt records for dev users.
+// It looks up lessons by path (org→course→module→lesson) to get the lesson ID.
+func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizAttemptSpec) error {
+	for _, a := range attempts {
+		user, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.User, error) {
+			return q.GetUserByEmail(ctx, a.UserEmail)
+		})
+		if err != nil {
+			return fmt.Errorf("lookup user %s: %w", a.UserEmail, err)
+		}
+
+		org, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Organization, error) {
+			return q.GetOrganizationBySlug(ctx, a.OrgSlug)
+		})
+		if err != nil {
+			return fmt.Errorf("lookup org %s: %w", a.OrgSlug, err)
+		}
+
+		// Find course by title
+		courses, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
+			return q.ListCoursesByOrg(ctx, gen.ListCoursesByOrgParams{OrganizationID: org.ID, Limit: 200, Offset: 0})
+		})
+		if err != nil {
+			return fmt.Errorf("list courses for org %s: %w", a.OrgSlug, err)
+		}
+		var courseID pgtype.UUID
+		for _, c := range courses {
+			if c.Title == a.CourseTitle {
+				courseID = c.ID
+				break
+			}
+		}
+		if !courseID.Valid {
+			s.log.InfoContext(ctx, "seed: quiz attempt skipped — course not found", "course", a.CourseTitle)
+			continue
+		}
+
+		// Find module by title
+		modules, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.CourseModule, error) {
+			return q.ListCourseModules(ctx, gen.ListCourseModulesParams{CourseID: courseID, Limit: 100, Offset: 0})
+		})
+		if err != nil {
+			return fmt.Errorf("list modules for course %s: %w", a.CourseTitle, err)
+		}
+		var moduleID pgtype.UUID
+		for _, m := range modules {
+			if m.Title == a.ModuleTitle {
+				moduleID = m.ID
+				break
+			}
+		}
+		if !moduleID.Valid {
+			s.log.InfoContext(ctx, "seed: quiz attempt skipped — module not found", "module", a.ModuleTitle)
+			continue
+		}
+
+		// Find lesson by title
+		lessons, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Lesson, error) {
+			return q.ListLessons(ctx, gen.ListLessonsParams{ModuleID: moduleID, Limit: 100, Offset: 0})
+		})
+		if err != nil {
+			return fmt.Errorf("list lessons for module %s: %w", a.ModuleTitle, err)
+		}
+		var lessonID pgtype.UUID
+		for _, l := range lessons {
+			if l.Title == a.LessonTitle {
+				lessonID = l.ID
+				break
+			}
+		}
+		if !lessonID.Valid {
+			s.log.InfoContext(ctx, "seed: quiz attempt skipped — lesson not found", "lesson", a.LessonTitle)
+			continue
+		}
+
+		// Load questions to compute score
+		questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
+			return q.ListLessonQuestions(ctx, lessonID)
+		})
+		if err != nil || len(questions) == 0 {
+			s.log.InfoContext(ctx, "seed: quiz attempt skipped — no questions for lesson", "lesson", a.LessonTitle)
+			continue
+		}
+
+		score := int32(0)
+		total := int32(len(questions))
+		for i, q := range questions {
+			if i < len(a.Answers) && a.Answers[i] == q.CorrectAnswer {
+				score++
+			}
+		}
+
+		answersJSON, _ := json.Marshal(a.Answers)
+		_, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.QuizAttempt, error) {
+			return q.UpsertQuizAttempt(ctx, gen.UpsertQuizAttemptParams{
+				LessonID: lessonID,
+				UserID:   user.ID,
+				Answers:  answersJSON,
+				Score:    score,
+				Total:    total,
+			})
+		})
+		if err != nil {
+			return fmt.Errorf("upsert quiz attempt %s/%s: %w", a.UserEmail, a.LessonTitle, err)
+		}
+		s.log.InfoContext(ctx, "seed: quiz attempt seeded", "user", a.UserEmail, "lesson", a.LessonTitle, "score", fmt.Sprintf("%d/%d", score, total))
 	}
 	return nil
 }

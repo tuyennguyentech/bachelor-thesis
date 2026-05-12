@@ -9,15 +9,129 @@
       {
         "title": "Chương 1: Độ phức tạp thuật toán",
         "lessons": [
-          { "title": "Bài 1: Big-O, Omega, Theta notation", "description": "Định nghĩa và cách phân tích độ phức tạp thời gian và không gian." },
-          { "title": "Bài 2: Phân tích đệ quy với Master Theorem", "description": "Áp dụng Master Theorem để giải quyết quan hệ truy hồi." },
+          {
+            "title": "Bài 1: Big-O, Omega, Theta notation",
+            "description": "Định nghĩa và cách phân tích độ phức tạp thời gian và không gian.",
+            "analysis": {
+              "transcript": "Trong bài học hôm nay, chúng ta sẽ tìm hiểu về ba ký hiệu quan trọng để đánh giá độ phức tạp thuật toán: Big-O, Omega và Theta.\n\nBig-O notation (ký hiệu O) dùng để mô tả giới hạn trên của thời gian chạy thuật toán. Nó cho chúng ta biết trong trường hợp xấu nhất, thuật toán sẽ chạy như thế nào. Ví dụ, thuật toán tìm kiếm tuyến tính có độ phức tạp O(n) vì trong trường hợp xấu nhất ta phải duyệt qua n phần tử.\n\nOmega notation (ký hiệu Ω) là giới hạn dưới — mô tả trường hợp tốt nhất của thuật toán. Ví dụ, tìm kiếm tuyến tính có Ω(1) vì phần tử cần tìm có thể nằm ngay ở đầu mảng.\n\nTheta notation (ký hiệu Θ) biểu diễn cả giới hạn trên lẫn giới hạn dưới, tức là độ phức tạp chính xác. Khi Big-O và Omega bằng nhau, ta dùng Theta. Ví dụ, vòng lặp đơn giản duyệt qua n phần tử luôn có Θ(n).\n\nKhi phân tích, ta bỏ qua hằng số và các số hạng bậc thấp. Ví dụ, 3n² + 5n + 10 được viết là O(n²). Các độ phức tạp phổ biến từ tốt đến xấu: O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ) < O(n!).",
+              "questions": [
+                {
+                  "question_text": "Big-O notation dùng để biểu diễn điều gì?",
+                  "options": ["Thời gian chạy chính xác của thuật toán", "Giới hạn trên (worst case) của độ phức tạp", "Giới hạn dưới (best case) của độ phức tạp", "Độ phức tạp trung bình của thuật toán"],
+                  "correct_answer": 1,
+                  "explanation": "Big-O biểu diễn giới hạn trên của độ phức tạp — trường hợp xấu nhất mà thuật toán có thể gặp phải."
+                },
+                {
+                  "question_text": "Trong Big-O notation, biểu thức 5n² + 3n + 100 được viết gọn là?",
+                  "options": ["O(5n²)", "O(n² + n)", "O(n²)", "O(n³)"],
+                  "correct_answer": 2,
+                  "explanation": "Ta bỏ hằng số và các số hạng bậc thấp hơn, chỉ giữ lại số hạng bậc cao nhất: O(n²)."
+                },
+                {
+                  "question_text": "Ký hiệu Theta (Θ) được dùng khi nào?",
+                  "options": ["Khi thuật toán chạy rất nhanh", "Khi Big-O và Omega bằng nhau (cận chặt)", "Khi không biết trường hợp xấu nhất", "Khi thuật toán dùng đệ quy"],
+                  "correct_answer": 1,
+                  "explanation": "Theta (Θ) biểu diễn cận chặt — khi giới hạn trên và giới hạn dưới của độ phức tạp trùng nhau."
+                },
+                {
+                  "question_text": "Trong các độ phức tạp sau, độ phức tạp nào là tệ nhất (tăng nhanh nhất)?",
+                  "options": ["O(n log n)", "O(n²)", "O(2ⁿ)", "O(n³)"],
+                  "correct_answer": 2,
+                  "explanation": "O(2ⁿ) là độ phức tạp hàm mũ, tăng cực kỳ nhanh và tệ hơn tất cả các lựa chọn còn lại."
+                },
+                {
+                  "question_text": "Thuật toán tìm kiếm nhị phân (binary search) có độ phức tạp Big-O là?",
+                  "options": ["O(1)", "O(log n)", "O(n)", "O(n log n)"],
+                  "correct_answer": 1,
+                  "explanation": "Binary search loại một nửa mảng ở mỗi bước, nên số bước tối đa là log₂(n) → O(log n)."
+                }
+              ]
+            }
+          },
+          {
+            "title": "Bài 2: Phân tích đệ quy với Master Theorem",
+            "description": "Áp dụng Master Theorem để giải quyết quan hệ truy hồi.",
+            "analysis": {
+              "transcript": "Master Theorem là công cụ mạnh mẽ để phân tích độ phức tạp của các thuật toán đệ quy dạng chia để trị.\n\nDạng tổng quát của quan hệ truy hồi là: T(n) = aT(n/b) + f(n), trong đó a là số bài toán con, b là hệ số chia nhỏ kích thước, và f(n) là chi phí chia/hợp nhất.\n\nMaster Theorem có 3 trường hợp:\n\nTrường hợp 1: Nếu f(n) = O(n^(log_b(a) - ε)) với ε > 0, thì T(n) = Θ(n^log_b(a)). Tức là chi phí ở các tầng dưới chiếm ưu thế.\n\nTrường hợp 2: Nếu f(n) = Θ(n^log_b(a)), thì T(n) = Θ(n^log_b(a) * log n). Hai phần cân bằng nhau.\n\nTrường hợp 3: Nếu f(n) = Ω(n^(log_b(a) + ε)) và af(n/b) ≤ cf(n) với c < 1, thì T(n) = Θ(f(n)). Chi phí ở gốc chiếm ưu thế.\n\nVí dụ: Merge Sort có T(n) = 2T(n/2) + O(n). Ở đây a=2, b=2, f(n)=n. Ta có log_2(2)=1, f(n)=n=n^1, nên thuộc trường hợp 2: T(n) = Θ(n log n).",
+              "questions": [
+                {
+                  "question_text": "Master Theorem áp dụng cho dạng quan hệ truy hồi nào?",
+                  "options": ["T(n) = T(n-1) + c", "T(n) = aT(n/b) + f(n)", "T(n) = T(n/2) + T(n/3)", "T(n) = n * T(n-1)"],
+                  "correct_answer": 1,
+                  "explanation": "Master Theorem áp dụng cho dạng T(n) = aT(n/b) + f(n) — dạng chia đều bài toán thành a bài toán con kích thước n/b."
+                },
+                {
+                  "question_text": "Merge Sort có T(n) = 2T(n/2) + O(n). Theo Master Theorem, độ phức tạp là?",
+                  "options": ["O(n)", "O(n log n)", "O(n²)", "O(log n)"],
+                  "correct_answer": 1,
+                  "explanation": "a=2, b=2, log_b(a)=1. f(n)=n=n^1 = n^log_b(a), nên thuộc Case 2: T(n) = Θ(n log n)."
+                },
+                {
+                  "question_text": "Binary Search có T(n) = T(n/2) + O(1). Độ phức tạp là?",
+                  "options": ["O(1)", "O(log n)", "O(n)", "O(n log n)"],
+                  "correct_answer": 1,
+                  "explanation": "a=1, b=2, log_2(1)=0. f(n)=1=n^0, nên Case 2: T(n)=Θ(n^0 * log n)=Θ(log n)."
+                },
+                {
+                  "question_text": "Trong T(n) = aT(n/b) + f(n), ý nghĩa của 'a' là gì?",
+                  "options": ["Hệ số chia kích thước bài toán", "Số bài toán con ở mỗi bước đệ quy", "Chi phí hợp nhất kết quả", "Độ sâu của cây đệ quy"],
+                  "correct_answer": 1,
+                  "explanation": "'a' là số lượng bài toán con được tạo ra ở mỗi bước đệ quy (number of subproblems)."
+                },
+                {
+                  "question_text": "Khi nào Master Theorem Case 1 áp dụng?",
+                  "options": ["f(n) tăng nhanh hơn n^log_b(a)", "f(n) = Θ(n^log_b(a))", "f(n) tăng chậm hơn n^log_b(a)", "Khi a = b"],
+                  "correct_answer": 2,
+                  "explanation": "Case 1 áp dụng khi f(n) = O(n^(log_b(a)-ε)) — tức là f(n) nhỏ hơn n^log_b(a), công việc ở tầng lá chiếm ưu thế."
+                }
+              ]
+            }
+          },
           { "title": "Bài 3: Benchmark thực tế", "description": "So sánh hiệu năng các thuật toán bằng thực nghiệm với dữ liệu lớn." }
         ]
       },
       {
         "title": "Chương 2: Danh sách và Stack/Queue",
         "lessons": [
-          { "title": "Bài 1: Mảng và Linked List", "description": "Triển khai, so sánh hiệu năng mảng tĩnh, động và danh sách liên kết đơn/đôi." },
+          {
+            "title": "Bài 1: Mảng và Linked List",
+            "description": "Triển khai, so sánh hiệu năng mảng tĩnh, động và danh sách liên kết đơn/đôi.",
+            "analysis": {
+              "transcript": "Trong bài này, chúng ta sẽ so sánh hai cấu trúc dữ liệu cơ bản nhất: Mảng (Array) và Danh sách liên kết (Linked List).\n\nMảng lưu trữ các phần tử liên tiếp trong bộ nhớ. Ưu điểm: truy cập ngẫu nhiên O(1) bằng chỉ số, cache-friendly. Nhược điểm: kích thước cố định (với mảng tĩnh), chèn/xóa ở giữa tốn O(n).\n\nMảng động (Dynamic Array) như ArrayList trong Java hay vector trong C++ tự động tăng kích thước khi đầy. Chi phí amortized cho append là O(1).\n\nLinked List lưu các node rải rác trong bộ nhớ, mỗi node chứa dữ liệu và con trỏ đến node tiếp theo. Ưu điểm: chèn/xóa ở đầu O(1), không cần biết trước kích thước. Nhược điểm: truy cập ngẫu nhiên O(n), tốn thêm bộ nhớ cho con trỏ, không cache-friendly.\n\nDoubly Linked List có thêm con trỏ đến node trước, cho phép duyệt hai chiều và xóa O(1) khi biết node.\n\nKhi nào dùng mảng: cần truy cập ngẫu nhiên, dữ liệu ít thay đổi. Khi nào dùng linked list: thường xuyên chèn/xóa ở đầu/giữa.",
+              "questions": [
+                {
+                  "question_text": "Thao tác truy cập phần tử tại chỉ số i trong mảng có độ phức tạp là?",
+                  "options": ["O(n)", "O(log n)", "O(1)", "O(n²)"],
+                  "correct_answer": 2,
+                  "explanation": "Mảng lưu liên tiếp trong bộ nhớ, địa chỉ phần tử thứ i = địa chỉ đầu + i × kích_thước. Tính được ngay → O(1)."
+                },
+                {
+                  "question_text": "Linked List có ưu điểm nào so với mảng?",
+                  "options": ["Truy cập ngẫu nhiên nhanh hơn", "Tiết kiệm bộ nhớ hơn", "Chèn/xóa ở đầu danh sách O(1)", "Cache-friendly hơn"],
+                  "correct_answer": 2,
+                  "explanation": "Chèn/xóa ở đầu Linked List chỉ cần thay đổi con trỏ → O(1), trong khi mảng cần dịch chuyển tất cả phần tử → O(n)."
+                },
+                {
+                  "question_text": "Nhược điểm chính của Linked List so với mảng là gì?",
+                  "options": ["Không thể lưu kiểu dữ liệu khác nhau", "Không hỗ trợ vòng lặp", "Truy cập phần tử tại vị trí i tốn O(n)", "Không thể mở rộng kích thước"],
+                  "correct_answer": 2,
+                  "explanation": "Để truy cập phần tử thứ i trong Linked List, phải duyệt từ đầu qua i node → O(n), không có truy cập ngẫu nhiên."
+                },
+                {
+                  "question_text": "Doubly Linked List khác Singly Linked List ở điểm nào?",
+                  "options": ["Mỗi node có 2 trường dữ liệu", "Mỗi node có con trỏ đến cả node trước và node sau", "Duyệt nhanh hơn O(1)", "Tốn ít bộ nhớ hơn"],
+                  "correct_answer": 1,
+                  "explanation": "Doubly Linked List có thêm con trỏ `prev` trỏ đến node trước, cho phép duyệt hai chiều và xóa O(1) khi biết node."
+                },
+                {
+                  "question_text": "Chi phí amortized của thao tác append vào Dynamic Array (mảng động) là?",
+                  "options": ["O(n) mỗi lần", "O(log n)", "O(1) amortized", "O(n²)"],
+                  "correct_answer": 2,
+                  "explanation": "Dynamic Array nhân đôi kích thước khi đầy. Dù thỉnh thoảng tốn O(n) để copy, nhưng trung bình (amortized) mỗi append chỉ O(1)."
+                }
+              ]
+            }
+          },
           { "title": "Bài 2: Stack và ứng dụng", "description": "Stack với mảng và DSLK, bài toán cân bằng ngoặc, tính biểu thức hậu tố." },
           { "title": "Bài 3: Queue và Deque", "description": "Queue vòng, priority queue cơ bản, ứng dụng BFS." },
           { "title": "Bài 4: Bài toán trượt cửa sổ", "description": "Kỹ thuật sliding window với deque để giải quyết các bài toán tối ưu." }
@@ -54,7 +168,45 @@
       {
         "title": "Chương 1: Nền tảng Java",
         "lessons": [
-          { "title": "Bài 1: JVM, JDK, JRE và vòng đời", "description": "Kiến trúc Java platform, biên dịch bytecode và JIT compilation." },
+          {
+            "title": "Bài 1: JVM, JDK, JRE và vòng đời",
+            "description": "Kiến trúc Java platform, biên dịch bytecode và JIT compilation.",
+            "analysis": {
+              "transcript": "Trong bài này chúng ta tìm hiểu ba thành phần cốt lõi của nền tảng Java: JVM, JDK và JRE.\n\nJVM (Java Virtual Machine) là máy ảo thực thi bytecode Java. JVM tạo nên tính 'Write Once, Run Anywhere' của Java — bytecode (.class file) có thể chạy trên bất kỳ hệ điều hành nào có JVM. JVM gồm các thành phần: Class Loader, Runtime Data Areas (Heap, Stack, Method Area), và Execution Engine.\n\nJIT (Just-In-Time) Compiler là phần quan trọng của Execution Engine. Nó biên dịch bytecode thường xuyên được dùng thành mã máy native, giúp Java đạt hiệu năng gần với C/C++.\n\nJRE (Java Runtime Environment) = JVM + các thư viện chuẩn (rt.jar). Đây là môi trường tối thiểu để chạy ứng dụng Java.\n\nJDK (Java Development Kit) = JRE + công cụ phát triển (javac compiler, debugger, javadoc...). Developer cần cài JDK để viết và biên dịch Java.\n\nVòng đời: Source code (.java) → javac compiler → Bytecode (.class) → JVM → Execution. JVM cũng có GC (Garbage Collector) tự động giải phóng bộ nhớ.",
+              "questions": [
+                {
+                  "question_text": "JVM là gì?",
+                  "options": ["Ngôn ngữ lập trình Java", "Máy ảo thực thi bytecode Java", "Trình biên dịch Java", "Thư viện chuẩn Java"],
+                  "correct_answer": 1,
+                  "explanation": "JVM (Java Virtual Machine) là máy ảo chịu trách nhiệm thực thi bytecode (.class files) Java trên từng nền tảng cụ thể."
+                },
+                {
+                  "question_text": "Sự khác biệt chính giữa JRE và JDK là gì?",
+                  "options": ["JRE nhanh hơn JDK", "JDK = JRE + công cụ phát triển (javac, debugger...)", "JRE chỉ dùng cho Windows", "Không có sự khác biệt"],
+                  "correct_answer": 1,
+                  "explanation": "JDK (Java Development Kit) bao gồm JRE và thêm các công cụ phát triển như javac (compiler), jdb (debugger), javadoc..."
+                },
+                {
+                  "question_text": "JIT Compiler trong JVM dùng để làm gì?",
+                  "options": ["Biên dịch file .java thành bytecode", "Biên dịch bytecode thường dùng thành mã máy native để tăng tốc", "Tự động kiểm tra lỗi cú pháp", "Quản lý bộ nhớ heap"],
+                  "correct_answer": 1,
+                  "explanation": "JIT (Just-In-Time) Compiler phát hiện bytecode được gọi nhiều lần và biên dịch sang mã máy native, giúp tăng hiệu năng đáng kể."
+                },
+                {
+                  "question_text": "File nguồn Java (.java) sau khi biên dịch tạo ra loại file nào?",
+                  "options": [".exe", ".dll", ".class (bytecode)", ".bin"],
+                  "correct_answer": 2,
+                  "explanation": "javac compiler biên dịch file .java thành file .class chứa bytecode — định dạng trung gian mà JVM có thể thực thi."
+                },
+                {
+                  "question_text": "Điều nào sau đây là ưu điểm của mô hình bytecode JVM?",
+                  "options": ["Chạy nhanh hơn C++", "Write Once Run Anywhere — chạy trên mọi nền tảng có JVM", "Không cần cài đặt", "Tự động tối ưu thuật toán"],
+                  "correct_answer": 1,
+                  "explanation": "Bytecode là ngôn ngữ trung gian, JVM trên mỗi nền tảng hiểu và thực thi bytecode → code Java chạy trên mọi OS có JVM mà không cần thay đổi."
+                }
+              ]
+            }
+          },
           { "title": "Bài 2: Kiểu dữ liệu và biểu thức", "description": "Primitive types, autoboxing, String pool và các toán tử." },
           { "title": "Bài 3: Control flow và vòng lặp", "description": "if-else, switch, for, while, do-while và các kỹ thuật tối ưu." }
         ]
