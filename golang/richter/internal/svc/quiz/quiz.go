@@ -169,12 +169,23 @@ func (s *QuizSvc) ListLessonAttempts(
 	ctx context.Context,
 	req *richterv1.ListLessonAttemptsRequest,
 ) (*richterv1.ListLessonAttemptsResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
 		return nil, err
 	}
 
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	// Require teacher+ role in the lesson's org
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
 	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	); err != nil {
 		return nil, err
 	}
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"errors"
+
 	"connectrpc.com/connect"
 	"connectrpc.com/validate"
 	jwtv1 "example.com/buf/gen/richter/jwt/v1"
@@ -18,6 +20,7 @@ import (
 	"example.com/richter/internal/svc/users"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
@@ -76,9 +79,11 @@ func (a *AuthSvc) Login(
 		return q.GetUserByEmail(ctx, req.GetEmail())
 	})
 	if err != nil {
-		err = connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
+		}
 		a.log.ErrorContext(ctx, "auth service failed", svc.LogAttrs("Login.GetUserByEmail", err)...)
-		return nil, err
+		return nil, svc.ConnectDBError(err)
 	}
 
 	if !secure.VerifyPassword(req.GetPassword(), user.PasswordHash) {

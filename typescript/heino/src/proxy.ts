@@ -51,7 +51,7 @@ export async function proxy(request: NextRequest) {
   if (refreshToken) {
     const tokens = await tryRefresh(refreshToken);
     if (tokens) {
-      const response = NextResponse.redirect(request.url);
+      const response = NextResponse.next();
       response.cookies.set(COOKIE_ACCESS, tokens.access, COOKIE_OPTS);
       response.cookies.set(COOKIE_REFRESH, tokens.refresh, COOKIE_OPTS);
       return response;

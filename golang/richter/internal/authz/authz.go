@@ -140,7 +140,7 @@ func (a *AuthzSvc) RequireOrgRole(ctx context.Context, orgID pgtype.UUID, roles 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("not a member of this organization"))
 		}
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
 	for _, r := range roles {
 		if member.Role == r {

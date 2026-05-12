@@ -349,6 +349,9 @@ func (o *OrgMembersSvc) RemoveOrganizationMember(
 					UserID:         userID,
 				})
 			})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+			}
 			if err == nil && targetMember.Role == gen.OrganizationRoleOwner {
 				return nil, connect.NewError(connect.CodePermissionDenied, errors.New("org admin cannot remove owner"))
 			}

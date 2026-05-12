@@ -33,3 +33,10 @@ RETURNING *;
 
 -- name: DeleteLesson :execrows
 DELETE FROM lessons WHERE id = $1;
+
+-- name: GetOrgIDByLessonID :one
+SELECT c.organization_id
+FROM lessons l
+JOIN course_modules cm ON cm.id = l.module_id
+JOIN courses c ON c.id = cm.course_id
+WHERE l.id = $1;

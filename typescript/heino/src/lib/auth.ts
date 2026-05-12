@@ -57,10 +57,15 @@ export const getSession = cache(async (): Promise<Session | null> => {
   try {
     const client = createRichterClient(AuthService);
     const res = await client.refreshToken({ refreshToken });
+    const claims = await verifyJwt(res.accessToken);
+    if (!claims) {
+      // Server returned an unverifiable token — clear cookies so we don't loop
+      cookieStore.delete(COOKIE_ACCESS);
+      cookieStore.delete(COOKIE_REFRESH);
+      return null;
+    }
     cookieStore.set(COOKIE_ACCESS, res.accessToken, COOKIE_OPTS);
     cookieStore.set(COOKIE_REFRESH, res.refreshToken, COOKIE_OPTS);
-    const claims = await verifyJwt(res.accessToken);
-    if (!claims) return null;
     return { claims, token: res.accessToken };
   } catch {
     return null;

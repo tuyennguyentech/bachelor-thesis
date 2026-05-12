@@ -104,8 +104,18 @@ func (s *AISvc) AnalyzeLesson(
 		return nil, err
 	}
 
-	// Auth: require org member (teacher+) — we check at the org level below
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	// Require teacher+ in the lesson's org
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	); err != nil {
 		return nil, err
 	}
 
@@ -139,10 +149,12 @@ func (s *AISvc) AnalyzeLesson(
 		return nil, err
 	}
 
-	// Persist questions
+	// Persist questions — if this fails, mark analysis as error so the client knows questions are missing
 	savedQuestions, err := s.saveQuestions(ctx, lessonID, questions)
 	if err != nil {
 		s.log.ErrorContext(ctx, "ai: failed to save questions", svc.LogAttrs("saveQuestions", err)...)
+		analysis, _ = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusError, transcript, segmentsJSON, "failed to save questions: "+err.Error())
+		return &richterv1.AnalyzeLessonResponse{Analysis: analysisToProto(analysis, nil)}, nil
 	}
 
 	return &richterv1.AnalyzeLessonResponse{Analysis: analysisToProto(analysis, savedQuestions)}, nil
@@ -246,7 +258,11 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 
 	// Wait until file is ACTIVE
 	for uploadedFile.State == genai.FileStateProcessing {
-		time.Sleep(3 * time.Second)
+		select {
+		case <-ctx2.Done():
+			return "", nil, nil, ctx2.Err()
+		case <-time.After(3 * time.Second):
+		}
 		uploadedFile, err = client.GetFile(ctx2, uploadedFile.Name)
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("poll file state: %w", err)
