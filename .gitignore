@@ -8,3 +8,6 @@ typescript/buf/gen
 
 # Local config overrides (may contain secrets)
 golang/richter/richter.local.toml
+
+# Compiled binaries accidentally placed in wrong dirs
+typescript/heino/richter
