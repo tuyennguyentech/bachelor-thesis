@@ -11,6 +11,7 @@ import (
 	"example.com/richter/internal/svc/lessons"
 	"example.com/richter/internal/svc/orgmembers"
 	"example.com/richter/internal/svc/organizations"
+	"example.com/richter/internal/svc/quiz"
 	"example.com/richter/internal/svc/storage"
 	"example.com/richter/internal/svc/users"
 	"github.com/samber/do/v2"
@@ -65,6 +66,10 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	if err != nil {
 		return
 	}
+	quizSvc, err := do.Invoke[*quiz.QuizSvc](i)
+	if err != nil {
+		return
+	}
 
 	mux := http.NewServeMux()
 	path, handler := authSvc.Handler()
@@ -84,6 +89,8 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	path, handler = storageSvc.Handler()
 	mux.Handle(path, handler)
 	path, handler = aiSvc.Handler()
+	mux.Handle(path, handler)
+	path, handler = quizSvc.Handler()
 	mux.Handle(path, handler)
 
 	v1 = &V1Svc{Mux: mux}

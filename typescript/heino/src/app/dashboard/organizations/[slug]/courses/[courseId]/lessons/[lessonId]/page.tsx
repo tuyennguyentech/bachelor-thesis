@@ -5,14 +5,23 @@ import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, LessonService, CourseModuleService } from "buf/gen/richter/v1/courses_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
-import { AIService } from "buf/gen/richter/v1/ai_pb";
-import { AnalysisStatus } from "buf/gen/richter/v1/ai_pb";
+import { AIService, AnalysisStatus } from "buf/gen/richter/v1/ai_pb";
+import { QuizService } from "buf/gen/richter/v1/quiz_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, VideoIcon, PlayCircleIcon, SparklesIcon, FileTextIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  VideoIcon,
+  PlayCircleIcon,
+  SparklesIcon,
+  FileTextIcon,
+  UsersIcon,
+} from "lucide-react";
 import { VideoUpload } from "./video-upload";
 import { AnalyzeButton } from "./analyze-button";
+import { QuizForm } from "./quiz-form";
+import { LessonAttempts } from "./lesson-attempts";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 
@@ -78,8 +87,10 @@ export default async function LessonDetailPage({
   }
   if (!module_ || module_.courseId !== courseId) notFound();
 
-  // Fetch video URL and AI analysis in parallel
-  const [videoUrl, analysis] = await Promise.all([
+  const quizClient = createRichterClient(QuizService, token);
+
+  // Parallel fetches: video URL, AI analysis, and quiz data
+  const [videoUrl, analysis, myAttempt, attemptsData] = await Promise.all([
     lesson.videoStorageKey
       ? createRichterClient(StorageService, token)
           .getDownloadUrl({ key: lesson.videoStorageKey, expiresInSeconds: 3600 })
@@ -90,9 +101,22 @@ export default async function LessonDetailPage({
       .getLessonAnalysis({ lessonId })
       .then((r) => r.analysis ?? null)
       .catch(() => null),
+    canManage
+      ? Promise.resolve(null)
+      : quizClient
+          .getMyQuizAttempt({ lessonId })
+          .then((r) => r.attempt ?? null)
+          .catch(() => null),
+    canManage
+      ? quizClient
+          .listLessonAttempts({ lessonId, limit: 50, offset: 0 })
+          .then((r) => ({ attempts: r.attempts, total: r.total }))
+          .catch(() => ({ attempts: [], total: 0 }))
+      : Promise.resolve(null),
   ]);
 
   const isDone = analysis?.status === AnalysisStatus.DONE;
+  const hasQuestions = isDone && analysis?.questions && analysis.questions.length > 0;
 
   return (
     <div className="mx-auto max-w-3xl flex flex-col gap-6">
@@ -174,7 +198,7 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* Transcript */}
+      {/* Transcript — visible to all */}
       {isDone && analysis?.transcript && (
         <div className="rounded-lg border p-4 flex flex-col gap-3">
           <div className="flex items-center gap-2">
@@ -187,41 +211,65 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* MCQ Questions */}
-      {isDone && analysis?.questions && analysis.questions.length > 0 && (
+      {/* MCQ: teacher sees answers; student gets interactive quiz form */}
+      {hasQuestions && (
         <div className="rounded-lg border p-4 flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <SparklesIcon className="size-4 text-muted-foreground" />
             <h2 className="font-medium text-sm">
-              Câu hỏi trắc nghiệm ({analysis.questions.length} câu)
+              Câu hỏi trắc nghiệm ({analysis!.questions.length} câu)
             </h2>
           </div>
-          <div className="flex flex-col gap-6">
-            {analysis.questions.map((q, qi) => (
-              <div key={q.id} className="flex flex-col gap-2">
-                <p className="text-sm font-medium">
-                  {qi + 1}. {q.questionText}
-                </p>
-                <div className="grid grid-cols-1 gap-1 ml-4">
-                  {q.options.map((opt, oi) => (
-                    <div
-                      key={oi}
-                      className={`text-sm px-3 py-1.5 rounded-md border ${
-                        oi === q.correctAnswer
-                          ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
-                          : "border-transparent text-muted-foreground"
-                      }`}
-                    >
-                      {String.fromCharCode(65 + oi)}. {opt.text}
-                    </div>
-                  ))}
+
+          {canManage ? (
+            // Teacher/admin: show correct answers
+            <div className="flex flex-col gap-6">
+              {analysis!.questions.map((q, qi) => (
+                <div key={q.id} className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">
+                    {qi + 1}. {q.questionText}
+                  </p>
+                  <div className="grid grid-cols-1 gap-1 ml-4">
+                    {q.options.map((opt, oi) => (
+                      <div
+                        key={oi}
+                        className={`text-sm px-3 py-1.5 rounded-md border ${
+                          oi === q.correctAnswer
+                            ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
+                            : "border-transparent text-muted-foreground"
+                        }`}
+                      >
+                        {String.fromCharCode(65 + oi)}. {opt.text}
+                      </div>
+                    ))}
+                  </div>
+                  {q.explanation && (
+                    <p className="text-xs text-muted-foreground ml-4 italic">{q.explanation}</p>
+                  )}
                 </div>
-                {q.explanation && (
-                  <p className="text-xs text-muted-foreground ml-4 italic">{q.explanation}</p>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
+          ) : (
+            // Student: interactive quiz form
+            <QuizForm
+              questions={analysis!.questions}
+              previousAttempt={myAttempt}
+              lessonId={lessonId}
+              slug={slug}
+              courseId={courseId}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Teacher/admin: student progress */}
+      {canManage && attemptsData && (
+        <div className="rounded-lg border p-4 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <UsersIcon className="size-4 text-muted-foreground" />
+            <h2 className="font-medium text-sm">Tiến độ học viên</h2>
           </div>
+          <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} />
         </div>
       )}
     </div>

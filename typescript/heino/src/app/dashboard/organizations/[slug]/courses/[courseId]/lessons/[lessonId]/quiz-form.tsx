@@ -1,0 +1,152 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { Button } from "@/components/ui/button";
+import { submitQuiz } from "@/app/actions/quiz";
+import { CheckCircleIcon, XCircleIcon, SendIcon } from "lucide-react";
+import type { LessonQuestion } from "buf/gen/richter/v1/ai_pb";
+import type { QuizAttempt } from "buf/gen/richter/v1/quiz_pb";
+
+interface Props {
+  questions: LessonQuestion[];
+  previousAttempt: QuizAttempt | null;
+  lessonId: string;
+  slug: string;
+  courseId: string;
+}
+
+export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId }: Props) {
+  const [selected, setSelected] = useState<(number | null)[]>(() =>
+    previousAttempt ? [...previousAttempt.answers] : Array(questions.length).fill(null),
+  );
+  const [result, setResult] = useState<{ score: number; total: number } | null>(
+    previousAttempt ? { score: previousAttempt.score, total: previousAttempt.total } : null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const submitted = result !== null;
+
+  function handleSelect(qi: number, oi: number) {
+    if (submitted) return;
+    setSelected((prev) => {
+      const next = [...prev];
+      next[qi] = oi;
+      return next;
+    });
+  }
+
+  function handleSubmit() {
+    const answers = selected.map((v) => v ?? 0);
+    setError(null);
+    startTransition(async () => {
+      const res = await submitQuiz(lessonId, answers, slug, courseId);
+      if (res?.error) {
+        setError(res.error);
+      } else if (res) {
+        setResult({ score: res.score ?? 0, total: res.total ?? 0 });
+        setSelected(answers);
+      }
+    });
+  }
+
+  const allAnswered = selected.every((v) => v !== null);
+
+  return (
+    <div className="flex flex-col gap-6">
+      {submitted && result && (
+        <div className="rounded-md bg-muted px-4 py-3 flex items-center gap-3">
+          <CheckCircleIcon className="size-5 text-green-500 shrink-0" />
+          <span className="text-sm font-medium">
+            Kết quả: {result.score}/{result.total} câu đúng (
+            {Math.round((result.score / result.total) * 100)}%)
+          </span>
+        </div>
+      )}
+
+      {questions.map((q, qi) => {
+        const sel = selected[qi];
+        const correct = q.correctAnswer;
+        return (
+          <div key={q.id} className="flex flex-col gap-2">
+            <p className="text-sm font-medium">
+              {qi + 1}. {q.questionText}
+            </p>
+            <div className="flex flex-col gap-1 ml-4">
+              {q.options.map((opt, oi) => {
+                const isSelected = sel === oi;
+                const isCorrect = oi === correct;
+                let className =
+                  "text-sm px-3 py-2 rounded-md border cursor-pointer transition-colors flex items-center gap-2";
+                if (submitted) {
+                  if (isCorrect) {
+                    className += " border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400";
+                  } else if (isSelected && !isCorrect) {
+                    className += " border-red-400 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400";
+                  } else {
+                    className += " border-transparent text-muted-foreground";
+                  }
+                } else {
+                  className += isSelected
+                    ? " border-primary bg-primary/10"
+                    : " border-border hover:border-muted-foreground";
+                }
+                return (
+                  <div key={oi} className={className} onClick={() => handleSelect(qi, oi)}>
+                    {submitted ? (
+                      isCorrect ? (
+                        <CheckCircleIcon className="size-3.5 shrink-0" />
+                      ) : isSelected ? (
+                        <XCircleIcon className="size-3.5 shrink-0" />
+                      ) : (
+                        <span className="size-3.5 shrink-0" />
+                      )
+                    ) : (
+                      <div
+                        className={`size-3.5 rounded-full border shrink-0 ${isSelected ? "border-primary bg-primary" : "border-muted-foreground"}`}
+                      />
+                    )}
+                    <span>
+                      {String.fromCharCode(65 + oi)}. {opt.text}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {submitted && q.explanation && (
+              <p className="text-xs text-muted-foreground ml-4 italic">{q.explanation}</p>
+            )}
+          </div>
+        );
+      })}
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {!submitted && (
+        <Button
+          size="sm"
+          className="self-start gap-2"
+          disabled={!allAnswered || isPending}
+          onClick={handleSubmit}
+        >
+          <SendIcon className="size-4" />
+          {isPending ? "Đang nộp…" : "Nộp bài"}
+        </Button>
+      )}
+
+      {submitted && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start"
+          onClick={() => {
+            setSelected(Array(questions.length).fill(null));
+            setResult(null);
+          }}
+        >
+          Làm lại
+        </Button>
+      )}
+    </div>
+  );
+}

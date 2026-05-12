@@ -5,3 +5,6 @@ golang/sql/gen
 
 node_modules
 typescript/buf/gen
+
+# Local config overrides (may contain secrets)
+golang/richter/richter.local.toml

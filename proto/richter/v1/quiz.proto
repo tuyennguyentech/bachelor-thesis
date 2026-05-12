@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "example.com/buf/gen/richter/v1;richterv1";
+
+message QuizAttempt {
+  string id = 1;
+  string lesson_id = 2;
+  string user_id = 3;
+  repeated int32 answers = 4;
+  int32 score = 5;
+  int32 total = 6;
+  google.protobuf.Timestamp submitted_at = 7;
+}
+
+message SubmitQuizRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  repeated int32 answers = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message SubmitQuizResponse {
+  QuizAttempt attempt = 1;
+}
+
+message GetMyQuizAttemptRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetMyQuizAttemptResponse {
+  QuizAttempt attempt = 1;
+}
+
+message StudentAttemptResult {
+  string user_id = 1;
+  string display_name = 2;
+  string email = 3;
+  int32 score = 4;
+  int32 total = 5;
+  google.protobuf.Timestamp submitted_at = 6;
+}
+
+message ListLessonAttemptsRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [
+    (buf.validate.field).int32 = {
+      gte: 1,
+      lte: 100
+    }
+  ];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListLessonAttemptsResponse {
+  repeated StudentAttemptResult attempts = 1;
+  int32 total = 2;
+}
+
+service QuizService {
+  // SubmitQuiz records a student's answers and returns their score.
+  rpc SubmitQuiz(SubmitQuizRequest) returns (SubmitQuizResponse) {}
+  // GetMyQuizAttempt returns the current user's latest attempt for a lesson.
+  rpc GetMyQuizAttempt(GetMyQuizAttemptRequest) returns (GetMyQuizAttemptResponse) {}
+  // ListLessonAttempts returns all student attempts for a lesson (teacher/admin only).
+  rpc ListLessonAttempts(ListLessonAttemptsRequest) returns (ListLessonAttemptsResponse) {}
+}
