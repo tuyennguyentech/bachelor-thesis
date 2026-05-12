@@ -1,0 +1,230 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+enum CourseStatus {
+  COURSE_STATUS_UNSPECIFIED = 0;
+  COURSE_STATUS_DRAFT = 1;
+  COURSE_STATUS_PUBLISHED = 2;
+  COURSE_STATUS_ARCHIVED = 3;
+}
+
+// ─── Course ──────────────────────────────────────────────────────────────────
+
+message Course {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string organization_id = 2 [(buf.validate.field).string.uuid = true];
+  string owner_id = 3 [(buf.validate.field).string.uuid = true];
+  string title = 4 [(buf.validate.field).string.min_len = 1];
+  string description = 5;
+  CourseStatus status = 6 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message CreateCourseRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  string owner_id = 2 [(buf.validate.field).string.uuid = true];
+  string title = 3 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string description = 4;
+}
+
+message CreateCourseResponse {
+  Course course = 1;
+}
+
+message GetCourseByIdRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetCourseByIdResponse {
+  Course course = 1;
+}
+
+message ListCoursesRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+  optional CourseStatus status_filter = 4;
+}
+
+message ListCoursesResponse {
+  repeated Course courses = 1;
+}
+
+message UpdateCourseRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string description = 3;
+}
+
+message UpdateCourseResponse {
+  Course course = 1;
+}
+
+message UpdateCourseStatusRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  CourseStatus status = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+}
+
+message UpdateCourseStatusResponse {
+  Course course = 1;
+}
+
+message DeleteCourseRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteCourseResponse {}
+
+service CourseService {
+  rpc CreateCourse(CreateCourseRequest) returns (CreateCourseResponse) {}
+  rpc GetCourseById(GetCourseByIdRequest) returns (GetCourseByIdResponse) {}
+  rpc ListCourses(ListCoursesRequest) returns (ListCoursesResponse) {}
+  rpc UpdateCourse(UpdateCourseRequest) returns (UpdateCourseResponse) {}
+  rpc UpdateCourseStatus(UpdateCourseStatusRequest) returns (UpdateCourseStatusResponse) {}
+  rpc DeleteCourse(DeleteCourseRequest) returns (DeleteCourseResponse) {}
+}
+
+// ─── CourseModule ─────────────────────────────────────────────────────────────
+
+message CourseModule {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string course_id = 2 [(buf.validate.field).string.uuid = true];
+  string title = 3 [(buf.validate.field).string.min_len = 1];
+  int32 order_index = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message CreateCourseModuleRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  int32 order_index = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message CreateCourseModuleResponse {
+  CourseModule module = 1;
+}
+
+message GetCourseModuleByIdRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetCourseModuleByIdResponse {
+  CourseModule module = 1;
+}
+
+message ListCourseModulesRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 500}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListCourseModulesResponse {
+  repeated CourseModule modules = 1;
+}
+
+message UpdateCourseModuleRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  int32 order_index = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message UpdateCourseModuleResponse {
+  CourseModule module = 1;
+}
+
+message DeleteCourseModuleRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteCourseModuleResponse {}
+
+service CourseModuleService {
+  rpc CreateCourseModule(CreateCourseModuleRequest) returns (CreateCourseModuleResponse) {}
+  rpc GetCourseModuleById(GetCourseModuleByIdRequest) returns (GetCourseModuleByIdResponse) {}
+  rpc ListCourseModules(ListCourseModulesRequest) returns (ListCourseModulesResponse) {}
+  rpc UpdateCourseModule(UpdateCourseModuleRequest) returns (UpdateCourseModuleResponse) {}
+  rpc DeleteCourseModule(DeleteCourseModuleRequest) returns (DeleteCourseModuleResponse) {}
+}
+
+// ─── Lesson ───────────────────────────────────────────────────────────────────
+
+message Lesson {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string module_id = 2 [(buf.validate.field).string.uuid = true];
+  string title = 3 [(buf.validate.field).string.min_len = 1];
+  string description = 4;
+  int32 order_index = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message CreateLessonRequest {
+  string module_id = 1 [(buf.validate.field).string.uuid = true];
+  string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string description = 3;
+  int32 order_index = 4 [(buf.validate.field).int32.gte = 0];
+}
+
+message CreateLessonResponse {
+  Lesson lesson = 1;
+}
+
+message GetLessonByIdRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetLessonByIdResponse {
+  Lesson lesson = 1;
+}
+
+message ListLessonsRequest {
+  string module_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 500}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListLessonsByCourseRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 500}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListLessonsByCourseResponse {
+  repeated Lesson lessons = 1;
+}
+
+message ListLessonsResponse {
+  repeated Lesson lessons = 1;
+}
+
+message UpdateLessonRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string description = 3;
+  int32 order_index = 4 [(buf.validate.field).int32.gte = 0];
+}
+
+message UpdateLessonResponse {
+  Lesson lesson = 1;
+}
+
+message DeleteLessonRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteLessonResponse {}
+
+service LessonService {
+  rpc CreateLesson(CreateLessonRequest) returns (CreateLessonResponse) {}
+  rpc GetLessonById(GetLessonByIdRequest) returns (GetLessonByIdResponse) {}
+  rpc ListLessons(ListLessonsRequest) returns (ListLessonsResponse) {}
+  rpc ListLessonsByCourse(ListLessonsByCourseRequest) returns (ListLessonsByCourseResponse) {}
+  rpc UpdateLesson(UpdateLessonRequest) returns (UpdateLessonResponse) {}
+  rpc DeleteLesson(DeleteLessonRequest) returns (DeleteLessonResponse) {}
+}
