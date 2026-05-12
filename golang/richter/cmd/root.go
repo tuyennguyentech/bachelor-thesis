@@ -7,7 +7,6 @@ import (
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
 	"example.com/richter/internal/api"
-	"example.com/richter/internal/seed"
 	"example.com/richter/log"
 	"github.com/samber/do/v2"
 	"github.com/spf13/cobra"
@@ -31,7 +30,6 @@ var (
 	logLevel string
 
 	richterCtx context.Context = context.Background()
-	richterCfg *cfg.RichterCfg
 
 	rootCmd = cobra.Command{
 		Use:   "richter",
@@ -79,29 +77,11 @@ func Execute() error {
 }
 
 func preRunE(ctx *context.Context, i do.Injector) (err error) {
-	richterCfg, err = do.Invoke[*cfg.RichterCfg](i)
-	if err != nil {
-		return fmt.Errorf("RichterCfg cannot be invoked: %w", err)
-	}
-	fmt.Println("-c", cfgFile, "--log.level", logLevel)
-	fmt.Printf("run with cfg: %#+v\n", richterCfg)
-
 	logSvc, err := do.Invoke[*log.LogSvc](i)
 	if err != nil {
 		return fmt.Errorf("LogSvc cannot be invoked: %w", err)
 	}
 	*ctx = log.WithLogger(*ctx, logSvc)
-
-	_ = log.FromCtx(*ctx)
-	logSvc.DebugContext(*ctx, "preRunE succeeds")
-
-	seeder, err := do.Invoke[*seed.SeederSvc](i)
-	if err != nil {
-		return fmt.Errorf("SeederSvc cannot be invoked: %w", err)
-	}
-	if err = seeder.Seed(*ctx); err != nil {
-		return fmt.Errorf("seed failed: %w", err)
-	}
 	return
 }
 

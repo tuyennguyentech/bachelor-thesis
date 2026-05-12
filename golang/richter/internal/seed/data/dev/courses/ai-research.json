@@ -1,0 +1,160 @@
+[
+  {
+    "org_slug": "ai-research",
+    "owner_email": "bob@dyadia.local",
+    "title": "Deep Learning cơ bản",
+    "description": "Từ neuron nhân tạo đến mạng học sâu: xây dựng và huấn luyện mô hình với PyTorch.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Neural Network nền tảng",
+        "lessons": [
+          { "title": "Bài 1: Perceptron và MLP", "description": "Neuron nhân tạo, activation function, forward pass." },
+          { "title": "Bài 2: Backpropagation", "description": "Chain rule, gradient computation, numerical gradient check." },
+          { "title": "Bài 3: Optimization Algorithms", "description": "SGD, Momentum, Adam, AdaGrad — so sánh và lựa chọn." }
+        ]
+      },
+      {
+        "title": "Chương 2: PyTorch thực chiến",
+        "lessons": [
+          { "title": "Bài 1: Tensor và Autograd", "description": "Tensor operations, requires_grad, computational graph." },
+          { "title": "Bài 2: nn.Module và Training Loop", "description": "Định nghĩa model, loss function, DataLoader, training/eval mode." },
+          { "title": "Bài 3: Regularization và Normalization", "description": "Dropout, Batch Norm, Layer Norm và kỹ thuật chống overfitting." }
+        ]
+      },
+      {
+        "title": "Chương 3: CNN và xử lý ảnh",
+        "lessons": [
+          { "title": "Bài 1: Convolution và Pooling", "description": "Kernel, stride, padding, receptive field và feature map." },
+          { "title": "Bài 2: Transfer Learning", "description": "ResNet, EfficientNet, fine-tuning và frozen layers." },
+          { "title": "Bài 3: Object Detection cơ bản", "description": "YOLO overview, anchor boxes, IoU và NMS." }
+        ]
+      },
+      {
+        "title": "Chương 4: RNN và Sequence Modeling",
+        "lessons": [
+          { "title": "Bài 1: RNN và LSTM", "description": "Vanishing gradient, gating mechanism, bidirectional LSTM." },
+          { "title": "Bài 2: Attention Mechanism", "description": "Scaled dot-product attention, query/key/value, self-attention." },
+          { "title": "Bài 3: Transformer cơ bản", "description": "Multi-head attention, positional encoding, encoder-decoder." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "ai-research",
+    "owner_email": "carol@dyadia.local",
+    "title": "Natural Language Processing",
+    "description": "Xử lý ngôn ngữ tự nhiên: từ biểu diễn văn bản đến các mô hình ngôn ngữ lớn hiện đại.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Biểu diễn văn bản",
+        "lessons": [
+          { "title": "Bài 1: Tokenization và Preprocessing", "description": "Word tokenizer, subword BPE, stemming/lemmatization, stop words." },
+          { "title": "Bài 2: Bag-of-Words và TF-IDF", "description": "Count vectorizer, TF-IDF matrix, cosine similarity." },
+          { "title": "Bài 3: Word2Vec và GloVe", "description": "CBOW, Skip-gram, negative sampling và pre-trained embeddings." }
+        ]
+      },
+      {
+        "title": "Chương 2: Phân loại văn bản và NER",
+        "lessons": [
+          { "title": "Bài 1: Text Classification", "description": "Naive Bayes, Logistic Regression, CNN cho text, benchmark datasets." },
+          { "title": "Bài 2: Sentiment Analysis", "description": "Lexicon-based, ML-based và transformer-based sentiment." },
+          { "title": "Bài 3: Named Entity Recognition", "description": "Sequence labeling, BIO tagging, CRF và spaCy NER." },
+          { "title": "Bài 4: Relation Extraction", "description": "Pattern-based, supervised và distant supervision approaches." }
+        ]
+      },
+      {
+        "title": "Chương 3: Language Models và BERT",
+        "lessons": [
+          { "title": "Bài 1: N-gram Language Model", "description": "Perplexity, smoothing, kneser-ney và giới hạn." },
+          { "title": "Bài 2: BERT và Fine-tuning", "description": "Masked LM, NSP, tokenization với WordPiece, fine-tuning classification." },
+          { "title": "Bài 3: GPT và Causal LM", "description": "Autoregressive generation, prompt engineering, few-shot learning." }
+        ]
+      },
+      {
+        "title": "Chương 4: Ứng dụng NLP thực tế",
+        "lessons": [
+          { "title": "Bài 1: Machine Translation", "description": "BLEU score, seq2seq với attention, MarianMT." },
+          { "title": "Bài 2: Question Answering", "description": "Extractive QA với SQuAD, span prediction, RAG." },
+          { "title": "Bài 3: Text Summarization", "description": "Extractive vs abstractive, ROUGE metric, PEGASUS/BART." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "ai-research",
+    "owner_email": "dave@dyadia.local",
+    "title": "Computer Vision",
+    "description": "Thị giác máy tính từ xử lý ảnh cổ điển đến các mô hình deep learning state-of-the-art.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Xử lý ảnh cổ điển",
+        "lessons": [
+          { "title": "Bài 1: Biểu diễn ảnh và màu sắc", "description": "RGB, HSV, grayscale, pixel operations với OpenCV." },
+          { "title": "Bài 2: Filtering và Edge Detection", "description": "Gaussian blur, Sobel, Canny edge detection, morphology." },
+          { "title": "Bài 3: Feature Descriptors", "description": "SIFT, ORB, HOG — keypoint detection và matching." }
+        ]
+      },
+      {
+        "title": "Chương 2: Deep Learning cho Computer Vision",
+        "lessons": [
+          { "title": "Bài 1: Image Classification với CNN", "description": "Data augmentation, train/val loop, torchvision datasets." },
+          { "title": "Bài 2: Semantic Segmentation", "description": "FCN, U-Net architecture, IoU và pixel accuracy." },
+          { "title": "Bài 3: Instance Segmentation", "description": "Mask R-CNN, panoptic segmentation, COCO evaluation." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "ai-research",
+    "owner_email": "alice@dyadia.local",
+    "title": "Reinforcement Learning",
+    "description": "Học tăng cường: từ Q-Learning cổ điển đến Deep RL và ứng dụng thực tế.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Nền tảng RL",
+        "lessons": [
+          { "title": "Bài 1: Agent, Environment và Reward", "description": "MDP, policy, value function, Bellman equation." },
+          { "title": "Bài 2: Q-Learning và SARSA", "description": "Tabular Q-Learning, epsilon-greedy, convergence." },
+          { "title": "Bài 3: Gym và môi trường thực hành", "description": "OpenAI Gym, custom environment, CartPole và Atari." }
+        ]
+      },
+      {
+        "title": "Chương 2: Deep RL",
+        "lessons": [
+          { "title": "Bài 1: DQN và Experience Replay", "description": "Deep Q-Network, replay buffer, target network, Double DQN." },
+          { "title": "Bài 2: Policy Gradient và REINFORCE", "description": "Policy gradient theorem, baseline, advantage function." },
+          { "title": "Bài 3: PPO và Actor-Critic", "description": "Proximal Policy Optimization, A2C, ứng dụng trong game và robotics." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "ai-research",
+    "owner_email": "bob@dyadia.local",
+    "title": "LLM và Prompt Engineering",
+    "description": "Hiểu cách hoạt động của Large Language Models và kỹ thuật khai thác hiệu quả qua prompt.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Kiến trúc LLM",
+        "lessons": [
+          { "title": "Bài 1: Transformer từ đầu", "description": "Attention, positional encoding, layer norm, FFN — triển khai bằng PyTorch." },
+          { "title": "Bài 2: Pre-training và RLHF", "description": "Self-supervised learning, instruction tuning, RLHF với human feedback." },
+          { "title": "Bài 3: Scaling Laws", "description": "Compute-optimal training, emergent abilities, model size vs data." }
+        ]
+      },
+      {
+        "title": "Chương 2: Prompt Engineering",
+        "lessons": [
+          { "title": "Bài 1: Zero-shot và Few-shot", "description": "Kỹ thuật prompting cơ bản, in-context learning, format." },
+          { "title": "Bài 2: Chain-of-Thought và ReAct", "description": "CoT prompting, step-by-step reasoning, tool-use với ReAct." },
+          { "title": "Bài 3: RAG và Grounding", "description": "Retrieval-Augmented Generation, embedding search, reduce hallucination." }
+        ]
+      }
+    ]
+  }
+]

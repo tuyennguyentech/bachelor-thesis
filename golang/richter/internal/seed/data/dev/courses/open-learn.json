@@ -1,0 +1,205 @@
+[
+  {
+    "org_slug": "open-learn",
+    "owner_email": "dave@dyadia.local",
+    "title": "Lập trình Python cơ bản",
+    "description": "Học Python từ con số 0: cú pháp, cấu trúc dữ liệu, hàm, OOP và các thư viện thiết yếu.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Python cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Cài đặt môi trường và Hello World", "description": "Cài Python, venv, pip và viết chương trình đầu tiên." },
+          { "title": "Bài 2: Kiểu dữ liệu cơ bản", "description": "int, float, str, bool — chuyển đổi kiểu và các thao tác cơ bản." },
+          { "title": "Bài 3: List, Tuple, Dict, Set", "description": "Tạo, truy cập, thêm/xóa phần tử và comprehension." },
+          { "title": "Bài 4: Control flow", "description": "if/elif/else, for, while, break, continue và vòng lặp lồng nhau." }
+        ]
+      },
+      {
+        "title": "Chương 2: Hàm và Module",
+        "lessons": [
+          { "title": "Bài 1: Định nghĩa và gọi hàm", "description": "def, return, default argument, *args, **kwargs." },
+          { "title": "Bài 2: Lambda và Higher-order Function", "description": "map, filter, reduce, sorted với key function." },
+          { "title": "Bài 3: Module và Package", "description": "import, from...import, tạo package riêng, __init__.py." },
+          { "title": "Bài 4: Xử lý ngoại lệ", "description": "try/except/finally, raise, custom exception, logging." }
+        ]
+      },
+      {
+        "title": "Chương 3: OOP trong Python",
+        "lessons": [
+          { "title": "Bài 1: Class và Object", "description": "__init__, self, instance vs class attribute, method." },
+          { "title": "Bài 2: Kế thừa và Đa hình", "description": "super(), method overriding, MRO và duck typing." },
+          { "title": "Bài 3: Dunder Methods", "description": "__str__, __repr__, __len__, __eq__, __lt__ và context manager." }
+        ]
+      },
+      {
+        "title": "Chương 4: Thư viện thực chiến",
+        "lessons": [
+          { "title": "Bài 1: File I/O và JSON", "description": "Đọc/ghi file text và binary, json.load/dump, xử lý CSV." },
+          { "title": "Bài 2: requests và httpx", "description": "Gọi REST API, xử lý response, timeout và retry." },
+          { "title": "Bài 3: datetime và pathlib", "description": "Xử lý ngày giờ, timezone và thao tác với đường dẫn file." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "open-learn",
+    "owner_email": "carol@dyadia.local",
+    "title": "Machine Learning từ đầu",
+    "description": "Xây dựng nền tảng vững chắc về Machine Learning: từ toán học đến triển khai mô hình thực tế.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Toán học cho ML",
+        "lessons": [
+          { "title": "Bài 1: Đại số tuyến tính ứng dụng", "description": "Vector, matrix, dot product, eigenvalue/eigenvector và ý nghĩa trong ML." },
+          { "title": "Bài 2: Giải tích và Gradient", "description": "Đạo hàm riêng, chain rule, gradient descent và learning rate." },
+          { "title": "Bài 3: Xác suất và Thống kê", "description": "Phân phối xác suất, Bayes theorem, MLE và MAP." }
+        ]
+      },
+      {
+        "title": "Chương 2: Supervised Learning",
+        "lessons": [
+          { "title": "Bài 1: Linear Regression", "description": "OLS, gradient descent, regularization L1/L2, polynomial features." },
+          { "title": "Bài 2: Logistic Regression và Classification", "description": "Sigmoid, cross-entropy loss, binary và multiclass classification." },
+          { "title": "Bài 3: Decision Tree và Random Forest", "description": "Information gain, Gini impurity, bagging và feature importance." },
+          { "title": "Bài 4: SVM và Kernel Trick", "description": "Hyperplane, margin, soft margin, RBF kernel và ứng dụng." }
+        ]
+      },
+      {
+        "title": "Chương 3: Unsupervised Learning",
+        "lessons": [
+          { "title": "Bài 1: K-Means Clustering", "description": "Thuật toán, chọn K với Elbow method và Silhouette score." },
+          { "title": "Bài 2: PCA và Dimensionality Reduction", "description": "SVD, explained variance, visualizing high-dimensional data." },
+          { "title": "Bài 3: DBSCAN và Hierarchical Clustering", "description": "Phân cụm dựa trên mật độ, dendrogram và linkage criteria." }
+        ]
+      },
+      {
+        "title": "Chương 4: Đánh giá và triển khai mô hình",
+        "lessons": [
+          { "title": "Bài 1: Train/Val/Test split và Cross-validation", "description": "Stratified k-fold, leave-one-out, bias-variance tradeoff." },
+          { "title": "Bài 2: Metrics: Precision, Recall, F1, AUC-ROC", "description": "Confusion matrix, imbalanced dataset, threshold tuning." },
+          { "title": "Bài 3: Hyperparameter Tuning", "description": "Grid search, random search, Bayesian optimization với Optuna." },
+          { "title": "Bài 4: MLflow và Model Registry", "description": "Experiment tracking, artifact logging và model versioning." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "open-learn",
+    "owner_email": "henry@dyadia.local",
+    "title": "Web Development với React",
+    "description": "Xây dựng ứng dụng web hiện đại với React 19, hooks, state management và tối ưu hiệu năng.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Nền tảng React",
+        "lessons": [
+          { "title": "Bài 1: JSX và Virtual DOM", "description": "Cú pháp JSX, Babel transpilation, reconciliation và diffing algorithm." },
+          { "title": "Bài 2: Component và Props", "description": "Functional component, props drilling, PropTypes và children." },
+          { "title": "Bài 3: State và Event Handling", "description": "useState, synthetic events, form controlled/uncontrolled." }
+        ]
+      },
+      {
+        "title": "Chương 2: Hooks nâng cao",
+        "lessons": [
+          { "title": "Bài 1: useEffect và Side Effects", "description": "Dependency array, cleanup function, fetch data pattern." },
+          { "title": "Bài 2: useContext và useReducer", "description": "Context API, reducers, kết hợp để thay thế Redux đơn giản." },
+          { "title": "Bài 3: useMemo, useCallback và React.memo", "description": "Tránh re-render không cần thiết, profiling với DevTools." },
+          { "title": "Bài 4: Custom Hooks", "description": "Tách logic tái sử dụng: useDebounce, useFetch, useLocalStorage." }
+        ]
+      },
+      {
+        "title": "Chương 3: Routing và Data Fetching",
+        "lessons": [
+          { "title": "Bài 1: React Router v7", "description": "BrowserRouter, Route, Link, useNavigate, nested routes, lazy loading." },
+          { "title": "Bài 2: TanStack Query", "description": "useQuery, useMutation, cache invalidation và optimistic updates." },
+          { "title": "Bài 3: Zustand và Jotai", "description": "Lightweight state management, atom-based state, persistence." }
+        ]
+      },
+      {
+        "title": "Chương 4: Tối ưu và Deploy",
+        "lessons": [
+          { "title": "Bài 1: Code Splitting và Lazy Loading", "description": "React.lazy, Suspense, route-level code splitting với Vite." },
+          { "title": "Bài 2: Testing với Vitest và Testing Library", "description": "Unit test component, mock hooks, integration test với render." },
+          { "title": "Bài 3: Deploy lên Vercel và Cloudflare Pages", "description": "CI/CD pipeline, environment variables, preview deployments." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "open-learn",
+    "owner_email": "dave@dyadia.local",
+    "title": "Data Science với Pandas",
+    "description": "Phân tích và trực quan hóa dữ liệu với Pandas, NumPy và Matplotlib/Seaborn.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Pandas cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Series và DataFrame", "description": "Tạo, indexing, slicing và các thao tác cơ bản." },
+          { "title": "Bài 2: Đọc và ghi dữ liệu", "description": "read_csv, read_excel, read_json, to_* methods." },
+          { "title": "Bài 3: Xử lý missing data", "description": "dropna, fillna, interpolate và chiến lược xử lý NaN." }
+        ]
+      },
+      {
+        "title": "Chương 2: Phân tích và trực quan hóa",
+        "lessons": [
+          { "title": "Bài 1: GroupBy và Aggregation", "description": "groupby, agg, pivot_table và cross-tabulation." },
+          { "title": "Bài 2: Matplotlib và Seaborn", "description": "Line plot, bar chart, heatmap, pairplot và styling." },
+          { "title": "Bài 3: Plotly và Dash", "description": "Interactive chart, dropdown, slider và Dash dashboard cơ bản." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "open-learn",
+    "owner_email": "alice@dyadia.local",
+    "title": "Linux và Command Line",
+    "description": "Thành thạo môi trường Linux: shell scripting, quản lý hệ thống và các công cụ dòng lệnh thiết yếu.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Shell cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Filesystem và điều hướng", "description": "Cấu trúc thư mục Linux, cd/ls/pwd/find, absolute vs relative path." },
+          { "title": "Bài 2: Thao tác file và văn bản", "description": "cp/mv/rm, cat/less/head/tail, grep, sed, awk cơ bản." },
+          { "title": "Bài 3: Quyền truy cập và owner", "description": "chmod, chown, umask, setuid/setgid và sticky bit." }
+        ]
+      },
+      {
+        "title": "Chương 2: Shell Scripting",
+        "lessons": [
+          { "title": "Bài 1: Bash script cơ bản", "description": "Shebang, biến, tham số, if/for/while và exit code." },
+          { "title": "Bài 2: Pipe và Redirection", "description": "stdin/stdout/stderr, pipe, tee, xargs và process substitution." },
+          { "title": "Bài 3: Cron và tự động hóa", "description": "crontab syntax, systemd timer, lock file và logging." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "open-learn",
+    "owner_email": "carol@dyadia.local",
+    "title": "Git và Version Control",
+    "description": "Thành thạo Git từ cơ bản đến nâng cao: branching strategy, rebase, conflict resolution và workflow nhóm.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Git cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Khởi tạo và commit", "description": "git init, add, commit, log, diff, gitignore." },
+          { "title": "Bài 2: Branch và Merge", "description": "Tạo branch, fast-forward, 3-way merge, merge conflict." },
+          { "title": "Bài 3: Remote và GitHub", "description": "origin, push/pull/fetch, tracking branch, fork." }
+        ]
+      },
+      {
+        "title": "Chương 2: Git nâng cao",
+        "lessons": [
+          { "title": "Bài 1: Rebase và Cherry-pick", "description": "Interactive rebase, squash, fixup, cherry-pick và khi nào dùng rebase vs merge." },
+          { "title": "Bài 2: Git workflow cho nhóm", "description": "Gitflow, GitHub Flow, trunk-based development và PR review process." },
+          { "title": "Bài 3: Stash, reflog và khôi phục", "description": "git stash, reflog, reset --soft/--hard, restore và bisect." }
+        ]
+      }
+    ]
+  }
+]

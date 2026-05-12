@@ -1,0 +1,167 @@
+[
+  {
+    "org_slug": "math-club",
+    "owner_email": "eve@dyadia.local",
+    "title": "Giải tích 1",
+    "description": "Nền tảng giải tích: giới hạn, đạo hàm, tích phân và ứng dụng trong khoa học kỹ thuật.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Giới hạn và Liên tục",
+        "lessons": [
+          { "title": "Bài 1: Giới hạn dãy số", "description": "Định nghĩa ε-N, các định lý về giới hạn, dãy đơn điệu có chặn." },
+          { "title": "Bài 2: Giới hạn hàm số", "description": "Định nghĩa ε-δ, giới hạn một phía, giới hạn tại vô cực." },
+          { "title": "Bài 3: Hàm liên tục", "description": "Định nghĩa, các loại gián đoạn, định lý Bolzano và giá trị trung gian." }
+        ]
+      },
+      {
+        "title": "Chương 2: Đạo hàm và Vi phân",
+        "lessons": [
+          { "title": "Bài 1: Định nghĩa và ý nghĩa đạo hàm", "description": "Đạo hàm theo định nghĩa, ý nghĩa hình học và vật lý, vi phân." },
+          { "title": "Bài 2: Quy tắc tính đạo hàm", "description": "Đạo hàm tổng, tích, thương, hàm hợp, hàm ngược." },
+          { "title": "Bài 3: Đạo hàm cấp cao và công thức Leibniz", "description": "Đạo hàm bậc n, công thức Leibniz cho tích hai hàm." },
+          { "title": "Bài 4: Ứng dụng đạo hàm", "description": "Định lý Rolle, Lagrange, L'Hôpital, cực trị và bài toán tối ưu." }
+        ]
+      },
+      {
+        "title": "Chương 3: Tích phân",
+        "lessons": [
+          { "title": "Bài 1: Tích phân bất định", "description": "Định nghĩa nguyên hàm, bảng tích phân cơ bản, tích phân từng phần." },
+          { "title": "Bài 2: Tích phân xác định", "description": "Định nghĩa Riemann, định lý Newton-Leibniz, tính chất." },
+          { "title": "Bài 3: Tích phân suy rộng", "description": "Tích phân trên khoảng vô hạn, tích phân hàm không bị chặn, tiêu chuẩn hội tụ." }
+        ]
+      },
+      {
+        "title": "Chương 4: Chuỗi số và Chuỗi hàm",
+        "lessons": [
+          { "title": "Bài 1: Chuỗi số", "description": "Điều kiện cần hội tụ, tiêu chuẩn so sánh, D'Alembert, Cauchy." },
+          { "title": "Bài 2: Chuỗi lũy thừa", "description": "Bán kính hội tụ, khai triển Taylor và Maclaurin, ứng dụng." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "math-club",
+    "owner_email": "frank@dyadia.local",
+    "title": "Đại số tuyến tính",
+    "description": "Ma trận, định thức, không gian vector, ánh xạ tuyến tính và ứng dụng trong khoa học dữ liệu.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Ma trận và Định thức",
+        "lessons": [
+          { "title": "Bài 1: Ma trận và các phép toán", "description": "Định nghĩa, cộng trừ, nhân ma trận, ma trận chuyển vị và nghịch đảo." },
+          { "title": "Bài 2: Định thức", "description": "Khai triển theo hàng/cột, tính chất, ứng dụng tính ma trận nghịch đảo." },
+          { "title": "Bài 3: Hệ phương trình tuyến tính", "description": "Phương pháp Gauss, Cramer, điều kiện có nghiệm và nghiệm tổng quát." }
+        ]
+      },
+      {
+        "title": "Chương 2: Không gian vector",
+        "lessons": [
+          { "title": "Bài 1: Định nghĩa không gian vector", "description": "Các tiên đề, không gian con, tổng và giao của không gian con." },
+          { "title": "Bài 2: Cơ sở và số chiều", "description": "Độc lập tuyến tính, sinh, cơ sở, công thức số chiều." },
+          { "title": "Bài 3: Không gian Euclid", "description": "Tích vô hướng, chuẩn, góc giữa hai vector, trực giao hóa Gram-Schmidt." }
+        ]
+      },
+      {
+        "title": "Chương 3: Ánh xạ tuyến tính và Trị riêng",
+        "lessons": [
+          { "title": "Bài 1: Ánh xạ tuyến tính", "description": "Định nghĩa, ma trận biểu diễn, hạt nhân và ảnh, hạng ánh xạ." },
+          { "title": "Bài 2: Trị riêng và vector riêng", "description": "Phương trình đặc trưng, đa thức đặc trưng, không gian riêng." },
+          { "title": "Bài 3: Chéo hóa ma trận", "description": "Điều kiện chéo hóa được, chéo hóa trực giao, phân tích SVD sơ lược." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "math-club",
+    "owner_email": "alice@dyadia.local",
+    "title": "Xác suất và Thống kê",
+    "description": "Lý thuyết xác suất, phân phối, ước lượng thống kê và kiểm định giả thuyết.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Lý thuyết xác suất",
+        "lessons": [
+          { "title": "Bài 1: Biến cố và xác suất", "description": "Không gian mẫu, biến cố, các định nghĩa xác suất, các quy tắc cộng nhân." },
+          { "title": "Bài 2: Xác suất có điều kiện và độc lập", "description": "Định lý Bayes, xác suất toàn phần, độc lập thống kê." },
+          { "title": "Bài 3: Biến ngẫu nhiên rời rạc", "description": "PMF, CDF, kỳ vọng, phương sai — Bernoulli, Binomial, Poisson." }
+        ]
+      },
+      {
+        "title": "Chương 2: Phân phối liên tục",
+        "lessons": [
+          { "title": "Bài 1: Biến ngẫu nhiên liên tục", "description": "PDF, CDF, kỳ vọng, phương sai — phân phối đều và hàm mũ." },
+          { "title": "Bài 2: Phân phối chuẩn", "description": "Phân phối chuẩn tắc, chuẩn hóa, định lý giới hạn trung tâm." },
+          { "title": "Bài 3: Phân phối mẫu", "description": "Chi-squared, Student t, Fisher F — ứng dụng trong kiểm định." }
+        ]
+      },
+      {
+        "title": "Chương 3: Thống kê suy diễn",
+        "lessons": [
+          { "title": "Bài 1: Ước lượng điểm và khoảng", "description": "MLE, khoảng tin cậy cho trung bình và tỷ lệ, xác định cỡ mẫu." },
+          { "title": "Bài 2: Kiểm định giả thuyết", "description": "H0 và H1, sai lầm loại I và II, p-value, z-test, t-test." },
+          { "title": "Bài 3: Phân tích phương sai và hồi quy", "description": "ANOVA một chiều, hồi quy tuyến tính đơn, hệ số tương quan." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "math-club",
+    "owner_email": "carol@dyadia.local",
+    "title": "Toán rời rạc",
+    "description": "Nền tảng toán học cho khoa học máy tính: logic, tổ hợp, đồ thị và lý thuyết số.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Logic và Chứng minh",
+        "lessons": [
+          { "title": "Bài 1: Mệnh đề và logic vị từ", "description": "Mệnh đề phức hợp, bảng chân trị, lượng từ ∀ và ∃." },
+          { "title": "Bài 2: Kỹ thuật chứng minh", "description": "Chứng minh trực tiếp, phản chứng, quy nạp toán học." },
+          { "title": "Bài 3: Tập hợp và Quan hệ", "description": "Phép toán tập hợp, quan hệ tương đương, quan hệ thứ tự, hàm số." }
+        ]
+      },
+      {
+        "title": "Chương 2: Tổ hợp",
+        "lessons": [
+          { "title": "Bài 1: Nguyên lý đếm", "description": "Nguyên lý cộng, nhân, bù trừ, nguyên lý Dirichlet (pigeonhole)." },
+          { "title": "Bài 2: Hoán vị, Chỉnh hợp, Tổ hợp", "description": "Công thức, bài toán có điều kiện, Newton binomial." },
+          { "title": "Bài 3: Quan hệ truy hồi", "description": "Xây dựng và giải quan hệ truy hồi tuyến tính, ứng dụng." }
+        ]
+      },
+      {
+        "title": "Chương 3: Lý thuyết đồ thị",
+        "lessons": [
+          { "title": "Bài 1: Đồ thị cơ bản", "description": "Định nghĩa, bậc đỉnh, đường đi, chu trình, đồ thị con." },
+          { "title": "Bài 2: Cây và Spanning Tree", "description": "Định lý cây, spanning tree, Kruskal, Prim." },
+          { "title": "Bài 3: Đồ thị Euler và Hamilton", "description": "Điều kiện tồn tại, thuật toán tìm đường đi/chu trình." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "math-club",
+    "owner_email": "eve@dyadia.local",
+    "title": "Giải tích số",
+    "description": "Phương pháp số để giải các bài toán toán học: phương trình, nội suy, tích phân số.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Sai số và Phương trình phi tuyến",
+        "lessons": [
+          { "title": "Bài 1: Sai số trong tính toán số", "description": "Sai số tuyệt đối, tương đối, lan truyền sai số và điều kiện." },
+          { "title": "Bài 2: Phương pháp chia đôi và dây cung", "description": "Bisection, false position — tốc độ hội tụ và tiêu dừng." },
+          { "title": "Bài 3: Phương pháp Newton-Raphson", "description": "Công thức lặp, điều kiện hội tụ, Newton cải tiến." }
+        ]
+      },
+      {
+        "title": "Chương 2: Nội suy và Xấp xỉ",
+        "lessons": [
+          { "title": "Bài 1: Nội suy Lagrange và Newton", "description": "Đa thức nội suy, sai số nội suy, bảng sai phân." },
+          { "title": "Bài 2: Xấp xỉ bình phương nhỏ nhất", "description": "Hệ phương trình chuẩn, hồi quy đa thức số." },
+          { "title": "Bài 3: Tích phân số", "description": "Công thức hình thang, Simpson 1/3 và 3/8, sai số và tích hợp Gauss." }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,227 @@
+[
+  {
+    "org_slug": "web-dev-bootcamp",
+    "owner_email": "grace@dyadia.local",
+    "title": "HTML/CSS từ đầu",
+    "description": "Xây dựng giao diện web chuyên nghiệp với HTML5 và CSS3 hiện đại.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: HTML5 cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Cấu trúc tài liệu HTML", "description": "DOCTYPE, head/body, semantic elements: header, nav, main, article." },
+          { "title": "Bài 2: Forms và Input", "description": "input types, validation attributes, fieldset, accessibility." },
+          { "title": "Bài 3: Tables và Lists", "description": "table, thead, tbody, tfoot; ol, ul, dl và khi nào dùng." }
+        ]
+      },
+      {
+        "title": "Chương 2: CSS3 và Layout",
+        "lessons": [
+          { "title": "Bài 1: Selectors và Specificity", "description": "Class, ID, pseudo-class, pseudo-element, specificity rules." },
+          { "title": "Bài 2: Box Model và Positioning", "description": "margin, padding, border, display, position relative/absolute/fixed." },
+          { "title": "Bài 3: Flexbox", "description": "flex-direction, justify-content, align-items, flex-wrap và gap." },
+          { "title": "Bài 4: CSS Grid", "description": "grid-template-columns/rows, grid-area, auto-fill, minmax." }
+        ]
+      },
+      {
+        "title": "Chương 3: Responsive và Animation",
+        "lessons": [
+          { "title": "Bài 1: Media Queries và Responsive Design", "description": "Mobile-first approach, breakpoints, viewport meta tag." },
+          { "title": "Bài 2: CSS Variables và Custom Properties", "description": "--var, :root, dark mode toggle, theming." },
+          { "title": "Bài 3: CSS Transition và Animation", "description": "transition, @keyframes, animation shorthand, will-change." }
+        ]
+      },
+      {
+        "title": "Chương 4: Tailwind CSS",
+        "lessons": [
+          { "title": "Bài 1: Utility-First và cấu hình", "description": "Cài đặt Tailwind, tailwind.config.js, purge/content." },
+          { "title": "Bài 2: Component Design với Tailwind", "description": "Xây dựng button, card, modal, navbar với Tailwind utility classes." },
+          { "title": "Bài 3: Dark Mode và Theme", "description": "darkMode config, color palette, extend theme." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "owner_email": "grace@dyadia.local",
+    "title": "JavaScript hiện đại (ES6+)",
+    "description": "Nắm vững JavaScript từ cú pháp ES6+ đến bất đồng bộ, module và các pattern quan trọng.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: ES6+ cú pháp mới",
+        "lessons": [
+          { "title": "Bài 1: let/const và Arrow Function", "description": "Block scope, temporal dead zone, implicit return, this binding." },
+          { "title": "Bài 2: Destructuring và Spread/Rest", "description": "Array/object destructuring, default values, rest params, spread." },
+          { "title": "Bài 3: Template Literals và Optional Chaining", "description": "Tagged template, ??, ?., optional chaining và nullish coalescing." }
+        ]
+      },
+      {
+        "title": "Chương 2: Bất đồng bộ trong JavaScript",
+        "lessons": [
+          { "title": "Bài 1: Callback và Callback Hell", "description": "Event loop, call stack, task queue và vấn đề với callback lồng nhau." },
+          { "title": "Bài 2: Promise", "description": "then/catch/finally, Promise.all/race/allSettled, chaining." },
+          { "title": "Bài 3: async/await", "description": "async function, await, try/catch, parallel với Promise.all." },
+          { "title": "Bài 4: Fetch API và Axios", "description": "GET/POST, headers, JSON, error handling, interceptor." }
+        ]
+      },
+      {
+        "title": "Chương 3: Prototype và OOP",
+        "lessons": [
+          { "title": "Bài 1: Prototype Chain", "description": "__proto__, Object.create, prototype delegation." },
+          { "title": "Bài 2: Class ES6", "description": "class, constructor, extends, super, static, private field (#)." },
+          { "title": "Bài 3: Design Pattern", "description": "Module pattern, Factory, Singleton, Observer trong JS." }
+        ]
+      },
+      {
+        "title": "Chương 4: Module và Tooling",
+        "lessons": [
+          { "title": "Bài 1: ES Module (ESM)", "description": "import/export, named/default, dynamic import và tree shaking." },
+          { "title": "Bài 2: Vite và Bundling", "description": "Vite config, build optimization, environment variables." },
+          { "title": "Bài 3: TypeScript cơ bản", "description": "type, interface, generics, tsconfig.json và strict mode." }
+        ]
+      },
+      {
+        "title": "Chương 5: Testing và Debugging",
+        "lessons": [
+          { "title": "Bài 1: DevTools nâng cao", "description": "Breakpoint, watch expression, network panel, memory profiling." },
+          { "title": "Bài 2: Vitest cho Unit Test", "description": "test, expect, mock, spy, coverage report." },
+          { "title": "Bài 3: Linting với ESLint và Biome", "description": "Rules, plugins, auto-fix và integrate vào CI." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "owner_email": "dave@dyadia.local",
+    "title": "Node.js và Express",
+    "description": "Xây dựng REST API chuyên nghiệp với Node.js và Express: routing, middleware, auth và database.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Node.js cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Event Loop và Non-blocking I/O", "description": "libuv, worker threads, CPU-bound vs I/O-bound tasks." },
+          { "title": "Bài 2: Streams và Buffer", "description": "Readable/Writable stream, pipe, backpressure, chunk processing." },
+          { "title": "Bài 3: npm, pnpm và Workspace", "description": "package.json, semver, lockfile, monorepo với pnpm workspace." }
+        ]
+      },
+      {
+        "title": "Chương 2: Express REST API",
+        "lessons": [
+          { "title": "Bài 1: Routing và Middleware", "description": "Router, app.use, error middleware, static files, body parsing." },
+          { "title": "Bài 2: Request Validation", "description": "Zod schema validation, custom middleware, sanitization." },
+          { "title": "Bài 3: Pagination và Filtering", "description": "offset-based, cursor-based pagination, query param parsing." },
+          { "title": "Bài 4: File Upload với Multer", "description": "Multipart form, file type validation, lưu S3 với presigned URL." }
+        ]
+      },
+      {
+        "title": "Chương 3: Authentication và Security",
+        "lessons": [
+          { "title": "Bài 1: JWT Auth", "description": "Access/refresh token, httpOnly cookie, token rotation." },
+          { "title": "Bài 2: bcrypt và Password Hashing", "description": "Salt rounds, timing attack, argon2 so sánh." },
+          { "title": "Bài 3: Rate Limiting và Helmet", "description": "Express-rate-limit, helmet headers, CORS config." }
+        ]
+      },
+      {
+        "title": "Chương 4: Database và ORM",
+        "lessons": [
+          { "title": "Bài 1: PostgreSQL với Prisma", "description": "Schema definition, migration, query API và relation." },
+          { "title": "Bài 2: Redis Caching", "description": "ioredis, cache-aside pattern, TTL và cache invalidation." },
+          { "title": "Bài 3: Testing với Supertest", "description": "Integration test cho Express routes, test database setup." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "owner_email": "henry@dyadia.local",
+    "title": "React & Next.js",
+    "description": "Xây dựng ứng dụng full-stack với Next.js 15, Server Components, Server Actions và Vercel.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Next.js App Router",
+        "lessons": [
+          { "title": "Bài 1: File-based Routing", "description": "page.tsx, layout.tsx, loading.tsx, error.tsx, route groups." },
+          { "title": "Bài 2: Server vs Client Components", "description": "'use client', data fetching trên server, RSC payload." },
+          { "title": "Bài 3: Metadata và SEO", "description": "generateMetadata, Open Graph, sitemap.ts, robots.ts." }
+        ]
+      },
+      {
+        "title": "Chương 2: Data Fetching và Caching",
+        "lessons": [
+          { "title": "Bài 1: fetch với cache và revalidate", "description": "cache: 'force-cache', revalidate, ISR và on-demand revalidation." },
+          { "title": "Bài 2: Server Actions", "description": "'use server', useActionState, form submission, redirect." },
+          { "title": "Bài 3: Optimistic UI", "description": "useOptimistic, instant feedback, rollback on error." }
+        ]
+      },
+      {
+        "title": "Chương 3: Authentication và Middleware",
+        "lessons": [
+          { "title": "Bài 1: Cookie-based Auth", "description": "httpOnly cookie, middleware.ts, session validation." },
+          { "title": "Bài 2: Route Protection", "description": "requireAuth helper, redirect chains, role-based access." },
+          { "title": "Bài 3: Auth với NextAuth.js", "description": "Providers, session, JWT vs database session." }
+        ]
+      },
+      {
+        "title": "Chương 4: Performance và Deploy",
+        "lessons": [
+          { "title": "Bài 1: Image Optimization", "description": "next/image, blur placeholder, priority, responsive sizes." },
+          { "title": "Bài 2: Font và Third-party Script", "description": "next/font, next/script, layout shift prevention." },
+          { "title": "Bài 3: Deploy Vercel và Edge Runtime", "description": "Project config, env vars, Edge Middleware, Analytics." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "owner_email": "grace@dyadia.local",
+    "title": "TypeScript thực chiến",
+    "description": "Từ any sang type-safe: nắm vững TypeScript nâng cao cho dự án production.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Type System nâng cao",
+        "lessons": [
+          { "title": "Bài 1: Generic và Conditional Types", "description": "Generic constraints, infer, Conditional type trong utility types." },
+          { "title": "Bài 2: Mapped Types và Template Literal", "description": "keyof, in, Partial/Required/Pick/Omit tự build lại." },
+          { "title": "Bài 3: Discriminated Union và Narrowing", "description": "Type guard, instanceof, satisfies operator." }
+        ]
+      },
+      {
+        "title": "Chương 2: TypeScript trong thực tế",
+        "lessons": [
+          { "title": "Bài 1: Type-safe API với Zod", "description": "Schema inference, parse vs safeParse, transform, refine." },
+          { "title": "Bài 2: Declaration Merging và Module Augmentation", "description": "Mở rộng thư viện third-party, global type declaration." },
+          { "title": "Bài 3: Strict tsconfig và linting", "description": "noUncheckedIndexedAccess, exactOptionalPropertyTypes, typescript-eslint." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "owner_email": "dave@dyadia.local",
+    "title": "Go cho Backend Engineer",
+    "description": "Xây dựng backend hiệu năng cao với Go: concurrency, HTTP server, gRPC và database.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Go cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Cú pháp và kiểu dữ liệu", "description": "var, const, slice, map, struct, pointer và zero value." },
+          { "title": "Bài 2: Interface và Error", "description": "Interface implicit, error as value, fmt.Errorf %w và errors.Is/As." },
+          { "title": "Bài 3: Goroutine và Channel", "description": "go keyword, channel buffered/unbuffered, select và context." }
+        ]
+      },
+      {
+        "title": "Chương 2: HTTP và gRPC",
+        "lessons": [
+          { "title": "Bài 1: net/http server", "description": "Handler, ServeMux, middleware chain, graceful shutdown." },
+          { "title": "Bài 2: Connect RPC", "description": "Protobuf schema, code gen, interceptor và error handling." },
+          { "title": "Bài 3: sqlc và PostgreSQL", "description": "Schema migration với Goose, sqlc query gen, transaction." }
+        ]
+      }
+    ]
+  }
+]

@@ -2,10 +2,11 @@ package seed
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
@@ -16,12 +17,13 @@ import (
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
 
-//go:embed data/dev.json
-var devDataRaw []byte
+//go:embed data/dev
+var devDataFS embed.FS
 
 var Package = do.Package(
 	do.Lazy(NewSeederSvc),
@@ -34,10 +36,9 @@ func init() {
 // ── service ───────────────────────────────────────────────────────────────────
 
 type SeederSvc struct {
-	pg      *db.PostgresSvc
-	log     *log.LogSvc
-	admin   *cfg.AdminCfg
-	seedCfg *cfg.SeedCfg
+	pg    *db.PostgresSvc
+	log   *log.LogSvc
+	admin *cfg.AdminCfg
 }
 
 func NewSeederSvc(i do.Injector) (s *SeederSvc, err error) {
@@ -54,10 +55,6 @@ func NewSeederSvc(i do.Injector) (s *SeederSvc, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("AdminCfg cannot be invoked: %w", err)
 	}
-	s.seedCfg, err = do.Invoke[*cfg.SeedCfg](i)
-	if err != nil {
-		return nil, fmt.Errorf("SeedCfg cannot be invoked: %w", err)
-	}
 	return
 }
 
@@ -69,41 +66,33 @@ func isDuplicate(err error) bool {
 
 // ── orchestration ─────────────────────────────────────────────────────────────
 
-// seeder is a named unit of seed work. Adding new seed categories = append here.
-type seeder struct {
-	name string
-	run  func(ctx context.Context) error
+// SeedAdmin seeds the system admin account. Idempotent — safe to call repeatedly.
+func (s *SeederSvc) SeedAdmin(ctx context.Context) error {
+	s.log.InfoContext(ctx, "seed: running seeder", "name", "admin")
+	return s.seedAdmin(ctx)
 }
 
-// Seed always seeds the system admin account, then runs dev seeders when
-// dev_seed_enabled = true. Every seeder is idempotent — safe to run on startup.
-func (s *SeederSvc) Seed(ctx context.Context) error {
-	seeders := []seeder{
-		{"admin", s.seedAdmin},
+// SeedDev seeds the full dev dataset (users, orgs, members, courses).
+// Idempotent — safe to call repeatedly.
+func (s *SeederSvc) SeedDev(ctx context.Context) error {
+	data, err := parseDevData()
+	if err != nil {
+		return fmt.Errorf("parse dev seed data: %w", err)
 	}
-
-	if s.seedCfg.DevSeedEnabled {
-		data, err := parseDevData()
-		if err != nil {
-			return fmt.Errorf("parse dev seed data: %w", err)
-		}
-		seeders = append(seeders,
-			seeder{"dev.users", func(ctx context.Context) error {
-				return s.seedDevUsers(ctx, data.Users)
-			}},
-			seeder{"dev.organizations", func(ctx context.Context) error {
-				return s.seedDevOrganizations(ctx, data.Organizations)
-			}},
-			seeder{"dev.org_members", func(ctx context.Context) error {
-				return s.seedDevOrgMembers(ctx, data.OrgMembers)
-			}},
-		)
+	type step struct {
+		name string
+		run  func(context.Context) error
 	}
-
-	for _, sd := range seeders {
-		s.log.InfoContext(ctx, "seed: running seeder", "name", sd.name)
-		if err := sd.run(ctx); err != nil {
-			return fmt.Errorf("seeder %q: %w", sd.name, err)
+	steps := []step{
+		{"dev.users", func(ctx context.Context) error { return s.seedDevUsers(ctx, data.Users) }},
+		{"dev.organizations", func(ctx context.Context) error { return s.seedDevOrganizations(ctx, data.Organizations) }},
+		{"dev.org_members", func(ctx context.Context) error { return s.seedDevOrgMembers(ctx, data.OrgMembers) }},
+		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses) }},
+	}
+	for _, st := range steps {
+		s.log.InfoContext(ctx, "seed: running seeder", "name", st.name)
+		if err := st.run(ctx); err != nil {
+			return fmt.Errorf("seeder %q: %w", st.name, err)
 		}
 	}
 	return nil
@@ -141,9 +130,10 @@ func (s *SeederSvc) seedAdmin(ctx context.Context) error {
 // ── dev seed data types ───────────────────────────────────────────────────────
 
 type devSeedData struct {
-	Users         []devUserSpec      `json:"users"`
-	Organizations []devOrgSpec       `json:"organizations"`
-	OrgMembers    []devOrgMemberSpec `json:"org_members"`
+	Users         []devUserSpec
+	Organizations []devOrgSpec
+	OrgMembers    []devOrgMemberSpec
+	Courses       []devCourseSpec
 }
 
 type devUserSpec struct {
@@ -168,10 +158,60 @@ type devOrgMemberSpec struct {
 	Status    string `json:"status"`
 }
 
+type devCourseSpec struct {
+	OrgSlug     string          `json:"org_slug"`
+	OwnerEmail  string          `json:"owner_email"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Status      string          `json:"status"`
+	Modules     []devModuleSpec `json:"modules"`
+}
+
+type devModuleSpec struct {
+	Title   string          `json:"title"`
+	Lessons []devLessonSpec `json:"lessons"`
+}
+
+type devLessonSpec struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+func readDevJSON(path string, v any) error {
+	raw, err := devDataFS.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("unmarshal %s: %w", path, err)
+	}
+	return nil
+}
+
 func parseDevData() (devSeedData, error) {
 	var data devSeedData
-	if err := json.Unmarshal(devDataRaw, &data); err != nil {
-		return devSeedData{}, fmt.Errorf("unmarshal dev.json: %w", err)
+	if err := readDevJSON("data/dev/users.json", &data.Users); err != nil {
+		return devSeedData{}, err
+	}
+	if err := readDevJSON("data/dev/organizations.json", &data.Organizations); err != nil {
+		return devSeedData{}, err
+	}
+	if err := readDevJSON("data/dev/org_members.json", &data.OrgMembers); err != nil {
+		return devSeedData{}, err
+	}
+	entries, err := devDataFS.ReadDir("data/dev/courses")
+	if err != nil {
+		return devSeedData{}, fmt.Errorf("read courses dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		var courses []devCourseSpec
+		if err := readDevJSON("data/dev/courses/"+entry.Name(), &courses); err != nil {
+			return devSeedData{}, err
+		}
+		data.Courses = append(data.Courses, courses...)
 	}
 	return data, nil
 }
@@ -274,9 +314,115 @@ func (s *SeederSvc) seedDevOrgMembers(ctx context.Context, members []devOrgMembe
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("add member %s to %s: %w", m.UserEmail, m.OrgSlug, err)
+			return fmt.Errorf("create member %s in %s: %w", m.UserEmail, m.OrgSlug, err)
 		}
-		s.log.InfoContext(ctx, "seed: dev org member added", "org", m.OrgSlug, "user", m.UserEmail)
+		s.log.InfoContext(ctx, "seed: dev org member created", "org", m.OrgSlug, "user", m.UserEmail)
 	}
 	return nil
+}
+
+func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec) error {
+	// Cache org lookups and existing course titles per org to avoid repeated queries.
+	type orgCache struct {
+		org    gen.Organization
+		titles map[string]struct{}
+	}
+	orgs := make(map[string]*orgCache)
+
+	for _, c := range courses {
+		if _, ok := orgs[c.OrgSlug]; !ok {
+			org, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Organization, error) {
+				return q.GetOrganizationBySlug(ctx, c.OrgSlug)
+			})
+			if err != nil {
+				return fmt.Errorf("lookup org %s: %w", c.OrgSlug, err)
+			}
+			existing, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
+				return q.ListCoursesByOrg(ctx, gen.ListCoursesByOrgParams{
+					OrganizationID: org.ID,
+					Limit:          1000,
+					Offset:         0,
+				})
+			})
+			if err != nil {
+				return fmt.Errorf("list courses for org %s: %w", c.OrgSlug, err)
+			}
+			titles := make(map[string]struct{}, len(existing))
+			for _, e := range existing {
+				titles[e.Title] = struct{}{}
+			}
+			orgs[c.OrgSlug] = &orgCache{org: org, titles: titles}
+		}
+		oc := orgs[c.OrgSlug]
+
+		if _, exists := oc.titles[c.Title]; exists {
+			s.log.InfoContext(ctx, "seed: dev course already exists, skipping", "org", c.OrgSlug, "title", c.Title)
+			continue
+		}
+
+		owner, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.User, error) {
+			return q.GetUserByEmail(ctx, c.OwnerEmail)
+		})
+		if err != nil {
+			return fmt.Errorf("lookup owner %s for course %q: %w", c.OwnerEmail, c.Title, err)
+		}
+
+		course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
+			return q.CreateCourse(ctx, gen.CreateCourseParams{
+				OrganizationID: oc.org.ID,
+				OwnerID:        owner.ID,
+				Title:          c.Title,
+				Description:    devDescToPgText(c.Description),
+			})
+		})
+		if err != nil {
+			return fmt.Errorf("create course %q in org %s: %w", c.Title, c.OrgSlug, err)
+		}
+
+		if status := gen.CourseStatus(c.Status); status != gen.CourseStatusDraft {
+			course, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
+				return q.UpdateCourseStatus(ctx, gen.UpdateCourseStatusParams{
+					ID:     course.ID,
+					Status: status,
+				})
+			})
+			if err != nil {
+				return fmt.Errorf("update status for course %q: %w", c.Title, err)
+			}
+		}
+
+		for i, m := range c.Modules {
+			module, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseModule, error) {
+				return q.CreateCourseModule(ctx, gen.CreateCourseModuleParams{
+					CourseID:   course.ID,
+					Title:      m.Title,
+					OrderIndex: int32(i),
+				})
+			})
+			if err != nil {
+				return fmt.Errorf("create module %d %q for course %q: %w", i, m.Title, c.Title, err)
+			}
+
+			for j, l := range m.Lessons {
+				if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+					return q.CreateLesson(ctx, gen.CreateLessonParams{
+						ModuleID:    module.ID,
+						Title:       l.Title,
+						Description: devDescToPgText(l.Description),
+						OrderIndex:  int32(j),
+					})
+				}); err != nil {
+					return fmt.Errorf("create lesson %d %q in module %q: %w", j, l.Title, m.Title, err)
+				}
+			}
+		}
+		oc.titles[c.Title] = struct{}{}
+		s.log.InfoContext(ctx, "seed: dev course created", "org", c.OrgSlug, "title", c.Title,
+			"modules", len(c.Modules))
+	}
+	return nil
+}
+
+func devDescToPgText(s string) pgtype.Text {
+	return pgtype.Text{String: s, Valid: s != ""}
 }

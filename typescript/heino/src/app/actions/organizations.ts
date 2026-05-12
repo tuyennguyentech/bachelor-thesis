@@ -32,14 +32,15 @@ export async function updateOrganization(_state: ActionState, formData: FormData
   const client = createRichterClient(OrganizationService, token);
 
   const id = formData.get("id") as string;
+  const slug = (formData.get("slug") as string)?.trim();
   const name = (formData.get("name") as string)?.trim();
 
   if (!name) return { error: "Tên không được để trống" };
 
   try {
-    await client.updateOrganization({ id, name });
+    await client.updateOrganization({ id, name, slug });
     revalidatePath("/admin/organizations");
-    revalidatePath(`/admin/organizations/${formData.get("slug")}`);
+    revalidatePath(`/admin/organizations/${slug}`);
     return { success: true };
   } catch {
     return { error: "Không thể cập nhật tổ chức" };

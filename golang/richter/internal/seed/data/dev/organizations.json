@@ -1,0 +1,8 @@
+[
+  { "slug": "dyadia-demo",      "name": "Dyadia Demo",           "creator_email": "alice@dyadia.local" },
+  { "slug": "hust-cs",          "name": "HUST Computer Science", "creator_email": "mod@dyadia.local"   },
+  { "slug": "open-learn",       "name": "Open Learning Hub",     "creator_email": "dave@dyadia.local"  },
+  { "slug": "ai-research",      "name": "AI Research Group",     "creator_email": "bob@dyadia.local"   },
+  { "slug": "web-dev-bootcamp", "name": "Web Dev Bootcamp",      "creator_email": "grace@dyadia.local" },
+  { "slug": "math-club",        "name": "Math Club",             "creator_email": "henry@dyadia.local" }
+]

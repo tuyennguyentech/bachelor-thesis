@@ -1,0 +1,112 @@
+[
+  {
+    "org_slug": "dyadia-demo",
+    "owner_email": "alice@dyadia.local",
+    "title": "Giới thiệu về Dyadia",
+    "description": "Khóa học tổng quan về nền tảng Dyadia, cách sử dụng và các tính năng chính.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Bắt đầu với Dyadia",
+        "lessons": [
+          { "title": "Bài 1: Dyadia là gì?", "description": "Tổng quan về nền tảng học tập Dyadia và triết lý thiết kế." },
+          { "title": "Bài 2: Tạo tài khoản và đăng nhập", "description": "Hướng dẫn đăng ký, xác thực và đăng nhập lần đầu." },
+          { "title": "Bài 3: Khám phá giao diện", "description": "Tour giao diện: dashboard, sidebar, profile và settings." }
+        ]
+      },
+      {
+        "title": "Chương 2: Quản lý tổ chức và khóa học",
+        "lessons": [
+          { "title": "Bài 1: Tạo và cấu hình tổ chức", "description": "Hướng dẫn tạo organization, thiết lập slug và trạng thái." },
+          { "title": "Bài 2: Quản lý thành viên", "description": "Mời thành viên, phân quyền role: student, teacher, admin, owner." },
+          { "title": "Bài 3: Tạo và xuất bản khóa học", "description": "Tạo khóa học, thêm chương, bài học và chuyển trạng thái published." },
+          { "title": "Bài 4: Theo dõi tiến độ học viên", "description": "Dashboard thống kê và theo dõi tiến độ học tập." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "owner_email": "bob@dyadia.local",
+    "title": "Phát triển phần mềm Agile",
+    "description": "Nắm vững quy trình phát triển phần mềm theo phương pháp Agile/Scrum trong môi trường thực tế.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Tư duy Agile",
+        "lessons": [
+          { "title": "Bài 1: Agile Manifesto và 12 nguyên tắc", "description": "Đọc và phân tích Agile Manifesto, hiểu lý do ra đời của Agile." },
+          { "title": "Bài 2: Waterfall vs Agile", "description": "So sánh mô hình thác nước truyền thống với phương pháp Agile linh hoạt." },
+          { "title": "Bài 3: Các framework phổ biến", "description": "Tổng quan Scrum, Kanban, SAFe và khi nào dùng framework nào." }
+        ]
+      },
+      {
+        "title": "Chương 2: Scrum thực chiến",
+        "lessons": [
+          { "title": "Bài 1: Các vai trò trong Scrum", "description": "Product Owner, Scrum Master, Development Team — trách nhiệm và sự phối hợp." },
+          { "title": "Bài 2: Sprint Planning và Backlog", "description": "Viết User Story, ước tính Story Point, lập kế hoạch Sprint." },
+          { "title": "Bài 3: Daily Standup hiệu quả", "description": "Format 3 câu hỏi, cách tránh các anti-pattern phổ biến." },
+          { "title": "Bài 4: Sprint Review và Retrospective", "description": "Trình bày kết quả, thu thập phản hồi và cải tiến liên tục." }
+        ]
+      },
+      {
+        "title": "Chương 3: Kanban và công cụ hỗ trợ",
+        "lessons": [
+          { "title": "Bài 1: Bảng Kanban và WIP limit", "description": "Thiết kế bảng Kanban, đặt giới hạn WIP để tối ưu luồng làm việc." },
+          { "title": "Bài 2: Jira, Linear và Notion", "description": "Hướng dẫn sử dụng các công cụ quản lý dự án phổ biến." },
+          { "title": "Bài 3: Định nghĩa of Done", "description": "Xây dựng Definition of Done rõ ràng, đo lường chất lượng." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "owner_email": "carol@dyadia.local",
+    "title": "Kỹ năng làm việc nhóm hiệu quả",
+    "description": "Phát triển kỹ năng giao tiếp, giải quyết xung đột và cộng tác trong môi trường làm việc hiện đại.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Nền tảng giao tiếp",
+        "lessons": [
+          { "title": "Bài 1: Lắng nghe tích cực", "description": "Kỹ thuật active listening, phản hồi hiệu quả và tránh rào cản giao tiếp." },
+          { "title": "Bài 2: Giao tiếp không bạo lực (NVC)", "description": "Mô hình NVC: Observation, Feeling, Need, Request." },
+          { "title": "Bài 3: Viết email và báo cáo chuyên nghiệp", "description": "Cấu trúc email, tóm tắt executive summary và báo cáo ngắn gọn." }
+        ]
+      },
+      {
+        "title": "Chương 2: Làm việc nhóm và giải quyết xung đột",
+        "lessons": [
+          { "title": "Bài 1: Các giai đoạn của nhóm (Tuckman)", "description": "Forming, Storming, Norming, Performing — nhận diện và xử lý." },
+          { "title": "Bài 2: Giải quyết xung đột", "description": "5 phong cách xử lý xung đột, khi nào dùng cái nào." },
+          { "title": "Bài 3: Meeting hiệu quả", "description": "Chuẩn bị agenda, facilitation, action item và follow-up." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "owner_email": "frank@dyadia.local",
+    "title": "DevOps cơ bản",
+    "description": "Hiểu và áp dụng DevOps: CI/CD, container, monitoring và SRE practices.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: CI/CD Pipeline",
+        "lessons": [
+          { "title": "Bài 1: Continuous Integration", "description": "Linting, unit test, build tự động mỗi commit." },
+          { "title": "Bài 2: GitHub Actions thực chiến", "description": "Workflow, job, step, matrix build và secrets." },
+          { "title": "Bài 3: Continuous Deployment", "description": "Blue-green deployment, canary release, rollback tự động." }
+        ]
+      },
+      {
+        "title": "Chương 2: Container và Orchestration",
+        "lessons": [
+          { "title": "Bài 1: Docker cơ bản", "description": "Image, container, Dockerfile, multi-stage build và layer caching." },
+          { "title": "Bài 2: Docker Compose", "description": "Khai báo multi-service, network, volume và health check." },
+          { "title": "Bài 3: Kubernetes overview", "description": "Pod, Deployment, Service, Ingress — kiến trúc và use case." }
+        ]
+      }
+    ]
+  }
+]

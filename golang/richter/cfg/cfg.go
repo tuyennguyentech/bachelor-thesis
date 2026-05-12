@@ -28,7 +28,6 @@ var (
 			do.Lazy(NewJwtCfgSvc),
 			do.Lazy(NewAuthCfgSvc),
 			do.Lazy(NewAdminCfgSvc),
-			do.Lazy(NewSeedCfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -55,7 +54,6 @@ type RichterCfg struct {
 	JwtCfg   `mapstructure:"jwt"`
 	AuthCfg  `mapstructure:"auth"`
 	AdminCfg `mapstructure:"admin"`
-	SeedCfg  `mapstructure:"seed"`
 }
 
 func NewConfig() RichterCfg {
@@ -83,7 +81,8 @@ func NewRichterCfgSvc(i do.Injector) (richterCfg *RichterCfg, err error) {
 	// 	return
 	// }
 	// log.Println("config file is found at: ", v.ConfigFileUsed())
-	richterCfg = new(NewConfig())
+	cfg := NewConfig()
+	richterCfg = &cfg
 	err = v.Unmarshal(richterCfg)
 	return
 }

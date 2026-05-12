@@ -7,6 +7,3 @@ port = "5432"
 database = "dyadia"
 user = 'dyadia'
 password = "dyadia"
-
-[seed]
-dev_seed_enabled = true

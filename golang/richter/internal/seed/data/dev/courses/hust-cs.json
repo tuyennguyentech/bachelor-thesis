@@ -1,0 +1,206 @@
+[
+  {
+    "org_slug": "hust-cs",
+    "owner_email": "carol@dyadia.local",
+    "title": "Cấu trúc dữ liệu và Giải thuật",
+    "description": "Khóa học chuyên sâu về các cấu trúc dữ liệu cơ bản và nâng cao cùng các thuật toán quan trọng trong khoa học máy tính.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Độ phức tạp thuật toán",
+        "lessons": [
+          { "title": "Bài 1: Big-O, Omega, Theta notation", "description": "Định nghĩa và cách phân tích độ phức tạp thời gian và không gian." },
+          { "title": "Bài 2: Phân tích đệ quy với Master Theorem", "description": "Áp dụng Master Theorem để giải quyết quan hệ truy hồi." },
+          { "title": "Bài 3: Benchmark thực tế", "description": "So sánh hiệu năng các thuật toán bằng thực nghiệm với dữ liệu lớn." }
+        ]
+      },
+      {
+        "title": "Chương 2: Danh sách và Stack/Queue",
+        "lessons": [
+          { "title": "Bài 1: Mảng và Linked List", "description": "Triển khai, so sánh hiệu năng mảng tĩnh, động và danh sách liên kết đơn/đôi." },
+          { "title": "Bài 2: Stack và ứng dụng", "description": "Stack với mảng và DSLK, bài toán cân bằng ngoặc, tính biểu thức hậu tố." },
+          { "title": "Bài 3: Queue và Deque", "description": "Queue vòng, priority queue cơ bản, ứng dụng BFS." },
+          { "title": "Bài 4: Bài toán trượt cửa sổ", "description": "Kỹ thuật sliding window với deque để giải quyết các bài toán tối ưu." }
+        ]
+      },
+      {
+        "title": "Chương 3: Cây và Đồ thị",
+        "lessons": [
+          { "title": "Bài 1: Binary Tree và BST", "description": "Duyệt cây (inorder/preorder/postorder), tìm kiếm, chèn, xóa trên BST." },
+          { "title": "Bài 2: AVL Tree và Red-Black Tree", "description": "Cây cân bằng: phép xoay, điều kiện cân bằng và độ phức tạp." },
+          { "title": "Bài 3: Heap và Priority Queue", "description": "Min-heap, max-heap, heapify, heap sort và ứng dụng." },
+          { "title": "Bài 4: BFS và DFS trên đồ thị", "description": "Biểu diễn đồ thị, duyệt theo chiều rộng và chiều sâu, phát hiện chu trình." },
+          { "title": "Bài 5: Shortest Path", "description": "Dijkstra, Bellman-Ford, Floyd-Warshall — phân tích và so sánh." }
+        ]
+      },
+      {
+        "title": "Chương 4: Kỹ thuật thuật toán nâng cao",
+        "lessons": [
+          { "title": "Bài 1: Chia để trị", "description": "Merge sort, Quick sort, binary search — thiết kế và phân tích." },
+          { "title": "Bài 2: Quy hoạch động (DP)", "description": "Memoization vs tabulation, bài toán LCS, Knapsack, đường đi tối ưu." },
+          { "title": "Bài 3: Greedy Algorithm", "description": "Điều kiện áp dụng greedy, Huffman coding, Activity Selection." },
+          { "title": "Bài 4: Backtracking và Branch & Bound", "description": "N-Queens, Sudoku solver, tối ưu hóa bằng tỉa nhánh." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "hust-cs",
+    "owner_email": "carol@dyadia.local",
+    "title": "Lập trình hướng đối tượng với Java",
+    "description": "Nắm vững các nguyên lý OOP và áp dụng vào phát triển ứng dụng thực tế với ngôn ngữ Java.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Nền tảng Java",
+        "lessons": [
+          { "title": "Bài 1: JVM, JDK, JRE và vòng đời", "description": "Kiến trúc Java platform, biên dịch bytecode và JIT compilation." },
+          { "title": "Bài 2: Kiểu dữ liệu và biểu thức", "description": "Primitive types, autoboxing, String pool và các toán tử." },
+          { "title": "Bài 3: Control flow và vòng lặp", "description": "if-else, switch, for, while, do-while và các kỹ thuật tối ưu." }
+        ]
+      },
+      {
+        "title": "Chương 2: OOP cơ bản",
+        "lessons": [
+          { "title": "Bài 1: Class, Object và Constructor", "description": "Định nghĩa class, khởi tạo object, constructor overloading và this keyword." },
+          { "title": "Bài 2: Encapsulation và Access Modifier", "description": "private/protected/public, getter/setter, JavaBeans convention." },
+          { "title": "Bài 3: Inheritance và Polymorphism", "description": "extends, super, method overriding, dynamic dispatch và Liskov Substitution." },
+          { "title": "Bài 4: Abstract Class và Interface", "description": "Sự khác biệt, default methods trong Java 8+, khi nào dùng cái nào." }
+        ]
+      },
+      {
+        "title": "Chương 3: Java Collections và Generics",
+        "lessons": [
+          { "title": "Bài 1: Collections Framework", "description": "List, Set, Map, Queue — lựa chọn đúng collection cho bài toán." },
+          { "title": "Bài 2: Generics và Wildcards", "description": "Generic class/method, bounded wildcards, type erasure." },
+          { "title": "Bài 3: Iterator và Comparable/Comparator", "description": "Custom sorting, Iterable pattern, enhanced for loop." }
+        ]
+      },
+      {
+        "title": "Chương 4: Exception Handling và I/O",
+        "lessons": [
+          { "title": "Bài 1: Checked vs Unchecked Exception", "description": "Phân loại exception, try-catch-finally, try-with-resources." },
+          { "title": "Bài 2: Custom Exception", "description": "Thiết kế exception hierarchy cho ứng dụng, best practices." },
+          { "title": "Bài 3: File I/O với NIO.2", "description": "Path, Files API, Streams và xử lý file lớn hiệu quả." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "hust-cs",
+    "owner_email": "frank@dyadia.local",
+    "title": "Cơ sở dữ liệu",
+    "description": "Thiết kế, triển khai và tối ưu hóa cơ sở dữ liệu quan hệ với PostgreSQL.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Mô hình dữ liệu quan hệ",
+        "lessons": [
+          { "title": "Bài 1: Mô hình ER và chuyển đổi sang quan hệ", "description": "Entity-Relationship Diagram, mapping sang bảng quan hệ, normalization." },
+          { "title": "Bài 2: Các dạng chuẩn (1NF đến BCNF)", "description": "Phân tích phụ thuộc hàm, đưa schema về các dạng chuẩn." },
+          { "title": "Bài 3: Chỉ mục và hiệu năng", "description": "B-tree index, Hash index, covering index và EXPLAIN ANALYZE." }
+        ]
+      },
+      {
+        "title": "Chương 2: SQL nâng cao",
+        "lessons": [
+          { "title": "Bài 1: JOIN và subquery", "description": "INNER/LEFT/RIGHT/FULL JOIN, correlated subquery, EXISTS." },
+          { "title": "Bài 2: Window Functions", "description": "ROW_NUMBER, RANK, DENSE_RANK, LAG/LEAD, PARTITION BY." },
+          { "title": "Bài 3: CTE và Recursive Query", "description": "WITH clause, recursive CTE cho cây phân cấp, hiệu suất." },
+          { "title": "Bài 4: Transaction và Isolation Level", "description": "ACID properties, READ COMMITTED, SERIALIZABLE, deadlock avoidance." }
+        ]
+      },
+      {
+        "title": "Chương 3: PostgreSQL thực chiến",
+        "lessons": [
+          { "title": "Bài 1: Kiểu dữ liệu đặc thù PostgreSQL", "description": "UUID, JSONB, Array, Range types và các extension hữu ích." },
+          { "title": "Bài 2: Stored Procedure và Trigger", "description": "PL/pgSQL cơ bản, trigger BEFORE/AFTER, audit log tự động." },
+          { "title": "Bài 3: Backup, Restore và Replication", "description": "pg_dump, pg_restore, streaming replication cơ bản." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "hust-cs",
+    "owner_email": "carol@dyadia.local",
+    "title": "Mạng máy tính",
+    "description": "Nghiên cứu kiến trúc, giao thức và bảo mật trong mạng máy tính hiện đại.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Mô hình OSI và TCP/IP",
+        "lessons": [
+          { "title": "Bài 1: 7 tầng OSI", "description": "Vai trò, chức năng từng tầng và cách dữ liệu đi qua stack." },
+          { "title": "Bài 2: TCP vs UDP", "description": "3-way handshake, flow control, congestion control, khi nào dùng UDP." },
+          { "title": "Bài 3: IP Addressing và Subnetting", "description": "IPv4, IPv6, CIDR notation, tính subnet mask và broadcast." }
+        ]
+      },
+      {
+        "title": "Chương 2: Giao thức ứng dụng",
+        "lessons": [
+          { "title": "Bài 1: HTTP/1.1, HTTP/2 và HTTP/3", "description": "Header, method, status code, multiplexing và QUIC protocol." },
+          { "title": "Bài 2: DNS và cơ chế phân giải tên miền", "description": "Recursive resolution, authoritative server, TTL và DNS caching." },
+          { "title": "Bài 3: TLS/SSL và HTTPS", "description": "Certificate chain, handshake, cipher suite và cách kiểm tra bảo mật." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "hust-cs",
+    "owner_email": "frank@dyadia.local",
+    "title": "Hệ điều hành",
+    "description": "Nguyên lý hoạt động của hệ điều hành: process management, memory, file system và I/O.",
+    "status": "archived",
+    "modules": [
+      {
+        "title": "Chương 1: Process và Thread",
+        "lessons": [
+          { "title": "Bài 1: Vòng đời process", "description": "Các trạng thái process, PCB, context switching và chi phí." },
+          { "title": "Bài 2: Thread và Concurrency", "description": "User-level vs kernel-level thread, race condition và critical section." },
+          { "title": "Bài 3: Semaphore và Mutex", "description": "Đồng bộ hóa process, bài toán Producer-Consumer, Dining Philosophers." }
+        ]
+      },
+      {
+        "title": "Chương 2: Quản lý bộ nhớ",
+        "lessons": [
+          { "title": "Bài 1: Paging và Segmentation", "description": "Page table, TLB, segmentation fault và bảo vệ bộ nhớ." },
+          { "title": "Bài 2: Virtual Memory và Page Fault", "description": "Demand paging, page replacement algorithms: LRU, FIFO, Clock." },
+          { "title": "Bài 3: Heap và Memory Allocator", "description": "malloc/free internals, fragmentation, buddy system." }
+        ]
+      },
+      {
+        "title": "Chương 3: File System và I/O",
+        "lessons": [
+          { "title": "Bài 1: Cấu trúc File System", "description": "Inode, directory structure, FAT và ext4." },
+          { "title": "Bài 2: I/O Scheduling", "description": "FCFS, SSTF, SCAN và cách SSD thay đổi I/O scheduling." },
+          { "title": "Bài 3: Deadlock và Phát hiện", "description": "Điều kiện Coffman, Resource Allocation Graph, Banker's algorithm." }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "hust-cs",
+    "owner_email": "alice@dyadia.local",
+    "title": "Kiến trúc máy tính",
+    "description": "Từ cổng logic đến kiến trúc bộ xử lý: pipeline, cache, bộ nhớ và hệ thống I/O.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Biểu diễn số và mạch số",
+        "lessons": [
+          { "title": "Bài 1: Hệ nhị phân, bù 2 và dấu phẩy động", "description": "Biểu diễn số nguyên, âm, IEEE 754 single/double precision." },
+          { "title": "Bài 2: Đại số Boole và mạch tổ hợp", "description": "Cổng logic, bản đồ Karnaugh, mạch cộng, mux/demux." },
+          { "title": "Bài 3: Mạch tuần tự và flip-flop", "description": "D/JK flip-flop, thanh ghi, bộ đếm và FSM." }
+        ]
+      },
+      {
+        "title": "Chương 2: CPU và Pipeline",
+        "lessons": [
+          { "title": "Bài 1: Kiến trúc RISC-V cơ bản", "description": "Tập lệnh, format R/I/S/B/U/J, thanh ghi và quy ước gọi hàm." },
+          { "title": "Bài 2: Pipeline 5 giai đoạn", "description": "IF, ID, EX, MEM, WB — data hazard, control hazard và forwarding." },
+          { "title": "Bài 3: Bộ nhớ cache", "description": "Direct-mapped, set-associative, write policy và cache coherence." }
+        ]
+      }
+    ]
+  }
+]

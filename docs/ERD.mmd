@@ -11,13 +11,14 @@ erDiagram
     USER ||--|{ ORGANIZATION_MEMBER : joins
     USER ||--o{ ORGANIZATION : creates
 
-    %% ORGANIZATION ||--o{ COURSE : owns
-    %% USER ||--o{ COURSE : creates
+    ORGANIZATION ||--o{ COURSE : owns
+    USER ||--o{ COURSE : creates
+    COURSE ||--o{ COURSE_MODULE : contains
+    COURSE_MODULE ||--o{ LESSON : contains
+
     %% COURSE ||--|{ COURSE_MEMBER : has
     %% USER ||--o{ COURSE_MEMBER : enrolls
 
-    %% COURSE ||--o{ COURSE_MODULE : contains
-    %% COURSE_MODULE ||--o{ LESSON : contains
     %% LESSON ||--o{ CONTENT_ITEM : contains
 
     %% CONTENT_ITEM ||--o{ CONTENT_ITEM_OBJECT : uses
@@ -63,41 +64,41 @@ erDiagram
         timestamp updated_at
     }
 
-    %% COURSE {
-    %%     uuid id PK
-    %%     uuid organization_id FK
-    %%     uuid owner_id FK
-    %%     text title
-    %%     text description
-    %%     course_status status "draft published archived"
-    %%     timestamptz created_at
-    %%     timestamptz updated_at
-    %% }
+    COURSE {
+        uuid id PK
+        uuid organization_id FK
+        uuid owner_id FK
+        text title
+        text description
+        course_status status "draft published archived"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    COURSE_MODULE {
+        uuid id PK
+        uuid course_id FK
+        text title
+        int order_index
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    LESSON {
+        uuid id PK
+        uuid module_id FK
+        text title
+        text description
+        int order_index
+        timestamp created_at
+        timestamp updated_at
+    }
 
     %% COURSE_MEMBER {
     %%     uuid course_id PK,FK
     %%     uuid user_id PK,FK
     %%     course_role role "owner teacher assistant student"
     %%     timestamptz joined_at
-    %% }
-
-    %% COURSE_MODULE {
-    %%     uuid id PK
-    %%     uuid course_id FK
-    %%     text title
-    %%     int order_index
-    %%     timestamptz created_at
-    %%     timestamptz updated_at
-    %% }
-
-    %% LESSON {
-    %%     uuid id PK
-    %%     uuid module_id FK
-    %%     text title
-    %%     text description
-    %%     int order_index
-    %%     timestamptz created_at
-    %%     timestamptz updated_at
     %% }
 
     %% CONTENT_ITEM {

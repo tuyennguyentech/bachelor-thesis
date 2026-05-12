@@ -160,15 +160,73 @@ Tổ chức của tôi                              [Page 1]
 HUST AI Lab
 /hust-ai-lab    [Hoạt động]
 
-Thông tin chung:
-  Ngày tạo: 01/01/2026
+Thông tin chung: Ngày tạo: 01/01/2026
 
-Vai trò của bạn:
-  [Giảng viên]  [Hoạt động]
-  Tham gia: 15/03/2026
+Khóa học:        [Xem khóa học →]
+Thành viên:      [Xem thành viên →]
+
+Vai trò của bạn: [Giảng viên]  [Hoạt động]
 ```
 
 **Files:** `src/app/dashboard/organizations/[slug]/page.tsx`
+
+---
+
+## `/dashboard/organizations/[slug]/courses` — Courses List
+
+| | |
+|---|---|
+| **Auth** | `requireOrgMember(org.id)` |
+| **RPC** | `CourseService.ListCourses(organizationId, limit, offset)` |
+| **Roles** | OWNER/ADMIN/TEACHER see "+ Tạo khóa học" button; STUDENT sees read-only list |
+
+**UI:**
+- Table: Tên khóa học | Trạng thái | Ngày tạo | → (detail link)
+- "Tạo khóa học" button (OWNER/ADMIN/TEACHER only) → dialog (title, optional description)
+- Pagination
+
+**Files:** `src/app/dashboard/organizations/[slug]/courses/page.tsx`
+
+---
+
+## `/dashboard/organizations/[slug]/courses/[courseId]` — Course Detail
+
+| | |
+|---|---|
+| **Auth** | `requireOrgMember(org.id)` |
+| **RPC** | `GetCourseById`, `ListCourseModules`, `ListLessonsByCourse` |
+
+**Role-based UI (two flags):**
+
+| Section | STUDENT | TEACHER | ADMIN/OWNER |
+|---------|---------|---------|-------------|
+| View course title + description | ✓ | ✓ | ✓ |
+| "Thông tin chung" edit form | ✗ | ✓ | ✓ |
+| "Trạng thái" section | ✗ | badge only | status select |
+| "Nội dung" (modules/lessons) | read-only | + add/edit/delete controls | + add/edit/delete controls |
+| "Xóa khóa học" danger zone | ✗ | ✗ | ✓ |
+
+See [authorization/richter/courses.md](../authorization/richter/courses.md) for backend enforcement details.
+
+**Files:** `src/app/dashboard/organizations/[slug]/courses/[courseId]/page.tsx`
+
+---
+
+## `/dashboard/organizations/[slug]/members` — Members
+
+| | |
+|---|---|
+| **Auth** | `requireOrgMember(org.id)` |
+| **RPC** | `ListOrganizationMembers(organizationId, limit, offset)`, `GetUserById` per member |
+| **Roles** | OWNER/ADMIN see management controls; TEACHER/STUDENT read-only |
+
+**UI:**
+- Table: Thành viên (name + email) | Vai trò | Trạng thái | Ngày tham gia | Actions
+- "Thêm thành viên" button (OWNER/ADMIN only) → dialog (email, role select)
+- Per-row Actions dropdown (OWNER/ADMIN only): Đổi role | Đổi trạng thái | Xóa khỏi org
+- Pagination
+
+**Files:** `src/app/dashboard/organizations/[slug]/members/page.tsx`
 
 ---
 
