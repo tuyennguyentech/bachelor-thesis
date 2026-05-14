@@ -23,7 +23,3 @@ model = "gemini-2.0-flash"
 [fdb]
 cluster_file = "fdb.cluster"
 api_version = 730
-
-[whisper]
-endpoint = "speaches:8000"
-model = "small"

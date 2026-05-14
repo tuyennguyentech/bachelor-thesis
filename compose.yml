@@ -71,9 +71,19 @@ services:
     command: sh
 
   speaches:
-    image: fedirz/faster-whisper-server:latest-cpu
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
     environment:
-      WHISPER__MODEL: small
+      WHISPER__INFERENCE_DEVICE: cpu
+      PRELOAD_MODELS: '["Systran/faster-whisper-small"]'
+    volumes:
+      - hf_hub_cache:/home/ubuntu/.cache/huggingface/hub
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://0.0.0.0:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   richter:
     image: busybox:musl
@@ -87,3 +97,4 @@ volumes:
   caddy_data:
   caddy_config:
   storage_data:
+  hf_hub_cache:

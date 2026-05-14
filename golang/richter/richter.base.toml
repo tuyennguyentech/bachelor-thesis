@@ -20,3 +20,7 @@ password = "changeme123"
 first_name = "System"
 last_name = "Admin"
 
+[whisper]
+endpoint = "speaches:8000"
+model = "small"
+
