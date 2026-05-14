@@ -103,12 +103,12 @@ func (o *OrganizationsSvc) GetOrganizationById(
 	ctx context.Context,
 	req *richterv1.GetOrganizationByIdRequest,
 ) (*richterv1.GetOrganizationByIdResponse, error) {
-	if _, err := o.authz.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
 	id, err := svc.ParseUUID(req.GetId())
 	if err != nil {
 		o.log.ErrorContext(ctx, "organizations service failed", svc.LogAttrs("GetOrganizationById.ParseUUID", err)...)
+		return nil, err
+	}
+	if _, err := o.authz.RequireOrgMember(ctx, id); err != nil {
 		return nil, err
 	}
 
@@ -134,8 +134,16 @@ func (o *OrganizationsSvc) GetOrganizationBySlug(
 		return q.GetOrganizationBySlug(ctx, req.GetSlug())
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Return PermissionDenied (not NotFound) to prevent authenticated users from
+			// enumerating valid org slugs by observing the error code difference.
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("not a member of this organization"))
+		}
 		err = svc.ConnectDBError(err)
 		o.log.ErrorContext(ctx, "organizations service failed", svc.LogAttrs("GetOrganizationBySlug", err)...)
+		return nil, err
+	}
+	if _, err := o.authz.RequireOrgMember(ctx, org.ID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetOrganizationBySlugResponse{Organization: OrganizationToProto(org)}, nil
@@ -203,9 +211,9 @@ func (o *OrganizationsSvc) ListOrganizationsByUser(
 
 	orgs, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Organization, error) {
 		return q.ListOrganizationsByUser(ctx, gen.ListOrganizationsByUserParams{
-			CreatedBy: userID,
-			Limit:     req.GetLimit(),
-			Offset:    req.GetOffset(),
+			UserID: userID,
+			Limit:  req.GetLimit(),
+			Offset: req.GetOffset(),
 		})
 	})
 	if err != nil {

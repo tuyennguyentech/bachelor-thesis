@@ -82,14 +82,15 @@ func (s *CoursesSvc) CreateCourse(
 		s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("CreateCourse.ParseUUID(org)", err)...)
 		return nil, err
 	}
-	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+	claims, err := s.authz.RequireOrgRole(ctx, orgID,
 		gen.OrganizationRoleOwner,
 		gen.OrganizationRoleAdmin,
 		gen.OrganizationRoleTeacher,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
-	ownerID, err := svc.ParseUUID(req.GetOwnerId())
+	ownerID, err := svc.ParseUUID(claims.GetSub())
 	if err != nil {
 		s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("CreateCourse.ParseUUID(owner)", err)...)
 		return nil, err
@@ -115,12 +116,19 @@ func (s *CoursesSvc) GetCourseById(
 	ctx context.Context,
 	req *richterv1.GetCourseByIdRequest,
 ) (*richterv1.GetCourseByIdResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
 		return nil, err
 	}
 	course, err := s.fetchCourse(ctx, req.GetId())
 	if err != nil {
+		if connect.CodeOf(err) == connect.CodeNotFound && claims.GetRole() != richterv1.UserRole_USER_ROLE_ADMIN {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("not a member of this organization"))
+		}
 		s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("GetCourseById", err)...)
+		return nil, err
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, course.OrganizationID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetCourseByIdResponse{Course: CourseToProto(course)}, nil

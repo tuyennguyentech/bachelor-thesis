@@ -86,15 +86,15 @@ func (a *AuthSvc) Login(
 		return nil, svc.ConnectDBError(err)
 	}
 
-	if !secure.VerifyPassword(req.GetPassword(), user.PasswordHash) {
-		err = connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
-		a.log.ErrorContext(ctx, "auth service failed", svc.LogAttrs("Login.VerifyPassword", err)...)
-		return nil, err
-	}
-
 	if user.Status != gen.UserStatusActive {
 		err = connect.NewError(connect.CodePermissionDenied, fmt.Errorf("account is not active"))
 		a.log.ErrorContext(ctx, "auth service failed", svc.LogAttrs("Login.CheckStatus", err)...)
+		return nil, err
+	}
+
+	if !secure.VerifyPassword(req.GetPassword(), user.PasswordHash) {
+		err = connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
+		a.log.ErrorContext(ctx, "auth service failed", svc.LogAttrs("Login.VerifyPassword", err)...)
 		return nil, err
 	}
 

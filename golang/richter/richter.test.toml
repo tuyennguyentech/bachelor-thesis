@@ -10,12 +10,20 @@ password = "dyadia_test"
 
 [s3]
 endpoint = "storage:9000"
-access_key_id = ""
-secret_access_key = ""
+access_key_id = "dyadia"
+secret_access_key = "dyadia_secret_key"
 bucket = "dyadia-test"
 use_ssl = false
-public_endpoint = "http://localhost:9000"
+public_endpoint = "http://caddy/api/storage"
 
 [gemini]
-# api_key set via RICHTER_GEMINI_API_KEY env var
+api_key = "AIzaSyCeWA7zcxuiattdt8_o_HWa9lY82JDFz7w"
 model = "gemini-2.0-flash"
+
+[fdb]
+cluster_file = "fdb.cluster"
+api_version = 730
+
+[whisper]
+endpoint = "speaches:8000"
+model = "small"

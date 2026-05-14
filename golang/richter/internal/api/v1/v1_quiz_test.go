@@ -322,25 +322,37 @@ func TestQuizAuthz(t *testing.T) {
 	lessonID := lessonRes.Lesson.Id
 	insertTestQuestions(t, lessonID, 2)
 
-	// Create student (member) and non-member
+	// Create student (member), teacher (member), and non-member
 	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
 	_, _ = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
 		OrganizationId: orgID, UserId: studentID,
 		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
 		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
 	})
-	_, nonMemberPassword, _ := createActiveUser(t, c.users)
-	_ = nonMemberPassword
+	teacherEmail, teacherPassword, teacherID := createActiveUser(t, c.users)
+	_, _ = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgID, UserId: teacherID,
+		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER,
+		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	})
+	nonMemberEmail, nonMemberPassword, _ := createActiveUser(t, c.users)
 
 	anonQuiz := richterv1connect.NewQuizServiceClient(http.DefaultClient, url)
 	studentToken := getUserToken(t, url, studentEmail, studentPassword)
 	studentQuiz := richterv1connect.NewQuizServiceClient(httpClientWithToken(studentToken), url)
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPassword)
+	teacherQuiz := richterv1connect.NewQuizServiceClient(httpClientWithToken(teacherToken), url)
+	nonMemberToken := getUserToken(t, url, nonMemberEmail, nonMemberPassword)
+	nonMemberQuiz := richterv1connect.NewQuizServiceClient(httpClientWithToken(nonMemberToken), url)
 
 	// SubmitQuiz
 	t.Run("SubmitQuiz", func(t *testing.T) {
 		req := &richterv1.SubmitQuizRequest{LessonId: lessonID, Answers: []int32{0, 0}}
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonQuiz.SubmitQuiz(ctx, req); return e }(), connect.CodeUnauthenticated)
+		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberQuiz.SubmitQuiz(ctx, req); return e }(), connect.CodePermissionDenied)
 		})
 		t.Run("Student/OK", func(t *testing.T) {
 			if _, err := studentQuiz.SubmitQuiz(ctx, req); err != nil {
@@ -355,6 +367,9 @@ func TestQuizAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonQuiz.GetMyQuizAttempt(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberQuiz.GetMyQuizAttempt(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
 		t.Run("Student/OK", func(t *testing.T) {
 			if _, err := studentQuiz.GetMyQuizAttempt(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
@@ -367,6 +382,14 @@ func TestQuizAuthz(t *testing.T) {
 		req := &richterv1.ListLessonAttemptsRequest{LessonId: lessonID, Limit: 10, Offset: 0}
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonQuiz.ListLessonAttempts(ctx, req); return e }(), connect.CodeUnauthenticated)
+		})
+		t.Run("Student/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := studentQuiz.ListLessonAttempts(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Teacher/OK", func(t *testing.T) {
+			if _, err := teacherQuiz.ListLessonAttempts(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
+			}
 		})
 		t.Run("Admin/OK", func(t *testing.T) {
 			if _, err := c.quiz.ListLessonAttempts(ctx, req); err != nil {

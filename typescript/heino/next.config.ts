@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["buf"],
-  /* config options here */
+  allowedDevOrigins: ["caddy"],
 };
 
 export default nextConfig;

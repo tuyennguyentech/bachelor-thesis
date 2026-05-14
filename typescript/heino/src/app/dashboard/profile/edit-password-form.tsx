@@ -14,11 +14,15 @@ export function EditPasswordForm() {
       {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
       {state?.success && <p className="text-sm text-green-600">Đã đổi mật khẩu</p>}
       <div className="space-y-1.5">
+        <Label htmlFor="oldPassword">Mật khẩu hiện tại</Label>
+        <Input id="oldPassword" name="oldPassword" type="password" required autoComplete="current-password" />
+      </div>
+      <div className="space-y-1.5">
         <Label htmlFor="password">Mật khẩu mới</Label>
         <Input id="password" name="password" type="password" required minLength={8} autoComplete="new-password" />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="confirm">Xác nhận mật khẩu</Label>
+        <Label htmlFor="confirm">Xác nhận mật khẩu mới</Label>
         <Input id="confirm" name="confirm" type="password" required minLength={8} autoComplete="new-password" />
       </div>
       <div className="flex justify-end">

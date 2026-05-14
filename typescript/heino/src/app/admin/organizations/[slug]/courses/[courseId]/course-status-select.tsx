@@ -36,7 +36,7 @@ export function CourseStatusSelect({
         const option = STATUS_OPTIONS.find((o) => String(o.value) === val);
         if (!option) return;
         startTransition(async () => {
-          await updateCourseStatus(courseId, slug, courseId, option.value);
+          await updateCourseStatus(courseId, slug, option.value);
         });
       }}
     >

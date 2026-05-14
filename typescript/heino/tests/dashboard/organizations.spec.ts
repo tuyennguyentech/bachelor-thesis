@@ -134,3 +134,29 @@ test.describe("Dashboard course detail", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 });
+
+// ── Authenticated non-member gets 404 ─────────────────────────────────────
+//
+// henry@dyadia.local has an account but is NOT seeded as a member of hust-cs.
+// Visiting any page under /dashboard/organizations/hust-cs should return 404,
+// not redirect to /login (which would only happen for unauthenticated users).
+
+test.describe("Authenticated non-member cannot access org", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("henry@dyadia.local");
+    await page.getByLabel("Mật khẩu").fill("Password123!");
+    await page.getByRole("button", { name: "Đăng nhập" }).click();
+    await page.waitForURL(/\/(admin|dashboard)/);
+  });
+
+  test("gets 404 on org detail page", async ({ page }) => {
+    const response = await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
+    expect(response?.status()).toBe(404);
+  });
+
+  test("gets 404 on org courses page", async ({ page }) => {
+    const response = await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
+    expect(response?.status()).toBe(404);
+  });
+});

@@ -27,6 +27,10 @@ message OrganizationMember {
   MemberStatus status = 4 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
+  // Embedded user info (populated by list queries via JOIN — avoids separate getUserById calls)
+  string user_email = 7;
+  string user_first_name = 8;
+  string user_last_name = 9;
 }
 
 message AddOrganizationMemberRequest {

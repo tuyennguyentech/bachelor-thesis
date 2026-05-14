@@ -5,7 +5,6 @@ import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { OrganizationMemberService, OrganizationRole, type OrganizationMember } from "buf/gen/richter/v1/organization_members_pb";
-import { UserService, type User } from "buf/gen/richter/v1/users_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
 import { ChevronLeftIcon } from "lucide-react";
@@ -45,7 +44,7 @@ export default async function DashboardMembersPage({
     const res = await orgClient.getOrganizationBySlug({ slug });
     org = res.organization;
   } catch (err) {
-    if (err instanceof ConnectError && err.code === Code.NotFound) notFound();
+    if (err instanceof ConnectError && (err.code === Code.NotFound || err.code === Code.PermissionDenied)) notFound();
     throw err;
   }
   if (!org) notFound();
@@ -66,16 +65,6 @@ export default async function DashboardMembersPage({
     members = [];
   }
   const hasNext = members.length === LIMIT;
-
-  const userClient = createRichterClient(UserService, token);
-  const userResults = await Promise.allSettled(
-    members.map((m) => userClient.getUserById({ id: m.userId }).then((r) => r.user))
-  );
-  const usersById = new Map<string, User>();
-  for (let i = 0; i < members.length; i++) {
-    const r = userResults[i];
-    if (r.status === "fulfilled" && r.value) usersById.set(members[i].userId, r.value);
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -115,16 +104,14 @@ export default async function DashboardMembersPage({
               </TableRow>
             ) : (
               members.map((m) => {
-                const user = usersById.get(m.userId);
+                const displayName = `${m.userFirstName} ${m.userLastName}`.trim() || m.userId;
                 return (
                   <TableRow key={m.userId}>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-sm font-medium">
-                          {user ? `${user.firstName} ${user.lastName}`.trim() : m.userId}
-                        </span>
-                        {user && (
-                          <span className="text-xs text-muted-foreground">{user.email}</span>
+                        <span className="text-sm font-medium">{displayName}</span>
+                        {m.userEmail && (
+                          <span className="text-xs text-muted-foreground">{m.userEmail}</span>
                         )}
                       </div>
                     </TableCell>

@@ -292,6 +292,33 @@ func TestOrgMemberErrors(t *testing.T) {
 			t.Errorf("expected code %v, got %v", connect.CodeNotFound, connect.CodeOf(err))
 		}
 	})
+
+	t.Run("RemoveLastOwner", func(t *testing.T) {
+		// ownerID is the only active owner of orgID; removal must be rejected
+		_, err := c.orgMembers.RemoveOrganizationMember(ctx, &richterv1.RemoveOrganizationMemberRequest{
+			OrganizationId: orgID,
+			UserId:         ownerID,
+		})
+		if err == nil {
+			t.Error("expected error removing last owner, got nil")
+		} else if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Errorf("expected code %v, got %v", connect.CodeFailedPrecondition, connect.CodeOf(err))
+		}
+	})
+
+	t.Run("DemoteLastOwner", func(t *testing.T) {
+		// ownerID is the only active owner of orgID; demotion to admin must be rejected
+		_, err := c.orgMembers.UpdateOrganizationMemberRole(ctx, &richterv1.UpdateOrganizationMemberRoleRequest{
+			OrganizationId: orgID,
+			UserId:         ownerID,
+			Role:           richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN,
+		})
+		if err == nil {
+			t.Error("expected error demoting last owner, got nil")
+		} else if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Errorf("expected code %v, got %v", connect.CodeFailedPrecondition, connect.CodeOf(err))
+		}
+	})
 }
 
 func TestOrgMembersAuthz(t *testing.T) {
@@ -381,6 +408,17 @@ func TestOrgMembersAuthz(t *testing.T) {
 			if _, err := orgAdminMembers.AddOrganizationMember(ctx, addReq()); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
+		})
+		t.Run("OrgAdmin/CannotAddOwner", func(t *testing.T) {
+			_, _, newUserID := createActiveUser(t, adminUsers)
+			assertCode(t, func() error {
+				_, e := orgAdminMembers.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+					OrganizationId: orgID, UserId: newUserID,
+					Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER,
+					Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+				})
+				return e
+			}(), connect.CodePermissionDenied)
 		})
 	})
 
@@ -562,6 +600,30 @@ func TestOrgMembersAuthz(t *testing.T) {
 			}); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
+		})
+		t.Run("SuspendedOrgAdmin/PermissionDenied", func(t *testing.T) {
+			suspEmail, suspPass, suspID := createActiveUser(t, adminUsers)
+			if _, err := adminMembers.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+				OrganizationId: orgID, UserId: suspID,
+				Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN,
+				Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+			}); err != nil {
+				t.Fatalf("setup: add suspendable admin: %v", err)
+			}
+			suspToken := getUserToken(t, url, suspEmail, suspPass)
+			suspClient := richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(suspToken), url)
+			if _, err := ownerMembers.UpdateOrganizationMemberStatus(ctx, &richterv1.UpdateOrganizationMemberStatusRequest{
+				OrganizationId: orgID, UserId: suspID,
+				Status: richterv1.MemberStatus_MEMBER_STATUS_SUSPENDED,
+			}); err != nil {
+				t.Fatalf("setup: suspend admin: %v", err)
+			}
+			assertCode(t, func() error {
+				_, e := suspClient.RemoveOrganizationMember(ctx, &richterv1.RemoveOrganizationMemberRequest{
+					OrganizationId: orgID, UserId: teacherID,
+				})
+				return e
+			}(), connect.CodePermissionDenied)
 		})
 		t.Run("Student/CanRemoveSelf", func(t *testing.T) {
 			if _, err := studentMembers.RemoveOrganizationMember(ctx, &richterv1.RemoveOrganizationMemberRequest{

@@ -26,11 +26,12 @@ export function OrgStatusSelect({
   orgSlug: string;
   currentStatus: OrganizationStatus;
 }) {
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
 
   return (
     <Select
       defaultValue={String(currentStatus)}
+      disabled={isPending}
       onValueChange={(val) => {
         const option = STATUS_OPTIONS.find((o) => String(o.value) === val);
         if (!option) return;

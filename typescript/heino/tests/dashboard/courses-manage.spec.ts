@@ -56,7 +56,7 @@ test.describe("Teacher course lifecycle", () => {
     const row = page.getByRole("row").filter({ hasText: courseTitle });
     // read href from the chevron link (Firefox asChild+Link can be flaky with click-navigate)
     const href = await row.getByRole("link").getAttribute("href");
-    courseUrl = `http://localhost:3000${href}`;
+    courseUrl = `${href}`;
     await page.goto(courseUrl);
     await expect(page.getByRole("heading", { name: courseTitle })).toBeVisible();
   });
@@ -216,7 +216,7 @@ test.describe("Admin course status and delete", () => {
 
     const row = page.getByRole("row").filter({ hasText: courseTitle });
     const href = await row.getByRole("link").getAttribute("href");
-    courseUrl = `http://localhost:3000${href}`;
+    courseUrl = `${href}`;
     await page.goto(courseUrl);
     await expect(page.getByRole("heading", { name: courseTitle })).toBeVisible();
   });
@@ -259,7 +259,7 @@ test.describe("Student course detail (read-only)", () => {
     await page.goto(COURSES_URL);
     // navigate to the first seeded course via the chevron link
     const href = await page.getByRole("row").nth(1).getByRole("link").getAttribute("href");
-    await page.goto(`http://localhost:3000${href}`);
+    await page.goto(`${href}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
     // student should NOT see management controls

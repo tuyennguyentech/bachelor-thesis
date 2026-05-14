@@ -22,8 +22,9 @@ test.describe("Dashboard profile page", () => {
     await page.goto("/dashboard/profile");
     // heading "Đổi mật khẩu" and button "Đổi mật khẩu" both exist — use role to disambiguate
     await expect(page.getByRole("heading", { name: "Đổi mật khẩu" })).toBeVisible();
-    await expect(page.getByLabel("Mật khẩu mới")).toBeVisible();
-    await expect(page.getByLabel("Xác nhận mật khẩu")).toBeVisible();
+    await expect(page.getByLabel("Mật khẩu hiện tại")).toBeVisible();
+    await expect(page.getByLabel("Mật khẩu mới", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Xác nhận mật khẩu mới")).toBeVisible();
   });
 
   test("edits first and last name", async ({ userPage: page }) => {
@@ -40,16 +41,18 @@ test.describe("Dashboard profile page", () => {
 
   test("shows error when password mismatch", async ({ userPage: page }) => {
     await page.goto("/dashboard/profile");
-    await page.getByLabel("Mật khẩu mới").fill("NewPass123!");
-    await page.getByLabel("Xác nhận mật khẩu").fill("DifferentPass999!");
+    await page.getByLabel("Mật khẩu hiện tại").fill("AnyCurrentPass1!");
+    await page.getByLabel("Mật khẩu mới", { exact: true }).fill("NewPass123!");
+    await page.getByLabel("Xác nhận mật khẩu mới").fill("DifferentPass999!");
     await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
     await expect(page.getByText("Mật khẩu xác nhận không khớp")).toBeVisible();
   });
 
   test("short password blocked by browser (minLength)", async ({ userPage: page }) => {
     await page.goto("/dashboard/profile");
-    await page.getByLabel("Mật khẩu mới").fill("short");
-    await page.getByLabel("Xác nhận mật khẩu").fill("short");
+    await page.getByLabel("Mật khẩu hiện tại").fill("AnyCurrentPass1!");
+    await page.getByLabel("Mật khẩu mới", { exact: true }).fill("short");
+    await page.getByLabel("Xác nhận mật khẩu mới").fill("short");
     await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
     await expect(page.getByText("Đã đổi mật khẩu")).not.toBeVisible();
   });

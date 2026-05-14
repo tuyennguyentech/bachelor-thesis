@@ -20,8 +20,8 @@ export function InteractiveTranscript({ segments, videoRef }: Props) {
     function onTimeUpdate() {
       const t = video!.currentTime;
       let next = -1;
-      for (let i = 0; i < segments.length; i++) {
-        if (t >= segments[i].startSeconds && t < segments[i].endSeconds) {
+      for (let i = segments.length - 1; i >= 0; i--) {
+        if (t >= segments[i].startSeconds) {
           next = i;
           break;
         }

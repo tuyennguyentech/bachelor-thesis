@@ -463,13 +463,16 @@ func TestUsersAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonUsers.GetUserById(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("User/OK", func(t *testing.T) {
-			if _, err := otherUsers.GetUserById(ctx, req); err != nil {
-				t.Errorf("expected OK, got %v", err)
-			}
+		t.Run("OtherUser/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := otherUsers.GetUserById(ctx, req); return e }(), connect.CodePermissionDenied)
 		})
 		t.Run("Self/OK", func(t *testing.T) {
 			if _, err := selfUsers.GetUserById(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
+			}
+		})
+		t.Run("Admin/OK", func(t *testing.T) {
+			if _, err := adminUsers.GetUserById(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
 		})
@@ -533,17 +536,23 @@ func TestUsersAuthz(t *testing.T) {
 	})
 
 	t.Run("UpdateUserPassword", func(t *testing.T) {
-		req := &richterv1.UpdateUserPasswordRequest{Id: tID, Password: testPassword()}
+		newPass := testPassword()
+		req := &richterv1.UpdateUserPasswordRequest{Id: tID, Password: newPass}
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonUsers.UpdateUserPassword(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
 		t.Run("OtherUser/PermissionDenied", func(t *testing.T) {
 			assertCode(t, func() error { _, e := otherUsers.UpdateUserPassword(ctx, req); return e }(), connect.CodePermissionDenied)
 		})
+		t.Run("Self/MissingOldPassword/InvalidArgument", func(t *testing.T) {
+			assertCode(t, func() error { _, e := selfUsers.UpdateUserPassword(ctx, req); return e }(), connect.CodeInvalidArgument)
+		})
 		t.Run("Self/OK", func(t *testing.T) {
-			if _, err := selfUsers.UpdateUserPassword(ctx, req); err != nil {
+			selfReq := &richterv1.UpdateUserPasswordRequest{Id: tID, Password: newPass, OldPassword: &tPass}
+			if _, err := selfUsers.UpdateUserPassword(ctx, selfReq); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
+			tPass = newPass // password has changed
 		})
 		t.Run("Admin/OK", func(t *testing.T) {
 			if _, err := adminUsers.UpdateUserPassword(ctx, req); err != nil {

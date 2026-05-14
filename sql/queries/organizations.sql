@@ -25,10 +25,11 @@ ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2;
 
 -- name: ListOrganizationsByUser :many
-SELECT *
-FROM organizations
-WHERE created_by = $1
-ORDER BY created_at DESC, id DESC
+SELECT o.*
+FROM organizations o
+JOIN organization_members om ON om.organization_id = o.id
+WHERE om.user_id = $1
+ORDER BY o.created_at DESC, o.id DESC
 LIMIT $2 OFFSET $3;
 
 -- name: UpdateOrganization :one

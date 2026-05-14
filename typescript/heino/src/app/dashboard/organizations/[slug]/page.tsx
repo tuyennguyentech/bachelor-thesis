@@ -19,7 +19,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
     const res = await orgClient.getOrganizationBySlug({ slug });
     org = res.organization;
   } catch (err) {
-    if (err instanceof ConnectError && err.code === Code.NotFound) notFound();
+    if (err instanceof ConnectError && (err.code === Code.NotFound || err.code === Code.PermissionDenied)) notFound();
     throw err;
   }
   if (!org) notFound();

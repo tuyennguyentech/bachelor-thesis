@@ -1,7 +1,7 @@
 import { requireAdmin } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { CourseService } from "buf/gen/richter/v1/courses_pb";
+import { CourseService, Course } from "buf/gen/richter/v1/courses_pb";
 import {
   Table,
   TableBody,
@@ -44,12 +44,17 @@ export default async function CoursesPage({
   if (!org) notFound();
 
   const courseClient = createRichterClient(CourseService, token);
-  const res = await courseClient.listCourses({
-    organizationId: org.id,
-    limit: LIMIT,
-    offset,
-  });
-  const courses = res.courses ?? [];
+  let courses: Course[] = [];
+  try {
+    const res = await courseClient.listCourses({
+      organizationId: org.id,
+      limit: LIMIT,
+      offset,
+    });
+    courses = res.courses ?? [];
+  } catch {
+    courses = [];
+  }
   const hasNext = courses.length === LIMIT;
 
   return (

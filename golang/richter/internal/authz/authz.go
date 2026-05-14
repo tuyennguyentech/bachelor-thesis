@@ -51,23 +51,54 @@ func NewAuthzSvc(i do.Injector) (a *AuthzSvc, err error) {
 	return
 }
 
+// jwtInterceptor injects JWT claims into context for both unary and streaming RPCs.
+type jwtInterceptor struct{ a *AuthzSvc }
+
+// injectClaims parses the Bearer token from h and returns an updated context.
+func (i *jwtInterceptor) injectClaims(ctx context.Context, h http.Header) (context.Context, error) {
+	token, ok := extractBearer(h)
+	if !ok {
+		return ctx, nil
+	}
+	claims, err := i.a.jwt.ValidateToken(token)
+	if err != nil {
+		return ctx, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+	if claims.GetTokenType() != jwtv1.TokenType_TOKEN_TYPE_ACCESS {
+		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid token type"))
+	}
+	return ContextWithClaims(ctx, claims), nil
+}
+
+func (i *jwtInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		ctx, err := i.injectClaims(ctx, req.Header())
+		if err != nil {
+			return nil, err
+		}
+		return next(ctx, req)
+	}
+}
+
+func (i *jwtInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
+
+func (i *jwtInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		ctx, err := i.injectClaims(ctx, conn.RequestHeader())
+		if err != nil {
+			return err
+		}
+		return next(ctx, conn)
+	}
+}
+
 // Interceptor parses the Bearer token if present and injects claims into context.
 // If a token is present but invalid, the request is rejected immediately.
 // Handlers enforce access control by calling Require*.
 func (a *AuthzSvc) Interceptor() connect.Interceptor {
-	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			token, ok := extractBearer(req.Header())
-			if ok {
-				claims, err := a.jwt.ValidateToken(token)
-				if err != nil {
-					return nil, connect.NewError(connect.CodeUnauthenticated, err)
-				}
-				ctx = ContextWithClaims(ctx, claims)
-			}
-			return next(ctx, req)
-		}
-	})
+	return &jwtInterceptor{a: a}
 }
 
 // RequireAuthenticated returns claims if the request carries a valid token.
@@ -141,6 +172,9 @@ func (a *AuthzSvc) RequireOrgRole(ctx context.Context, orgID pgtype.UUID, roles 
 			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("not a member of this organization"))
 		}
 		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	if member.Status != gen.MemberStatusActive {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("membership is not active"))
 	}
 	for _, r := range roles {
 		if member.Role == r {

@@ -218,12 +218,24 @@ func TestAuthLoginErrors(t *testing.T) {
 			t.Fatalf("setup: failed to create inactive user: %v", err)
 		}
 
+		// Correct password but inactive account → PermissionDenied
 		_, err = c.auth.Login(ctx, &richterv1.LoginRequest{
 			Email:    inactiveEmail,
 			Password: inactivePassword,
 		})
 		if err == nil {
 			t.Error("expected error for inactive user, got nil")
+		} else if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Errorf("expected code %v, got %v", connect.CodePermissionDenied, connect.CodeOf(err))
+		}
+
+		// Wrong password + inactive account → also PermissionDenied (status checked before bcrypt)
+		_, err = c.auth.Login(ctx, &richterv1.LoginRequest{
+			Email:    inactiveEmail,
+			Password: "wrongpasswordXYZ123!",
+		})
+		if err == nil {
+			t.Error("expected error for inactive user with wrong password, got nil")
 		} else if connect.CodeOf(err) != connect.CodePermissionDenied {
 			t.Errorf("expected code %v, got %v", connect.CodePermissionDenied, connect.CodeOf(err))
 		}

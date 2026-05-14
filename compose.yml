@@ -57,17 +57,23 @@ services:
 
   storage:
     image: chrislusf/seaweedfs:3.88
-    command: server -s3 -s3.port=9000 -dir=/data -s3.allowEmptyFolder=false
+    command: server -s3 -s3.port=9000 -dir=/data -s3.allowEmptyFolder=false -s3.config=/config/s3.json
     ports:
       - "9000:9000"
     volumes:
       - storage_data:/data
+      - ./conf/seaweedfs:/config:Z
 
   debug:
     image: alpine/curl
     tty: true
     stdin_open: true
     command: sh
+
+  speaches:
+    image: fedirz/faster-whisper-server:latest-cpu
+    environment:
+      WHISPER__MODEL: small
 
   richter:
     image: busybox:musl

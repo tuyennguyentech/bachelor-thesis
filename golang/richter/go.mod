@@ -7,13 +7,17 @@ require (
 	connectrpc.com/validate v0.6.0
 	example.com/buf v0.0.0-00010101000000-000000000000
 	example.com/sql v0.0.0-00010101000000-000000000000
+	github.com/apple/foundationdb/bindings/go v0.0.0-20250918235822-341404ebaa37
 	github.com/brianvoe/gofakeit/v7 v7.14.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/google/generative-ai-go v0.20.1
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/minio/minio-go/v7 v7.1.0
 	github.com/samber/do/v2 v2.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/crypto v0.50.0
+	google.golang.org/api v0.278.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -41,7 +45,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/cel-go v0.26.1 // indirect
-	github.com/google/generative-ai-go v0.20.1 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
@@ -55,7 +58,6 @@ require (
 	github.com/klauspost/crc32 v1.3.0 // indirect
 	github.com/minio/crc64nvme v1.1.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
-	github.com/minio/minio-go/v7 v7.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
@@ -82,7 +84,6 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/api v0.278.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	google.golang.org/grpc v1.80.0 // indirect

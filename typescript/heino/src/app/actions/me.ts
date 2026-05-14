@@ -30,16 +30,18 @@ export async function updateMyPassword(_state: ActionState, formData: FormData):
   const { claims, token } = await requireAnyUser();
   const client = createRichterClient(UserService, token);
 
+  const oldPassword = (formData.get("oldPassword") as string)?.trim();
   const password = formData.get("password") as string;
   const confirm = formData.get("confirm") as string;
 
-  if (!password || password.length < 8) return { error: "Mật khẩu phải có ít nhất 8 ký tự" };
+  if (!oldPassword) return { error: "Vui lòng nhập mật khẩu hiện tại" };
+  if (!password || password.length < 8) return { error: "Mật khẩu mới phải có ít nhất 8 ký tự" };
   if (password !== confirm) return { error: "Mật khẩu xác nhận không khớp" };
 
   try {
-    await client.updateUserPassword({ id: claims.sub, password });
+    await client.updateUserPassword({ id: claims.sub, password, oldPassword });
     return { success: true };
   } catch {
-    return { error: "Không thể đổi mật khẩu" };
+    return { error: "Không thể đổi mật khẩu. Kiểm tra lại mật khẩu hiện tại." };
   }
 }

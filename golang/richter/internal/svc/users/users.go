@@ -168,7 +168,7 @@ func (u *UsersSvc) GetUserById(
 	ctx context.Context,
 	req *richterv1.GetUserByIdRequest,
 ) (*richterv1.GetUserByIdResponse, error) {
-	if _, err := u.authz.RequireAuthenticated(ctx); err != nil {
+	if _, err := u.authz.RequireSelf(ctx, req.GetId()); err != nil {
 		return nil, err
 	}
 	id, err := svc.ParseUUID(req.GetId())
@@ -294,7 +294,8 @@ func (u *UsersSvc) UpdateUserPassword(
 	ctx context.Context,
 	req *richterv1.UpdateUserPasswordRequest,
 ) (*richterv1.UpdateUserPasswordResponse, error) {
-	if _, err := u.authz.RequireSelf(ctx, req.GetId()); err != nil {
+	claims, err := u.authz.RequireSelf(ctx, req.GetId())
+	if err != nil {
 		return nil, err
 	}
 	id, err := svc.ParseUUID(req.GetId())
@@ -302,6 +303,24 @@ func (u *UsersSvc) UpdateUserPassword(
 		u.log.ErrorContext(ctx, "users service failed", svc.LogAttrs("UpdateUserPassword.ParseUUID", err)...)
 		return nil, err
 	}
+
+	// Non-admin users must provide their current password.
+	isAdmin := claims.GetRole() == richterv1.UserRole_USER_ROLE_ADMIN
+	if !isAdmin {
+		if req.OldPassword == nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("old_password is required"))
+		}
+		current, err := db.WithConnection(u.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.User, error) {
+			return q.GetUserByID(ctx, id)
+		})
+		if err != nil {
+			return nil, svc.ConnectDBError(err)
+		}
+		if !secure.VerifyPassword(req.GetOldPassword(), current.PasswordHash) {
+			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("incorrect current password"))
+		}
+	}
+
 	passwordHash, err := secure.HashPassword(req.GetPassword())
 	if err != nil {
 		err = connect.NewError(connect.CodeInternal, err)

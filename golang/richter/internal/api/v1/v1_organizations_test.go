@@ -274,6 +274,19 @@ func TestOrganizationErrors(t *testing.T) {
 			t.Errorf("expected code %v, got %v", connect.CodeNotFound, connect.CodeOf(err))
 		}
 	})
+
+	t.Run("SlugNotFoundReturnsPermissionDenied", func(t *testing.T) {
+		// GetOrganizationBySlug returns PermissionDenied (not NotFound) for any non-existent
+		// slug to prevent authenticated users from enumerating valid org slugs.
+		_, err := c.orgs.GetOrganizationBySlug(ctx, &richterv1.GetOrganizationBySlugRequest{
+			Slug: testSlug(),
+		})
+		if err == nil {
+			t.Error("expected error for non-existent slug, got nil")
+		} else if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Errorf("expected code %v (slug enumeration prevention), got %v", connect.CodePermissionDenied, connect.CodeOf(err))
+		}
+	})
 }
 
 func TestOrgsAuthz(t *testing.T) {
@@ -373,8 +386,16 @@ func TestOrgsAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonOrgs.GetOrganizationById(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("User/OK", func(t *testing.T) {
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberOrgs.GetOrganizationById(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Member/OK", func(t *testing.T) {
 			if _, err := studentOrgs.GetOrganizationById(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
+			}
+		})
+		t.Run("Admin/OK", func(t *testing.T) {
+			if _, err := adminOrgs.GetOrganizationById(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
 		})
@@ -385,8 +406,16 @@ func TestOrgsAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonOrgs.GetOrganizationBySlug(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("User/OK", func(t *testing.T) {
-			if _, err := nonMemberOrgs.GetOrganizationBySlug(ctx, req); err != nil {
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberOrgs.GetOrganizationBySlug(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Member/OK", func(t *testing.T) {
+			if _, err := studentOrgs.GetOrganizationBySlug(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
+			}
+		})
+		t.Run("Admin/OK", func(t *testing.T) {
+			if _, err := adminOrgs.GetOrganizationBySlug(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
 			}
 		})

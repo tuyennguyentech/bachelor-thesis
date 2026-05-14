@@ -15,6 +15,7 @@ import (
 	"example.com/richter/internal/svc"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
@@ -59,13 +60,9 @@ func (s *CourseModulesSvc) Handler() (string, http.Handler) {
 	)
 }
 
-func (s *CourseModulesSvc) fetchCourse(ctx context.Context, id string) (gen.Course, error) {
-	uuid, err := svc.ParseUUID(id)
-	if err != nil {
-		return gen.Course{}, err
-	}
+func (s *CourseModulesSvc) fetchCourse(ctx context.Context, id pgtype.UUID) (gen.Course, error) {
 	course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
-		return q.GetCourseByID(ctx, uuid)
+		return q.GetCourseByID(ctx, id)
 	})
 	if err != nil {
 		return gen.Course{}, svc.ConnectDBError(err)
@@ -91,7 +88,12 @@ func (s *CourseModulesSvc) CreateCourseModule(
 	ctx context.Context,
 	req *richterv1.CreateCourseModuleRequest,
 ) (*richterv1.CreateCourseModuleResponse, error) {
-	course, err := s.fetchCourse(ctx, req.GetCourseId())
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("CreateCourseModule.ParseUUID", err)...)
+		return nil, err
+	}
+	course, err := s.fetchCourse(ctx, courseID)
 	if err != nil {
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("CreateCourseModule.fetchCourse", err)...)
 		return nil, err
@@ -123,12 +125,25 @@ func (s *CourseModulesSvc) GetCourseModuleById(
 	ctx context.Context,
 	req *richterv1.GetCourseModuleByIdRequest,
 ) (*richterv1.GetCourseModuleByIdResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
 		return nil, err
 	}
 	m, err := s.fetchModule(ctx, req.GetId())
 	if err != nil {
+		if connect.CodeOf(err) == connect.CodeNotFound && claims.GetRole() != richterv1.UserRole_USER_ROLE_ADMIN {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("not a member of this organization"))
+		}
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("GetCourseModuleById", err)...)
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByCourseModuleID(ctx, m.ID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetCourseModuleByIdResponse{Module: CourseModuleToProto(m)}, nil
@@ -138,12 +153,17 @@ func (s *CourseModulesSvc) ListCourseModules(
 	ctx context.Context,
 	req *richterv1.ListCourseModulesRequest,
 ) (*richterv1.ListCourseModulesResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
 	courseID, err := svc.ParseUUID(req.GetCourseId())
 	if err != nil {
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("ListCourseModules.ParseUUID", err)...)
+		return nil, err
+	}
+	course, err := s.fetchCourse(ctx, courseID)
+	if err != nil {
+		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("ListCourseModules.fetchCourse", err)...)
+		return nil, err
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, course.OrganizationID); err != nil {
 		return nil, err
 	}
 
@@ -176,7 +196,7 @@ func (s *CourseModulesSvc) UpdateCourseModule(
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("UpdateCourseModule.fetch", err)...)
 		return nil, err
 	}
-	course, err := s.fetchCourse(ctx, existing.CourseID.String())
+	course, err := s.fetchCourse(ctx, existing.CourseID)
 	if err != nil {
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("UpdateCourseModule.fetchCourse", err)...)
 		return nil, err
@@ -213,7 +233,7 @@ func (s *CourseModulesSvc) DeleteCourseModule(
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("DeleteCourseModule.fetch", err)...)
 		return nil, err
 	}
-	course, err := s.fetchCourse(ctx, existing.CourseID.String())
+	course, err := s.fetchCourse(ctx, existing.CourseID)
 	if err != nil {
 		s.log.ErrorContext(ctx, "course modules service failed", svc.LogAttrs("DeleteCourseModule.fetchCourse", err)...)
 		return nil, err

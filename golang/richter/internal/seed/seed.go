@@ -6,19 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/kv"
 	"example.com/richter/internal/secure"
 	"example.com/richter/internal/svc"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/samber/do/v2"
 )
 
@@ -36,9 +44,12 @@ func init() {
 // ── service ───────────────────────────────────────────────────────────────────
 
 type SeederSvc struct {
-	pg    *db.PostgresSvc
-	log   *log.LogSvc
-	admin *cfg.AdminCfg
+	pg       *db.PostgresSvc
+	kv       *kv.KVSvc
+	log      *log.LogSvc
+	admin    *cfg.AdminCfg
+	s3client *minio.Client
+	s3cfg    *cfg.S3Cfg
 }
 
 func NewSeederSvc(i do.Injector) (s *SeederSvc, err error) {
@@ -47,6 +58,10 @@ func NewSeederSvc(i do.Injector) (s *SeederSvc, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc cannot be invoked: %w", err)
 	}
+	s.kv, err = do.Invoke[*kv.KVSvc](i)
+	if err != nil {
+		return nil, fmt.Errorf("KVSvc cannot be invoked: %w", err)
+	}
 	s.log, err = do.Invoke[*log.LogSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("LogSvc cannot be invoked: %w", err)
@@ -54,6 +69,17 @@ func NewSeederSvc(i do.Injector) (s *SeederSvc, err error) {
 	s.admin, err = do.Invoke[*cfg.AdminCfg](i)
 	if err != nil {
 		return nil, fmt.Errorf("AdminCfg cannot be invoked: %w", err)
+	}
+	s.s3cfg, err = do.Invoke[*cfg.S3Cfg](i)
+	if err != nil {
+		return nil, fmt.Errorf("S3Cfg cannot be invoked: %w", err)
+	}
+	s.s3client, err = minio.New(s.s3cfg.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(s.s3cfg.AccessKeyID, s.s3cfg.SecretAccessKey, ""),
+		Secure: s.s3cfg.UseSSL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("minio client init: %w", err)
 	}
 	return
 }
@@ -85,7 +111,9 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 		{"dev.organizations", func(ctx context.Context) error { return s.seedDevOrganizations(ctx, data.Organizations) }},
 		{"dev.org_members", func(ctx context.Context) error { return s.seedDevOrgMembers(ctx, data.OrgMembers) }},
 		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses) }},
+		{"dev.lesson_video_keys", func(ctx context.Context) error { return s.seedDevLessonVideoKeys(ctx, data.Courses) }},
 		{"dev.quiz_attempts", func(ctx context.Context) error { return s.seedDevQuizAttempts(ctx, data.QuizAttempts) }},
+		{"dev.videos", func(ctx context.Context) error { return s.seedDevVideos(ctx, data.Videos) }},
 	}
 	for _, st := range steps {
 		s.log.InfoContext(ctx, "seed: running seeder", "name", st.name)
@@ -133,6 +161,7 @@ type devSeedData struct {
 	OrgMembers    []devOrgMemberSpec
 	Courses       []devCourseSpec
 	QuizAttempts  []devQuizAttemptSpec
+	Videos        []devVideoSpec
 }
 
 type devUserSpec struct {
@@ -172,9 +201,11 @@ type devModuleSpec struct {
 }
 
 type devLessonSpec struct {
-	Title       string           `json:"title"`
-	Description string           `json:"description"`
-	Analysis    *devAnalysisSpec `json:"analysis,omitempty"`
+	Title        string           `json:"title"`
+	Description  string           `json:"description"`
+	Analysis     *devAnalysisSpec `json:"analysis,omitempty"`
+	VideoKey     string           `json:"video_key,omitempty"`
+	DurationSecs int32            `json:"duration_secs,omitempty"`
 }
 
 type devAnalysisSpec struct {
@@ -187,6 +218,12 @@ type devQuestionSpec struct {
 	Options       []string `json:"options"`
 	CorrectAnswer int32    `json:"correct_answer"`
 	Explanation   string   `json:"explanation"`
+	StartSeconds  float64  `json:"start_seconds"`
+}
+
+type devVideoSpec struct {
+	LocalPath string `json:"local_path"`
+	S3Key     string `json:"s3_key"`
 }
 
 type devQuizAttemptSpec struct {
@@ -235,6 +272,9 @@ func parseDevData() (devSeedData, error) {
 		data.Courses = append(data.Courses, courses...)
 	}
 	if err := readDevJSON("data/dev/quiz_attempts.json", &data.QuizAttempts); err != nil {
+		return devSeedData{}, err
+	}
+	if err := readDevJSON("data/dev/videos.json", &data.Videos); err != nil {
 		return devSeedData{}, err
 	}
 	return data, nil
@@ -439,6 +479,19 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 					return fmt.Errorf("create lesson %d %q in module %q: %w", j, l.Title, m.Title, err)
 				}
 
+				if l.VideoKey != "" {
+					_, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+						return q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
+							ID:              lesson.ID,
+							VideoStorageKey: pgtype.Text{String: l.VideoKey, Valid: true},
+							DurationSeconds: pgtype.Int4{Int32: l.DurationSecs, Valid: true},
+						})
+					})
+					if err != nil {
+						s.log.WarnContext(ctx, "seed: failed to set video for lesson", "lesson", l.Title, "err", err)
+					}
+				}
+
 				if l.Analysis != nil {
 					if err := s.seedLessonAnalysis(ctx, lesson.ID, l.Analysis); err != nil {
 						s.log.ErrorContext(ctx, "seed: failed to seed analysis", "lesson", l.Title, "err", err)
@@ -453,19 +506,107 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 	return nil
 }
 
-func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID, a *devAnalysisSpec) error {
-	analysis, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-		return q.UpsertLessonAnalysis(ctx, gen.UpsertLessonAnalysisParams{
-			LessonID:   lessonID,
-			Status:     gen.LessonAnalysisStatusDone,
-			Transcript: pgtype.Text{String: a.Transcript, Valid: true},
-			ErrorMsg:   pgtype.Text{},
+// seedDevLessonVideoKeys patches video_storage_key on existing lessons that have
+// a video_key in the seed data but none in the DB (idempotent: skips if already set).
+func (s *SeederSvc) seedDevLessonVideoKeys(ctx context.Context, courses []devCourseSpec) error {
+	for _, c := range courses {
+		org, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Organization, error) {
+			return q.GetOrganizationBySlug(ctx, c.OrgSlug)
 		})
-	})
-	if err != nil {
+		if err != nil {
+			return fmt.Errorf("lookup org %s: %w", c.OrgSlug, err)
+		}
+
+		dbCourses, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
+			return q.ListCoursesByOrg(ctx, gen.ListCoursesByOrgParams{OrganizationID: org.ID, Limit: 1000, Offset: 0})
+		})
+		if err != nil {
+			return fmt.Errorf("list courses for org %s: %w", c.OrgSlug, err)
+		}
+		var courseID pgtype.UUID
+		for _, dc := range dbCourses {
+			if dc.Title == c.Title {
+				courseID = dc.ID
+				break
+			}
+		}
+		if !courseID.Valid {
+			continue
+		}
+
+		dbModules, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.CourseModule, error) {
+			return q.ListCourseModules(ctx, gen.ListCourseModulesParams{CourseID: courseID, Limit: 100, Offset: 0})
+		})
+		if err != nil {
+			return fmt.Errorf("list modules for course %q: %w", c.Title, err)
+		}
+
+		for _, m := range c.Modules {
+			var moduleID pgtype.UUID
+			for _, dm := range dbModules {
+				if dm.Title == m.Title {
+					moduleID = dm.ID
+					break
+				}
+			}
+			if !moduleID.Valid {
+				continue
+			}
+
+			dbLessons, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Lesson, error) {
+				return q.ListLessons(ctx, gen.ListLessonsParams{ModuleID: moduleID, Limit: 100, Offset: 0})
+			})
+			if err != nil {
+				return fmt.Errorf("list lessons for module %q: %w", m.Title, err)
+			}
+
+			for _, l := range m.Lessons {
+				if l.VideoKey == "" {
+					continue
+				}
+				for _, dl := range dbLessons {
+					if dl.Title != l.Title {
+						continue
+					}
+					if dl.VideoStorageKey.Valid {
+						break
+					}
+					_, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+						return q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
+							ID:              dl.ID,
+							VideoStorageKey: pgtype.Text{String: l.VideoKey, Valid: true},
+							DurationSeconds: pgtype.Int4{Int32: l.DurationSecs, Valid: true},
+						})
+					})
+					if err != nil {
+						s.log.WarnContext(ctx, "seed: failed to set video key for lesson", "lesson", l.Title, "err", err)
+					} else {
+						s.log.InfoContext(ctx, "seed: video key set for lesson", "lesson", l.Title, "key", l.VideoKey)
+					}
+					break
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID, a *devAnalysisSpec) error {
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+			LessonID: lessonID,
+			Status:   gen.LessonAnalysisStatusDone,
+			ErrorMsg: pgtype.Text{},
+		})
+		return err
+	}); err != nil {
 		return fmt.Errorf("upsert analysis: %w", err)
 	}
-	_ = analysis
+	if a.Transcript != "" {
+		if err := s.kv.Set("lesson", tuple.Tuple{lessonID.String(), "transcript"}, []byte(a.Transcript)); err != nil {
+			s.log.WarnContext(ctx, "seed: FDB transcript write failed", "lesson_id", lessonID.String(), "err", err)
+		}
+	}
 
 	// Delete old questions, then insert fresh ones
 	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
@@ -475,7 +616,10 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 	}
 
 	for i, qspec := range a.Questions {
-		optJSON, _ := json.Marshal(qspec.Options)
+		optJSON, err := json.Marshal(qspec.Options)
+		if err != nil {
+			return fmt.Errorf("marshal options for question %d: %w", i, err)
+		}
 		if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
 			return q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
 				LessonID:      lessonID,
@@ -484,6 +628,7 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 				CorrectAnswer: qspec.CorrectAnswer,
 				Explanation:   pgtype.Text{String: qspec.Explanation, Valid: qspec.Explanation != ""},
 				OrderIndex:    int32(i),
+				StartSeconds:  qspec.StartSeconds,
 			})
 		}); err != nil {
 			return fmt.Errorf("create question %d: %w", i, err)
@@ -569,7 +714,11 @@ func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizA
 
 		// Load questions to compute score
 		questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
-			return q.ListLessonQuestions(ctx, lessonID)
+			return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{
+				LessonID: lessonID,
+				Limit:    100,
+				Offset:   0,
+			})
 		})
 		if err != nil || len(questions) == 0 {
 			s.log.InfoContext(ctx, "seed: quiz attempt skipped — no questions for lesson", "lesson", a.LessonTitle)
@@ -584,7 +733,10 @@ func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizA
 			}
 		}
 
-		answersJSON, _ := json.Marshal(a.Answers)
+		answersJSON, err := json.Marshal(a.Answers)
+		if err != nil {
+			return fmt.Errorf("marshal answers for attempt %s/%s: %w", a.UserEmail, a.LessonTitle, err)
+		}
 		_, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.QuizAttempt, error) {
 			return q.UpsertQuizAttempt(ctx, gen.UpsertQuizAttemptParams{
 				LessonID: lessonID,
@@ -604,4 +756,84 @@ func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizA
 
 func devDescToPgText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: s != ""}
+}
+
+// ── video seeder ──────────────────────────────────────────────────────────────
+
+func (s *SeederSvc) ensureBucket(ctx context.Context) error {
+	exists, err := s.s3client.BucketExists(ctx, s.s3cfg.Bucket)
+	if err != nil {
+		return fmt.Errorf("check bucket %q: %w", s.s3cfg.Bucket, err)
+	}
+	if !exists {
+		if err := s.s3client.MakeBucket(ctx, s.s3cfg.Bucket, minio.MakeBucketOptions{}); err != nil {
+			return fmt.Errorf("create bucket %q: %w", s.s3cfg.Bucket, err)
+		}
+		s.log.InfoContext(ctx, "seed: bucket created", "bucket", s.s3cfg.Bucket)
+	}
+	return nil
+}
+
+func (s *SeederSvc) seedDevVideos(ctx context.Context, videos []devVideoSpec) error {
+	if err := s.ensureBucket(ctx); err != nil {
+		return err
+	}
+	for _, v := range videos {
+		if _, err := s.s3client.StatObject(ctx, s.s3cfg.Bucket, v.S3Key, minio.StatObjectOptions{}); err == nil {
+			s.log.InfoContext(ctx, "seed: video already in storage, skipping", "key", v.S3Key)
+			continue
+		}
+		s.log.InfoContext(ctx, "seed: uploading video", "key", v.S3Key, "file", v.LocalPath)
+		if err := s.uploadFromFile(ctx, v.S3Key, v.LocalPath); err != nil {
+			s.log.WarnContext(ctx, "seed: video upload failed, continuing", "key", v.S3Key, "err", err)
+			continue
+		}
+		s.log.InfoContext(ctx, "seed: video uploaded", "key", v.S3Key)
+	}
+	return nil
+}
+
+func (s *SeederSvc) uploadFromFile(ctx context.Context, s3Key, localPath string) error {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", localPath, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", localPath, err)
+	}
+
+	_, putErr := s.s3client.PutObject(ctx, s.s3cfg.Bucket, s3Key, f, info.Size(), minio.PutObjectOptions{
+		ContentType: "video/mp4",
+	})
+	if putErr == nil {
+		return nil
+	}
+
+	// Fall back to presigned PUT — works for buckets that reject header-based auth
+	// (e.g. SeaweedFS buckets configured without IAM accept presigned requests).
+	presignURL, err := s.s3client.PresignedPutObject(ctx, s.s3cfg.Bucket, s3Key, 15*time.Minute)
+	if err != nil {
+		return fmt.Errorf("direct upload failed (%v); presign also failed: %w", putErr, err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, presignURL.String(), f)
+	if err != nil {
+		return fmt.Errorf("build presigned PUT request: %w", err)
+	}
+	req.ContentLength = info.Size()
+	req.Header.Set("Content-Type", "video/mp4")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("presigned PUT: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("presigned PUT: status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }

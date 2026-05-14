@@ -1,47 +1,1237 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import React, { useState, useRef, useEffect, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { analyzeLesson } from "@/app/actions/ai";
-import { SparklesIcon, Loader2Icon } from "lucide-react";
+import {
+  SparklesIcon, Loader2Icon, CheckIcon, XIcon,
+  ChevronRightIcon, ChevronDownIcon, RefreshCwIcon, MergeIcon, Trash2Icon,
+  PencilIcon, LockIcon, ScissorsIcon, ArrowUpIcon, ArrowDownIcon, PlayIcon,
+} from "lucide-react";
+import {
+  AnalysisProgressStep, AnalysisStatus, GenerateQuestionsStep,
+} from "buf/gen/richter/v1/ai_pb";
+import type { TranscriptChunk, TranscriptSegment, LessonQuestion } from "buf/gen/richter/v1/ai_pb";
+import {
+  getLessonAnalysis, listLessonTranscriptChunks, updateChunkConfig,
+  updateTranscriptSegment, mergeChunks, deleteChunk, splitChunk, adjustChunkBoundary,
+} from "@/app/actions/ai";
+import { LessonQuestionsEditor } from "./lesson-questions-editor";
 
-interface Props {
-  lessonId: string;
-  slug: string;
-  courseId: string;
+// ── Step progress helpers ─────────────────────────────────────────────────────
+
+const EXTRACT_STEPS = [
+  { step: AnalysisProgressStep.DOWNLOADING, label: "Tải video từ storage" },
+  { step: AnalysisProgressStep.UPLOADING, label: "Gửi lên Gemini" },
+  { step: AnalysisProgressStep.ANALYZING, label: "Phiên âm & phân đoạn nội dung" },
+  { step: AnalysisProgressStep.SAVING, label: "Lưu kết quả" },
+] as const;
+
+const CHUNK_STEPS = [
+  { step: AnalysisProgressStep.ANALYZING, label: "Phân tích nội dung với Gemini" },
+  { step: AnalysisProgressStep.SAVING, label: "Lưu các đoạn" },
+] as const;
+
+type StepState = "pending" | "active" | "done" | "error";
+
+type StreamRunState =
+  | { phase: "idle" }
+  | { phase: "syncing" }
+  | { phase: "running"; currentStep: AnalysisProgressStep | null }
+  | { phase: "done" }
+  | { phase: "error"; failedAt: AnalysisProgressStep | null; message: string };
+
+function getStepState(step: AnalysisProgressStep, run: StreamRunState): StepState {
+  if (run.phase === "idle" || run.phase === "syncing") return "pending";
+  if (run.phase === "done") return "done";
+  if (run.phase === "error") {
+    if (run.failedAt === null || step < run.failedAt) return "done";
+    if (step === run.failedAt) return "error";
+    return "pending";
+  }
+  const cur = run.currentStep;
+  if (cur === null) return "pending";
+  if (step < cur) return "done";
+  if (step === cur) return "active";
+  return "pending";
 }
 
-export function AnalyzeButton({ lessonId, slug, courseId }: Props) {
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+type GenRunState =
+  | { phase: "idle" }
+  | { phase: "running"; message: string; chunkIndex: number; totalChunks: number }
+  | { phase: "done" }
+  | { phase: "error"; message: string };
 
-  function handleClick() {
-    setError(null);
-    startTransition(async () => {
-      const result = await analyzeLesson(lessonId, slug, courseId);
-      if (result?.error) {
-        setError(result.error);
+// ── Tab types ─────────────────────────────────────────────────────────────────
+
+type TabKey = "phienAm" | "doanNoidung" | "cauHoi";
+
+// ── Pipeline step wrapper ─────────────────────────────────────────────────────
+
+type PipelineStepStatus = "locked" | "available" | "active" | "done" | "error";
+
+function PipelineStep({
+  number,
+  title,
+  pipelineStatus = "available",
+  optional = false,
+  collapsible = false,
+  defaultOpen = true,
+  isLast = false,
+  children,
+}: {
+  number: number;
+  title: string;
+  pipelineStatus?: PipelineStepStatus;
+  optional?: boolean;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  isLast?: boolean;
+  children?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const locked = pipelineStatus === "locked";
+
+  const badgeClass = {
+    locked: "bg-muted text-muted-foreground border-muted-foreground/30",
+    available: "border-border text-foreground bg-background",
+    active: "border-blue-500 bg-blue-500 text-white",
+    done: "border-green-500 bg-green-500 text-white",
+    error: "border-destructive bg-destructive text-white",
+  }[pipelineStatus];
+
+  const titleClass = locked ? "text-muted-foreground" : "text-foreground";
+
+  return (
+    <div className="flex gap-3">
+      {/* number badge + connector line */}
+      <div className="flex flex-col items-center shrink-0">
+        <div className={`size-7 rounded-full border-2 flex items-center justify-center text-xs font-semibold ${badgeClass}`}>
+          {pipelineStatus === "done" ? <CheckIcon className="size-3.5" /> :
+           pipelineStatus === "error" ? <XIcon className="size-3.5" /> :
+           pipelineStatus === "active" ? <Loader2Icon className="size-3.5 animate-spin" /> :
+           pipelineStatus === "locked" ? <LockIcon className="size-3" /> :
+           number}
+        </div>
+        {!isLast && <div className="flex-1 w-px bg-border mt-1 mb-0" />}
+      </div>
+
+      {/* title + content */}
+      <div className={`flex flex-col gap-2 ${isLast ? "pb-1" : "pb-5"} flex-1 min-w-0`}>
+        <div className="flex items-center gap-1.5 min-h-[28px]">
+          <span className={`text-sm font-medium ${titleClass}`}>{title}</span>
+          {optional && (
+            <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px">
+              Tuỳ chọn
+            </span>
+          )}
+          {collapsible && !locked && (
+            <button
+              type="button"
+              className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground"
+              onClick={() => setOpen(o => !o)}
+              aria-label={open ? "Thu gọn" : "Mở rộng"}
+            >
+              {open
+                ? <ChevronDownIcon className="size-3.5" />
+                : <ChevronRightIcon className="size-3.5" />}
+            </button>
+          )}
+        </div>
+
+        {!locked && (!collapsible || open) && children}
+      </div>
+    </div>
+  );
+}
+
+// ── Shared sub-components ─────────────────────────────────────────────────────
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatStepDuration(ms: number) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+}
+
+const stepColors: Record<StepState, string> = {
+  done: "bg-green-500/20 text-green-600 dark:text-green-400",
+  active: "bg-blue-500/20 text-blue-600 dark:text-blue-400",
+  error: "bg-destructive/20 text-destructive",
+  pending: "bg-muted text-muted-foreground",
+};
+const labelColors: Record<StepState, string> = {
+  done: "text-green-700 dark:text-green-400",
+  active: "text-foreground font-medium",
+  error: "text-destructive",
+  pending: "text-muted-foreground",
+};
+
+function ProgressStrip({
+  steps,
+  runState,
+  stepTimings,
+  now,
+}: {
+  steps: readonly { step: AnalysisProgressStep; label: string }[];
+  runState: StreamRunState;
+  stepTimings: Partial<Record<number, { start: number; end?: number }>>;
+  now: number;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 ml-0.5" data-testid="stream-progress">
+      {steps.map(({ step, label }) => {
+        const state = getStepState(step, runState);
+        const timing = stepTimings[step];
+        let durationLabel: string | null = null;
+        if (timing) {
+          if (timing.end) durationLabel = formatStepDuration(timing.end - timing.start);
+          else if (state === "active") durationLabel = formatStepDuration(now - timing.start);
+        }
+        return (
+          <div key={step} className="flex items-center gap-2 text-xs">
+            <span className={`size-4 flex items-center justify-center rounded-full shrink-0 ${stepColors[state]}`}>
+              {state === "done" ? <CheckIcon className="size-2.5" /> :
+               state === "active" ? <Loader2Icon className="size-2.5 animate-spin" /> :
+               state === "error" ? <XIcon className="size-2.5" /> :
+               <span className="size-1.5 rounded-full bg-current inline-block" />}
+            </span>
+            <span className={labelColors[state]}>{label}</span>
+            {durationLabel && (
+              <span className="ml-auto tabular-nums text-muted-foreground">{durationLabel}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Segment editor row ────────────────────────────────────────────────────────
+
+interface SegmentRowProps {
+  segment: TranscriptSegment;
+  index: number;
+  lessonId: string;
+  onUpdated: (index: number, text: string) => void;
+  onSaved?: () => void;
+  disabled: boolean;
+}
+
+function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disabled }: SegmentRowProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(segment.text);
+  const [saving, startSaving] = useTransition();
+
+  function handleSave() {
+    if (draft.trim() === segment.text) { setEditing(false); return; }
+    startSaving(async () => {
+      const res = await updateTranscriptSegment(lessonId, index, draft.trim());
+      if (!res.error) {
+        onUpdated(index, draft.trim());
+        setEditing(false);
+        onSaved?.();
       }
     });
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <Button
-        variant="default"
-        size="sm"
-        disabled={isPending}
-        onClick={handleClick}
-        className="gap-2 self-start"
-      >
-        {isPending ? (
-          <Loader2Icon className="size-4 animate-spin" />
+    <div className="flex gap-2 items-start rounded-md border border-border bg-muted/30 px-2 py-1.5 text-xs">
+      <span className="text-muted-foreground shrink-0 tabular-nums pt-0.5">
+        {formatTime(segment.startSeconds)}
+      </span>
+      <div className="flex-1 min-w-0">
+        {editing ? (
+          <textarea
+            autoFocus
+            className="w-full resize-none rounded border border-input bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none"
+            rows={3}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { setDraft(segment.text); setEditing(false); }
+            }}
+          />
         ) : (
-          <SparklesIcon className="size-4" />
+          <p className="text-foreground leading-relaxed">{segment.text}</p>
         )}
-        {isPending ? "Đang phân tích…" : "Phân tích video"}
-      </Button>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      </div>
+      {!disabled && (
+        editing ? (
+          <Button
+            variant="ghost" size="icon" className="size-6 shrink-0"
+            disabled={saving} onClick={handleSave} title="Lưu"
+          >
+            {saving ? <Loader2Icon className="size-3 animate-spin" /> : <CheckIcon className="size-3" />}
+          </Button>
+        ) : (
+          <Button
+            variant="ghost" size="icon" className="size-6 shrink-0"
+            onClick={() => setEditing(true)} title="Chỉnh sửa"
+          >
+            <PencilIcon className="size-3" />
+          </Button>
+        )
+      )}
+    </div>
+  );
+}
+
+// ── Chunk helpers ─────────────────────────────────────────────────────────────
+
+function getChunkSegments(chunk: TranscriptChunk, allSegments: TranscriptSegment[]): TranscriptSegment[] {
+  return allSegments.filter(s =>
+    s.startSeconds >= chunk.startSeconds &&
+    s.startSeconds < chunk.endSeconds
+  );
+}
+
+function computeCoherence(segs: TranscriptSegment[]): number {
+  if (segs.length === 0) return 0;
+  if (segs.length === 1) return 1;
+  const allWords = segs.flatMap(s => (s.text.toLowerCase().match(/\b[a-zA-ZÀ-ɏ]{4,}\b/g) ?? []));
+  if (allWords.length === 0) return 0;
+  const uniqueWords = new Set(allWords);
+  return 1 - uniqueWords.size / allWords.length;
+}
+
+// ── Coherence badge ───────────────────────────────────────────────────────────
+
+function CoherenceBadge({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const color = pct >= 70
+    ? "text-green-700 dark:text-green-400 border-green-300 dark:border-green-800"
+    : pct >= 40
+    ? "text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-800"
+    : "text-red-700 dark:text-red-400 border-red-300 dark:border-red-800";
+  return (
+    <span className={`text-xs border rounded px-1.5 py-px font-mono ${color}`} title="Mức độ gắn kết nội dung">
+      {pct}%
+    </span>
+  );
+}
+
+// ── Chunk editor ──────────────────────────────────────────────────────────────
+
+interface ChunkEditorProps {
+  chunk: TranscriptChunk;
+  chunkSegments: TranscriptSegment[];
+  prevChunkId: string | null;
+  nextChunkId: string | null;
+  onMergeWithPrev: (id: string) => void;
+  onMergeWithNext: (id: string) => void;
+  onDelete: (id: string) => void;
+  onSplit: (id: string, splitAtSeconds: number) => void;
+  onMoveSegment: (prevChunkId: string, nextChunkId: string, newBoundarySeconds: number, triggerChunkId: string) => void;
+  isMerging: boolean;
+  isDeleting: boolean;
+  isSplitting: boolean;
+  isMoving: boolean;
+  disabled: boolean;
+}
+
+function ChunkEditor({
+  chunk, chunkSegments, prevChunkId, nextChunkId,
+  onMergeWithPrev, onMergeWithNext, onDelete, onSplit, onMoveSegment,
+  isMerging, isDeleting, isSplitting, isMoving, disabled,
+}: ChunkEditorProps) {
+  const busy = disabled || isMerging || isDeleting || isSplitting || isMoving;
+  const coherence = computeCoherence(chunkSegments);
+  return (
+    <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/20 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-muted/40">
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm truncate">{chunk.summary}</p>
+          <p className="text-xs text-muted-foreground">{formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}</p>
+        </div>
+        {chunkSegments.length > 0 && <CoherenceBadge score={coherence} />}
+        <div className="flex items-center gap-1 shrink-0">
+          {prevChunkId && (
+            <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs h-6"
+              disabled={busy} onClick={() => onMergeWithPrev(chunk.id)} title="Gộp với đoạn trước">
+              {isMerging ? <Loader2Icon className="size-3 animate-spin" /> : <MergeIcon className="size-3" />}
+              Gộp lên
+            </Button>
+          )}
+          {nextChunkId && (
+            <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs h-6"
+              disabled={busy} onClick={() => onMergeWithNext(chunk.id)} title="Gộp với đoạn sau">
+              {isMerging ? <Loader2Icon className="size-3 animate-spin" /> : <MergeIcon className="size-3" />}
+              Gộp xuống
+            </Button>
+          )}
+          <Button variant="ghost" size="sm"
+            className="gap-1 px-2 text-xs h-6 text-destructive hover:text-destructive"
+            disabled={busy} onClick={() => onDelete(chunk.id)}>
+            {isDeleting ? <Loader2Icon className="size-3 animate-spin" /> : <Trash2Icon className="size-3" />}
+            Xoá
+          </Button>
+        </div>
+      </div>
+      {chunkSegments.length > 0 && (
+        <div className="flex flex-col divide-y divide-border/50 px-1 pb-1">
+          {chunkSegments.map((seg, i) => {
+            const isFirstSeg = i === 0;
+            const isLastSeg = i === chunkSegments.length - 1;
+            const nextSegStart = !isLastSeg ? chunkSegments[i + 1].startSeconds : null;
+            return (
+              <div key={seg.startSeconds} className="flex items-start gap-2 px-2 py-1.5 text-xs group">
+                <span className="text-muted-foreground tabular-nums shrink-0 pt-0.5">{formatTime(seg.startSeconds)}</span>
+                <p className="flex-1 text-foreground leading-relaxed">{seg.text}</p>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                  {isFirstSeg && prevChunkId && !isLastSeg && (
+                    <Button variant="ghost" size="sm"
+                      className="px-1 text-xs h-5"
+                      disabled={busy}
+                      onClick={() => onMoveSegment(prevChunkId, chunk.id, nextSegStart ?? chunk.endSeconds, chunk.id)}
+                      title="Chuyển lên đoạn trước">
+                      {isMoving ? <Loader2Icon className="size-3 animate-spin" /> : <ArrowUpIcon className="size-3" />}
+                    </Button>
+                  )}
+                  {isLastSeg && nextChunkId && (
+                    <Button variant="ghost" size="sm"
+                      className="px-1 text-xs h-5"
+                      disabled={busy}
+                      onClick={() => onMoveSegment(chunk.id, nextChunkId, seg.startSeconds, chunk.id)}
+                      title="Chuyển xuống đoạn sau">
+                      {isMoving ? <Loader2Icon className="size-3 animate-spin" /> : <ArrowDownIcon className="size-3" />}
+                    </Button>
+                  )}
+                  {!isFirstSeg && (
+                    <Button variant="ghost" size="sm"
+                      className="gap-1 px-1.5 text-xs h-5"
+                      disabled={busy} onClick={() => onSplit(chunk.id, seg.startSeconds)}
+                      title="Tách chunk tại đây">
+                      {isSplitting ? <Loader2Icon className="size-3 animate-spin" /> : <ScissorsIcon className="size-3" />}
+                      Tách
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Question config row ───────────────────────────────────────────────────────
+
+function QuestionConfigRow({ chunk, disabled, coherence }: { chunk: TranscriptChunk; disabled: boolean; coherence?: number }) {
+  const [count, setCount] = useState(chunk.questionCountConfig || 1);
+  const [, startSaving] = useTransition();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setCount(chunk.questionCountConfig || 1);
+  }, [chunk.id, chunk.questionCountConfig]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  function handleChange(val: number) {
+    const clamped = Math.min(20, Math.max(1, val));
+    setCount(clamped);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      startSaving(async () => { await updateChunkConfig(chunk.id, clamped); });
+    }, 600);
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+      <div className="flex-1 min-w-0">
+        <p className="font-medium truncate">{chunk.summary}</p>
+        <p className="text-muted-foreground">{formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}</p>
+      </div>
+      {coherence !== undefined && <CoherenceBadge score={coherence} />}
+      <label className="flex items-center gap-1.5 shrink-0 text-muted-foreground">
+        Số câu hỏi:
+        <input
+          type="number" min={1} max={20} value={count}
+          disabled={disabled}
+          onChange={(e) => handleChange(parseInt(e.target.value, 10) || 1)}
+          className="w-12 rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground text-center disabled:opacity-50"
+        />
+      </label>
+    </div>
+  );
+}
+
+// ── Tab bar ───────────────────────────────────────────────────────────────────
+
+function TabBar({
+  active,
+  onChange,
+  tabs,
+}: {
+  active: TabKey;
+  onChange: (t: TabKey) => void;
+  tabs: { key: TabKey; label: string; dot?: "done" | "active" | "error" }[];
+}) {
+  return (
+    <div className="flex border-b border-border mb-4">
+      {tabs.map(({ key, label, dot }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onChange(key)}
+          className={[
+            "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+            active === key
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          ].join(" ")}
+        >
+          {label}
+          {dot === "done" && (
+            <span className="size-1.5 rounded-full bg-green-500 shrink-0" />
+          )}
+          {dot === "active" && (
+            <Loader2Icon className="size-3 shrink-0 animate-spin text-blue-500" />
+          )}
+          {dot === "error" && (
+            <span className="size-1.5 rounded-full bg-destructive shrink-0" />
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+interface Props {
+  lessonId: string;
+  initialChunks?: TranscriptChunk[];
+  initialSegments?: TranscriptSegment[];
+  initialStatus?: AnalysisStatus;
+  initialQuestions?: LessonQuestion[];
+}
+
+export function AnalyzeButton({
+  lessonId,
+  initialChunks = [],
+  initialSegments = [],
+  initialStatus,
+  initialQuestions = [],
+}: Props) {
+  const router = useRouter();
+  const esRef = useRef<EventSource | null>(null);
+
+  const [activeTab, setActiveTab] = useState<TabKey>("phienAm");
+  const [status, setStatus] = useState<AnalysisStatus | undefined>(initialStatus);
+  const [extractState, setExtractState] = useState<StreamRunState>(() => {
+    if (initialStatus !== AnalysisStatus.PROCESSING) return { phase: "idle" };
+    return initialSegments.length > 0 ? { phase: "done" } : { phase: "syncing" };
+  });
+  const [chunkState, setChunkState] = useState<StreamRunState>(() => {
+    if (initialStatus === AnalysisStatus.PROCESSING && initialSegments.length > 0 && initialChunks.length === 0) {
+      return { phase: "syncing" };
+    }
+    return { phase: "idle" };
+  });
+  const [extractTimings, setExtractTimings] = useState<Partial<Record<number, { start: number; end?: number }>>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const [segments, setSegments] = useState<TranscriptSegment[]>(initialSegments);
+  const [chunkTimings, setChunkTimings] = useState<Partial<Record<number, { start: number; end?: number }>>>({});
+  const [chunks, setChunks] = useState<TranscriptChunk[]>(initialChunks);
+  const [mutatingChunkId, setMutatingChunkId] = useState<string | null>(null);
+  const [mutatingOp, setMutatingOp] = useState<"merge" | "delete" | "split" | "move" | null>(null);
+  const [genState, setGenState] = useState<GenRunState>({ phase: "idle" });
+  const [isReloadingChunks, setIsReloadingChunks] = useState(false);
+  const [genWarnings, setGenWarnings] = useState<string[]>([]);
+  const [mutatingError, setMutatingError] = useState<string | null>(null);
+  const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const [confirmReExtract, setConfirmReExtract] = useState(false);
+  const [questions, setQuestions] = useState<LessonQuestion[]>(initialQuestions);
+  const [questionsGenKey, setQuestionsGenKey] = useState(0);
+  const autoRunRef = useRef(false);
+  // Tracks whether the pending confirmation should auto-run generate after extract.
+  const confirmAutoRunRef = useRef(true);
+
+  useEffect(() => { return () => { esRef.current?.close(); }; }, []);
+
+  useEffect(() => {
+    const isRunning = extractState.phase === "running" || chunkState.phase === "running";
+    if (!isRunning) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [extractState.phase, chunkState.phase]);
+
+  const isSyncingExtract = extractState.phase === "syncing";
+  const isSyncingChunk = chunkState.phase === "syncing";
+  useEffect(() => {
+    if (!isSyncingExtract && !isSyncingChunk) return;
+    const id = setInterval(async () => {
+      try {
+        const { analysis, chunks: freshChunks } = await getLessonAnalysis(lessonId);
+        if (!analysis || analysis.status === AnalysisStatus.PROCESSING) return;
+        clearInterval(id);
+        if (
+          analysis.status === AnalysisStatus.TRANSCRIPT_EXTRACTED ||
+          analysis.status === AnalysisStatus.CHUNKS_READY ||
+          analysis.status === AnalysisStatus.DONE
+        ) {
+          setChunks(freshChunks);
+          setSegments(analysis.transcriptSegments);
+          setStatus(analysis.status);
+          if (isSyncingExtract) setExtractState({ phase: "done" });
+          if (isSyncingChunk) setChunkState({ phase: "done" });
+          router.refresh();
+        } else if (analysis.status === AnalysisStatus.ERROR) {
+          const msg = analysis.errorMsg || "Thao tác thất bại.";
+          if (isSyncingExtract) setExtractState({ phase: "error", failedAt: null, message: msg });
+          if (isSyncingChunk) setChunkState({ phase: "error", failedAt: null, message: msg });
+        } else {
+          if (isSyncingExtract) setExtractState({ phase: "idle" });
+          if (isSyncingChunk) setChunkState({ phase: "idle" });
+        }
+      } catch {
+        // network error — keep polling
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isSyncingExtract, isSyncingChunk, lessonId, router]);
+
+  // ── SSE helper ──────────────────────────────────────────────────────────────
+
+  function startStream(
+    url: string,
+    setState: React.Dispatch<React.SetStateAction<StreamRunState>>,
+    setTimings: (fn: (p: Partial<Record<number, { start: number; end?: number }>>) => Partial<Record<number, { start: number; end?: number }>>) => void,
+    onDone: () => void,
+  ) {
+    esRef.current?.close();
+    setState({ phase: "running", currentStep: null });
+    setTimings(() => ({}));
+    setNow(Date.now());
+
+    const es = new EventSource(url);
+    esRef.current = es;
+    let lastStep: AnalysisProgressStep | null = null;
+
+    es.onmessage = (e: MessageEvent<string>) => {
+      const data = JSON.parse(e.data) as { step: number; message: string };
+      if (data.step === AnalysisProgressStep.ERROR) {
+        if (lastStep !== null) {
+          const t = Date.now();
+          setTimings(prev => ({ ...prev, [lastStep!]: { ...prev[lastStep!]!, end: t } }));
+        }
+        setState({ phase: "error", failedAt: lastStep, message: data.message || "Thao tác thất bại." });
+        es.close();
+        return;
+      }
+      if (data.step === AnalysisProgressStep.DONE) {
+        if (lastStep !== null) {
+          const t = Date.now();
+          setTimings(prev => ({ ...prev, [lastStep!]: { ...prev[lastStep!]!, end: t } }));
+        }
+        setState({ phase: "done" });
+        es.close();
+        onDone();
+        return;
+      }
+      const newStep = data.step as AnalysisProgressStep;
+      if (newStep !== lastStep) {
+        const t = Date.now();
+        setTimings(prev => {
+          const updated = { ...prev };
+          if (lastStep !== null && updated[lastStep] && !updated[lastStep]!.end) {
+            updated[lastStep] = { ...updated[lastStep]!, end: t };
+          }
+          if (!updated[newStep]) updated[newStep] = { start: t };
+          return updated;
+        });
+      }
+      lastStep = newStep;
+      setState({ phase: "running", currentStep: newStep });
+    };
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CONNECTING) return;
+      setState(prev =>
+        prev.phase === "running"
+          ? { phase: "error", failedAt: prev.currentStep, message: "Mất kết nối với máy chủ." }
+          : prev,
+      );
+      es.close();
+    };
+  }
+
+  // ── Extract ─────────────────────────────────────────────────────────────────
+
+  async function reloadAfterExtract() {
+    const { analysis, chunks: freshChunks } = await getLessonAnalysis(lessonId);
+    if (analysis) {
+      setSegments(analysis.transcriptSegments);
+      setChunks(freshChunks);
+      setStatus(analysis.status);
+    }
+    setChunkState({ phase: "idle" });
+    setChunkTimings({});
+    setGenState({ phase: "idle" });
+    setGenWarnings([]);
+    router.refresh();
+
+    if (autoRunRef.current) {
+      if (freshChunks.length > 0) {
+        handleGenerate(false);
+      } else {
+        autoRunRef.current = false;
+        setIsAutoRunning(false);
+      }
+    }
+  }
+
+  function startExtract(withAutoRun: boolean) {
+    autoRunRef.current = withAutoRun;
+    setIsAutoRunning(withAutoRun);
+    setConfirmReExtract(false);
+    setChunkState({ phase: "idle" });
+    setChunkTimings({});
+    setGenState({ phase: "idle" });
+    setGenWarnings([]);
+    startStream(
+      `/api/ai/extract-transcript?lessonId=${encodeURIComponent(lessonId)}`,
+      setExtractState,
+      setExtractTimings,
+      reloadAfterExtract,
+    );
+  }
+
+  // ── Re-chunk ─────────────────────────────────────────────────────────────────
+
+  async function reloadChunks() {
+    setIsReloadingChunks(true);
+    try {
+      const fresh = await listLessonTranscriptChunks(lessonId);
+      setChunks(fresh);
+      setStatus(AnalysisStatus.CHUNKS_READY);
+    } finally {
+      setIsReloadingChunks(false);
+    }
+  }
+
+  function handleChunk() {
+    if (chunkState.phase === "running") return;
+    setGenState({ phase: "idle" });
+    setGenWarnings([]);
+    startStream(
+      `/api/ai/chunk-transcript?lessonId=${encodeURIComponent(lessonId)}`,
+      setChunkState,
+      setChunkTimings,
+      reloadChunks,
+    );
+  }
+
+  // ── Chunk mutations ──────────────────────────────────────────────────────────
+
+  async function handleMergeWithPrev(chunkId: string) {
+    const idx = chunks.findIndex(c => c.id === chunkId);
+    if (idx <= 0) return;
+    setMutatingChunkId(chunkId);
+    setMutatingOp("merge");
+    setMutatingError(null);
+    try {
+      const res = await mergeChunks(chunks[idx - 1].id, chunkId);
+      if (!res.error && res.chunk) {
+        const fresh = await listLessonTranscriptChunks(lessonId);
+        setChunks(fresh);
+      } else if (res.error) {
+        setMutatingError(res.error);
+      }
+    } finally {
+      setMutatingChunkId(null);
+      setMutatingOp(null);
+    }
+  }
+
+  async function handleMergeWithNext(chunkId: string) {
+    const idx = chunks.findIndex(c => c.id === chunkId);
+    if (idx < 0 || idx >= chunks.length - 1) return;
+    setMutatingChunkId(chunkId);
+    setMutatingOp("merge");
+    setMutatingError(null);
+    try {
+      const res = await mergeChunks(chunkId, chunks[idx + 1].id);
+      if (!res.error && res.chunk) {
+        const fresh = await listLessonTranscriptChunks(lessonId);
+        setChunks(fresh);
+      } else if (res.error) {
+        setMutatingError(res.error);
+      }
+    } finally {
+      setMutatingChunkId(null);
+      setMutatingOp(null);
+    }
+  }
+
+  async function handleMoveSegment(prevChunkId: string, nextChunkId: string, newBoundarySeconds: number, triggerChunkId: string) {
+    setMutatingChunkId(triggerChunkId);
+    setMutatingOp("move");
+    setMutatingError(null);
+    try {
+      const res = await adjustChunkBoundary(prevChunkId, nextChunkId, newBoundarySeconds);
+      if (!res.error) {
+        const fresh = await listLessonTranscriptChunks(lessonId);
+        setChunks(fresh);
+      } else {
+        setMutatingError(res.error);
+      }
+    } finally {
+      setMutatingChunkId(null);
+      setMutatingOp(null);
+    }
+  }
+
+  async function handleDeleteChunk(chunkId: string) {
+    setMutatingChunkId(chunkId);
+    setMutatingOp("delete");
+    setMutatingError(null);
+    try {
+      const res = await deleteChunk(chunkId);
+      if (!res.error) {
+        const fresh = await listLessonTranscriptChunks(lessonId);
+        setChunks(fresh);
+      } else {
+        setMutatingError(res.error);
+      }
+    } finally {
+      setMutatingChunkId(null);
+      setMutatingOp(null);
+    }
+  }
+
+  async function handleSplitChunk(chunkId: string, splitAtSeconds: number) {
+    setMutatingChunkId(chunkId);
+    setMutatingOp("split");
+    setMutatingError(null);
+    try {
+      const res = await splitChunk(chunkId, splitAtSeconds);
+      if (!res.error) {
+        const fresh = await listLessonTranscriptChunks(lessonId);
+        setChunks(fresh);
+      } else {
+        setMutatingError(res.error);
+      }
+    } finally {
+      setMutatingChunkId(null);
+      setMutatingOp(null);
+    }
+  }
+
+  // ── Generate questions ───────────────────────────────────────────────────────
+
+  async function reloadAfterGenerate() {
+    const { analysis } = await getLessonAnalysis(lessonId);
+    if (analysis?.questions) {
+      setQuestions(analysis.questions);
+      setQuestionsGenKey(k => k + 1);
+    }
+    router.refresh();
+    // Auto-navigate to the questions tab to show the result.
+    setActiveTab("cauHoi");
+  }
+
+  function handleGenerate(force?: boolean) {
+    esRef.current?.close();
+    setGenState({ phase: "running", message: "Đang bắt đầu...", chunkIndex: 0, totalChunks: 0 });
+    setGenWarnings([]);
+
+    const shouldForce = force ?? questionsGenerated;
+    const params = new URLSearchParams({ lessonId });
+    if (shouldForce) params.set("forceRegenerate", "1");
+    const es = new EventSource(`/api/ai/generate-questions?${params.toString()}`);
+    esRef.current = es;
+
+    es.onmessage = (e: MessageEvent<string>) => {
+      const data = JSON.parse(e.data) as { step: number; message: string; chunkIndex: number; totalChunks: number };
+      if (data.step === GenerateQuestionsStep.ERROR) {
+        setGenWarnings(prev => [...prev, data.message || "Lỗi tạo câu hỏi cho một đoạn"]);
+        setGenState({ phase: "running", message: data.message || "Lỗi, tiếp tục đoạn khác...", chunkIndex: data.chunkIndex, totalChunks: data.totalChunks });
+        return;
+      }
+      if (data.step === GenerateQuestionsStep.DONE) {
+        setGenState({ phase: "done" });
+        es.close();
+        autoRunRef.current = false;
+        setIsAutoRunning(false);
+        reloadAfterGenerate();
+        return;
+      }
+      setGenState({ phase: "running", message: data.message, chunkIndex: data.chunkIndex, totalChunks: data.totalChunks });
+    };
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CONNECTING) return;
+      setGenState(prev => prev.phase === "running" ? { phase: "error", message: "Mất kết nối với máy chủ." } : prev);
+      autoRunRef.current = false;
+      setIsAutoRunning(false);
+      es.close();
+    };
+  }
+
+  // ── Derived state ───────────────────────────────────────────────────────────
+
+  const isExtracting = extractState.phase === "running";
+  const isSyncing = extractState.phase === "syncing";
+  const isChunking = chunkState.phase === "running";
+  const isChunkSyncing = chunkState.phase === "syncing";
+  const isGenerating = genState.phase === "running";
+  const isMutating = !!mutatingChunkId;
+  const isBusy = isExtracting || isChunking || isGenerating || isReloadingChunks || isMutating;
+
+  const hasSegments = segments.length > 0;
+  const hasChunks = chunks.length > 0;
+  const questionsGenerated = genState.phase === "done" || status === AnalysisStatus.DONE;
+
+  const step2Status: PipelineStepStatus =
+    isExtracting || isSyncing ? "active" :
+    extractState.phase === "error" ? "error" :
+    hasSegments ? "done" : "available";
+
+  const step3Status: PipelineStepStatus = hasSegments ? "available" : "locked";
+
+  const step4Status: PipelineStepStatus =
+    !hasSegments ? "locked" :
+    isChunking || isChunkSyncing ? "active" :
+    chunkState.phase === "error" ? "error" :
+    hasChunks ? "done" : "available";
+
+  const step5Status: PipelineStepStatus = hasChunks ? "available" : "locked";
+  const step6Status: PipelineStepStatus = hasChunks ? "available" : "locked";
+
+  const step7Status: PipelineStepStatus =
+    !hasChunks ? "locked" :
+    isGenerating ? "active" :
+    genState.phase === "error" ? "error" :
+    questionsGenerated ? "done" : "available";
+
+  const tabDefs: { key: TabKey; label: string; dot?: "done" | "active" | "error" }[] = [
+    {
+      key: "phienAm",
+      label: "Phiên âm",
+      dot: isExtracting || isSyncing ? "active" : extractState.phase === "error" ? "error" : hasSegments ? "done" : undefined,
+    },
+    {
+      key: "doanNoidung",
+      label: "Đoạn nội dung",
+      dot: isChunking || isChunkSyncing ? "active" : chunkState.phase === "error" ? "error" : hasChunks ? "done" : undefined,
+    },
+    {
+      key: "cauHoi",
+      label: "Câu hỏi",
+      dot: isGenerating ? "active" : genState.phase === "error" ? "error" : questionsGenerated ? "done" : undefined,
+    },
+  ];
+
+  return (
+    <div className="flex flex-col">
+      <TabBar active={activeTab} onChange={setActiveTab} tabs={tabDefs} />
+
+      {/* ── Tab 1: Phiên âm ── */}
+      {activeTab === "phienAm" && (
+        <div className="flex flex-col">
+          {/* Step 1: Analyze */}
+          <PipelineStep number={1} title="Phân tích bài giảng" pipelineStatus={step2Status}>
+            <div className="flex flex-col gap-2">
+              {!confirmReExtract && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={isBusy}
+                    onClick={() => {
+                      if (hasSegments) { confirmAutoRunRef.current = true; setConfirmReExtract(true); return; }
+                      startExtract(true);
+                    }}
+                    className="gap-2"
+                  >
+                    {isExtracting && isAutoRunning
+                      ? <Loader2Icon className="size-4 animate-spin" />
+                      : <PlayIcon className="size-4" />}
+                    {isExtracting && isAutoRunning ? "Đang phân tích…" :
+                      hasSegments ? "Trích xuất lại transcript" : "Trích xuất transcript"}
+                  </Button>
+
+                  {hasSegments && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isBusy}
+                      onClick={() => {
+                        confirmAutoRunRef.current = false;
+                        setConfirmReExtract(true);
+                      }}
+                      className="gap-2"
+                    >
+                      {isExtracting && !isAutoRunning
+                        ? <Loader2Icon className="size-4 animate-spin" />
+                        : <RefreshCwIcon className="size-4" />}
+                      {isExtracting && !isAutoRunning ? "Đang trích xuất…" : "Chỉ trích xuất lại"}
+                    </Button>
+                  )}
+
+                  {isExtracting && isAutoRunning && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground gap-1.5"
+                      onClick={() => { autoRunRef.current = false; setIsAutoRunning(false); }}
+                    >
+                      <XIcon className="size-3.5" /> Bỏ tạo câu hỏi tự động
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {confirmReExtract && (
+                <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs flex flex-col gap-2">
+                  <p className="text-amber-700 dark:text-amber-400">
+                    Phân tích lại sẽ <strong>xoá toàn bộ</strong> transcript, đoạn nội dung và câu hỏi hiện tại. Tiếp tục?
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm" variant="destructive" className="h-6 text-xs px-2"
+                      onClick={() => startExtract(confirmAutoRunRef.current)}
+                    >
+                      Xoá & phân tích lại
+                    </Button>
+                    <Button
+                      size="sm" variant="ghost" className="h-6 text-xs px-2"
+                      onClick={() => setConfirmReExtract(false)}
+                    >
+                      Huỷ
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {isAutoRunning && !isExtracting && isGenerating && (
+                <p className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                  <Loader2Icon className="size-3 animate-spin" /> Đang tự động tạo câu hỏi...
+                </p>
+              )}
+
+              {isSyncing && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Tiến trình trước có vẻ bị gián đoạn. Bấm &ldquo;Phân tích lại&rdquo; để thử lại.
+                </p>
+              )}
+              {extractState.phase !== "idle" && extractState.phase !== "syncing" && (
+                <div data-testid="extract-progress">
+                  <ProgressStrip steps={EXTRACT_STEPS} runState={extractState} stepTimings={extractTimings} now={now} />
+                </div>
+              )}
+              {extractState.phase === "error" && (
+                <p className="text-xs text-destructive">{extractState.message}</p>
+              )}
+            </div>
+          </PipelineStep>
+
+          {/* Step 2: Edit transcript */}
+          <PipelineStep
+            number={2} title="Chỉnh sửa transcript" pipelineStatus={step3Status}
+            optional collapsible defaultOpen={true} isLast
+          >
+            <div className="flex flex-col gap-1 max-h-64 overflow-y-auto pr-1">
+              {segments.map((seg, i) => (
+                <SegmentRow
+                  key={i}
+                  segment={seg}
+                  index={i}
+                  lessonId={lessonId}
+                  disabled={isBusy}
+                  onUpdated={(idx, text) =>
+                    setSegments(prev => prev.map((s, j) => j === idx ? { ...s, text } : s))
+                  }
+                  onSaved={() => {
+                    setChunkState({ phase: "idle" });
+                    setChunkTimings({});
+                    setGenState({ phase: "idle" });
+                    setGenWarnings([]);
+                  }}
+                />
+              ))}
+            </div>
+          </PipelineStep>
+        </div>
+      )}
+
+      {/* ── Tab 2: Đoạn nội dung ── */}
+      {activeTab === "doanNoidung" && (
+        <div className="flex flex-col">
+          {/* Step 1: Re-chunk */}
+          <PipelineStep number={1} title="Phân đoạn lại" pipelineStatus={step4Status} optional collapsible defaultOpen={!hasChunks}>
+            <div className="flex flex-col gap-2">
+              <Button
+                variant={hasChunks ? "outline" : "default"}
+                size="sm"
+                disabled={isBusy}
+                onClick={handleChunk}
+                className="gap-2 w-fit"
+              >
+                {isChunking
+                  ? <Loader2Icon className="size-4 animate-spin" />
+                  : <RefreshCwIcon className="size-4" />}
+                {isChunking ? "Đang phân đoạn…" : "Phân đoạn lại"}
+              </Button>
+              {isChunkSyncing && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Phân đoạn trước có vẻ bị gián đoạn. Bấm &ldquo;Phân đoạn lại&rdquo; để thử lại.
+                </p>
+              )}
+              {chunkState.phase !== "idle" && chunkState.phase !== "syncing" && (
+                <ProgressStrip steps={CHUNK_STEPS} runState={chunkState} stepTimings={chunkTimings} now={now} />
+              )}
+              {chunkState.phase === "error" && (
+                <p className="text-xs text-destructive">{chunkState.message}</p>
+              )}
+            </div>
+          </PipelineStep>
+
+          {/* Step 2: Edit chunks */}
+          <PipelineStep
+            number={2} title="Chỉnh sửa đoạn" pipelineStatus={step5Status}
+            optional collapsible defaultOpen={false}
+          >
+            <div className="flex flex-col gap-1.5">
+              {isReloadingChunks ? (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2Icon className="size-3 animate-spin" /> Đang tải…
+                </div>
+              ) : (
+                chunks.map((chunk, i) => (
+                  <ChunkEditor
+                    key={chunk.id}
+                    chunk={chunk}
+                    chunkSegments={getChunkSegments(chunk, segments)}
+                    prevChunkId={i > 0 ? chunks[i - 1].id : null}
+                    nextChunkId={i < chunks.length - 1 ? chunks[i + 1].id : null}
+                    onMergeWithPrev={handleMergeWithPrev}
+                    onMergeWithNext={handleMergeWithNext}
+                    onDelete={handleDeleteChunk}
+                    onSplit={handleSplitChunk}
+                    onMoveSegment={handleMoveSegment}
+                    isMerging={mutatingChunkId === chunk.id && mutatingOp === "merge"}
+                    isDeleting={mutatingChunkId === chunk.id && mutatingOp === "delete"}
+                    isSplitting={mutatingChunkId === chunk.id && mutatingOp === "split"}
+                    isMoving={mutatingChunkId === chunk.id && mutatingOp === "move"}
+                    disabled={isBusy}
+                  />
+                ))
+              )}
+              {mutatingError && (
+                <p className="text-xs text-destructive mt-1">{mutatingError}</p>
+              )}
+            </div>
+          </PipelineStep>
+
+          {/* Step 3: Question count config */}
+          <PipelineStep number={3} title="Cấu hình số câu hỏi" pipelineStatus={step6Status} isLast>
+            <div className="flex flex-col gap-1.5">
+              {chunks.map(chunk => {
+                const chunkSegs = getChunkSegments(chunk, segments);
+                return (
+                  <QuestionConfigRow
+                    key={chunk.id}
+                    chunk={chunk}
+                    disabled={isBusy}
+                    coherence={chunkSegs.length > 0 ? computeCoherence(chunkSegs) : undefined}
+                  />
+                );
+              })}
+            </div>
+          </PipelineStep>
+        </div>
+      )}
+
+      {/* ── Tab 3: Câu hỏi ── */}
+      {activeTab === "cauHoi" && (
+        <div className="flex flex-col gap-4">
+          {/* Generate button + progress */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`text-sm font-medium ${step7Status === "locked" ? "text-muted-foreground" : "text-foreground"}`}>
+                Tạo câu hỏi
+              </span>
+              {step7Status === "locked" && (
+                <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px flex items-center gap-1">
+                  <LockIcon className="size-2.5" /> Cần phân đoạn trước
+                </span>
+              )}
+            </div>
+            <Button
+              variant={questionsGenerated ? "outline" : "default"}
+              size="sm"
+              disabled={isBusy || chunks.length === 0}
+              onClick={() => handleGenerate()}
+              className="gap-2 w-fit"
+            >
+              {isGenerating
+                ? <Loader2Icon className="size-4 animate-spin" />
+                : questionsGenerated
+                  ? <RefreshCwIcon className="size-4" />
+                  : <SparklesIcon className="size-4" />}
+              {isGenerating ? "Đang tạo câu hỏi…" :
+                questionsGenerated ? "Tạo lại câu hỏi" : "Tạo câu hỏi"}
+            </Button>
+            {genState.phase === "running" && (
+              <p className="text-xs text-muted-foreground">
+                {genState.message}
+                {genState.totalChunks > 0 && ` (${genState.chunkIndex + 1}/${genState.totalChunks})`}
+              </p>
+            )}
+            {genState.phase === "done" && (
+              <p className="text-xs text-green-700 dark:text-green-400 font-medium" data-testid="gen-done">
+                {genWarnings.length > 0
+                  ? `Hoàn thành (${genWarnings.length} đoạn gặp lỗi — xem chi tiết bên dưới)`
+                  : "Câu hỏi đã được tạo thành công!"}
+              </p>
+            )}
+            {genWarnings.length > 0 && (
+              <div className="flex flex-col gap-0.5">
+                {genWarnings.map((w, i) => (
+                  <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{w}</p>
+                ))}
+              </div>
+            )}
+            {genState.phase === "error" && (
+              <p className="text-xs text-destructive">{genState.message}</p>
+            )}
+          </div>
+
+          {/* Questions list */}
+          {questions.length > 0 && (
+            <div className="flex flex-col gap-2 border-t pt-3">
+              <p className="text-xs text-muted-foreground font-medium">{questions.length} câu hỏi</p>
+              <LessonQuestionsEditor
+                key={questionsGenKey}
+                lessonId={lessonId}
+                initialQuestions={questions}
+              />
+            </div>
+          )}
+
+          {questions.length === 0 && !isGenerating && (
+            <div className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border rounded-lg">
+              {chunks.length === 0
+                ? "Phân đoạn nội dung trước để tạo câu hỏi."
+                : "Bấm \"Tạo câu hỏi\" để bắt đầu."}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

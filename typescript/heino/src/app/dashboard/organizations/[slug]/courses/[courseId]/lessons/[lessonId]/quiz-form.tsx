@@ -4,24 +4,35 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { submitQuiz } from "@/app/actions/quiz";
 import { CheckCircleIcon, XCircleIcon, SendIcon } from "lucide-react";
-import type { LessonQuestion } from "buf/gen/richter/v1/ai_pb";
 import type { QuizAttempt } from "buf/gen/richter/v1/quiz_pb";
 
+export interface SafeQuestion {
+  id: string;
+  questionText: string;
+  options: { text: string }[];
+  explanation: string;
+}
+
 interface Props {
-  questions: LessonQuestion[];
+  questions: SafeQuestion[];
   previousAttempt: QuizAttempt | null;
+  /** Correct answers provided server-side only after the user has already submitted. */
+  initialCorrectAnswers?: number[];
   lessonId: string;
   slug: string;
   courseId: string;
 }
 
-export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId }: Props) {
+export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, lessonId, slug, courseId }: Props) {
   const [selected, setSelected] = useState<(number | null)[]>(() =>
-    previousAttempt ? [...previousAttempt.answers] : Array(questions.length).fill(null),
+    Array.from({ length: questions.length }, (_, i) =>
+      previousAttempt ? ((previousAttempt.answers ?? [])[i] ?? null) : null,
+    ),
   );
   const [result, setResult] = useState<{ score: number; total: number } | null>(
     previousAttempt ? { score: previousAttempt.score, total: previousAttempt.total } : null,
   );
+  const [correctAnswers, setCorrectAnswers] = useState<number[] | undefined>(initialCorrectAnswers);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -46,6 +57,7 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
         setError(res.error);
       } else if (res) {
         setResult({ score: res.score ?? 0, total: res.total ?? 0 });
+        setCorrectAnswers(res.correctAnswers);
         setSelected(answers);
       }
     });
@@ -67,7 +79,8 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
 
       {questions.map((q, qi) => {
         const sel = selected[qi];
-        const correct = q.correctAnswer;
+        const hasAnswers = correctAnswers != null && correctAnswers.length > 0;
+        const correct = hasAnswers ? (correctAnswers[qi] ?? -1) : -1;
         return (
           <div key={q.id} className="flex flex-col gap-2">
             <p className="text-sm font-medium">
@@ -76,13 +89,13 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
             <div className="flex flex-col gap-1 ml-4">
               {q.options.map((opt, oi) => {
                 const isSelected = sel === oi;
-                const isCorrect = oi === correct;
+                const isCorrect = hasAnswers && oi === correct;
                 let className =
                   "text-sm px-3 py-2 rounded-md border cursor-pointer transition-colors flex items-center gap-2";
-                if (submitted) {
+                if (submitted && hasAnswers) {
                   if (isCorrect) {
                     className += " border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400";
-                  } else if (isSelected && !isCorrect) {
+                  } else if (isSelected) {
                     className += " border-red-400 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400";
                   } else {
                     className += " border-transparent text-muted-foreground";
@@ -90,11 +103,13 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
                 } else {
                   className += isSelected
                     ? " border-primary bg-primary/10"
+                    : submitted
+                    ? " border-transparent text-muted-foreground"
                     : " border-border hover:border-muted-foreground";
                 }
                 return (
                   <div key={oi} className={className} onClick={() => handleSelect(qi, oi)}>
-                    {submitted ? (
+                    {submitted && hasAnswers ? (
                       isCorrect ? (
                         <CheckCircleIcon className="size-3.5 shrink-0" />
                       ) : isSelected ? (
@@ -114,7 +129,7 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
                 );
               })}
             </div>
-            {submitted && q.explanation && (
+            {submitted && hasAnswers && q.explanation && (
               <p className="text-xs text-muted-foreground ml-4 italic">{q.explanation}</p>
             )}
           </div>
@@ -143,6 +158,8 @@ export function QuizForm({ questions, previousAttempt, lessonId, slug, courseId 
           onClick={() => {
             setSelected(Array(questions.length).fill(null));
             setResult(null);
+            setCorrectAnswers(undefined);
+            setError(null);
           }}
         >
           Làm lại

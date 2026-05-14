@@ -385,10 +385,21 @@ func TestCoursesAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonCourses.GetCourseById(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("AnyAuthed/OK", func(t *testing.T) {
-			if _, err := nonMemberCourses.GetCourseById(ctx, req); err != nil {
-				t.Errorf("expected OK for any authenticated user, got %v", err)
-			}
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberCourses.GetCourseById(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("NonMember/NonExistentId/PermissionDenied", func(t *testing.T) {
+			// oracle protection: non-member must not learn whether an ID exists
+			assertCode(t, func() error {
+				_, e := nonMemberCourses.GetCourseById(ctx, &richterv1.GetCourseByIdRequest{Id: gofakeit.UUID()})
+				return e
+			}(), connect.CodePermissionDenied)
+		})
+		t.Run("Admin/NonExistentId/NotFound", func(t *testing.T) {
+			assertCode(t, func() error {
+				_, e := adminCourses.GetCourseById(ctx, &richterv1.GetCourseByIdRequest{Id: gofakeit.UUID()})
+				return e
+			}(), connect.CodeNotFound)
 		})
 		t.Run("Student/OK", func(t *testing.T) {
 			if _, err := studentCourses.GetCourseById(ctx, req); err != nil {
@@ -754,6 +765,21 @@ func TestCourseModulesAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonModules.GetCourseModuleById(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberModules.GetCourseModuleById(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("NonMember/NonExistentId/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error {
+				_, e := nonMemberModules.GetCourseModuleById(ctx, &richterv1.GetCourseModuleByIdRequest{Id: gofakeit.UUID()})
+				return e
+			}(), connect.CodePermissionDenied)
+		})
+		t.Run("Admin/NonExistentId/NotFound", func(t *testing.T) {
+			assertCode(t, func() error {
+				_, e := adminModules.GetCourseModuleById(ctx, &richterv1.GetCourseModuleByIdRequest{Id: gofakeit.UUID()})
+				return e
+			}(), connect.CodeNotFound)
+		})
 		t.Run("Student/OK", func(t *testing.T) {
 			if _, err := studentModules.GetCourseModuleById(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
@@ -767,9 +793,12 @@ func TestCourseModulesAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonModules.ListCourseModules(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("NonMember/OK", func(t *testing.T) {
-			if _, err := nonMemberModules.ListCourseModules(ctx, req); err != nil {
-				t.Errorf("expected OK for any authenticated user, got %v", err)
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberModules.ListCourseModules(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Student/OK", func(t *testing.T) {
+			if _, err := studentModules.ListCourseModules(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
 			}
 		})
 	})
@@ -1134,14 +1163,24 @@ func TestLessonsAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonLessons.GetLessonById(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberLessons.GetLessonById(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("NonMember/NonExistentId/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error {
+				_, e := nonMemberLessons.GetLessonById(ctx, &richterv1.GetLessonByIdRequest{Id: gofakeit.UUID()})
+				return e
+			}(), connect.CodePermissionDenied)
+		})
+		t.Run("Admin/NonExistentId/NotFound", func(t *testing.T) {
+			assertCode(t, func() error {
+				_, e := adminLessons.GetLessonById(ctx, &richterv1.GetLessonByIdRequest{Id: gofakeit.UUID()})
+				return e
+			}(), connect.CodeNotFound)
+		})
 		t.Run("Student/OK", func(t *testing.T) {
 			if _, err := studentLessons.GetLessonById(ctx, req); err != nil {
 				t.Errorf("expected OK, got %v", err)
-			}
-		})
-		t.Run("NonMember/OK", func(t *testing.T) {
-			if _, err := nonMemberLessons.GetLessonById(ctx, req); err != nil {
-				t.Errorf("expected OK for any authenticated user, got %v", err)
 			}
 		})
 	})
@@ -1152,9 +1191,12 @@ func TestLessonsAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonLessons.ListLessons(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("NonMember/OK", func(t *testing.T) {
-			if _, err := nonMemberLessons.ListLessons(ctx, req); err != nil {
-				t.Errorf("expected OK for any authenticated user, got %v", err)
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberLessons.ListLessons(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Student/OK", func(t *testing.T) {
+			if _, err := studentLessons.ListLessons(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
 			}
 		})
 	})
@@ -1165,9 +1207,12 @@ func TestLessonsAuthz(t *testing.T) {
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, e := anonLessons.ListLessonsByCourse(ctx, req); return e }(), connect.CodeUnauthenticated)
 		})
-		t.Run("NonMember/OK", func(t *testing.T) {
-			if _, err := nonMemberLessons.ListLessonsByCourse(ctx, req); err != nil {
-				t.Errorf("expected OK for any authenticated user, got %v", err)
+		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
+			assertCode(t, func() error { _, e := nonMemberLessons.ListLessonsByCourse(ctx, req); return e }(), connect.CodePermissionDenied)
+		})
+		t.Run("Student/OK", func(t *testing.T) {
+			if _, err := studentLessons.ListLessonsByCourse(ctx, req); err != nil {
+				t.Errorf("expected OK, got %v", err)
 			}
 		})
 	})

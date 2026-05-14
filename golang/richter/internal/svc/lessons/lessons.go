@@ -144,12 +144,25 @@ func (s *LessonsSvc) GetLessonById(
 	ctx context.Context,
 	req *richterv1.GetLessonByIdRequest,
 ) (*richterv1.GetLessonByIdResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
 		return nil, err
 	}
 	l, err := s.fetchLesson(ctx, req.GetId())
 	if err != nil {
+		if connect.CodeOf(err) == connect.CodeNotFound && claims.GetRole() != richterv1.UserRole_USER_ROLE_ADMIN {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("not a member of this organization"))
+		}
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("GetLessonById", err)...)
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, l.ID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetLessonByIdResponse{Lesson: LessonToProto(l)}, nil
@@ -159,12 +172,19 @@ func (s *LessonsSvc) ListLessons(
 	ctx context.Context,
 	req *richterv1.ListLessonsRequest,
 ) (*richterv1.ListLessonsResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
 	moduleID, err := svc.ParseUUID(req.GetModuleId())
 	if err != nil {
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("ListLessons.ParseUUID", err)...)
+		return nil, err
+	}
+
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByCourseModuleID(ctx, moduleID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 
@@ -192,12 +212,17 @@ func (s *LessonsSvc) ListLessonsByCourse(
 	ctx context.Context,
 	req *richterv1.ListLessonsByCourseRequest,
 ) (*richterv1.ListLessonsByCourseResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
-		return nil, err
-	}
 	courseID, err := svc.ParseUUID(req.GetCourseId())
 	if err != nil {
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("ListLessonsByCourse.ParseUUID", err)...)
+		return nil, err
+	}
+	course, err := s.fetchCourse(ctx, courseID)
+	if err != nil {
+		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("ListLessonsByCourse.fetchCourse", err)...)
+		return nil, err
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, course.OrganizationID); err != nil {
 		return nil, err
 	}
 
@@ -302,6 +327,26 @@ func (s *LessonsSvc) UpdateLessonVideo(
 		err = svc.ConnectDBError(err)
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("UpdateLessonVideo", err)...)
 		return nil, err
+	}
+
+	// Clear stale analysis data when video is replaced so the new video gets a fresh slate.
+	if existing.VideoStorageKey.Valid && existing.VideoStorageKey.String != req.GetVideoStorageKey() {
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			return q.DeleteLessonQuestions(ctx, existing.ID)
+		}); err != nil {
+			s.log.WarnContext(ctx, "lessons: failed to clear questions on video replace", "lesson_id", existing.ID.String(), "err", err)
+		}
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			return q.DeleteLessonTranscriptChunks(ctx, existing.ID)
+		}); err != nil {
+			s.log.WarnContext(ctx, "lessons: failed to clear chunks on video replace", "lesson_id", existing.ID.String(), "err", err)
+		}
+		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+				LessonID: existing.ID, Status: gen.LessonAnalysisStatusPending, ErrorMsg: pgtype.Text{},
+			})
+			return err
+		})
 	}
 	return &richterv1.UpdateLessonVideoResponse{Lesson: LessonToProto(l)}, nil
 }

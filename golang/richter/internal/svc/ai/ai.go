@@ -4,9 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"os"
+	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,9 +24,11 @@ import (
 	"example.com/richter/internal"
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/kv"
 	"example.com/richter/internal/svc"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,13 +48,22 @@ func init() {
 }
 
 type AISvc struct {
-	pg        *db.PostgresSvc
-	log       *log.LogSvc
-	authz     *authz.AuthzSvc
-	s3client  *minio.Client
-	s3cfg     *cfg.S3Cfg
-	geminiCfg *cfg.GeminiCfg
+	pg          *db.PostgresSvc
+	kv          *kv.KVSvc
+	log         *log.LogSvc
+	authz       *authz.AuthzSvc
+	s3client    *minio.Client
+	s3cfg       *cfg.S3Cfg
+	geminiCfg   *cfg.GeminiCfg
+	whisperCfg  *cfg.WhisperCfg
 }
+
+// FDB namespace constants.
+const (
+	kvNsLesson = "lesson"
+	kvNsChunk  = "chunk"
+	kvNsWatch  = "watch"
+)
 
 var _ richterv1connect.AIServiceHandler = (*AISvc)(nil)
 
@@ -54,6 +71,10 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	pg, err := do.Invoke[*db.PostgresSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc: %w", err)
+	}
+	kvSvc, err := do.Invoke[*kv.KVSvc](i)
+	if err != nil {
+		return nil, fmt.Errorf("KVSvc: %w", err)
 	}
 	l, err := do.Invoke[*log.LogSvc](i)
 	if err != nil {
@@ -71,6 +92,10 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GeminiCfg: %w", err)
 	}
+	whisperCfg, err := do.Invoke[*cfg.WhisperCfg](i)
+	if err != nil {
+		return nil, fmt.Errorf("WhisperCfg: %w", err)
+	}
 
 	s3client, err := minio.New(s3cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(s3cfg.AccessKeyID, s3cfg.SecretAccessKey, ""),
@@ -81,8 +106,8 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	}
 
 	return &AISvc{
-		pg: pg, log: l, authz: az,
-		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg,
+		pg: pg, kv: kvSvc, log: l, authz: az,
+		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, whisperCfg: whisperCfg,
 	}, nil
 }
 
@@ -93,71 +118,14 @@ func (s *AISvc) Handler() (string, http.Handler) {
 	)
 }
 
-// ── AnalyzeLesson ─────────────────────────────────────────────────────────────
+// ── Legacy (unimplemented) ────────────────────────────────────────────────────
 
-func (s *AISvc) AnalyzeLesson(
-	ctx context.Context,
-	req *richterv1.AnalyzeLessonRequest,
-) (*richterv1.AnalyzeLessonResponse, error) {
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
-	if err != nil {
-		return nil, err
-	}
+func (s *AISvc) AnalyzeLesson(_ context.Context, _ *richterv1.AnalyzeLessonRequest) (*richterv1.AnalyzeLessonResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use ExtractTranscriptStream → ChunkTranscriptStream → GenerateQuestionsStream"))
+}
 
-	// Require teacher+ in the lesson's org
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if _, err := s.authz.RequireOrgRole(ctx, orgID,
-		gen.OrganizationRoleOwner,
-		gen.OrganizationRoleAdmin,
-		gen.OrganizationRoleTeacher,
-	); err != nil {
-		return nil, err
-	}
-
-	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
-		return q.GetLessonByID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if !lesson.VideoStorageKey.Valid || lesson.VideoStorageKey.String == "" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("lesson has no video uploaded"))
-	}
-
-	// Mark as processing
-	analysis, err := s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusProcessing, "", nil, "")
-	if err != nil {
-		return nil, err
-	}
-
-	// Run analysis (may take up to 2 min)
-	transcript, segments, questions, analyzeErr := s.runGeminiAnalysis(ctx, lesson.VideoStorageKey.String)
-
-	if analyzeErr != nil {
-		analysis, _ = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusError, "", nil, analyzeErr.Error())
-		return &richterv1.AnalyzeLessonResponse{Analysis: analysisToProto(analysis, nil)}, nil
-	}
-
-	segmentsJSON, _ := json.Marshal(segments)
-	analysis, err = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusDone, transcript, segmentsJSON, "")
-	if err != nil {
-		return nil, err
-	}
-
-	// Persist questions — if this fails, mark analysis as error so the client knows questions are missing
-	savedQuestions, err := s.saveQuestions(ctx, lessonID, questions)
-	if err != nil {
-		s.log.ErrorContext(ctx, "ai: failed to save questions", svc.LogAttrs("saveQuestions", err)...)
-		analysis, _ = s.upsertAnalysis(ctx, lessonID, gen.LessonAnalysisStatusError, transcript, segmentsJSON, "failed to save questions: "+err.Error())
-		return &richterv1.AnalyzeLessonResponse{Analysis: analysisToProto(analysis, nil)}, nil
-	}
-
-	return &richterv1.AnalyzeLessonResponse{Analysis: analysisToProto(analysis, savedQuestions)}, nil
+func (s *AISvc) AnalyzeLessonStream(_ context.Context, _ *richterv1.AnalyzeLessonRequest, _ *connect.ServerStream[richterv1.AnalysisProgressEvent]) error {
+	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use ExtractTranscriptStream → ChunkTranscriptStream → GenerateQuestionsStream"))
 }
 
 // ── GetLessonAnalysis ─────────────────────────────────────────────────────────
@@ -166,12 +134,18 @@ func (s *AISvc) GetLessonAnalysis(
 	ctx context.Context,
 	req *richterv1.GetLessonAnalysisRequest,
 ) (*richterv1.GetLessonAnalysisResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
 		return nil, err
 	}
 
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
 	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 
@@ -179,23 +153,1154 @@ func (s *AISvc) GetLessonAnalysis(
 		return q.GetLessonAnalysis(ctx, lessonID)
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &richterv1.GetLessonAnalysisResponse{}, nil
+		}
 		return nil, svc.ConnectDBError(err)
 	}
 
-	questions, _ := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
-		return q.ListLessonQuestions(ctx, lessonID)
+	questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
+		return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{
+			LessonID: lessonID,
+			Limit:    500,
+			Offset:   0,
+		})
 	})
+	if err != nil {
+		s.log.ErrorContext(ctx, "ai: failed to list lesson questions", svc.LogAttrs("ListLessonQuestions", err)...)
+	}
 
-	return &richterv1.GetLessonAnalysisResponse{Analysis: analysisToProto(analysis, questions)}, nil
+	chunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, lessonID)
+	})
+	if err != nil {
+		s.log.ErrorContext(ctx, "ai: failed to list lesson chunks", svc.LogAttrs("ListLessonTranscriptChunks", err)...)
+	}
+
+	lessonIDStr := lessonID.String()
+	transcript := s.loadTranscriptFromFDB(lessonIDStr)
+	segments := s.loadSegmentsFromFDB(lessonIDStr)
+
+	protoChunks := make([]*richterv1.TranscriptChunk, 0, len(chunks))
+	for _, c := range chunks {
+		protoChunks = append(protoChunks, chunkToProto(c))
+	}
+
+	return &richterv1.GetLessonAnalysisResponse{
+		Analysis: analysisToProto(analysis, questions, transcript, segments),
+		Chunks:   protoChunks,
+	}, nil
 }
 
-// ── Gemini analysis ───────────────────────────────────────────────────────────
+// ── Step 2: ExtractTranscriptStream ──────────────────────────────────────────
+
+// progressFn is called at each analysis step; returning a non-nil error aborts the pipeline.
+type progressFn func(step richterv1.AnalysisProgressStep, msg string) error
+
+// authorizeAndLoadLesson validates auth + loads the lesson for analysis.
+func (s *AISvc) authorizeAndLoadLesson(ctx context.Context, lessonIDStr string) (pgtype.UUID, string, error) {
+	lessonID, err := svc.ParseUUID(lessonIDStr)
+	if err != nil {
+		return pgtype.UUID{}, "", err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return pgtype.UUID{}, "", svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	); err != nil {
+		return pgtype.UUID{}, "", err
+	}
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
+	})
+	if err != nil {
+		return pgtype.UUID{}, "", svc.ConnectDBError(err)
+	}
+	if !lesson.VideoStorageKey.Valid || lesson.VideoStorageKey.String == "" {
+		return pgtype.UUID{}, "", connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("lesson has no video uploaded"))
+	}
+	if _, err := s.s3client.StatObject(ctx, s.s3cfg.Bucket, lesson.VideoStorageKey.String, minio.StatObjectOptions{}); err != nil {
+		return pgtype.UUID{}, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("video file not found in storage"))
+	}
+	return lessonID, lesson.VideoStorageKey.String, nil
+}
+
+// requireTeacherRole is a helper for RPCs that require teacher+ org role.
+func (s *AISvc) requireTeacherRole(ctx context.Context, lessonID pgtype.UUID) error {
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return svc.ConnectDBError(err)
+	}
+	_, err = s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	)
+	return err
+}
+
+func (s *AISvc) ExtractTranscriptStream(
+	ctx context.Context,
+	req *richterv1.ExtractTranscriptRequest,
+	stream *connect.ServerStream[richterv1.AnalysisProgressEvent],
+) error {
+	lessonID, videoKey, err := s.authorizeAndLoadLesson(ctx, req.GetLessonId())
+	if err != nil {
+		return err
+	}
+
+	progress := func(step richterv1.AnalysisProgressStep, msg string) error {
+		return stream.Send(&richterv1.AnalysisProgressEvent{Step: step, Message: msg})
+	}
+
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+			LessonID: lessonID, Status: gen.LessonAnalysisStatusProcessing, ErrorMsg: pgtype.Text{},
+		})
+		return err
+	}); err != nil {
+		_ = stream.Send(&richterv1.AnalysisProgressEvent{
+			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
+			Message: err.Error(),
+		})
+		return nil
+	}
+
+	// If the server is killed (SIGTERM) or panics while PROCESSING, reset status to ERROR
+	// so the user can retry instead of being stuck with a spinning "Đang xử lý…".
+	statusFinalized := false
+	defer func() {
+		if statusFinalized {
+			return
+		}
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := db.WithConnection(s.pg, bgCtx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
+			return q.UpsertLessonAnalysisStatus(bgCtx, gen.UpsertLessonAnalysisStatusParams{
+				LessonID: lessonID,
+				Status:   gen.LessonAnalysisStatusError,
+				ErrorMsg: pgtype.Text{String: "Quá trình bị gián đoạn. Vui lòng thử lại.", Valid: true},
+			})
+		}); err != nil {
+			s.log.ErrorContext(bgCtx, "ai: cleanup defer: failed to reset stuck PROCESSING status", "err", err)
+		}
+	}()
+
+	lessonIDStr := lessonID.String()
+	var transcript string
+	var segments []transcriptSegment
+	var rawChunks []transcriptChunkRaw
+	var extractErr error
+	if s.whisperCfg.Endpoint != "" {
+		transcript, segments, rawChunks, extractErr = s.runWhisperAnalyze(ctx, videoKey, progress)
+	} else {
+		transcript, segments, rawChunks, extractErr = s.runGeminiAnalyze(ctx, lessonIDStr, videoKey, progress)
+	}
+	if extractErr != nil {
+		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+				LessonID: lessonID, Status: gen.LessonAnalysisStatusError,
+				ErrorMsg: pgtype.Text{String: extractErr.Error(), Valid: true},
+			})
+			return err
+		})
+		statusFinalized = true
+		_ = stream.Send(&richterv1.AnalysisProgressEvent{
+			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
+			Message: extractErr.Error(),
+		})
+		return nil
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_SAVING, "Đang lưu kết quả..."); err != nil {
+		return nil
+	}
+
+	// Save transcript + segments to FDB.
+	segmentsJSON, err := json.Marshal(segments)
+	if err != nil {
+		s.log.ErrorContext(ctx, "ai: failed to marshal segments", svc.LogAttrs("json.Marshal", err)...)
+		segmentsJSON = []byte("[]")
+	}
+	if transcript != "" {
+		if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonIDStr, "transcript"}, []byte(transcript)); err != nil {
+			s.log.WarnContext(ctx, "ai: FDB transcript write failed", "err", err)
+		}
+	}
+	if len(segmentsJSON) > 0 {
+		if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonIDStr, "segments"}, segmentsJSON); err != nil {
+			s.log.WarnContext(ctx, "ai: FDB segments write failed", "err", err)
+		}
+	}
+
+	// Save chunks to PG (if Gemini returned any). Status goes to CHUNKS_READY.
+	// If no chunks were returned (edge case), status stays at TRANSCRIPT_EXTRACTED so the
+	// user can trigger ChunkTranscriptStream manually.
+	var finalStatus gen.LessonAnalysisStatus
+	if len(rawChunks) > 0 {
+		type chunkFDBEntry struct{ id, transcript string }
+		var chunkFDBEntries []chunkFDBEntry
+
+		saveErr := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
+			// Remove stale chunks + their questions atomically.
+			existing, err := q.ListLessonTranscriptChunks(ctx, lessonID)
+			if err != nil {
+				return fmt.Errorf("list existing chunks: %w", err)
+			}
+			for _, ec := range existing {
+				if err := q.DeleteLessonQuestionsForChunk(ctx, ec.ID); err != nil {
+					return fmt.Errorf("delete questions for chunk %s: %w", ec.ID, err)
+				}
+			}
+			if err := q.DeleteLessonTranscriptChunks(ctx, lessonID); err != nil {
+				return fmt.Errorf("delete old chunks: %w", err)
+			}
+			if err := q.DeleteLessonQuestions(ctx, lessonID); err != nil {
+				s.log.WarnContext(ctx, "ai: failed to delete stale questions on re-extract", "err", err)
+			}
+			for i, ch := range rawChunks {
+				dbChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
+					LessonID:            lessonID,
+					OrderIndex:          int32(i),
+					StartSeconds:        float64(ch.StartSeconds),
+					EndSeconds:          float64(ch.EndSeconds),
+					Summary:             ch.Summary,
+					QuestionCountConfig: 1,
+				})
+				if err != nil {
+					return fmt.Errorf("insert chunk %d: %w", i, err)
+				}
+				chunkText := buildChunkTranscript(segments, ch.StartSeconds, ch.EndSeconds)
+				if chunkText == "" {
+					chunkText = transcript
+				}
+				chunkFDBEntries = append(chunkFDBEntries, chunkFDBEntry{id: dbChunk.ID.String(), transcript: chunkText})
+			}
+			return nil
+		})
+		if saveErr != nil {
+			s.log.ErrorContext(ctx, "ai: failed to save chunks from combined analyze", svc.LogAttrs("ExtractTranscriptStream", saveErr)...)
+			// Fall back: save transcript without chunks.
+			finalStatus = gen.LessonAnalysisStatusTranscriptExtracted
+		} else {
+			for _, e := range chunkFDBEntries {
+				if e.transcript == "" {
+					continue
+				}
+				if err := s.kv.Set(kvNsChunk, tuple.Tuple{e.id, "transcript"}, []byte(e.transcript)); err != nil {
+					s.log.WarnContext(ctx, "ai: FDB chunk transcript write failed", "chunk_id", e.id, "err", err)
+				}
+			}
+			finalStatus = gen.LessonAnalysisStatusChunksReady
+		}
+	} else {
+		// Gemini returned no chunks; clear stale data and stop at TRANSCRIPT_EXTRACTED.
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			if err := q.DeleteLessonQuestions(ctx, lessonID); err != nil {
+				s.log.WarnContext(ctx, "ai: failed to delete stale questions on re-extract", "err", err)
+			}
+			return q.DeleteLessonTranscriptChunks(ctx, lessonID)
+		}); err != nil {
+			s.log.WarnContext(ctx, "ai: failed to clear stale chunks on re-extract", "err", err)
+		}
+		finalStatus = gen.LessonAnalysisStatusTranscriptExtracted
+	}
+
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
+			LessonID: lessonID,
+			Status:   finalStatus,
+			ErrorMsg: pgtype.Text{},
+		})
+	}); err != nil {
+		s.log.ErrorContext(ctx, "ai: failed to update analysis status", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
+	}
+	statusFinalized = true
+
+	return stream.Send(&richterv1.AnalysisProgressEvent{
+		Step: richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DONE,
+	})
+}
+
+// ── Step 3: UpdateTranscriptSegment ──────────────────────────────────────────
+
+func (s *AISvc) UpdateTranscriptSegment(
+	ctx context.Context,
+	req *richterv1.UpdateTranscriptSegmentRequest,
+) (*richterv1.UpdateTranscriptSegmentResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
+		return nil, err
+	}
+
+	segmentsBytes, err := s.kv.Get(kvNsLesson, tuple.Tuple{lessonID.String(), "segments"})
+	if err != nil || len(segmentsBytes) == 0 {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no segments found — run Step 2 first"))
+	}
+
+	var segments []transcriptSegment
+	if err := json.Unmarshal(segmentsBytes, &segments); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse segments: %w", err))
+	}
+
+	idx := int(req.GetSegmentIndex())
+	if idx < 0 || idx >= len(segments) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("segment_index %d out of range [0, %d)", idx, len(segments)))
+	}
+
+	segments[idx].Text = req.GetText()
+
+	updated, err := json.Marshal(segments)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("marshal segments: %w", err))
+	}
+	if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonID.String(), "segments"}, updated); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save segments: %w", err))
+	}
+
+	// Rebuild transcript text so ChunkTranscriptStream sees the edited content.
+	var parts []string
+	for _, seg := range segments {
+		if seg.Text != "" {
+			parts = append(parts, seg.Text)
+		}
+	}
+	rebuiltTranscript := strings.Join(parts, " ")
+	if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonID.String(), "transcript"}, []byte(rebuiltTranscript)); err != nil {
+		s.log.WarnContext(ctx, "ai: failed to rebuild transcript after segment edit", "err", err)
+	}
+
+	seg := segments[idx]
+	return &richterv1.UpdateTranscriptSegmentResponse{
+		Segment: &richterv1.TranscriptSegment{
+			StartSeconds: seg.StartSeconds,
+			EndSeconds:   seg.EndSeconds,
+			Text:         seg.Text,
+		},
+	}, nil
+}
+
+// ── Step 4: ChunkTranscriptStream ─────────────────────────────────────────────
+
+func (s *AISvc) ChunkTranscriptStream(
+	ctx context.Context,
+	req *richterv1.ChunkTranscriptRequest,
+	stream *connect.ServerStream[richterv1.AnalysisProgressEvent],
+) error {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return err
+	}
+	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
+		return err
+	}
+
+	progress := func(step richterv1.AnalysisProgressStep, msg string) error {
+		return stream.Send(&richterv1.AnalysisProgressEvent{Step: step, Message: msg})
+	}
+
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+			LessonID: lessonID, Status: gen.LessonAnalysisStatusProcessing, ErrorMsg: pgtype.Text{},
+		})
+		return err
+	}); err != nil {
+		_ = stream.Send(&richterv1.AnalysisProgressEvent{
+			Step: richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR, Message: err.Error(),
+		})
+		return nil
+	}
+
+	// Cleanup: if we exit without setting a final status (SIGTERM/panic during Gemini call),
+	// reset to ERROR so the user can retry instead of being stuck with "Đang xử lý…".
+	chunkStatusFinalized := false
+	defer func() {
+		if chunkStatusFinalized {
+			return
+		}
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := db.WithConnection(s.pg, bgCtx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
+			return q.UpsertLessonAnalysisStatus(bgCtx, gen.UpsertLessonAnalysisStatusParams{
+				LessonID: lessonID,
+				Status:   gen.LessonAnalysisStatusError,
+				ErrorMsg: pgtype.Text{String: "Quá trình bị gián đoạn. Vui lòng thử lại.", Valid: true},
+			})
+		}); err != nil {
+			s.log.ErrorContext(bgCtx, "ai: chunk cleanup defer: failed to reset stuck PROCESSING status", "err", err)
+		}
+	}()
+
+	transcriptBytes, err := s.kv.Get(kvNsLesson, tuple.Tuple{lessonID.String(), "transcript"})
+	if err != nil || len(transcriptBytes) == 0 {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript found — run Step 2 (extract transcript) first"))
+	}
+
+	segmentsBytes, _ := s.kv.Get(kvNsLesson, tuple.Tuple{lessonID.String(), "segments"})
+	var allSegs []transcriptSegment
+	if len(segmentsBytes) > 0 {
+		_ = json.Unmarshal(segmentsBytes, &allSegs)
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING, "Đang phân tích nội dung để xác định đoạn..."); err != nil {
+		return nil
+	}
+
+	chunks, chunkErr := s.runGeminiChunk(ctx, string(transcriptBytes), segmentsBytes)
+	if chunkErr == nil && len(chunks) == 0 {
+		chunkErr = fmt.Errorf("Gemini returned 0 chunks — transcript may be too short or model response was empty")
+	}
+	if chunkErr != nil {
+		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
+				LessonID: lessonID,
+				Status:   gen.LessonAnalysisStatusError,
+				ErrorMsg: pgtype.Text{String: chunkErr.Error(), Valid: true},
+			})
+		})
+		chunkStatusFinalized = true
+		_ = stream.Send(&richterv1.AnalysisProgressEvent{
+			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
+			Message: chunkErr.Error(),
+		})
+		return nil
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_SAVING, "Đang lưu các đoạn..."); err != nil {
+		return nil
+	}
+
+	type chunkFDBEntry struct{ id, transcript string }
+	var chunkFDBEntries []chunkFDBEntry
+
+	saveErr := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
+		// Delete old questions and chunks atomically.
+		existing, err := q.ListLessonTranscriptChunks(ctx, lessonID)
+		if err != nil {
+			return fmt.Errorf("list existing chunks: %w", err)
+		}
+		for _, ec := range existing {
+			if err := q.DeleteLessonQuestionsForChunk(ctx, ec.ID); err != nil {
+				return fmt.Errorf("delete questions for chunk %s: %w", ec.ID, err)
+			}
+		}
+		if err := q.DeleteLessonTranscriptChunks(ctx, lessonID); err != nil {
+			return fmt.Errorf("delete old chunks: %w", err)
+		}
+
+		for i, ch := range chunks {
+			dbChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
+				LessonID:            lessonID,
+				OrderIndex:          int32(i),
+				StartSeconds:        float64(ch.StartSeconds),
+				EndSeconds:          float64(ch.EndSeconds),
+				Summary:             ch.Summary,
+				QuestionCountConfig: 1,
+			})
+			if err != nil {
+				return fmt.Errorf("insert chunk %d: %w", i, err)
+			}
+			chunkText := buildChunkTranscript(allSegs, ch.StartSeconds, ch.EndSeconds)
+			if chunkText == "" {
+				chunkText = string(transcriptBytes)
+			}
+			chunkFDBEntries = append(chunkFDBEntries, chunkFDBEntry{
+				id:         dbChunk.ID.String(),
+				transcript: chunkText,
+			})
+		}
+		return nil
+	})
+	if saveErr != nil {
+		s.log.ErrorContext(ctx, "ai: failed to save chunks", svc.LogAttrs("ChunkTranscriptStream", saveErr)...)
+		_ = stream.Send(&richterv1.AnalysisProgressEvent{
+			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
+			Message: "Lỗi khi lưu đoạn nội dung: " + saveErr.Error(),
+		})
+		return nil
+	}
+
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
+			LessonID: lessonID,
+			Status:   gen.LessonAnalysisStatusChunksReady,
+			ErrorMsg: pgtype.Text{},
+		})
+	}); err != nil {
+		s.log.ErrorContext(ctx, "ai: failed to update status to chunks_ready", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
+	}
+	chunkStatusFinalized = true
+
+	for _, e := range chunkFDBEntries {
+		if e.transcript == "" {
+			continue
+		}
+		if err := s.kv.Set(kvNsChunk, tuple.Tuple{e.id, "transcript"}, []byte(e.transcript)); err != nil {
+			s.log.WarnContext(ctx, "ai: FDB chunk transcript write failed", "chunk_id", e.id, "err", err)
+		}
+	}
+
+	return stream.Send(&richterv1.AnalysisProgressEvent{
+		Step: richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DONE,
+	})
+}
+
+// ── Step 5: Chunk editing ─────────────────────────────────────────────────────
+
+func (s *AISvc) ListLessonTranscriptChunks(
+	ctx context.Context,
+	req *richterv1.ListLessonTranscriptChunksRequest,
+) (*richterv1.ListLessonTranscriptChunksResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+		return nil, err
+	}
+
+	chunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	protoChunks := make([]*richterv1.TranscriptChunk, 0, len(chunks))
+	for _, c := range chunks {
+		protoChunks = append(protoChunks, chunkToProto(c))
+	}
+	return &richterv1.ListLessonTranscriptChunksResponse{Chunks: protoChunks}, nil
+}
+
+func (s *AISvc) UpdateChunkConfig(
+	ctx context.Context,
+	req *richterv1.UpdateChunkConfigRequest,
+) (*richterv1.UpdateChunkConfigResponse, error) {
+	chunkID, err := svc.ParseUUID(req.GetChunkId())
+	if err != nil {
+		return nil, err
+	}
+
+	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, chunkID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
+		return nil, err
+	}
+
+	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.UpdateChunkQuestionCountConfig(ctx, gen.UpdateChunkQuestionCountConfigParams{
+			ID:                  chunkID,
+			QuestionCountConfig: req.GetQuestionCount(),
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.UpdateChunkConfigResponse{Chunk: chunkToProto(updated)}, nil
+}
+
+func (s *AISvc) MergeChunks(
+	ctx context.Context,
+	req *richterv1.MergeChunksRequest,
+) (*richterv1.MergeChunksResponse, error) {
+	keepID, err := svc.ParseUUID(req.GetKeepChunkId())
+	if err != nil {
+		return nil, err
+	}
+	discardID, err := svc.ParseUUID(req.GetDiscardChunkId())
+	if err != nil {
+		return nil, err
+	}
+	if keepID == discardID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("keep and discard must be different chunks"))
+	}
+
+	keepChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, keepID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, keepChunk.LessonID); err != nil {
+		return nil, err
+	}
+
+	discardChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, discardID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if keepChunk.LessonID != discardChunk.LessonID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunks must belong to the same lesson"))
+	}
+
+	diff := keepChunk.OrderIndex - discardChunk.OrderIndex
+	if diff != 1 && diff != -1 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("only adjacent chunks can be merged"))
+	}
+
+	keepTranscript := s.fetchChunkTranscript(keepID.String())
+	discardTranscript := s.fetchChunkTranscript(discardID.String())
+
+	mergedStart := min(keepChunk.StartSeconds, discardChunk.StartSeconds)
+	mergedEnd := max(keepChunk.EndSeconds, discardChunk.EndSeconds)
+
+	var mergedTranscript string
+	if keepChunk.OrderIndex < discardChunk.OrderIndex {
+		mergedTranscript = keepTranscript + "\n" + discardTranscript
+	} else {
+		mergedTranscript = discardTranscript + "\n" + keepTranscript
+	}
+
+	// Write merged transcript to FDB before PG commit: keepID is known, so if PG fails the
+	// FDB entry is harmless (same key, next successful merge will overwrite).
+	if err := s.kv.Set(kvNsChunk, tuple.Tuple{keepID.String(), "transcript"}, []byte(mergedTranscript)); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("write merged transcript to FDB: %w", err))
+	}
+
+	var mergedChunk gen.LessonTranscriptChunk
+	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
+		if err := q.DeleteLessonQuestionsForChunk(ctx, discardID); err != nil {
+			return fmt.Errorf("delete discard questions: %w", err)
+		}
+		if err := q.DeleteLessonTranscriptChunk(ctx, discardID); err != nil {
+			return fmt.Errorf("delete discard chunk: %w", err)
+		}
+		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
+			ID:           keepID,
+			StartSeconds: mergedStart,
+			EndSeconds:   mergedEnd,
+			Summary:      keepChunk.Summary,
+		})
+		if err != nil {
+			return fmt.Errorf("update keep chunk boundaries: %w", err)
+		}
+		mergedChunk = updated
+		return q.ReorderLessonChunks(ctx, keepChunk.LessonID)
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("merge chunks: %w", err))
+	}
+
+	_ = s.kv.Delete(kvNsChunk, tuple.Tuple{discardID.String(), "transcript"})
+
+	return &richterv1.MergeChunksResponse{MergedChunk: chunkToProto(mergedChunk)}, nil
+}
+
+func (s *AISvc) DeleteChunk(
+	ctx context.Context,
+	req *richterv1.DeleteChunkRequest,
+) (*richterv1.DeleteChunkResponse, error) {
+	chunkID, err := svc.ParseUUID(req.GetChunkId())
+	if err != nil {
+		return nil, err
+	}
+
+	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, chunkID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
+		return nil, err
+	}
+
+	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
+		if err := q.DeleteLessonQuestionsForChunk(ctx, chunkID); err != nil {
+			return fmt.Errorf("delete questions: %w", err)
+		}
+		if err := q.DeleteLessonTranscriptChunk(ctx, chunkID); err != nil {
+			return fmt.Errorf("delete chunk: %w", err)
+		}
+		return q.ReorderLessonChunks(ctx, chunk.LessonID)
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete chunk: %w", err))
+	}
+
+	_ = s.kv.Delete(kvNsChunk, tuple.Tuple{chunkID.String(), "transcript"})
+
+	return &richterv1.DeleteChunkResponse{}, nil
+}
+
+func (s *AISvc) SplitChunk(
+	ctx context.Context,
+	req *richterv1.SplitChunkRequest,
+) (*richterv1.SplitChunkResponse, error) {
+	chunkID, err := svc.ParseUUID(req.GetChunkId())
+	if err != nil {
+		return nil, err
+	}
+	splitAt := float32(req.GetSplitAtSeconds())
+
+	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, chunkID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("chunk not found"))
+		}
+		return nil, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
+		return nil, err
+	}
+	if splitAt <= float32(chunk.StartSeconds) || splitAt >= float32(chunk.EndSeconds) {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("split_at_seconds %.1f must be within (%.1f, %.1f)", splitAt, chunk.StartSeconds, chunk.EndSeconds))
+	}
+
+	allSegs := s.loadSegmentsFromFDB(chunk.LessonID.String())
+	firstTranscript := buildChunkTranscript(allSegs, float32(chunk.StartSeconds), splitAt)
+	secondTranscript := buildChunkTranscript(allSegs, splitAt, float32(chunk.EndSeconds))
+
+	// Write the first chunk's transcript to FDB before the PG transaction: chunk.ID is
+	// already known so if PG fails, the orphaned FDB entry is harmless (same key, just updated).
+	if firstTranscript != "" {
+		if err := s.kv.Set(kvNsChunk, tuple.Tuple{chunk.ID.String(), "transcript"}, []byte(firstTranscript)); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("write first chunk transcript to FDB: %w", err))
+		}
+	}
+
+	type splitResult struct {
+		first       gen.LessonTranscriptChunk
+		second      gen.LessonTranscriptChunk
+		secondNewID pgtype.UUID
+	}
+	result, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (splitResult, error) {
+		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
+			ID: chunk.ID, StartSeconds: chunk.StartSeconds,
+			EndSeconds: float64(splitAt), Summary: chunk.Summary,
+		})
+		if err != nil {
+			return splitResult{}, svc.ConnectDBError(err)
+		}
+
+		existingChunks, _ := q.ListLessonTranscriptChunks(ctx, chunk.LessonID)
+		maxOrder := int32(0)
+		for _, c := range existingChunks {
+			if c.OrderIndex > maxOrder {
+				maxOrder = c.OrderIndex
+			}
+		}
+		newChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
+			LessonID: chunk.LessonID, OrderIndex: maxOrder + 1,
+			StartSeconds: float64(splitAt), EndSeconds: chunk.EndSeconds,
+			Summary: chunk.Summary, QuestionCountConfig: chunk.QuestionCountConfig,
+		})
+		if err != nil {
+			return splitResult{}, svc.ConnectDBError(err)
+		}
+
+		if err := q.ReorderLessonChunks(ctx, chunk.LessonID); err != nil {
+			return splitResult{}, fmt.Errorf("reorder chunks after split: %w", err)
+		}
+
+		first, err := q.GetLessonTranscriptChunk(ctx, updated.ID)
+		if err != nil {
+			return splitResult{}, fmt.Errorf("re-fetch first chunk after split: %w", err)
+		}
+		second, err := q.GetLessonTranscriptChunk(ctx, newChunk.ID)
+		if err != nil {
+			return splitResult{}, fmt.Errorf("re-fetch second chunk after split: %w", err)
+		}
+		return splitResult{first: first, second: second, secondNewID: newChunk.ID}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Second chunk ID only known after PG insert — FDB write happens after commit.
+	// On failure the second chunk has no transcript; log as error so data loss is visible.
+	if secondTranscript != "" {
+		if err := s.kv.Set(kvNsChunk, tuple.Tuple{result.secondNewID.String(), "transcript"}, []byte(secondTranscript)); err != nil {
+			s.log.ErrorContext(ctx, "ai: SplitChunk second chunk FDB write failed — transcript lost",
+				"chunk_id", result.secondNewID.String(), "err", err)
+		}
+	}
+
+	return &richterv1.SplitChunkResponse{
+		FirstChunk:  chunkToProto(result.first),
+		SecondChunk: chunkToProto(result.second),
+	}, nil
+}
+
+// ── Step 5d: AdjustChunkBoundary ─────────────────────────────────────────────
+
+func (s *AISvc) AdjustChunkBoundary(
+	ctx context.Context,
+	req *richterv1.AdjustChunkBoundaryRequest,
+) (*richterv1.AdjustChunkBoundaryResponse, error) {
+	prevID, err := svc.ParseUUID(req.GetPrevChunkId())
+	if err != nil {
+		return nil, err
+	}
+	nextID, err := svc.ParseUUID(req.GetNextChunkId())
+	if err != nil {
+		return nil, err
+	}
+	newBoundary := float32(req.GetNewBoundarySeconds())
+
+	prevChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, prevID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("prev chunk not found"))
+		}
+		return nil, svc.ConnectDBError(err)
+	}
+	nextChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, nextID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("next chunk not found"))
+		}
+		return nil, svc.ConnectDBError(err)
+	}
+	if prevChunk.LessonID != nextChunk.LessonID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunks belong to different lessons"))
+	}
+	if prevChunk.OrderIndex+1 != nextChunk.OrderIndex {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunks are not adjacent (order_index %d and %d)", prevChunk.OrderIndex, nextChunk.OrderIndex))
+	}
+	if err := s.requireTeacherRole(ctx, prevChunk.LessonID); err != nil {
+		return nil, err
+	}
+	if newBoundary <= float32(prevChunk.StartSeconds) || newBoundary >= float32(nextChunk.EndSeconds) {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("new_boundary_seconds %.1f must be within (%.1f, %.1f)",
+				newBoundary, prevChunk.StartSeconds, nextChunk.EndSeconds))
+	}
+
+	allSegs := s.loadSegmentsFromFDB(prevChunk.LessonID.String())
+	prevTranscript := buildChunkTranscript(allSegs, float32(prevChunk.StartSeconds), newBoundary)
+	nextTranscript := buildChunkTranscript(allSegs, newBoundary, float32(nextChunk.EndSeconds))
+
+	// Both IDs are known before PG; write FDB first so PG commit always has a matching transcript.
+	if prevTranscript != "" {
+		if err := s.kv.Set(kvNsChunk, tuple.Tuple{prevID.String(), "transcript"}, []byte(prevTranscript)); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("write prev chunk transcript to FDB: %w", err))
+		}
+	}
+	if nextTranscript != "" {
+		if err := s.kv.Set(kvNsChunk, tuple.Tuple{nextID.String(), "transcript"}, []byte(nextTranscript)); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("write next chunk transcript to FDB: %w", err))
+		}
+	}
+
+	type boundaryResult struct {
+		prev gen.LessonTranscriptChunk
+		next gen.LessonTranscriptChunk
+	}
+	result, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (boundaryResult, error) {
+		// Re-fetch inside the transaction to guard against concurrent reorders.
+		currentPrev, err := q.GetLessonTranscriptChunk(ctx, prevID)
+		if err != nil {
+			return boundaryResult{}, svc.ConnectDBError(err)
+		}
+		currentNext, err := q.GetLessonTranscriptChunk(ctx, nextID)
+		if err != nil {
+			return boundaryResult{}, svc.ConnectDBError(err)
+		}
+		if currentPrev.OrderIndex+1 != currentNext.OrderIndex {
+			return boundaryResult{}, connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("chunks are no longer adjacent — another edit may have changed their order"))
+		}
+		updPrev, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
+			ID: prevID, StartSeconds: currentPrev.StartSeconds, EndSeconds: float64(newBoundary), Summary: currentPrev.Summary,
+		})
+		if err != nil {
+			return boundaryResult{}, svc.ConnectDBError(err)
+		}
+		updNext, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
+			ID: nextID, StartSeconds: float64(newBoundary), EndSeconds: currentNext.EndSeconds, Summary: currentNext.Summary,
+		})
+		if err != nil {
+			return boundaryResult{}, svc.ConnectDBError(err)
+		}
+		return boundaryResult{prev: updPrev, next: updNext}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &richterv1.AdjustChunkBoundaryResponse{
+		PrevChunk: chunkToProto(result.prev),
+		NextChunk: chunkToProto(result.next),
+	}, nil
+}
+
+// ── Step 7: GenerateQuestionsStream ──────────────────────────────────────────
+
+func (s *AISvc) GenerateQuestionsStream(
+	ctx context.Context,
+	req *richterv1.GenerateQuestionsRequest,
+	stream *connect.ServerStream[richterv1.GenerateQuestionsProgressEvent],
+) error {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return err
+	}
+	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
+		return err
+	}
+
+	var chunks []gen.LessonTranscriptChunk
+
+	if req.GetChunkId() != "" {
+		chunkID, err := svc.ParseUUID(req.GetChunkId())
+		if err != nil {
+			return err
+		}
+		c, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+			return q.GetLessonTranscriptChunk(ctx, chunkID)
+		})
+		if err != nil {
+			return svc.ConnectDBError(err)
+		}
+		chunks = []gen.LessonTranscriptChunk{c}
+	} else {
+		chunks, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+			return q.ListLessonTranscriptChunks(ctx, lessonID)
+		})
+		if err != nil {
+			return svc.ConnectDBError(err)
+		}
+	}
+
+	if len(chunks) == 0 {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript chunks found — run Step 4 (chunk transcript) first"))
+	}
+
+	total := int32(len(chunks))
+
+	// Pre-load question counts for all chunks to avoid N+1 in the loop below.
+	chunkHasQuestions := map[string]bool{}
+	if !req.GetForceRegenerate() && req.GetChunkId() == "" {
+		existingQs, _ := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
+			return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{LessonID: lessonID, Limit: 5000, Offset: 0})
+		})
+		for _, eq := range existingQs {
+			if eq.ChunkID.Valid {
+				chunkHasQuestions[eq.ChunkID.String()] = true
+			}
+		}
+	}
+
+	type genResult struct {
+		i         int
+		chunk     gen.LessonTranscriptChunk
+		questions []mcqQuestion
+		err       error
+		skipped   bool
+	}
+	resultCh := make(chan genResult, total)
+
+	// Cancel goroutines when the function returns (client disconnect, etc.).
+	genCtx, genCancel := context.WithCancel(ctx)
+	defer genCancel()
+
+	const maxParallel = 3
+	sem := make(chan struct{}, maxParallel)
+
+	toReceive := int(total)
+	for i, chunk := range chunks {
+		if !req.GetForceRegenerate() && req.GetChunkId() == "" && chunkHasQuestions[chunk.ID.String()] {
+			resultCh <- genResult{i: i, chunk: chunk, skipped: true}
+			continue
+		}
+		i, chunk := i, chunk
+		go func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			chunkTranscript := s.fetchChunkTranscript(chunk.ID.String())
+			if strings.TrimSpace(chunkTranscript) == "" {
+				resultCh <- genResult{i: i, chunk: chunk, err: fmt.Errorf("không có nội dung transcript, bỏ qua")}
+				return
+			}
+			qs, genErr := s.runGeminiGenerateQuestions(genCtx, chunk, chunkTranscript)
+			resultCh <- genResult{i: i, chunk: chunk, questions: qs, err: genErr}
+		}()
+	}
+
+	for range toReceive {
+		var result genResult
+		select {
+		case <-ctx.Done():
+			return nil
+		case result = <-resultCh:
+		}
+
+		if result.skipped {
+			_ = stream.Send(&richterv1.GenerateQuestionsProgressEvent{
+				Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK,
+				Message:     fmt.Sprintf("Đoạn %d/%d đã có câu hỏi, bỏ qua", result.i+1, total),
+				ChunkIndex:  int32(result.i),
+				TotalChunks: total,
+			})
+			continue
+		}
+		if result.err != nil {
+			s.log.ErrorContext(ctx, "ai: failed to generate questions for chunk",
+				"chunk_id", result.chunk.ID.String(), "chunk_index", result.i, "err", result.err)
+			if sendErr := stream.Send(&richterv1.GenerateQuestionsProgressEvent{
+				Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_ERROR,
+				Message:     fmt.Sprintf("Lỗi đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, result.err.Error()),
+				ChunkIndex:  int32(result.i),
+				TotalChunks: total,
+			}); sendErr != nil {
+				return nil
+			}
+			continue
+		}
+		if sendErr := stream.Send(&richterv1.GenerateQuestionsProgressEvent{
+			Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK,
+			Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s", result.i+1, total, result.chunk.Summary),
+			ChunkIndex:  int32(result.i),
+			TotalChunks: total,
+		}); sendErr != nil {
+			return nil
+		}
+		if _, saveErr := s.saveQuestionsForChunk(ctx, lessonID, result.chunk.ID, result.questions); saveErr != nil {
+			s.log.ErrorContext(ctx, "ai: failed to save questions for chunk",
+				"chunk_id", result.chunk.ID.String(), "err", saveErr)
+			if sendErr := stream.Send(&richterv1.GenerateQuestionsProgressEvent{
+				Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_ERROR,
+				Message:     fmt.Sprintf("Lỗi lưu câu hỏi đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, saveErr.Error()),
+				ChunkIndex:  int32(result.i),
+				TotalChunks: total,
+			}); sendErr != nil {
+				return nil
+			}
+		}
+	}
+
+	if req.GetChunkId() == "" {
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
+				LessonID: lessonID,
+				Status:   gen.LessonAnalysisStatusDone,
+				ErrorMsg: pgtype.Text{},
+			})
+		}); err != nil {
+			s.log.ErrorContext(ctx, "ai: failed to mark analysis done", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
+		}
+	}
+
+	return stream.Send(&richterv1.GenerateQuestionsProgressEvent{
+		Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_DONE,
+		TotalChunks: total,
+	})
+}
+
+// ── Gemini helpers ────────────────────────────────────────────────────────────
+
+// extractStatusCode extracts an HTTP status code string from a Gemini error message.
+// Returns "429", "503", etc. if found, otherwise "rate limit".
+func extractStatusCode(msg string) string {
+	for _, code := range []string{"503", "429", "500", "502", "504"} {
+		if strings.Contains(msg, code) {
+			return code
+		}
+	}
+	return "rate limit"
+}
+
+// friendlyGeminiError maps verbose Gemini API errors to user-readable messages.
+func friendlyGeminiError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "429") || strings.Contains(msg, "quota") || strings.Contains(msg, "rate") || strings.Contains(msg, "503") || strings.Contains(msg, "overloaded") {
+		return fmt.Errorf("Vượt hạn mức Gemini API (%s). Vui lòng thử lại sau vài phút.", extractStatusCode(msg))
+	}
+	return err
+}
+
+func (s *AISvc) newGeminiClient(ctx context.Context) (*genai.Client, error) {
+	if s.geminiCfg.APIKey == "" {
+		return nil, fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
+	}
+	c, err := genai.NewClient(ctx, option.WithAPIKey(s.geminiCfg.APIKey))
+	if err != nil {
+		return nil, fmt.Errorf("create gemini client: %w", err)
+	}
+	return c, nil
+}
+
+func geminiResponseText(resp *genai.GenerateContentResponse) (string, error) {
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("empty gemini response: no candidates")
+	}
+	cand := resp.Candidates[0]
+	// MAX_TOKENS finish reason means the JSON was cut off mid-generation.
+	if cand.FinishReason != 0 && cand.FinishReason != genai.FinishReasonStop {
+		return "", fmt.Errorf("gemini stopped unexpectedly (finish_reason=%v) — try a shorter input or increase max_output_tokens", cand.FinishReason)
+	}
+	if cand.Content == nil || len(cand.Content.Parts) == 0 {
+		return "", fmt.Errorf("empty gemini response: no content parts")
+	}
+	var b strings.Builder
+	for _, p := range cand.Content.Parts {
+		if txt, ok := p.(genai.Text); ok {
+			b.WriteString(string(txt))
+		}
+	}
+	raw := strings.TrimSpace(b.String())
+	if raw == "" {
+		return "", fmt.Errorf("empty gemini response: no text content")
+	}
+	// Strip markdown code fences that some models add even with ResponseMIMEType=application/json.
+	if strings.HasPrefix(raw, "```") {
+		// Remove opening fence: ```json or ```
+		if after, found := strings.CutPrefix(raw, "```json"); found {
+			raw = after
+		} else {
+			raw, _ = strings.CutPrefix(raw, "```")
+		}
+		// Remove closing fence: prefer \n``` (fence on its own line) to avoid
+		// accidentally truncating JSON content that happens to contain backticks.
+		if idx := strings.LastIndex(raw, "\n```"); idx != -1 {
+			raw = raw[:idx]
+		} else if idx := strings.LastIndex(raw, "```"); idx != -1 {
+			raw = raw[:idx]
+		}
+		raw = strings.TrimSpace(raw)
+	}
+	return raw, nil
+}
 
 type mcqQuestion struct {
 	QuestionText  string   `json:"question_text"`
 	Options       []string `json:"options"`
 	CorrectAnswer int      `json:"correct_answer"`
 	Explanation   string   `json:"explanation"`
+	StartSeconds  float32  `json:"start_seconds"`
 }
 
 type transcriptSegment struct {
@@ -204,38 +1309,177 @@ type transcriptSegment struct {
 	Text         string  `json:"text"`
 }
 
-func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (transcript string, segments []transcriptSegment, questions []mcqQuestion, err error) {
-	if s.geminiCfg.APIKey == "" {
-		return "", nil, nil, fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
+// transcriptChunkRaw is the boundary-only Gemini response for a chunk.
+// Transcript text is assembled programmatically from segments (no redundant Gemini output).
+type transcriptChunkRaw struct {
+	Summary      string  `json:"summary"`
+	StartSeconds float32 `json:"start_seconds"`
+	EndSeconds   float32 `json:"end_seconds"`
+}
+
+// geminiFileCache stores a Gemini Files API entry so it can be reused across re-extractions.
+// Gemini files are auto-deleted after 48 h; we skip re-upload within that window.
+type geminiFileCache struct {
+	Name       string  `json:"name"`
+	URI        string  `json:"uri"`
+	Duration   float64 `json:"duration"`
+	StorageKey string  `json:"storage_key"`
+}
+
+// tryGetCachedGeminiFile returns an active Gemini file for the lesson if one was previously
+// uploaded and has not yet expired (state == ACTIVE). storageKey is used to invalidate the
+// cache when the lesson video is replaced.
+func (s *AISvc) tryGetCachedGeminiFile(ctx context.Context, client *genai.Client, lessonIDStr, storageKey string) (*genai.File, float64, bool) {
+	data, err := s.kv.Get(kvNsLesson, tuple.Tuple{lessonIDStr, "gemini_file"})
+	if err != nil || len(data) == 0 {
+		return nil, 0, false
+	}
+	var cache geminiFileCache
+	if err := json.Unmarshal(data, &cache); err != nil || cache.Name == "" || cache.StorageKey != storageKey {
+		return nil, 0, false
+	}
+	f, err := client.GetFile(ctx, cache.Name)
+	if err != nil || f.State != genai.FileStateActive {
+		return nil, 0, false
+	}
+	return f, cache.Duration, true
+}
+
+// cacheGeminiFile persists the Gemini file reference to FDB for future reuse.
+func (s *AISvc) cacheGeminiFile(lessonIDStr, storageKey string, f *genai.File, duration float64) {
+	data, err := json.Marshal(geminiFileCache{Name: f.Name, URI: f.URI, Duration: duration, StorageKey: storageKey})
+	if err != nil {
+		return
+	}
+	_ = s.kv.Set(kvNsLesson, tuple.Tuple{lessonIDStr, "gemini_file"}, data)
+}
+
+// parseMp4Duration parses duration from MP4 moov/mvhd box. Returns 0 if not parseable.
+func parseMp4Duration(data []byte) float64 {
+	pos := 0
+	for pos+8 <= len(data) {
+		size := int(data[pos])<<24 | int(data[pos+1])<<16 | int(data[pos+2])<<8 | int(data[pos+3])
+		if size < 8 || pos+size > len(data) {
+			break
+		}
+		boxType := string(data[pos+4 : pos+8])
+		if boxType == "moov" {
+			return parseMvhd(data[pos+8 : pos+size])
+		}
+		pos += size
+	}
+	return 0
+}
+
+func parseMvhd(data []byte) float64 {
+	pos := 0
+	for pos+8 <= len(data) {
+		size := int(data[pos])<<24 | int(data[pos+1])<<16 | int(data[pos+2])<<8 | int(data[pos+3])
+		if size < 8 || pos+size > len(data) {
+			break
+		}
+		boxType := string(data[pos+4 : pos+8])
+		if boxType == "mvhd" && pos+size <= len(data) {
+			d := data[pos+8:]
+			if len(d) < 20 {
+				return 0
+			}
+			version := d[0]
+			var timescale, duration uint64
+			if version == 0 && len(d) >= 20 {
+				timescale = uint64(d[12])<<24 | uint64(d[13])<<16 | uint64(d[14])<<8 | uint64(d[15])
+				duration = uint64(d[16])<<24 | uint64(d[17])<<16 | uint64(d[18])<<8 | uint64(d[19])
+			} else if version == 1 && len(d) >= 32 {
+				timescale = uint64(d[20])<<24 | uint64(d[21])<<16 | uint64(d[22])<<8 | uint64(d[23])
+				duration = uint64(d[24])<<56 | uint64(d[25])<<48 | uint64(d[26])<<40 | uint64(d[27])<<32 |
+					uint64(d[28])<<24 | uint64(d[29])<<16 | uint64(d[30])<<8 | uint64(d[31])
+			}
+			if timescale > 0 {
+				return float64(duration) / float64(timescale)
+			}
+			return 0
+		}
+		pos += size
+	}
+	return 0
+}
+
+func normalizeSegments(segs []transcriptSegment, duration float64) []transcriptSegment {
+	if len(segs) == 0 {
+		return segs
+	}
+	sort.Slice(segs, func(i, j int) bool { return segs[i].StartSeconds < segs[j].StartSeconds })
+
+	// Proportional rescale: if Gemini's timestamps are significantly off from the real duration,
+	// scale all timestamps so that the range maps to [0, duration]. This avoids the "cluster at
+	// end" artifact that clamping produces when multiple segments exceed the video length.
+	if duration > 0 {
+		geminiMax := float64(segs[len(segs)-1].EndSeconds)
+		if geminiMax <= 0 {
+			geminiMax = float64(segs[len(segs)-1].StartSeconds) + 1
+		}
+		// geminiMax < 5 means all timestamps are essentially zero — no usable timing data, skip rescaling.
+		if geminiMax >= 5 && (geminiMax > duration*1.05 || geminiMax < duration*0.5) {
+			scale := float32(duration / geminiMax)
+			for i := range segs {
+				segs[i].StartSeconds *= scale
+				segs[i].EndSeconds *= scale
+			}
+		}
+		// Drop segments that start at or past the video end.
+		maxDur := float32(duration)
+		valid := segs[:0]
+		for _, s := range segs {
+			if s.StartSeconds < maxDur {
+				valid = append(valid, s)
+			}
+		}
+		segs = valid
 	}
 
-	// Download video bytes from S3 (budget separate from Gemini to avoid starvation)
+	if len(segs) == 0 {
+		return segs
+	}
+
+	// Fix degenerate end times
+	maxDur := float32(duration)
+	for i := range segs {
+		if segs[i].EndSeconds <= segs[i].StartSeconds {
+			segs[i].EndSeconds = segs[i].StartSeconds + 15
+			if duration > 0 && segs[i].EndSeconds > maxDur {
+				segs[i].EndSeconds = maxDur
+			}
+		}
+	}
+	// Fix gaps: each segment's end = next segment's start
+	for i := 0; i < len(segs)-1; i++ {
+		if segs[i].EndSeconds > segs[i+1].StartSeconds {
+			segs[i].EndSeconds = segs[i+1].StartSeconds
+		}
+	}
+	return segs
+}
+
+func (s *AISvc) downloadVideo(ctx context.Context, storageKey string) ([]byte, string, error) {
 	s3ctx, s3cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer s3cancel()
 
+	const maxVideoBytes = int64(500 * 1024 * 1024) // 500 MB
+
 	obj, err := s.s3client.GetObject(s3ctx, s.s3cfg.Bucket, storageKey, minio.GetObjectOptions{})
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("download video from storage: %w", err)
+		return nil, "", fmt.Errorf("download video from storage: %w", err)
 	}
 	defer obj.Close()
 
-	videoBytes, err := io.ReadAll(obj)
+	videoBytes, err := io.ReadAll(io.LimitReader(obj, maxVideoBytes+1))
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("read video bytes: %w", err)
+		return nil, "", fmt.Errorf("read video bytes: %w", err)
 	}
-	s3cancel()
-
-	// Gemini upload + polling + generation get their own budget
-	ctx2, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-
-	client, err := genai.NewClient(ctx2, option.WithAPIKey(s.geminiCfg.APIKey))
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("create gemini client: %w", err)
+	if int64(len(videoBytes)) > maxVideoBytes {
+		return nil, "", fmt.Errorf("video file exceeds maximum size of 500 MB")
 	}
-	defer client.Close()
 
-	// Upload video to Gemini File API
 	mimeType := "video/mp4"
 	if idx := strings.LastIndex(storageKey, "."); idx >= 0 {
 		ext := strings.ToLower(storageKey[idx+1:])
@@ -248,124 +1492,831 @@ func (s *AISvc) runGeminiAnalysis(ctx context.Context, storageKey string) (trans
 			mimeType = "video/x-msvideo"
 		}
 	}
+	return videoBytes, mimeType, nil
+}
 
-	uploadedFile, err := client.UploadFile(ctx2, "", bytes.NewReader(videoBytes), &genai.UploadFileOptions{
+func (s *AISvc) uploadToGemini(ctx context.Context, client *genai.Client, videoBytes []byte, mimeType string) (*genai.File, error) {
+	uploadedFile, err := client.UploadFile(ctx, "", bytes.NewReader(videoBytes), &genai.UploadFileOptions{
 		MIMEType: mimeType,
 	})
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("upload to gemini file api: %w", err)
+		return nil, fmt.Errorf("upload to gemini file api: %w", err)
 	}
 
-	// Wait until file is ACTIVE
+	pollTicker := time.NewTicker(3 * time.Second)
+	defer pollTicker.Stop()
 	for uploadedFile.State == genai.FileStateProcessing {
 		select {
-		case <-ctx2.Done():
-			return "", nil, nil, ctx2.Err()
-		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-pollTicker.C:
 		}
-		uploadedFile, err = client.GetFile(ctx2, uploadedFile.Name)
+		uploadedFile, err = client.GetFile(ctx, uploadedFile.Name)
 		if err != nil {
-			return "", nil, nil, fmt.Errorf("poll file state: %w", err)
+			return nil, fmt.Errorf("poll file state: %w", err)
 		}
 	}
 	if uploadedFile.State != genai.FileStateActive {
-		return "", nil, nil, fmt.Errorf("file upload failed with state: %v", uploadedFile.State)
+		return nil, fmt.Errorf("file upload failed with state: %v", uploadedFile.State)
 	}
-	defer client.DeleteFile(ctx2, uploadedFile.Name) //nolint:errcheck
+	return uploadedFile, nil
+}
+
+func (s *AISvc) uploadToGeminiTracked(ctx context.Context, client *genai.Client, videoBytes []byte, mimeType string, progress progressFn) (*genai.File, error) {
+	uploadCtx, uploadCancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer uploadCancel()
+
+	type result struct {
+		file *genai.File
+		err  error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		f, err := s.uploadToGemini(uploadCtx, client, videoBytes, mimeType)
+		resCh <- result{f, err}
+	}()
+
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case res := <-resCh:
+			return res.file, res.err
+		case <-heartbeat.C:
+			if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_UPLOADING,
+				"Đang tải video lên Gemini... (video lớn có thể mất vài phút)"); err != nil {
+				uploadCancel()
+				return nil, err
+			}
+		case <-uploadCtx.Done():
+			return nil, uploadCtx.Err()
+		}
+	}
+}
+
+// runGeminiAnalyze downloads (or reuses a cached Gemini file for) the lesson video, then makes
+// a single GenerateContent call that returns transcript, fine-grained segments, AND chunk
+// boundaries. This collapses the old extract+chunk two-step into a single Gemini API call.
+func (s *AISvc) runGeminiAnalyze(ctx context.Context, lessonIDStr, storageKey string, progress progressFn) (transcript string, segments []transcriptSegment, chunks []transcriptChunkRaw, err error) {
+	client, clientErr := s.newGeminiClient(ctx)
+	if clientErr != nil {
+		return "", nil, nil, clientErr
+	}
+	defer client.Close()
+
+	var uploadedFile *genai.File
+	var videoDuration float64
+	var mimeType string
+
+	// Try to reuse a previously uploaded Gemini file for this lesson (48-h cache).
+	if cachedFile, dur, ok := s.tryGetCachedGeminiFile(ctx, client, lessonIDStr, storageKey); ok {
+		uploadedFile = cachedFile
+		videoDuration = dur
+		mimeType = "video/mp4"
+		if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_UPLOADING,
+			"Tái sử dụng file đã tải lên Gemini (bỏ qua bước tải)..."); err != nil {
+			return "", nil, nil, err
+		}
+	} else {
+		// Download from storage.
+		if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DOWNLOADING,
+			"Đang tải video từ storage..."); err != nil {
+			return "", nil, nil, err
+		}
+		videoBytes, mt, dlErr := s.downloadVideo(ctx, storageKey)
+		if dlErr != nil {
+			return "", nil, nil, dlErr
+		}
+		mimeType = mt
+		videoDuration = parseMp4Duration(videoBytes)
+
+		if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_UPLOADING,
+			"Đang gửi video lên Gemini..."); err != nil {
+			return "", nil, nil, err
+		}
+		uploadedFile, err = s.uploadToGeminiTracked(ctx, client, videoBytes, mimeType, progress)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		// Cache so that retries or re-extractions reuse the same file.
+		s.cacheGeminiFile(lessonIDStr, storageKey, uploadedFile, videoDuration)
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING,
+		"Đang phiên âm & phân đoạn nội dung..."); err != nil {
+		return "", nil, nil, err
+	}
 
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.2)
 	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(65536)
 
-	prompt := `Bạn là trợ lý giáo dục. Hãy phân tích video bài giảng này và thực hiện 2 nhiệm vụ:
+	var promptSb strings.Builder
+	promptSb.WriteString("Bạn là trợ lý giáo dục. Phân tích video bài giảng này và thực hiện đồng thời:\n\n")
+	if videoDuration > 0 {
+		fmt.Fprintf(&promptSb,
+			"Thời lượng video: chính xác %.1f giây. Mọi timestamp (start_seconds, end_seconds) PHẢI nằm trong [0, %.1f].\n\n",
+			videoDuration, videoDuration)
+	}
+	promptSb.WriteString(`1. PHIÊN ÂM: Ghi lại chính xác toàn bộ nội dung được nói.
+2. TIMESTAMP: Chia thành các đoạn nhỏ ~15-30 giây, mỗi đoạn có thời điểm bắt đầu/kết thúc.
+3. PHÂN ĐOẠN: Xác định 3-7 chủ đề/nội dung lớn của bài giảng (mỗi đoạn thường 2-10 phút).
 
-1. PHIÊN ÂM CÓ TIMESTAMP: Chia nội dung video thành các đoạn ngắn (khoảng 15-30 giây mỗi đoạn) với thời gian bắt đầu và kết thúc chính xác.
+Yêu cầu chunks:
+- Các chunk phải liền nhau và không chồng chéo: chunks[i].end_seconds == chunks[i+1].start_seconds
+- Chunk đầu tiên bắt đầu từ 0.0, chunk cuối kết thúc tại thời lượng video.
+- Mỗi summary ngắn gọn 2-5 từ mô tả nội dung chính.
 
-2. CÂU HỎI TRẮC NGHIỆM: Tạo 5 câu hỏi trắc nghiệm (MCQ) từ nội dung video để kiểm tra hiểu biết của học sinh. Mỗi câu có 4 lựa chọn (A, B, C, D), chỉ có 1 đáp án đúng.
-
-Trả về kết quả dưới dạng JSON với cấu trúc sau (transcript là toàn bộ nội dung ghép lại, transcript_segments là mảng các đoạn có timestamp):
+Trả về JSON:
 {
-  "transcript": "Nội dung phiên âm đầy đủ ghép từ tất cả các đoạn...",
+  "transcript": "Toàn bộ nội dung phiên âm...",
   "transcript_segments": [
-    {"start_seconds": 0.0, "end_seconds": 15.0, "text": "Nội dung đoạn 1..."},
-    {"start_seconds": 15.0, "end_seconds": 32.0, "text": "Nội dung đoạn 2..."}
+    {"start_seconds": 0.0, "end_seconds": 15.0, "text": "Nội dung đoạn..."}
   ],
-  "questions": [
-    {
-      "question_text": "Câu hỏi 1?",
-      "options": ["Lựa chọn A", "Lựa chọn B", "Lựa chọn C", "Lựa chọn D"],
-      "correct_answer": 0,
-      "explanation": "Giải thích tại sao đáp án đúng là A"
-    }
+  "chunks": [
+    {"summary": "Tóm tắt ngắn", "start_seconds": 0.0, "end_seconds": 120.0}
   ]
-}`
+}`)
 
-	resp, err := model.GenerateContent(ctx2,
+	genCtx, genCancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer genCancel()
+	resp, err := model.GenerateContent(genCtx,
 		genai.FileData{URI: uploadedFile.URI, MIMEType: mimeType},
-		genai.Text(prompt),
+		genai.Text(promptSb.String()),
 	)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("generate content: %w", err)
+		return "", nil, nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
 	}
 
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return "", nil, nil, fmt.Errorf("empty gemini response")
-	}
-
-	raw := ""
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if txt, ok := part.(genai.Text); ok {
-			raw += string(txt)
-		}
+	raw, err := geminiResponseText(resp)
+	if err != nil {
+		return "", nil, nil, err
 	}
 
 	var result struct {
-		Transcript         string              `json:"transcript"`
-		TranscriptSegments []transcriptSegment `json:"transcript_segments"`
-		Questions          []mcqQuestion       `json:"questions"`
+		Transcript         string               `json:"transcript"`
+		TranscriptSegments []transcriptSegment  `json:"transcript_segments"`
+		Chunks             []transcriptChunkRaw `json:"chunks"`
 	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return "", nil, nil, fmt.Errorf("parse gemini response: %w", err)
 	}
 
-	return result.Transcript, result.TranscriptSegments, result.Questions, nil
+	normalizedSegments := normalizeSegments(result.TranscriptSegments, videoDuration)
+
+	if strings.TrimSpace(result.Transcript) == "" {
+		return "", nil, nil, fmt.Errorf("Gemini trả về transcript rỗng — video có thể không có lời nói hoặc chất lượng âm thanh quá thấp")
+	}
+
+	// Fix degenerate chunk boundaries.
+	for i := range result.Chunks {
+		ch := &result.Chunks[i]
+		if ch.EndSeconds <= ch.StartSeconds {
+			ch.EndSeconds = ch.StartSeconds + 30
+		}
+		if videoDuration > 0 {
+			if float64(ch.EndSeconds) > videoDuration {
+				ch.EndSeconds = float32(videoDuration)
+			}
+		}
+	}
+
+	return result.Transcript, normalizedSegments, result.Chunks, nil
 }
 
-// ── DB helpers ────────────────────────────────────────────────────────────────
+// runGeminiChunk calls Gemini with the transcript text (no video) to determine chunk boundaries.
+func (s *AISvc) runGeminiChunk(ctx context.Context, transcript string, segmentsJSON []byte) ([]transcriptChunkRaw, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
 
-func (s *AISvc) upsertAnalysis(ctx context.Context, lessonID pgtype.UUID, status gen.LessonAnalysisStatus, transcript string, segments []byte, errMsg string) (gen.LessonAnalysis, error) {
-	return db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-		return q.UpsertLessonAnalysis(ctx, gen.UpsertLessonAnalysisParams{
-			LessonID:           lessonID,
-			Status:             status,
-			Transcript:         pgtype.Text{String: transcript, Valid: transcript != ""},
-			TranscriptSegments: segments,
-			ErrorMsg:           pgtype.Text{String: errMsg, Valid: errMsg != ""},
+	client, err := s.newGeminiClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	model := client.GenerativeModel(s.geminiCfg.Model)
+	model.SetTemperature(0.2)
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(32768)
+
+	var sb strings.Builder
+	sb.WriteString(`Bạn là trợ lý giáo dục. Dựa trên nội dung phiên âm bài giảng và các mốc thời gian dưới đây, hãy phân chia bài giảng thành các đoạn lớn theo chủ đề/nội dung gắn kết (thường 3-7 đoạn).
+
+Nội dung phiên âm:
+`)
+	sb.WriteString(transcript)
+
+	if len(segmentsJSON) > 0 {
+		sb.WriteString("\n\nCác mốc thời gian (JSON):\n")
+		sb.Write(segmentsJSON)
+	}
+
+	sb.WriteString(`
+
+Chỉ trả về ranh giới thời gian và tóm tắt — KHÔNG cần trả lại nội dung transcript (sẽ được lắp ráp từ mốc thời gian ở phía server).
+
+Trả về JSON:
+{
+  "chunks": [
+    {
+      "summary": "Tóm tắt ngắn gọn (2-5 từ)",
+      "start_seconds": 0.0,
+      "end_seconds": 120.0
+    }
+  ]
+}`)
+
+	resp, err := model.GenerateContent(ctx, genai.Text(sb.String()))
+	if err != nil {
+		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+	}
+
+	raw, err := geminiResponseText(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Chunks []transcriptChunkRaw `json:"chunks"`
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("parse gemini response: %w", err)
+	}
+
+	for i := range result.Chunks {
+		ch := &result.Chunks[i]
+		if ch.EndSeconds <= ch.StartSeconds {
+			ch.EndSeconds = ch.StartSeconds + 30
+		}
+	}
+	return result.Chunks, nil
+}
+
+func (s *AISvc) runGeminiGenerateQuestions(ctx context.Context, chunk gen.LessonTranscriptChunk, transcript string) ([]mcqQuestion, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	client, err := s.newGeminiClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	model := client.GenerativeModel(s.geminiCfg.Model)
+	model.SetTemperature(0.3)
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(8192)
+
+	prompt := fmt.Sprintf(`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d câu hỏi trắc nghiệm (MCQ) để kiểm tra hiểu biết của học sinh. Mỗi câu có 4 lựa chọn (A, B, C, D), chỉ có 1 đáp án đúng.
+
+Đoạn nội dung (%.1f - %.1f giây):
+%s
+
+Trả về JSON:
+{
+  "questions": [
+    {
+      "question_text": "Câu hỏi?",
+      "options": ["Lựa chọn A", "Lựa chọn B", "Lựa chọn C", "Lựa chọn D"],
+      "correct_answer": 0,
+      "explanation": "Giải thích đáp án đúng",
+      "start_seconds": %.1f
+    }
+  ]
+}
+
+Lưu ý: start_seconds là thời điểm (giây) trong video mà nội dung liên quan đến câu hỏi xuất hiện. Chọn thời điểm trong khoảng %.1f - %.1f giây.`,
+		chunk.QuestionCountConfig,
+		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		transcript,
+		float32(chunk.StartSeconds),
+		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+	)
+
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+	}
+
+	raw, err := geminiResponseText(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Questions []mcqQuestion `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("parse gemini response: %w", err)
+	}
+
+	return result.Questions, nil
+}
+
+// ── FDB content helpers ───────────────────────────────────────────────────────
+
+// loadTranscriptFromFDB reads the full transcript text for a lesson from FDB.
+func (s *AISvc) loadTranscriptFromFDB(lessonIDStr string) string {
+	data, _ := s.kv.Get(kvNsLesson, tuple.Tuple{lessonIDStr, "transcript"})
+	return strings.TrimSpace(string(data))
+}
+
+// loadSegmentsFromFDB reads transcript segments for a lesson from FDB.
+func (s *AISvc) loadSegmentsFromFDB(lessonIDStr string) []transcriptSegment {
+	data, _ := s.kv.Get(kvNsLesson, tuple.Tuple{lessonIDStr, "segments"})
+	if len(data) == 0 {
+		return nil
+	}
+	var segs []transcriptSegment
+	_ = json.Unmarshal(data, &segs)
+	return segs
+}
+
+// fetchChunkTranscript reads chunk transcript text from FDB.
+func (s *AISvc) fetchChunkTranscript(chunkIDStr string) string {
+	data, _ := s.kv.Get(kvNsChunk, tuple.Tuple{chunkIDStr, "transcript"})
+	return strings.TrimSpace(string(data))
+}
+
+// buildChunkTranscript concatenates segment texts within [startSec, endSec) from the given segment list.
+func buildChunkTranscript(segs []transcriptSegment, startSec, endSec float32) string {
+	var b strings.Builder
+	for _, seg := range segs {
+		if seg.StartSeconds >= startSec && seg.StartSeconds < endSec {
+			b.WriteString(seg.Text)
+			b.WriteString(" ")
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (s *AISvc) insertQuestionsInTx(ctx context.Context, q *gen.Queries, lessonID, chunkID pgtype.UUID, questions []mcqQuestion) ([]gen.LessonQuestion, error) {
+	saved := make([]gen.LessonQuestion, 0, len(questions))
+	for i, qst := range questions {
+		if qst.CorrectAnswer < 0 || qst.CorrectAnswer >= len(qst.Options) {
+			s.log.WarnContext(ctx, "ai: skipping question with invalid correct_answer index",
+				"question_index", i, "correct_answer", qst.CorrectAnswer, "options_count", len(qst.Options))
+			continue
+		}
+		optJSON, err := json.Marshal(qst.Options)
+		if err != nil {
+			return saved, fmt.Errorf("marshal options for question %d: %w", i, err)
+		}
+		lq, err := q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
+			LessonID:      lessonID,
+			QuestionText:  qst.QuestionText,
+			Options:       optJSON,
+			CorrectAnswer: int32(qst.CorrectAnswer),
+			Explanation:   pgtype.Text{String: qst.Explanation, Valid: qst.Explanation != ""},
+			OrderIndex:    int32(i),
+			StartSeconds:  float64(qst.StartSeconds),
+			ChunkID:       chunkID,
 		})
-	})
+		if err != nil {
+			return saved, err
+		}
+		saved = append(saved, lq)
+	}
+	return saved, nil
 }
 
-func (s *AISvc) saveQuestions(ctx context.Context, lessonID pgtype.UUID, questions []mcqQuestion) ([]gen.LessonQuestion, error) {
+func (s *AISvc) saveQuestionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, questions []mcqQuestion) ([]gen.LessonQuestion, error) {
 	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonQuestion, error) {
-		if err := q.DeleteLessonQuestions(ctx, lessonID); err != nil {
+		if err := q.DeleteLessonQuestionsForChunk(ctx, chunkID); err != nil {
 			return nil, err
 		}
-		saved := make([]gen.LessonQuestion, 0, len(questions))
-		for i, qst := range questions {
-			optJSON, _ := json.Marshal(qst.Options)
-			lq, err := q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
-				LessonID:      lessonID,
-				QuestionText:  qst.QuestionText,
-				Options:       optJSON,
-				CorrectAnswer: int32(qst.CorrectAnswer),
-				Explanation:   pgtype.Text{String: qst.Explanation, Valid: qst.Explanation != ""},
-				OrderIndex:    int32(i),
-			})
-			if err != nil {
-				return saved, err
-			}
-			saved = append(saved, lq)
-		}
-		return saved, nil
+		return s.insertQuestionsInTx(ctx, q, lessonID, chunkID, questions)
 	})
+}
+
+// ── Step 8: Question editing ──────────────────────────────────────────────────
+
+func (s *AISvc) authorizeQuestionWrite(ctx context.Context, questionIDStr string) (gen.LessonQuestion, error) {
+	questionID, err := svc.ParseUUID(questionIDStr)
+	if err != nil {
+		return gen.LessonQuestion{}, err
+	}
+	q, err := db.WithConnection(s.pg, ctx, func(qq *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
+		return qq.GetLessonQuestionByID(ctx, questionID)
+	})
+	if err != nil {
+		return gen.LessonQuestion{}, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, q.LessonID); err != nil {
+		return gen.LessonQuestion{}, err
+	}
+	return q, nil
+}
+
+func (s *AISvc) UpdateLessonQuestion(
+	ctx context.Context,
+	req *richterv1.UpdateLessonQuestionRequest,
+) (*richterv1.UpdateLessonQuestionResponse, error) {
+	authorized, err := s.authorizeQuestionWrite(ctx, req.GetQuestionId())
+	if err != nil {
+		return nil, err
+	}
+	questionID := authorized.ID
+	optJSON, err := json.Marshal(req.GetOptions())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid options"))
+	}
+	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
+		return q.UpdateLessonQuestion(ctx, gen.UpdateLessonQuestionParams{
+			ID:            questionID,
+			QuestionText:  req.GetQuestionText(),
+			Options:       optJSON,
+			CorrectAnswer: req.GetCorrectAnswer(),
+			Explanation:   pgtype.Text{String: req.GetExplanation(), Valid: req.GetExplanation() != ""},
+			StartSeconds:  float64(req.GetStartSeconds()),
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.UpdateLessonQuestionResponse{Question: questionToProto(updated)}, nil
+}
+
+func (s *AISvc) CreateManualQuestion(
+	ctx context.Context,
+	req *richterv1.CreateManualQuestionRequest,
+) (*richterv1.CreateManualQuestionResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
+		return nil, err
+	}
+	optJSON, err := json.Marshal(req.GetOptions())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid options"))
+	}
+	created, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.LessonQuestion, error) {
+		nextIdx, err := q.GetLessonQuestionNextOrderIndex(ctx, lessonID)
+		if err != nil {
+			return gen.LessonQuestion{}, fmt.Errorf("compute order_index: %w", err)
+		}
+		return q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
+			LessonID:      lessonID,
+			QuestionText:  req.GetQuestionText(),
+			Options:       optJSON,
+			CorrectAnswer: req.GetCorrectAnswer(),
+			Explanation:   pgtype.Text{String: req.GetExplanation(), Valid: req.GetExplanation() != ""},
+			OrderIndex:    nextIdx,
+			StartSeconds:  float64(req.GetStartSeconds()),
+			ChunkID:       pgtype.UUID{},
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.CreateManualQuestionResponse{Question: questionToProto(created)}, nil
+}
+
+func (s *AISvc) DeleteLessonQuestion(
+	ctx context.Context,
+	req *richterv1.DeleteLessonQuestionRequest,
+) (*richterv1.DeleteLessonQuestionResponse, error) {
+	authorized, err := s.authorizeQuestionWrite(ctx, req.GetQuestionId())
+	if err != nil {
+		return nil, err
+	}
+	questionID := authorized.ID
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.DeleteLessonQuestionByID(ctx, questionID)
+	}); err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.DeleteLessonQuestionResponse{}, nil
+}
+
+func (s *AISvc) RegenerateQuestion(
+	ctx context.Context,
+	req *richterv1.RegenerateQuestionRequest,
+) (*richterv1.RegenerateQuestionResponse, error) {
+	q, err := s.authorizeQuestionWrite(ctx, req.GetQuestionId())
+	if err != nil {
+		return nil, err
+	}
+	if s.geminiCfg.APIKey == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("Gemini API key not configured"))
+	}
+
+	var contextText string
+	var chunkStart, chunkEnd float32
+
+	if q.ChunkID.Valid {
+		chunk, cerr := db.WithConnection(s.pg, ctx, func(qq *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+			return qq.GetLessonTranscriptChunk(ctx, q.ChunkID)
+		})
+		if cerr == nil {
+			contextText = s.fetchChunkTranscript(chunk.ID.String())
+			chunkStart = float32(chunk.StartSeconds)
+			chunkEnd = float32(chunk.EndSeconds)
+		}
+	}
+	if contextText == "" {
+		// Fall back to lesson-level transcript from FDB
+		if data, _ := s.kv.Get(kvNsLesson, tuple.Tuple{q.LessonID.String(), "transcript"}); len(data) > 0 {
+			contextText = string(data)
+		}
+		chunkStart = float32(q.StartSeconds) - 30
+		if chunkStart < 0 {
+			chunkStart = 0
+		}
+		chunkEnd = float32(q.StartSeconds) + 60
+	}
+	if contextText == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript available to regenerate question"))
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	client, err := s.newGeminiClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	model := client.GenerativeModel(s.geminiCfg.Model)
+	model.SetTemperature(0.5)
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(2048)
+
+	prompt := fmt.Sprintf(`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo MỘT câu hỏi trắc nghiệm mới để kiểm tra hiểu biết của học sinh. Câu hỏi có 4 lựa chọn (A, B, C, D), chỉ 1 đáp án đúng.
+
+Nội dung (khoảng %.1f - %.1f giây):
+%s
+
+Trả về JSON:
+{
+  "question_text": "Câu hỏi?",
+  "options": ["Lựa chọn A", "Lựa chọn B", "Lựa chọn C", "Lựa chọn D"],
+  "correct_answer": 0,
+  "explanation": "Giải thích đáp án đúng",
+  "start_seconds": %.1f
+}`,
+		chunkStart, chunkEnd, contextText, float32(q.StartSeconds),
+	)
+
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+	}
+
+	raw, err := geminiResponseText(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var result mcqQuestion
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("parse gemini response: %w", err)
+	}
+	if result.CorrectAnswer < 0 || result.CorrectAnswer >= len(result.Options) {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalid correct_answer from AI"))
+	}
+
+	optJSON, _ := json.Marshal(result.Options)
+	updated, err := db.WithConnection(s.pg, ctx, func(qq *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
+		return qq.UpdateLessonQuestion(ctx, gen.UpdateLessonQuestionParams{
+			ID:            q.ID,
+			QuestionText:  result.QuestionText,
+			Options:       optJSON,
+			CorrectAnswer: int32(result.CorrectAnswer),
+			Explanation:   pgtype.Text{String: result.Explanation, Valid: result.Explanation != ""},
+			StartSeconds:  float64(result.StartSeconds),
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.RegenerateQuestionResponse{Question: questionToProto(updated)}, nil
+}
+
+// ── Video watch progress (FoundationDB) ──────────────────────────────────────
+
+func (s *AISvc) UpdateWatchProgress(
+	ctx context.Context,
+	req *richterv1.UpdateWatchProgressRequest,
+) (*richterv1.UpdateWatchProgressResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	claims, err := s.authz.RequireOrgMember(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.kv.SetFloat64(kvNsWatch, tuple.Tuple{claims.GetSub(), req.GetLessonId()}, float64(req.GetPositionSeconds())); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save watch progress: %w", err))
+	}
+	return &richterv1.UpdateWatchProgressResponse{}, nil
+}
+
+func (s *AISvc) GetWatchProgress(
+	ctx context.Context,
+	req *richterv1.GetWatchProgressRequest,
+) (*richterv1.GetWatchProgressResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	claims, err := s.authz.RequireOrgMember(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	pos, err := s.kv.GetFloat64(kvNsWatch, tuple.Tuple{claims.GetSub(), req.GetLessonId()})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get watch progress: %w", err))
+	}
+	return &richterv1.GetWatchProgressResponse{PositionSeconds: float32(pos)}, nil
+}
+
+// ── Whisper helpers ───────────────────────────────────────────────────────────
+
+// extractAudio runs ffmpeg to extract 16kHz mono WAV audio from a video byte slice.
+// Both input and output use temp files because MP4 requires seekable input (moov atom
+// can be at the end of the file) and WAV requires seekable output for correct size headers.
+func extractAudio(ctx context.Context, videoBytes []byte) ([]byte, error) {
+	videoTmp, err := os.CreateTemp("", "richter-video-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp video file: %w", err)
+	}
+	videoPath := videoTmp.Name()
+	defer os.Remove(videoPath)
+
+	if _, err := videoTmp.Write(videoBytes); err != nil {
+		videoTmp.Close()
+		return nil, fmt.Errorf("write temp video: %w", err)
+	}
+	videoTmp.Close()
+
+	audioTmp, err := os.CreateTemp("", "richter-audio-*.wav")
+	if err != nil {
+		return nil, fmt.Errorf("create temp wav file: %w", err)
+	}
+	audioPath := audioTmp.Name()
+	audioTmp.Close()
+	defer os.Remove(audioPath)
+
+	cmd := exec.CommandContext(ctx,
+		"ffmpeg", "-hide_banner", "-loglevel", "error",
+		"-y",
+		"-i", videoPath,
+		"-vn",
+		"-acodec", "pcm_s16le",
+		"-ar", "16000",
+		"-ac", "1",
+		audioPath,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg extract audio: %w: %s", err, stderr.String())
+	}
+	return os.ReadFile(audioPath)
+}
+
+// whisperTranscribe sends audio bytes to the faster-whisper-server and returns
+// the full transcript text along with fine-grained segment timestamps.
+func (s *AISvc) whisperTranscribe(ctx context.Context, audioBytes []byte) (string, []transcriptSegment, error) {
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+
+	// Set Content-Type to audio/wav so speaches can detect the format correctly.
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", `form-data; name="file"; filename="audio.wav"`)
+	h.Set("Content-Type", "audio/wav")
+	fw, err := w.CreatePart(h)
+	if err != nil {
+		return "", nil, fmt.Errorf("create file part: %w", err)
+	}
+	if _, err := fw.Write(audioBytes); err != nil {
+		return "", nil, fmt.Errorf("write audio bytes: %w", err)
+	}
+	if err := w.WriteField("model", s.whisperCfg.Model); err != nil {
+		return "", nil, fmt.Errorf("write model field: %w", err)
+	}
+	if err := w.WriteField("response_format", "verbose_json"); err != nil {
+		return "", nil, fmt.Errorf("write response_format: %w", err)
+	}
+	if err := w.WriteField("timestamp_granularities[]", "segment"); err != nil {
+		return "", nil, fmt.Errorf("write timestamp_granularities: %w", err)
+	}
+	w.Close()
+
+	url := "http://" + s.whisperCfg.Endpoint + "/v1/audio/transcriptions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return "", nil, fmt.Errorf("build whisper request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return "", nil, fmt.Errorf("call whisper API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", nil, fmt.Errorf("read whisper response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("whisper API %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var result struct {
+		Text     string `json:"text"`
+		Segments []struct {
+			Start float32 `json:"start"`
+			End   float32 `json:"end"`
+			Text  string  `json:"text"`
+		} `json:"segments"`
+	}
+	if err := json.Unmarshal(respBytes, &result); err != nil {
+		return "", nil, fmt.Errorf("parse whisper response: %w", err)
+	}
+
+	segs := make([]transcriptSegment, len(result.Segments))
+	for i, seg := range result.Segments {
+		segs[i] = transcriptSegment{
+			StartSeconds: seg.Start,
+			EndSeconds:   seg.End,
+			Text:         strings.TrimSpace(seg.Text),
+		}
+	}
+	return strings.TrimSpace(result.Text), segs, nil
+}
+
+// runWhisperAnalyze is the Whisper-based replacement for runGeminiAnalyze.
+// Pipeline: download video → ffmpeg extract audio → Whisper transcription →
+// Gemini (text-only) chunking. No video upload to Gemini required.
+func (s *AISvc) runWhisperAnalyze(ctx context.Context, storageKey string, progress progressFn) (transcript string, segments []transcriptSegment, chunks []transcriptChunkRaw, err error) {
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DOWNLOADING,
+		"Đang tải video từ storage..."); err != nil {
+		return "", nil, nil, err
+	}
+	videoBytes, _, dlErr := s.downloadVideo(ctx, storageKey)
+	if dlErr != nil {
+		return "", nil, nil, dlErr
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_UPLOADING,
+		"Đang trích xuất âm thanh..."); err != nil {
+		return "", nil, nil, err
+	}
+	audioCtx, audioCancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer audioCancel()
+	audioBytes, audioErr := extractAudio(audioCtx, videoBytes)
+	if audioErr != nil {
+		return "", nil, nil, fmt.Errorf("extract audio: %w", audioErr)
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING,
+		"Đang phiên âm bằng Whisper..."); err != nil {
+		return "", nil, nil, err
+	}
+	whisperCtx, whisperCancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer whisperCancel()
+	transcript, segments, whisperErr := s.whisperTranscribe(whisperCtx, audioBytes)
+	if whisperErr != nil {
+		return "", nil, nil, fmt.Errorf("whisper transcription: %w", whisperErr)
+	}
+	if strings.TrimSpace(transcript) == "" {
+		return "", nil, nil, fmt.Errorf("Whisper trả về transcript rỗng — video có thể không có lời nói hoặc chất lượng âm thanh quá thấp")
+	}
+
+	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING,
+		"Đang phân đoạn nội dung bằng Gemini..."); err != nil {
+		return "", nil, nil, err
+	}
+	segmentsJSON, _ := json.Marshal(segments)
+	chunks, chunkErr := s.runGeminiChunk(ctx, transcript, segmentsJSON)
+	if chunkErr != nil {
+		// Chunking failure is non-fatal: return transcript without chunks so
+		// the caller can fall back to TRANSCRIPT_EXTRACTED status.
+		s.log.WarnContext(ctx, "ai: whisper pipeline: gemini chunking failed, returning transcript only", "err", chunkErr)
+		return transcript, segments, nil, nil
+	}
+
+	return transcript, segments, chunks, nil
 }

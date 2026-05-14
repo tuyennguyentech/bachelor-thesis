@@ -16,7 +16,6 @@ import (
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
-	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -35,7 +34,6 @@ func init() {
 
 type QuizSvc struct {
 	pg    *db.PostgresSvc
-	log   *log.LogSvc
 	authz *authz.AuthzSvc
 }
 
@@ -46,15 +44,11 @@ func NewQuizSvc(i do.Injector) (*QuizSvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc: %w", err)
 	}
-	l, err := do.Invoke[*log.LogSvc](i)
-	if err != nil {
-		return nil, fmt.Errorf("LogSvc: %w", err)
-	}
 	az, err := do.Invoke[*authz.AuthzSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("AuthzSvc: %w", err)
 	}
-	return &QuizSvc{pg: pg, log: l, authz: az}, nil
+	return &QuizSvc{pg: pg, authz: az}, nil
 }
 
 func (s *QuizSvc) Handler() (string, http.Handler) {
@@ -84,9 +78,24 @@ func (s *QuizSvc) SubmitQuiz(
 		return nil, err
 	}
 
+	// Verify caller is an active member of the org that owns this lesson.
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+		return nil, err
+	}
+
 	// Load questions to compute score
 	questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
-		return q.ListLessonQuestions(ctx, lessonID)
+		return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{
+			LessonID: lessonID,
+			Limit:    100,
+			Offset:   0,
+		})
 	})
 	if err != nil {
 		return nil, svc.ConnectDBError(err)
@@ -140,6 +149,17 @@ func (s *QuizSvc) GetMyQuizAttempt(
 	if err != nil {
 		return nil, err
 	}
+
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+		return nil, err
+	}
+
 	userID, err := svc.ParseUUID(claims.Sub)
 	if err != nil {
 		return nil, err
@@ -159,7 +179,9 @@ func (s *QuizSvc) GetMyQuizAttempt(
 	}
 
 	var answers []int32
-	_ = json.Unmarshal(attempt.Answers, &answers)
+	if err := json.Unmarshal(attempt.Answers, &answers); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("unmarshal answers: %w", err))
+	}
 	return &richterv1.GetMyQuizAttemptResponse{Attempt: attemptToProto(attempt, answers)}, nil
 }
 
@@ -194,23 +216,29 @@ func (s *QuizSvc) ListLessonAttempts(
 		limit = 50
 	}
 
-	rows, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListLessonAttemptsRow, error) {
-		return q.ListLessonAttempts(ctx, gen.ListLessonAttemptsParams{
+	type attemptsResult struct {
+		rows  []gen.ListLessonAttemptsRow
+		total int64
+	}
+	ar, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (attemptsResult, error) {
+		rows, err := q.ListLessonAttempts(ctx, gen.ListLessonAttemptsParams{
 			LessonID: lessonID,
 			Limit:    limit,
 			Offset:   req.GetOffset(),
 		})
+		if err != nil {
+			return attemptsResult{}, err
+		}
+		total, err := q.CountLessonAttempts(ctx, lessonID)
+		if err != nil {
+			return attemptsResult{}, err
+		}
+		return attemptsResult{rows, total}, nil
 	})
 	if err != nil {
 		return nil, svc.ConnectDBError(err)
 	}
-
-	total, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (int64, error) {
-		return q.CountLessonAttempts(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
+	rows, total := ar.rows, ar.total
 
 	results := make([]*richterv1.StudentAttemptResult, 0, len(rows))
 	for _, r := range rows {

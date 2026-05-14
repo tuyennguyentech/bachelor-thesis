@@ -15,10 +15,15 @@ FROM organization_members
 WHERE organization_id = $1 AND user_id = $2;
 
 -- name: ListOrganizationMembers :many
-SELECT *
-FROM organization_members
-WHERE organization_id = $1
-ORDER BY created_at DESC
+SELECT
+  om.*,
+  u.email     AS user_email,
+  u.first_name AS user_first_name,
+  u.last_name  AS user_last_name
+FROM organization_members om
+JOIN users u ON u.id = om.user_id
+WHERE om.organization_id = $1
+ORDER BY om.created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: ListUserMemberships :many
@@ -43,6 +48,13 @@ RETURNING *;
 -- name: RemoveOrganizationMember :execrows
 DELETE FROM organization_members
 WHERE organization_id = $1 AND user_id = $2;
+
+-- name: CountOrganizationOwners :one
+SELECT COUNT(*)::bigint
+FROM organization_members
+WHERE organization_id = $1
+  AND role = 'owner'
+  AND status = 'active';
 
 -- name: BulkAddOrganizationMembers :copyfrom
 INSERT INTO organization_members (

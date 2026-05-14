@@ -101,13 +101,13 @@ export async function updateUserPassword(_state: ActionState, formData: FormData
   }
 }
 
-export async function deleteUser(id: string): Promise<void> {
+export async function deleteUser(id: string): Promise<ActionState> {
   const { token } = await requireAdmin();
   const client = createRichterClient(UserService, token);
   try {
     await client.deleteUser({ id });
   } catch {
-    return;
+    return { error: "Không thể xóa người dùng" };
   }
   redirect("/admin/users");
 }

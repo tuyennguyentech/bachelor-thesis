@@ -1,0 +1,18 @@
+[
+  {
+    "local_path": "seed-assets/videos/big-buck-bunny.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch1-big-o-notation.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/elephants-dream.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch2-array-linked-list.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/sintel.mp4",
+    "s3_key": "seed/hust-cs/java/ch1-jvm-jdk-jre.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/big-buck-bunny.mp4",
+    "s3_key": "seed/dyadia-demo/intro/ch1-overview.mp4"
+  }
+]

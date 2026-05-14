@@ -1,0 +1,20 @@
+{
+  "identities": [
+    {
+      "name": "dyadia",
+      "credentials": [
+        {
+          "accessKey": "dyadia",
+          "secretKey": "dyadia_secret_key"
+        }
+      ],
+      "actions": [
+        "Admin",
+        "Read",
+        "Write",
+        "List",
+        "Tagging"
+      ]
+    }
+  ]
+}

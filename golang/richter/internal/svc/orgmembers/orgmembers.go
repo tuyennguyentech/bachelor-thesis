@@ -67,7 +67,6 @@ func (o *OrgMembersSvc) AddOrganizationMember(
 ) (*richterv1.AddOrganizationMemberResponse, error) {
 	orgID, err := svc.ParseUUID(req.GetOrganizationId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("AddOrganizationMember.ParseOrgUUID", err)...)
 		return nil, err
 	}
 	if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleAdmin, gen.OrganizationRoleOwner); err != nil {
@@ -75,17 +74,20 @@ func (o *OrgMembersSvc) AddOrganizationMember(
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("AddOrganizationMember.ParseUserUUID", err)...)
 		return nil, err
 	}
 	role, err := OrganizationRoleToSQL(req.GetRole())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("AddOrganizationMember.OrganizationRoleToSQL", err)...)
 		return nil, err
+	}
+	// Only owner (or SYS_ADMIN) may add a new owner.
+	if role == gen.OrganizationRoleOwner {
+		if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleOwner); err != nil {
+			return nil, err
+		}
 	}
 	status, err := MemberStatusToSQL(req.GetStatus())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("AddOrganizationMember.MemberStatusToSQL", err)...)
 		return nil, err
 	}
 
@@ -111,7 +113,6 @@ func (o *OrgMembersSvc) GetOrganizationMember(
 ) (*richterv1.GetOrganizationMemberResponse, error) {
 	orgID, err := svc.ParseUUID(req.GetOrganizationId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("GetOrganizationMember.ParseOrgUUID", err)...)
 		return nil, err
 	}
 	if _, err := o.authz.RequireOrgMember(ctx, orgID); err != nil {
@@ -119,7 +120,6 @@ func (o *OrgMembersSvc) GetOrganizationMember(
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("GetOrganizationMember.ParseUserUUID", err)...)
 		return nil, err
 	}
 
@@ -143,14 +143,13 @@ func (o *OrgMembersSvc) ListOrganizationMembers(
 ) (*richterv1.ListOrganizationMembersResponse, error) {
 	orgID, err := svc.ParseUUID(req.GetOrganizationId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("ListOrganizationMembers.ParseUUID", err)...)
 		return nil, err
 	}
 	if _, err := o.authz.RequireOrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 
-	members, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.OrganizationMember, error) {
+	members, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListOrganizationMembersRow, error) {
 		return q.ListOrganizationMembers(ctx, gen.ListOrganizationMembersParams{
 			OrganizationID: orgID,
 			Limit:          req.GetLimit(),
@@ -165,7 +164,7 @@ func (o *OrgMembersSvc) ListOrganizationMembers(
 
 	out := make([]*richterv1.OrganizationMember, 0, len(members))
 	for _, m := range members {
-		out = append(out, OrganizationMemberToProto(m))
+		out = append(out, OrganizationMemberRowToProto(m))
 	}
 	return &richterv1.ListOrganizationMembersResponse{Members: out}, nil
 }
@@ -179,7 +178,6 @@ func (o *OrgMembersSvc) ListUserMemberships(
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("ListUserMemberships.ParseUUID", err)...)
 		return nil, err
 	}
 
@@ -209,44 +207,48 @@ func (o *OrgMembersSvc) UpdateOrganizationMemberRole(
 ) (*richterv1.UpdateOrganizationMemberRoleResponse, error) {
 	orgID, err := svc.ParseUUID(req.GetOrganizationId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberRole.ParseOrgUUID", err)...)
 		return nil, err
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberRole.ParseUserUUID", err)...)
 		return nil, err
 	}
 	role, err := OrganizationRoleToSQL(req.GetRole())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberRole.OrganizationRoleToSQL", err)...)
 		return nil, err
 	}
 
-	// Fetch target's current role to determine required caller permission level.
-	// Only ORG_OWNER or SYS_ADMIN may change an OWNER's role.
-	targetMember, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
-		return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+	// All permission checks and the update happen inside one transaction to eliminate TOCTOU.
+	// Only ORG_OWNER may change an OWNER's role or promote anyone to OWNER.
+	member, err := db.WithCommitTx(o.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.OrganizationMember, error) {
+		current, err := q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
 			OrganizationID: orgID,
 			UserID:         userID,
 		})
-	})
-	if err != nil {
-		err = svc.ConnectDBError(err)
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberRole.GetTargetMember", err)...)
-		return nil, err
-	}
-	if targetMember.Role == gen.OrganizationRoleOwner {
-		if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleOwner); err != nil {
-			return nil, err
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return gen.OrganizationMember{}, connect.NewError(connect.CodeNotFound, errors.New("member not found"))
+			}
+			return gen.OrganizationMember{}, connect.NewError(connect.CodeInternal, fmt.Errorf("get member: %w", err))
 		}
-	} else {
-		if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleAdmin, gen.OrganizationRoleOwner); err != nil {
-			return nil, err
+		if current.Role == gen.OrganizationRoleOwner || role == gen.OrganizationRoleOwner {
+			if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleOwner); err != nil {
+				return gen.OrganizationMember{}, err
+			}
+		} else {
+			if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleAdmin, gen.OrganizationRoleOwner); err != nil {
+				return gen.OrganizationMember{}, err
+			}
 		}
-	}
-
-	member, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+		if current.Role == gen.OrganizationRoleOwner && role != gen.OrganizationRoleOwner && current.Status == gen.MemberStatusActive {
+			ownerCount, err := q.CountOrganizationOwners(ctx, orgID)
+			if err != nil {
+				return gen.OrganizationMember{}, connect.NewError(connect.CodeInternal, fmt.Errorf("count owners: %w", err))
+			}
+			if ownerCount <= 1 {
+				return gen.OrganizationMember{}, connect.NewError(connect.CodeFailedPrecondition, errors.New("cannot demote the last owner of an organization"))
+			}
+		}
 		return q.UpdateOrganizationMemberRole(ctx, gen.UpdateOrganizationMemberRoleParams{
 			OrganizationID: orgID,
 			UserID:         userID,
@@ -254,6 +256,9 @@ func (o *OrgMembersSvc) UpdateOrganizationMemberRole(
 		})
 	})
 	if err != nil {
+		if connect.CodeOf(err) != connect.CodeUnknown {
+			return nil, err
+		}
 		err = svc.ConnectDBError(err)
 		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberRole", err)...)
 		return nil, err
@@ -267,24 +272,48 @@ func (o *OrgMembersSvc) UpdateOrganizationMemberStatus(
 ) (*richterv1.UpdateOrganizationMemberStatusResponse, error) {
 	orgID, err := svc.ParseUUID(req.GetOrganizationId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberStatus.ParseOrgUUID", err)...)
-		return nil, err
-	}
-	if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleAdmin, gen.OrganizationRoleOwner); err != nil {
 		return nil, err
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberStatus.ParseUserUUID", err)...)
 		return nil, err
 	}
 	status, err := MemberStatusToSQL(req.GetStatus())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberStatus.MemberStatusToSQL", err)...)
 		return nil, err
 	}
 
-	member, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+	// All permission checks and the update happen inside one transaction to eliminate TOCTOU.
+	// Only ORG_OWNER may change an OWNER's status; also prevents locking out the last owner.
+	member, err := db.WithCommitTx(o.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.OrganizationMember, error) {
+		current, err := q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: orgID,
+			UserID:         userID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return gen.OrganizationMember{}, connect.NewError(connect.CodeNotFound, errors.New("member not found"))
+			}
+			return gen.OrganizationMember{}, connect.NewError(connect.CodeInternal, fmt.Errorf("get member: %w", err))
+		}
+		if current.Role == gen.OrganizationRoleOwner {
+			if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleOwner); err != nil {
+				return gen.OrganizationMember{}, err
+			}
+			if status != gen.MemberStatusActive && current.Status == gen.MemberStatusActive {
+				ownerCount, err := q.CountOrganizationOwners(ctx, orgID)
+				if err != nil {
+					return gen.OrganizationMember{}, connect.NewError(connect.CodeInternal, fmt.Errorf("count owners: %w", err))
+				}
+				if ownerCount <= 1 {
+					return gen.OrganizationMember{}, connect.NewError(connect.CodeFailedPrecondition, errors.New("cannot deactivate the last owner of an organization"))
+				}
+			}
+		} else {
+			if _, err := o.authz.RequireOrgRole(ctx, orgID, gen.OrganizationRoleAdmin, gen.OrganizationRoleOwner); err != nil {
+				return gen.OrganizationMember{}, err
+			}
+		}
 		return q.UpdateOrganizationMemberStatus(ctx, gen.UpdateOrganizationMemberStatusParams{
 			OrganizationID: orgID,
 			UserID:         userID,
@@ -292,6 +321,9 @@ func (o *OrgMembersSvc) UpdateOrganizationMemberStatus(
 		})
 	})
 	if err != nil {
+		if connect.CodeOf(err) != connect.CodeUnknown {
+			return nil, err
+		}
 		err = svc.ConnectDBError(err)
 		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("UpdateOrganizationMemberStatus", err)...)
 		return nil, err
@@ -305,12 +337,10 @@ func (o *OrgMembersSvc) RemoveOrganizationMember(
 ) (*richterv1.RemoveOrganizationMemberResponse, error) {
 	orgID, err := svc.ParseUUID(req.GetOrganizationId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("RemoveOrganizationMember.ParseOrgUUID", err)...)
 		return nil, err
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("RemoveOrganizationMember.ParseUserUUID", err)...)
 		return nil, err
 	}
 
@@ -337,6 +367,9 @@ func (o *OrgMembersSvc) RemoveOrganizationMember(
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 
+		if callerMember.Status != gen.MemberStatusActive {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("membership is not active"))
+		}
 		switch callerMember.Role {
 		case gen.OrganizationRoleStudent, gen.OrganizationRoleTeacher:
 			if callerClaims.GetSub() != req.GetUserId() {
@@ -349,32 +382,56 @@ func (o *OrgMembersSvc) RemoveOrganizationMember(
 					UserID:         userID,
 				})
 			})
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil, connect.NewError(connect.CodeNotFound, errors.New("member not found"))
+				}
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get member: %w", err))
 			}
-			if err == nil && targetMember.Role == gen.OrganizationRoleOwner {
+			if targetMember.Role == gen.OrganizationRoleOwner {
 				return nil, connect.NewError(connect.CodePermissionDenied, errors.New("org admin cannot remove owner"))
 			}
 		case gen.OrganizationRoleOwner:
-			// owner can remove anyone
+			// owner can remove anyone, but cannot orphan the org
 		}
 	}
 
-	rowsAffected, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (int64, error) {
+	// Last-owner guard + delete in one transaction to avoid TOCTOU race.
+	rowsAffected, err := db.WithCommitTx(o.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (int64, error) {
+		target, err := q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: orgID,
+			UserID:         userID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return 0, connect.NewError(connect.CodeNotFound, fmt.Errorf("member not found: org=%s user=%s", orgID.String(), userID.String()))
+			}
+			return 0, connect.NewError(connect.CodeInternal, fmt.Errorf("get member: %w", err))
+		}
+		if target.Role == gen.OrganizationRoleOwner && target.Status == gen.MemberStatusActive {
+			ownerCount, err := q.CountOrganizationOwners(ctx, orgID)
+			if err != nil {
+				return 0, connect.NewError(connect.CodeInternal, fmt.Errorf("count owners: %w", err))
+			}
+			if ownerCount <= 1 {
+				return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("cannot remove the last owner of an organization"))
+			}
+		}
 		return q.RemoveOrganizationMember(ctx, gen.RemoveOrganizationMemberParams{
 			OrganizationID: orgID,
 			UserID:         userID,
 		})
 	})
 	if err != nil {
+		if connect.CodeOf(err) != connect.CodeUnknown {
+			return nil, err
+		}
 		err = svc.ConnectDBError(err)
 		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("RemoveOrganizationMember", err)...)
 		return nil, err
 	}
 	if rowsAffected == 0 {
-		err = connect.NewError(connect.CodeNotFound, fmt.Errorf("member not found: org=%s user=%s", orgID.String(), userID.String()))
-		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("RemoveOrganizationMember.NotFound", err)...)
-		return nil, err
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("member not found: org=%s user=%s", orgID.String(), userID.String()))
 	}
 	return &richterv1.RemoveOrganizationMemberResponse{}, nil
 }

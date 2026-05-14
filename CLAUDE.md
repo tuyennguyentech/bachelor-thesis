@@ -122,6 +122,65 @@ Conventional Commits with scopes: `feat(heino):`, `fix(richter):`, `refactor(sql
 - 2-space indentation, LF line endings (see `.editorconfig`)
 - UI components colocated under `src/components/ui`
 
+## Runtime & Process Rules (MUST follow every session)
+
+### NEVER use detached/shell background processes
+**Do not** use `nohup ... &` or shell `cmd &` (including inside Agent scripts) — these detach from Claude Code's control and leak as orphans when the session ends.
+
+**DO use Claude Code's managed background tools** — these are session-managed and do NOT leak:
+- `Bash(run_in_background: true)` — starts process, Claude Code tracks it, one notification when done.
+- `Monitor(persistent: true)` — streams stdout as notifications, killed automatically when session ends or via `TaskStop`.
+
+**Shell `cmd &` inside an Agent is NOT acceptable** — even with `kill $PID` cleanup, proven unreliable in practice: Agent exited with processes still alive, creating orphan richter instances that corrupted test state.
+
+**Correct approach for running heino/richter servers + tests autonomously:**
+```
+# 1. Start server (managed background)
+Bash(run_in_background: true): ./container-shell.sh richter -- go run ./golang/richter/ -c ...
+
+# 2. Wait for ready (single notification when done)
+Bash(run_in_background: true): until curl -s http://richter:8080 >/dev/null; do sleep 1; done
+
+# 3. Run tests (foreground)
+Bash: ./container-shell.sh heino -- pnpm -F heino exec playwright test ...
+```
+
+Or use `Monitor` to tail the server log and detect readiness before proceeding.
+
+First, always check `ps aux` and kill any orphan richter/heino not owned by the current session. Never reuse orphan processes from a previous session.
+
+### ALL operations MUST use container-shell
+Every command — servers, tests, migrations, seed — must run inside `container-shell.sh` (Aardvark DNS resolves `postgres`, `storage`, `richter`).
+
+```sh
+# Heino dev server (via Shell mode or Agent)
+./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino dev
+
+# Richter service — test DB (via Shell mode or Agent)
+./scripts/setup/environment.dev/container-shell.sh richter -- go run ./golang/richter/ -c golang/richter/richter.base.toml,golang/richter/richter.test.toml
+
+# Richter service — dev DB
+./scripts/setup/environment.dev/container-shell.sh richter -- go run ./golang/richter/ -c golang/richter/richter.base.toml,golang/richter/richter.local.toml
+
+# Playwright E2E tests
+./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino exec playwright test
+
+# Go integration tests
+./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/test/golang/richter/test.sh
+```
+
+Config via `-c` flag for richter. Never hardcode hostnames/passwords/endpoints in source.
+
+### DB reset for tests
+```sh
+# Use goose -env flag to load .env/.env.test — do NOT inline GOOSE_DBSTRING or source the file manually
+./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test reset
+./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test up
+
+# Reseed
+./scripts/setup/environment.dev/container-shell.sh richter -- go run ./golang/richter/ -c golang/richter/richter.base.toml,golang/richter/richter.test.toml seed --dev
+```
+
 ## Adding a New RPC Method
 
 1. Add message + service method to `proto/richter/v1/users.proto` (include protovalidate annotations)

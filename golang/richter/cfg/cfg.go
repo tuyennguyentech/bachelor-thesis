@@ -30,6 +30,8 @@ var (
 			do.Lazy(NewAdminCfgSvc),
 			do.Lazy(NewS3CfgSvc),
 			do.Lazy(NewGeminiCfgSvc),
+			do.Lazy(NewFdbCfgSvc),
+			do.Lazy(NewWhisperCfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -50,24 +52,28 @@ func init() {
 }
 
 type RichterCfg struct {
-	LogCfg    `mapstructure:"log"`
-	DbCfg     `mapstructure:"db"`
-	ApiCfg    `mapstructure:"api"`
-	JwtCfg    `mapstructure:"jwt"`
-	AuthCfg   `mapstructure:"auth"`
-	AdminCfg  `mapstructure:"admin"`
-	S3Cfg     `mapstructure:"s3"`
-	GeminiCfg `mapstructure:"gemini"`
+	LogCfg     `mapstructure:"log"`
+	DbCfg      `mapstructure:"db"`
+	ApiCfg     `mapstructure:"api"`
+	JwtCfg     `mapstructure:"jwt"`
+	AuthCfg    `mapstructure:"auth"`
+	AdminCfg   `mapstructure:"admin"`
+	S3Cfg      `mapstructure:"s3"`
+	GeminiCfg  `mapstructure:"gemini"`
+	FdbCfg     `mapstructure:"fdb"`
+	WhisperCfg `mapstructure:"whisper"`
 }
 
 func NewConfig() RichterCfg {
 	return RichterCfg{
-		LogCfg:    NewLogCfg(),
-		ApiCfg:    NewApiCfg(),
-		JwtCfg:    NewJwtCfg(),
-		AuthCfg:   NewAuthCfg(),
-		S3Cfg:     NewS3Cfg(),
-		GeminiCfg: NewGeminiCfg(),
+		LogCfg:     NewLogCfg(),
+		ApiCfg:     NewApiCfg(),
+		JwtCfg:     NewJwtCfg(),
+		AuthCfg:    NewAuthCfg(),
+		S3Cfg:      NewS3Cfg(),
+		GeminiCfg:  NewGeminiCfg(),
+		FdbCfg:     NewFdbCfg(),
+		WhisperCfg: NewWhisperCfg(),
 	}
 }
 
@@ -117,6 +123,7 @@ func NewViperSvc(i do.Injector) (v *viper.Viper, err error) {
 	}
 
 	v.SetEnvPrefix("richter")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 	return
 }

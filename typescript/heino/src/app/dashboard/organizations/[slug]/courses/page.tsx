@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { CourseService } from "buf/gen/richter/v1/courses_pb";
+import { CourseService, Course } from "buf/gen/richter/v1/courses_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
@@ -43,7 +43,7 @@ export default async function DashboardCoursesPage({
     const res = await orgClient.getOrganizationBySlug({ slug });
     org = res.organization;
   } catch (err) {
-    if (err instanceof ConnectError && err.code === Code.NotFound) notFound();
+    if (err instanceof ConnectError && (err.code === Code.NotFound || err.code === Code.PermissionDenied)) notFound();
     throw err;
   }
   if (!org) notFound();
@@ -52,12 +52,17 @@ export default async function DashboardCoursesPage({
   const canManage = CAN_MANAGE.includes(member.role);
 
   const courseClient = createRichterClient(CourseService, token);
-  const res = await courseClient.listCourses({
-    organizationId: org.id,
-    limit: LIMIT,
-    offset,
-  });
-  const courses = res.courses ?? [];
+  let courses: Course[] = [];
+  try {
+    const res = await courseClient.listCourses({
+      organizationId: org.id,
+      limit: LIMIT,
+      offset,
+    });
+    courses = res.courses ?? [];
+  } catch {
+    courses = [];
+  }
   const hasNext = courses.length === LIMIT;
 
   return (

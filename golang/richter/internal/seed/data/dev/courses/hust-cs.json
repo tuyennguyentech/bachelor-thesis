@@ -12,38 +12,70 @@
           {
             "title": "Bài 1: Big-O, Omega, Theta notation",
             "description": "Định nghĩa và cách phân tích độ phức tạp thời gian và không gian.",
+            "video_key": "seed/hust-cs/dsa/ch1-big-o-notation.mp4",
+            "duration_secs": 1247,
             "analysis": {
               "transcript": "Trong bài học hôm nay, chúng ta sẽ tìm hiểu về ba ký hiệu quan trọng để đánh giá độ phức tạp thuật toán: Big-O, Omega và Theta.\n\nBig-O notation (ký hiệu O) dùng để mô tả giới hạn trên của thời gian chạy thuật toán. Nó cho chúng ta biết trong trường hợp xấu nhất, thuật toán sẽ chạy như thế nào. Ví dụ, thuật toán tìm kiếm tuyến tính có độ phức tạp O(n) vì trong trường hợp xấu nhất ta phải duyệt qua n phần tử.\n\nOmega notation (ký hiệu Ω) là giới hạn dưới — mô tả trường hợp tốt nhất của thuật toán. Ví dụ, tìm kiếm tuyến tính có Ω(1) vì phần tử cần tìm có thể nằm ngay ở đầu mảng.\n\nTheta notation (ký hiệu Θ) biểu diễn cả giới hạn trên lẫn giới hạn dưới, tức là độ phức tạp chính xác. Khi Big-O và Omega bằng nhau, ta dùng Theta. Ví dụ, vòng lặp đơn giản duyệt qua n phần tử luôn có Θ(n).\n\nKhi phân tích, ta bỏ qua hằng số và các số hạng bậc thấp. Ví dụ, 3n² + 5n + 10 được viết là O(n²). Các độ phức tạp phổ biến từ tốt đến xấu: O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ) < O(n!).",
               "questions": [
                 {
                   "question_text": "Big-O notation dùng để biểu diễn điều gì?",
-                  "options": ["Thời gian chạy chính xác của thuật toán", "Giới hạn trên (worst case) của độ phức tạp", "Giới hạn dưới (best case) của độ phức tạp", "Độ phức tạp trung bình của thuật toán"],
+                  "options": [
+                    "Thời gian chạy chính xác của thuật toán",
+                    "Giới hạn trên (worst case) của độ phức tạp",
+                    "Giới hạn dưới (best case) của độ phức tạp",
+                    "Độ phức tạp trung bình của thuật toán"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "Big-O biểu diễn giới hạn trên của độ phức tạp — trường hợp xấu nhất mà thuật toán có thể gặp phải."
+                  "explanation": "Big-O biểu diễn giới hạn trên của độ phức tạp — trường hợp xấu nhất mà thuật toán có thể gặp phải.",
+                  "start_seconds": 208
                 },
                 {
                   "question_text": "Trong Big-O notation, biểu thức 5n² + 3n + 100 được viết gọn là?",
-                  "options": ["O(5n²)", "O(n² + n)", "O(n²)", "O(n³)"],
+                  "options": [
+                    "O(5n²)",
+                    "O(n² + n)",
+                    "O(n²)",
+                    "O(n³)"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "Ta bỏ hằng số và các số hạng bậc thấp hơn, chỉ giữ lại số hạng bậc cao nhất: O(n²)."
+                  "explanation": "Ta bỏ hằng số và các số hạng bậc thấp hơn, chỉ giữ lại số hạng bậc cao nhất: O(n²).",
+                  "start_seconds": 416
                 },
                 {
                   "question_text": "Ký hiệu Theta (Θ) được dùng khi nào?",
-                  "options": ["Khi thuật toán chạy rất nhanh", "Khi Big-O và Omega bằng nhau (cận chặt)", "Khi không biết trường hợp xấu nhất", "Khi thuật toán dùng đệ quy"],
+                  "options": [
+                    "Khi thuật toán chạy rất nhanh",
+                    "Khi Big-O và Omega bằng nhau (cận chặt)",
+                    "Khi không biết trường hợp xấu nhất",
+                    "Khi thuật toán dùng đệ quy"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "Theta (Θ) biểu diễn cận chặt — khi giới hạn trên và giới hạn dưới của độ phức tạp trùng nhau."
+                  "explanation": "Theta (Θ) biểu diễn cận chặt — khi giới hạn trên và giới hạn dưới của độ phức tạp trùng nhau.",
+                  "start_seconds": 624
                 },
                 {
                   "question_text": "Trong các độ phức tạp sau, độ phức tạp nào là tệ nhất (tăng nhanh nhất)?",
-                  "options": ["O(n log n)", "O(n²)", "O(2ⁿ)", "O(n³)"],
+                  "options": [
+                    "O(n log n)",
+                    "O(n²)",
+                    "O(2ⁿ)",
+                    "O(n³)"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "O(2ⁿ) là độ phức tạp hàm mũ, tăng cực kỳ nhanh và tệ hơn tất cả các lựa chọn còn lại."
+                  "explanation": "O(2ⁿ) là độ phức tạp hàm mũ, tăng cực kỳ nhanh và tệ hơn tất cả các lựa chọn còn lại.",
+                  "start_seconds": 831
                 },
                 {
                   "question_text": "Thuật toán tìm kiếm nhị phân (binary search) có độ phức tạp Big-O là?",
-                  "options": ["O(1)", "O(log n)", "O(n)", "O(n log n)"],
+                  "options": [
+                    "O(1)",
+                    "O(log n)",
+                    "O(n)",
+                    "O(n log n)"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "Binary search loại một nửa mảng ở mỗi bước, nên số bước tối đa là log₂(n) → O(log n)."
+                  "explanation": "Binary search loại một nửa mảng ở mỗi bước, nên số bước tối đa là log₂(n) → O(log n).",
+                  "start_seconds": 1039
                 }
               ]
             }
@@ -56,38 +88,71 @@
               "questions": [
                 {
                   "question_text": "Master Theorem áp dụng cho dạng quan hệ truy hồi nào?",
-                  "options": ["T(n) = T(n-1) + c", "T(n) = aT(n/b) + f(n)", "T(n) = T(n/2) + T(n/3)", "T(n) = n * T(n-1)"],
+                  "options": [
+                    "T(n) = T(n-1) + c",
+                    "T(n) = aT(n/b) + f(n)",
+                    "T(n) = T(n/2) + T(n/3)",
+                    "T(n) = n * T(n-1)"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "Master Theorem áp dụng cho dạng T(n) = aT(n/b) + f(n) — dạng chia đều bài toán thành a bài toán con kích thước n/b."
+                  "explanation": "Master Theorem áp dụng cho dạng T(n) = aT(n/b) + f(n) — dạng chia đều bài toán thành a bài toán con kích thước n/b.",
+                  "start_seconds": 100
                 },
                 {
                   "question_text": "Merge Sort có T(n) = 2T(n/2) + O(n). Theo Master Theorem, độ phức tạp là?",
-                  "options": ["O(n)", "O(n log n)", "O(n²)", "O(log n)"],
+                  "options": [
+                    "O(n)",
+                    "O(n log n)",
+                    "O(n²)",
+                    "O(log n)"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "a=2, b=2, log_b(a)=1. f(n)=n=n^1 = n^log_b(a), nên thuộc Case 2: T(n) = Θ(n log n)."
+                  "explanation": "a=2, b=2, log_b(a)=1. f(n)=n=n^1 = n^log_b(a), nên thuộc Case 2: T(n) = Θ(n log n).",
+                  "start_seconds": 200
                 },
                 {
                   "question_text": "Binary Search có T(n) = T(n/2) + O(1). Độ phức tạp là?",
-                  "options": ["O(1)", "O(log n)", "O(n)", "O(n log n)"],
+                  "options": [
+                    "O(1)",
+                    "O(log n)",
+                    "O(n)",
+                    "O(n log n)"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "a=1, b=2, log_2(1)=0. f(n)=1=n^0, nên Case 2: T(n)=Θ(n^0 * log n)=Θ(log n)."
+                  "explanation": "a=1, b=2, log_2(1)=0. f(n)=1=n^0, nên Case 2: T(n)=Θ(n^0 * log n)=Θ(log n).",
+                  "start_seconds": 300
                 },
                 {
                   "question_text": "Trong T(n) = aT(n/b) + f(n), ý nghĩa của 'a' là gì?",
-                  "options": ["Hệ số chia kích thước bài toán", "Số bài toán con ở mỗi bước đệ quy", "Chi phí hợp nhất kết quả", "Độ sâu của cây đệ quy"],
+                  "options": [
+                    "Hệ số chia kích thước bài toán",
+                    "Số bài toán con ở mỗi bước đệ quy",
+                    "Chi phí hợp nhất kết quả",
+                    "Độ sâu của cây đệ quy"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "'a' là số lượng bài toán con được tạo ra ở mỗi bước đệ quy (number of subproblems)."
+                  "explanation": "'a' là số lượng bài toán con được tạo ra ở mỗi bước đệ quy (number of subproblems).",
+                  "start_seconds": 400
                 },
                 {
                   "question_text": "Khi nào Master Theorem Case 1 áp dụng?",
-                  "options": ["f(n) tăng nhanh hơn n^log_b(a)", "f(n) = Θ(n^log_b(a))", "f(n) tăng chậm hơn n^log_b(a)", "Khi a = b"],
+                  "options": [
+                    "f(n) tăng nhanh hơn n^log_b(a)",
+                    "f(n) = Θ(n^log_b(a))",
+                    "f(n) tăng chậm hơn n^log_b(a)",
+                    "Khi a = b"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "Case 1 áp dụng khi f(n) = O(n^(log_b(a)-ε)) — tức là f(n) nhỏ hơn n^log_b(a), công việc ở tầng lá chiếm ưu thế."
+                  "explanation": "Case 1 áp dụng khi f(n) = O(n^(log_b(a)-ε)) — tức là f(n) nhỏ hơn n^log_b(a), công việc ở tầng lá chiếm ưu thế.",
+                  "start_seconds": 500
                 }
               ]
             }
           },
-          { "title": "Bài 3: Benchmark thực tế", "description": "So sánh hiệu năng các thuật toán bằng thực nghiệm với dữ liệu lớn." }
+          {
+            "title": "Bài 3: Benchmark thực tế",
+            "description": "So sánh hiệu năng các thuật toán bằng thực nghiệm với dữ liệu lớn."
+          }
         ]
       },
       {
@@ -96,64 +161,132 @@
           {
             "title": "Bài 1: Mảng và Linked List",
             "description": "Triển khai, so sánh hiệu năng mảng tĩnh, động và danh sách liên kết đơn/đôi.",
+            "video_key": "seed/hust-cs/dsa/ch2-array-linked-list.mp4",
+            "duration_secs": 1530,
             "analysis": {
               "transcript": "Trong bài này, chúng ta sẽ so sánh hai cấu trúc dữ liệu cơ bản nhất: Mảng (Array) và Danh sách liên kết (Linked List).\n\nMảng lưu trữ các phần tử liên tiếp trong bộ nhớ. Ưu điểm: truy cập ngẫu nhiên O(1) bằng chỉ số, cache-friendly. Nhược điểm: kích thước cố định (với mảng tĩnh), chèn/xóa ở giữa tốn O(n).\n\nMảng động (Dynamic Array) như ArrayList trong Java hay vector trong C++ tự động tăng kích thước khi đầy. Chi phí amortized cho append là O(1).\n\nLinked List lưu các node rải rác trong bộ nhớ, mỗi node chứa dữ liệu và con trỏ đến node tiếp theo. Ưu điểm: chèn/xóa ở đầu O(1), không cần biết trước kích thước. Nhược điểm: truy cập ngẫu nhiên O(n), tốn thêm bộ nhớ cho con trỏ, không cache-friendly.\n\nDoubly Linked List có thêm con trỏ đến node trước, cho phép duyệt hai chiều và xóa O(1) khi biết node.\n\nKhi nào dùng mảng: cần truy cập ngẫu nhiên, dữ liệu ít thay đổi. Khi nào dùng linked list: thường xuyên chèn/xóa ở đầu/giữa.",
               "questions": [
                 {
                   "question_text": "Thao tác truy cập phần tử tại chỉ số i trong mảng có độ phức tạp là?",
-                  "options": ["O(n)", "O(log n)", "O(1)", "O(n²)"],
+                  "options": [
+                    "O(n)",
+                    "O(log n)",
+                    "O(1)",
+                    "O(n²)"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "Mảng lưu liên tiếp trong bộ nhớ, địa chỉ phần tử thứ i = địa chỉ đầu + i × kích_thước. Tính được ngay → O(1)."
+                  "explanation": "Mảng lưu liên tiếp trong bộ nhớ, địa chỉ phần tử thứ i = địa chỉ đầu + i × kích_thước. Tính được ngay → O(1).",
+                  "start_seconds": 255
                 },
                 {
                   "question_text": "Linked List có ưu điểm nào so với mảng?",
-                  "options": ["Truy cập ngẫu nhiên nhanh hơn", "Tiết kiệm bộ nhớ hơn", "Chèn/xóa ở đầu danh sách O(1)", "Cache-friendly hơn"],
+                  "options": [
+                    "Truy cập ngẫu nhiên nhanh hơn",
+                    "Tiết kiệm bộ nhớ hơn",
+                    "Chèn/xóa ở đầu danh sách O(1)",
+                    "Cache-friendly hơn"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "Chèn/xóa ở đầu Linked List chỉ cần thay đổi con trỏ → O(1), trong khi mảng cần dịch chuyển tất cả phần tử → O(n)."
+                  "explanation": "Chèn/xóa ở đầu Linked List chỉ cần thay đổi con trỏ → O(1), trong khi mảng cần dịch chuyển tất cả phần tử → O(n).",
+                  "start_seconds": 510
                 },
                 {
                   "question_text": "Nhược điểm chính của Linked List so với mảng là gì?",
-                  "options": ["Không thể lưu kiểu dữ liệu khác nhau", "Không hỗ trợ vòng lặp", "Truy cập phần tử tại vị trí i tốn O(n)", "Không thể mở rộng kích thước"],
+                  "options": [
+                    "Không thể lưu kiểu dữ liệu khác nhau",
+                    "Không hỗ trợ vòng lặp",
+                    "Truy cập phần tử tại vị trí i tốn O(n)",
+                    "Không thể mở rộng kích thước"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "Để truy cập phần tử thứ i trong Linked List, phải duyệt từ đầu qua i node → O(n), không có truy cập ngẫu nhiên."
+                  "explanation": "Để truy cập phần tử thứ i trong Linked List, phải duyệt từ đầu qua i node → O(n), không có truy cập ngẫu nhiên.",
+                  "start_seconds": 765
                 },
                 {
                   "question_text": "Doubly Linked List khác Singly Linked List ở điểm nào?",
-                  "options": ["Mỗi node có 2 trường dữ liệu", "Mỗi node có con trỏ đến cả node trước và node sau", "Duyệt nhanh hơn O(1)", "Tốn ít bộ nhớ hơn"],
+                  "options": [
+                    "Mỗi node có 2 trường dữ liệu",
+                    "Mỗi node có con trỏ đến cả node trước và node sau",
+                    "Duyệt nhanh hơn O(1)",
+                    "Tốn ít bộ nhớ hơn"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "Doubly Linked List có thêm con trỏ `prev` trỏ đến node trước, cho phép duyệt hai chiều và xóa O(1) khi biết node."
+                  "explanation": "Doubly Linked List có thêm con trỏ `prev` trỏ đến node trước, cho phép duyệt hai chiều và xóa O(1) khi biết node.",
+                  "start_seconds": 1020
                 },
                 {
                   "question_text": "Chi phí amortized của thao tác append vào Dynamic Array (mảng động) là?",
-                  "options": ["O(n) mỗi lần", "O(log n)", "O(1) amortized", "O(n²)"],
+                  "options": [
+                    "O(n) mỗi lần",
+                    "O(log n)",
+                    "O(1) amortized",
+                    "O(n²)"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "Dynamic Array nhân đôi kích thước khi đầy. Dù thỉnh thoảng tốn O(n) để copy, nhưng trung bình (amortized) mỗi append chỉ O(1)."
+                  "explanation": "Dynamic Array nhân đôi kích thước khi đầy. Dù thỉnh thoảng tốn O(n) để copy, nhưng trung bình (amortized) mỗi append chỉ O(1).",
+                  "start_seconds": 1275
                 }
               ]
             }
           },
-          { "title": "Bài 2: Stack và ứng dụng", "description": "Stack với mảng và DSLK, bài toán cân bằng ngoặc, tính biểu thức hậu tố." },
-          { "title": "Bài 3: Queue và Deque", "description": "Queue vòng, priority queue cơ bản, ứng dụng BFS." },
-          { "title": "Bài 4: Bài toán trượt cửa sổ", "description": "Kỹ thuật sliding window với deque để giải quyết các bài toán tối ưu." }
+          {
+            "title": "Bài 2: Stack và ứng dụng",
+            "description": "Stack với mảng và DSLK, bài toán cân bằng ngoặc, tính biểu thức hậu tố."
+          },
+          {
+            "title": "Bài 3: Queue và Deque",
+            "description": "Queue vòng, priority queue cơ bản, ứng dụng BFS."
+          },
+          {
+            "title": "Bài 4: Bài toán trượt cửa sổ",
+            "description": "Kỹ thuật sliding window với deque để giải quyết các bài toán tối ưu."
+          }
         ]
       },
       {
         "title": "Chương 3: Cây và Đồ thị",
         "lessons": [
-          { "title": "Bài 1: Binary Tree và BST", "description": "Duyệt cây (inorder/preorder/postorder), tìm kiếm, chèn, xóa trên BST." },
-          { "title": "Bài 2: AVL Tree và Red-Black Tree", "description": "Cây cân bằng: phép xoay, điều kiện cân bằng và độ phức tạp." },
-          { "title": "Bài 3: Heap và Priority Queue", "description": "Min-heap, max-heap, heapify, heap sort và ứng dụng." },
-          { "title": "Bài 4: BFS và DFS trên đồ thị", "description": "Biểu diễn đồ thị, duyệt theo chiều rộng và chiều sâu, phát hiện chu trình." },
-          { "title": "Bài 5: Shortest Path", "description": "Dijkstra, Bellman-Ford, Floyd-Warshall — phân tích và so sánh." }
+          {
+            "title": "Bài 1: Binary Tree và BST",
+            "description": "Duyệt cây (inorder/preorder/postorder), tìm kiếm, chèn, xóa trên BST."
+          },
+          {
+            "title": "Bài 2: AVL Tree và Red-Black Tree",
+            "description": "Cây cân bằng: phép xoay, điều kiện cân bằng và độ phức tạp."
+          },
+          {
+            "title": "Bài 3: Heap và Priority Queue",
+            "description": "Min-heap, max-heap, heapify, heap sort và ứng dụng."
+          },
+          {
+            "title": "Bài 4: BFS và DFS trên đồ thị",
+            "description": "Biểu diễn đồ thị, duyệt theo chiều rộng và chiều sâu, phát hiện chu trình."
+          },
+          {
+            "title": "Bài 5: Shortest Path",
+            "description": "Dijkstra, Bellman-Ford, Floyd-Warshall — phân tích và so sánh."
+          }
         ]
       },
       {
         "title": "Chương 4: Kỹ thuật thuật toán nâng cao",
         "lessons": [
-          { "title": "Bài 1: Chia để trị", "description": "Merge sort, Quick sort, binary search — thiết kế và phân tích." },
-          { "title": "Bài 2: Quy hoạch động (DP)", "description": "Memoization vs tabulation, bài toán LCS, Knapsack, đường đi tối ưu." },
-          { "title": "Bài 3: Greedy Algorithm", "description": "Điều kiện áp dụng greedy, Huffman coding, Activity Selection." },
-          { "title": "Bài 4: Backtracking và Branch & Bound", "description": "N-Queens, Sudoku solver, tối ưu hóa bằng tỉa nhánh." }
+          {
+            "title": "Bài 1: Chia để trị",
+            "description": "Merge sort, Quick sort, binary search — thiết kế và phân tích."
+          },
+          {
+            "title": "Bài 2: Quy hoạch động (DP)",
+            "description": "Memoization vs tabulation, bài toán LCS, Knapsack, đường đi tối ưu."
+          },
+          {
+            "title": "Bài 3: Greedy Algorithm",
+            "description": "Điều kiện áp dụng greedy, Huffman coding, Activity Selection."
+          },
+          {
+            "title": "Bài 4: Backtracking và Branch & Bound",
+            "description": "N-Queens, Sudoku solver, tối ưu hóa bằng tỉa nhánh."
+          }
         ]
       }
     ]
@@ -171,69 +304,137 @@
           {
             "title": "Bài 1: JVM, JDK, JRE và vòng đời",
             "description": "Kiến trúc Java platform, biên dịch bytecode và JIT compilation.",
+            "video_key": "seed/hust-cs/java/ch1-jvm-jdk-jre.mp4",
+            "duration_secs": 1820,
             "analysis": {
               "transcript": "Trong bài này chúng ta tìm hiểu ba thành phần cốt lõi của nền tảng Java: JVM, JDK và JRE.\n\nJVM (Java Virtual Machine) là máy ảo thực thi bytecode Java. JVM tạo nên tính 'Write Once, Run Anywhere' của Java — bytecode (.class file) có thể chạy trên bất kỳ hệ điều hành nào có JVM. JVM gồm các thành phần: Class Loader, Runtime Data Areas (Heap, Stack, Method Area), và Execution Engine.\n\nJIT (Just-In-Time) Compiler là phần quan trọng của Execution Engine. Nó biên dịch bytecode thường xuyên được dùng thành mã máy native, giúp Java đạt hiệu năng gần với C/C++.\n\nJRE (Java Runtime Environment) = JVM + các thư viện chuẩn (rt.jar). Đây là môi trường tối thiểu để chạy ứng dụng Java.\n\nJDK (Java Development Kit) = JRE + công cụ phát triển (javac compiler, debugger, javadoc...). Developer cần cài JDK để viết và biên dịch Java.\n\nVòng đời: Source code (.java) → javac compiler → Bytecode (.class) → JVM → Execution. JVM cũng có GC (Garbage Collector) tự động giải phóng bộ nhớ.",
               "questions": [
                 {
                   "question_text": "JVM là gì?",
-                  "options": ["Ngôn ngữ lập trình Java", "Máy ảo thực thi bytecode Java", "Trình biên dịch Java", "Thư viện chuẩn Java"],
+                  "options": [
+                    "Ngôn ngữ lập trình Java",
+                    "Máy ảo thực thi bytecode Java",
+                    "Trình biên dịch Java",
+                    "Thư viện chuẩn Java"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "JVM (Java Virtual Machine) là máy ảo chịu trách nhiệm thực thi bytecode (.class files) Java trên từng nền tảng cụ thể."
+                  "explanation": "JVM (Java Virtual Machine) là máy ảo chịu trách nhiệm thực thi bytecode (.class files) Java trên từng nền tảng cụ thể.",
+                  "start_seconds": 303
                 },
                 {
                   "question_text": "Sự khác biệt chính giữa JRE và JDK là gì?",
-                  "options": ["JRE nhanh hơn JDK", "JDK = JRE + công cụ phát triển (javac, debugger...)", "JRE chỉ dùng cho Windows", "Không có sự khác biệt"],
+                  "options": [
+                    "JRE nhanh hơn JDK",
+                    "JDK = JRE + công cụ phát triển (javac, debugger...)",
+                    "JRE chỉ dùng cho Windows",
+                    "Không có sự khác biệt"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "JDK (Java Development Kit) bao gồm JRE và thêm các công cụ phát triển như javac (compiler), jdb (debugger), javadoc..."
+                  "explanation": "JDK (Java Development Kit) bao gồm JRE và thêm các công cụ phát triển như javac (compiler), jdb (debugger), javadoc...",
+                  "start_seconds": 607
                 },
                 {
                   "question_text": "JIT Compiler trong JVM dùng để làm gì?",
-                  "options": ["Biên dịch file .java thành bytecode", "Biên dịch bytecode thường dùng thành mã máy native để tăng tốc", "Tự động kiểm tra lỗi cú pháp", "Quản lý bộ nhớ heap"],
+                  "options": [
+                    "Biên dịch file .java thành bytecode",
+                    "Biên dịch bytecode thường dùng thành mã máy native để tăng tốc",
+                    "Tự động kiểm tra lỗi cú pháp",
+                    "Quản lý bộ nhớ heap"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "JIT (Just-In-Time) Compiler phát hiện bytecode được gọi nhiều lần và biên dịch sang mã máy native, giúp tăng hiệu năng đáng kể."
+                  "explanation": "JIT (Just-In-Time) Compiler phát hiện bytecode được gọi nhiều lần và biên dịch sang mã máy native, giúp tăng hiệu năng đáng kể.",
+                  "start_seconds": 910
                 },
                 {
                   "question_text": "File nguồn Java (.java) sau khi biên dịch tạo ra loại file nào?",
-                  "options": [".exe", ".dll", ".class (bytecode)", ".bin"],
+                  "options": [
+                    ".exe",
+                    ".dll",
+                    ".class (bytecode)",
+                    ".bin"
+                  ],
                   "correct_answer": 2,
-                  "explanation": "javac compiler biên dịch file .java thành file .class chứa bytecode — định dạng trung gian mà JVM có thể thực thi."
+                  "explanation": "javac compiler biên dịch file .java thành file .class chứa bytecode — định dạng trung gian mà JVM có thể thực thi.",
+                  "start_seconds": 1213
                 },
                 {
                   "question_text": "Điều nào sau đây là ưu điểm của mô hình bytecode JVM?",
-                  "options": ["Chạy nhanh hơn C++", "Write Once Run Anywhere — chạy trên mọi nền tảng có JVM", "Không cần cài đặt", "Tự động tối ưu thuật toán"],
+                  "options": [
+                    "Chạy nhanh hơn C++",
+                    "Write Once Run Anywhere — chạy trên mọi nền tảng có JVM",
+                    "Không cần cài đặt",
+                    "Tự động tối ưu thuật toán"
+                  ],
                   "correct_answer": 1,
-                  "explanation": "Bytecode là ngôn ngữ trung gian, JVM trên mỗi nền tảng hiểu và thực thi bytecode → code Java chạy trên mọi OS có JVM mà không cần thay đổi."
+                  "explanation": "Bytecode là ngôn ngữ trung gian, JVM trên mỗi nền tảng hiểu và thực thi bytecode → code Java chạy trên mọi OS có JVM mà không cần thay đổi.",
+                  "start_seconds": 1517
                 }
               ]
             }
           },
-          { "title": "Bài 2: Kiểu dữ liệu và biểu thức", "description": "Primitive types, autoboxing, String pool và các toán tử." },
-          { "title": "Bài 3: Control flow và vòng lặp", "description": "if-else, switch, for, while, do-while và các kỹ thuật tối ưu." }
+          {
+            "title": "Bài 2: Kiểu dữ liệu và biểu thức",
+            "description": "Primitive types, autoboxing, String pool và các toán tử."
+          },
+          {
+            "title": "Bài 3: Control flow và vòng lặp",
+            "description": "if-else, switch, for, while, do-while và các kỹ thuật tối ưu."
+          }
         ]
       },
       {
         "title": "Chương 2: OOP cơ bản",
         "lessons": [
-          { "title": "Bài 1: Class, Object và Constructor", "description": "Định nghĩa class, khởi tạo object, constructor overloading và this keyword." },
-          { "title": "Bài 2: Encapsulation và Access Modifier", "description": "private/protected/public, getter/setter, JavaBeans convention." },
-          { "title": "Bài 3: Inheritance và Polymorphism", "description": "extends, super, method overriding, dynamic dispatch và Liskov Substitution." },
-          { "title": "Bài 4: Abstract Class và Interface", "description": "Sự khác biệt, default methods trong Java 8+, khi nào dùng cái nào." }
+          {
+            "title": "Bài 1: Class, Object và Constructor",
+            "description": "Định nghĩa class, khởi tạo object, constructor overloading và this keyword."
+          },
+          {
+            "title": "Bài 2: Encapsulation và Access Modifier",
+            "description": "private/protected/public, getter/setter, JavaBeans convention."
+          },
+          {
+            "title": "Bài 3: Inheritance và Polymorphism",
+            "description": "extends, super, method overriding, dynamic dispatch và Liskov Substitution."
+          },
+          {
+            "title": "Bài 4: Abstract Class và Interface",
+            "description": "Sự khác biệt, default methods trong Java 8+, khi nào dùng cái nào."
+          }
         ]
       },
       {
         "title": "Chương 3: Java Collections và Generics",
         "lessons": [
-          { "title": "Bài 1: Collections Framework", "description": "List, Set, Map, Queue — lựa chọn đúng collection cho bài toán." },
-          { "title": "Bài 2: Generics và Wildcards", "description": "Generic class/method, bounded wildcards, type erasure." },
-          { "title": "Bài 3: Iterator và Comparable/Comparator", "description": "Custom sorting, Iterable pattern, enhanced for loop." }
+          {
+            "title": "Bài 1: Collections Framework",
+            "description": "List, Set, Map, Queue — lựa chọn đúng collection cho bài toán."
+          },
+          {
+            "title": "Bài 2: Generics và Wildcards",
+            "description": "Generic class/method, bounded wildcards, type erasure."
+          },
+          {
+            "title": "Bài 3: Iterator và Comparable/Comparator",
+            "description": "Custom sorting, Iterable pattern, enhanced for loop."
+          }
         ]
       },
       {
         "title": "Chương 4: Exception Handling và I/O",
         "lessons": [
-          { "title": "Bài 1: Checked vs Unchecked Exception", "description": "Phân loại exception, try-catch-finally, try-with-resources." },
-          { "title": "Bài 2: Custom Exception", "description": "Thiết kế exception hierarchy cho ứng dụng, best practices." },
-          { "title": "Bài 3: File I/O với NIO.2", "description": "Path, Files API, Streams và xử lý file lớn hiệu quả." }
+          {
+            "title": "Bài 1: Checked vs Unchecked Exception",
+            "description": "Phân loại exception, try-catch-finally, try-with-resources."
+          },
+          {
+            "title": "Bài 2: Custom Exception",
+            "description": "Thiết kế exception hierarchy cho ứng dụng, best practices."
+          },
+          {
+            "title": "Bài 3: File I/O với NIO.2",
+            "description": "Path, Files API, Streams và xử lý file lớn hiệu quả."
+          }
         ]
       }
     ]
@@ -248,26 +449,56 @@
       {
         "title": "Chương 1: Mô hình dữ liệu quan hệ",
         "lessons": [
-          { "title": "Bài 1: Mô hình ER và chuyển đổi sang quan hệ", "description": "Entity-Relationship Diagram, mapping sang bảng quan hệ, normalization." },
-          { "title": "Bài 2: Các dạng chuẩn (1NF đến BCNF)", "description": "Phân tích phụ thuộc hàm, đưa schema về các dạng chuẩn." },
-          { "title": "Bài 3: Chỉ mục và hiệu năng", "description": "B-tree index, Hash index, covering index và EXPLAIN ANALYZE." }
+          {
+            "title": "Bài 1: Mô hình ER và chuyển đổi sang quan hệ",
+            "description": "Entity-Relationship Diagram, mapping sang bảng quan hệ, normalization."
+          },
+          {
+            "title": "Bài 2: Các dạng chuẩn (1NF đến BCNF)",
+            "description": "Phân tích phụ thuộc hàm, đưa schema về các dạng chuẩn."
+          },
+          {
+            "title": "Bài 3: Chỉ mục và hiệu năng",
+            "description": "B-tree index, Hash index, covering index và EXPLAIN ANALYZE."
+          }
         ]
       },
       {
         "title": "Chương 2: SQL nâng cao",
         "lessons": [
-          { "title": "Bài 1: JOIN và subquery", "description": "INNER/LEFT/RIGHT/FULL JOIN, correlated subquery, EXISTS." },
-          { "title": "Bài 2: Window Functions", "description": "ROW_NUMBER, RANK, DENSE_RANK, LAG/LEAD, PARTITION BY." },
-          { "title": "Bài 3: CTE và Recursive Query", "description": "WITH clause, recursive CTE cho cây phân cấp, hiệu suất." },
-          { "title": "Bài 4: Transaction và Isolation Level", "description": "ACID properties, READ COMMITTED, SERIALIZABLE, deadlock avoidance." }
+          {
+            "title": "Bài 1: JOIN và subquery",
+            "description": "INNER/LEFT/RIGHT/FULL JOIN, correlated subquery, EXISTS."
+          },
+          {
+            "title": "Bài 2: Window Functions",
+            "description": "ROW_NUMBER, RANK, DENSE_RANK, LAG/LEAD, PARTITION BY."
+          },
+          {
+            "title": "Bài 3: CTE và Recursive Query",
+            "description": "WITH clause, recursive CTE cho cây phân cấp, hiệu suất."
+          },
+          {
+            "title": "Bài 4: Transaction và Isolation Level",
+            "description": "ACID properties, READ COMMITTED, SERIALIZABLE, deadlock avoidance."
+          }
         ]
       },
       {
         "title": "Chương 3: PostgreSQL thực chiến",
         "lessons": [
-          { "title": "Bài 1: Kiểu dữ liệu đặc thù PostgreSQL", "description": "UUID, JSONB, Array, Range types và các extension hữu ích." },
-          { "title": "Bài 2: Stored Procedure và Trigger", "description": "PL/pgSQL cơ bản, trigger BEFORE/AFTER, audit log tự động." },
-          { "title": "Bài 3: Backup, Restore và Replication", "description": "pg_dump, pg_restore, streaming replication cơ bản." }
+          {
+            "title": "Bài 1: Kiểu dữ liệu đặc thù PostgreSQL",
+            "description": "UUID, JSONB, Array, Range types và các extension hữu ích."
+          },
+          {
+            "title": "Bài 2: Stored Procedure và Trigger",
+            "description": "PL/pgSQL cơ bản, trigger BEFORE/AFTER, audit log tự động."
+          },
+          {
+            "title": "Bài 3: Backup, Restore và Replication",
+            "description": "pg_dump, pg_restore, streaming replication cơ bản."
+          }
         ]
       }
     ]
@@ -282,17 +513,35 @@
       {
         "title": "Chương 1: Mô hình OSI và TCP/IP",
         "lessons": [
-          { "title": "Bài 1: 7 tầng OSI", "description": "Vai trò, chức năng từng tầng và cách dữ liệu đi qua stack." },
-          { "title": "Bài 2: TCP vs UDP", "description": "3-way handshake, flow control, congestion control, khi nào dùng UDP." },
-          { "title": "Bài 3: IP Addressing và Subnetting", "description": "IPv4, IPv6, CIDR notation, tính subnet mask và broadcast." }
+          {
+            "title": "Bài 1: 7 tầng OSI",
+            "description": "Vai trò, chức năng từng tầng và cách dữ liệu đi qua stack."
+          },
+          {
+            "title": "Bài 2: TCP vs UDP",
+            "description": "3-way handshake, flow control, congestion control, khi nào dùng UDP."
+          },
+          {
+            "title": "Bài 3: IP Addressing và Subnetting",
+            "description": "IPv4, IPv6, CIDR notation, tính subnet mask và broadcast."
+          }
         ]
       },
       {
         "title": "Chương 2: Giao thức ứng dụng",
         "lessons": [
-          { "title": "Bài 1: HTTP/1.1, HTTP/2 và HTTP/3", "description": "Header, method, status code, multiplexing và QUIC protocol." },
-          { "title": "Bài 2: DNS và cơ chế phân giải tên miền", "description": "Recursive resolution, authoritative server, TTL và DNS caching." },
-          { "title": "Bài 3: TLS/SSL và HTTPS", "description": "Certificate chain, handshake, cipher suite và cách kiểm tra bảo mật." }
+          {
+            "title": "Bài 1: HTTP/1.1, HTTP/2 và HTTP/3",
+            "description": "Header, method, status code, multiplexing và QUIC protocol."
+          },
+          {
+            "title": "Bài 2: DNS và cơ chế phân giải tên miền",
+            "description": "Recursive resolution, authoritative server, TTL và DNS caching."
+          },
+          {
+            "title": "Bài 3: TLS/SSL và HTTPS",
+            "description": "Certificate chain, handshake, cipher suite và cách kiểm tra bảo mật."
+          }
         ]
       }
     ]
@@ -307,25 +556,52 @@
       {
         "title": "Chương 1: Process và Thread",
         "lessons": [
-          { "title": "Bài 1: Vòng đời process", "description": "Các trạng thái process, PCB, context switching và chi phí." },
-          { "title": "Bài 2: Thread và Concurrency", "description": "User-level vs kernel-level thread, race condition và critical section." },
-          { "title": "Bài 3: Semaphore và Mutex", "description": "Đồng bộ hóa process, bài toán Producer-Consumer, Dining Philosophers." }
+          {
+            "title": "Bài 1: Vòng đời process",
+            "description": "Các trạng thái process, PCB, context switching và chi phí."
+          },
+          {
+            "title": "Bài 2: Thread và Concurrency",
+            "description": "User-level vs kernel-level thread, race condition và critical section."
+          },
+          {
+            "title": "Bài 3: Semaphore và Mutex",
+            "description": "Đồng bộ hóa process, bài toán Producer-Consumer, Dining Philosophers."
+          }
         ]
       },
       {
         "title": "Chương 2: Quản lý bộ nhớ",
         "lessons": [
-          { "title": "Bài 1: Paging và Segmentation", "description": "Page table, TLB, segmentation fault và bảo vệ bộ nhớ." },
-          { "title": "Bài 2: Virtual Memory và Page Fault", "description": "Demand paging, page replacement algorithms: LRU, FIFO, Clock." },
-          { "title": "Bài 3: Heap và Memory Allocator", "description": "malloc/free internals, fragmentation, buddy system." }
+          {
+            "title": "Bài 1: Paging và Segmentation",
+            "description": "Page table, TLB, segmentation fault và bảo vệ bộ nhớ."
+          },
+          {
+            "title": "Bài 2: Virtual Memory và Page Fault",
+            "description": "Demand paging, page replacement algorithms: LRU, FIFO, Clock."
+          },
+          {
+            "title": "Bài 3: Heap và Memory Allocator",
+            "description": "malloc/free internals, fragmentation, buddy system."
+          }
         ]
       },
       {
         "title": "Chương 3: File System và I/O",
         "lessons": [
-          { "title": "Bài 1: Cấu trúc File System", "description": "Inode, directory structure, FAT và ext4." },
-          { "title": "Bài 2: I/O Scheduling", "description": "FCFS, SSTF, SCAN và cách SSD thay đổi I/O scheduling." },
-          { "title": "Bài 3: Deadlock và Phát hiện", "description": "Điều kiện Coffman, Resource Allocation Graph, Banker's algorithm." }
+          {
+            "title": "Bài 1: Cấu trúc File System",
+            "description": "Inode, directory structure, FAT và ext4."
+          },
+          {
+            "title": "Bài 2: I/O Scheduling",
+            "description": "FCFS, SSTF, SCAN và cách SSD thay đổi I/O scheduling."
+          },
+          {
+            "title": "Bài 3: Deadlock và Phát hiện",
+            "description": "Điều kiện Coffman, Resource Allocation Graph, Banker's algorithm."
+          }
         ]
       }
     ]
@@ -340,17 +616,35 @@
       {
         "title": "Chương 1: Biểu diễn số và mạch số",
         "lessons": [
-          { "title": "Bài 1: Hệ nhị phân, bù 2 và dấu phẩy động", "description": "Biểu diễn số nguyên, âm, IEEE 754 single/double precision." },
-          { "title": "Bài 2: Đại số Boole và mạch tổ hợp", "description": "Cổng logic, bản đồ Karnaugh, mạch cộng, mux/demux." },
-          { "title": "Bài 3: Mạch tuần tự và flip-flop", "description": "D/JK flip-flop, thanh ghi, bộ đếm và FSM." }
+          {
+            "title": "Bài 1: Hệ nhị phân, bù 2 và dấu phẩy động",
+            "description": "Biểu diễn số nguyên, âm, IEEE 754 single/double precision."
+          },
+          {
+            "title": "Bài 2: Đại số Boole và mạch tổ hợp",
+            "description": "Cổng logic, bản đồ Karnaugh, mạch cộng, mux/demux."
+          },
+          {
+            "title": "Bài 3: Mạch tuần tự và flip-flop",
+            "description": "D/JK flip-flop, thanh ghi, bộ đếm và FSM."
+          }
         ]
       },
       {
         "title": "Chương 2: CPU và Pipeline",
         "lessons": [
-          { "title": "Bài 1: Kiến trúc RISC-V cơ bản", "description": "Tập lệnh, format R/I/S/B/U/J, thanh ghi và quy ước gọi hàm." },
-          { "title": "Bài 2: Pipeline 5 giai đoạn", "description": "IF, ID, EX, MEM, WB — data hazard, control hazard và forwarding." },
-          { "title": "Bài 3: Bộ nhớ cache", "description": "Direct-mapped, set-associative, write policy và cache coherence." }
+          {
+            "title": "Bài 1: Kiến trúc RISC-V cơ bản",
+            "description": "Tập lệnh, format R/I/S/B/U/J, thanh ghi và quy ước gọi hàm."
+          },
+          {
+            "title": "Bài 2: Pipeline 5 giai đoạn",
+            "description": "IF, ID, EX, MEM, WB — data hazard, control hazard và forwarding."
+          },
+          {
+            "title": "Bài 3: Bộ nhớ cache",
+            "description": "Direct-mapped, set-associative, write policy và cache coherence."
+          }
         ]
       }
     ]

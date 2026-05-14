@@ -20,3 +20,9 @@ RETURNING *;
 
 -- name: DeleteCourseModule :execrows
 DELETE FROM course_modules WHERE id = $1;
+
+-- name: GetOrgIDByCourseModuleID :one
+SELECT c.organization_id
+FROM course_modules cm
+JOIN courses c ON c.id = cm.course_id
+WHERE cm.id = $1;

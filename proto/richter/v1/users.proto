@@ -105,6 +105,7 @@ message UpdateUserProfileResponse {
 message UpdateUserPasswordRequest {
   string id = 1 [(buf.validate.field).string.uuid = true];
   string password = 2 [(buf.validate.field).string.min_len = 8];
+  optional string old_password = 3;
 }
 
 message UpdateUserPasswordResponse {

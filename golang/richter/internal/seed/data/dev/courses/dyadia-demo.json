@@ -9,7 +9,7 @@
       {
         "title": "Chương 1: Bắt đầu với Dyadia",
         "lessons": [
-          { "title": "Bài 1: Dyadia là gì?", "description": "Tổng quan về nền tảng học tập Dyadia và triết lý thiết kế." },
+          { "title": "Bài 1: Dyadia là gì?", "description": "Tổng quan về nền tảng học tập Dyadia và triết lý thiết kế.", "video_key": "seed/dyadia-demo/intro/ch1-overview.mp4", "duration_secs": 480 },
           { "title": "Bài 2: Tạo tài khoản và đăng nhập", "description": "Hướng dẫn đăng ký, xác thực và đăng nhập lần đầu." },
           { "title": "Bài 3: Khám phá giao diện", "description": "Tour giao diện: dashboard, sidebar, profile và settings." }
         ]

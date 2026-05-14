@@ -41,11 +41,13 @@ export function MemberActionsMenu({
   currentStatus,
   slug,
 }: MemberActionsMenuProps) {
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   return (
-    <>
+    <div className="flex flex-col items-end gap-1">
+      {error && <p className="text-xs text-destructive max-w-48 text-right">{error}</p>}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8">
@@ -64,9 +66,13 @@ export function MemberActionsMenu({
               ].map(({ label, value }) => (
                 <DropdownMenuItem
                   key={value}
-                  disabled={value === currentRole}
+                  disabled={value === currentRole || isPending}
                   onClick={() =>
-                    startTransition(async () => { await updateMemberRole(organizationId, userId, value, slug) })
+                    startTransition(async () => {
+                      setError(null);
+                      const res = await updateMemberRole(organizationId, userId, value, slug);
+                      if (res?.error) setError(res.error);
+                    })
                   }
                 >
                   {label}
@@ -84,9 +90,13 @@ export function MemberActionsMenu({
               ].map(({ label, value }) => (
                 <DropdownMenuItem
                   key={value}
-                  disabled={value === currentStatus}
+                  disabled={value === currentStatus || isPending}
                   onClick={() =>
-                    startTransition(async () => { await updateMemberStatus(organizationId, userId, value, slug) })
+                    startTransition(async () => {
+                      setError(null);
+                      const res = await updateMemberStatus(organizationId, userId, value, slug);
+                      if (res?.error) setError(res.error);
+                    })
                   }
                 >
                   {label}
@@ -116,7 +126,11 @@ export function MemberActionsMenu({
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction
               onClick={() =>
-                startTransition(async () => { await removeMember(organizationId, userId, slug) })
+                startTransition(async () => {
+                  setError(null);
+                  const res = await removeMember(organizationId, userId, slug);
+                  if (res?.error) setError(res.error);
+                })
               }
             >
               Xóa
@@ -124,6 +138,6 @@ export function MemberActionsMenu({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   );
 }

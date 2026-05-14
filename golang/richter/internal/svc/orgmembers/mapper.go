@@ -20,6 +20,20 @@ func OrganizationMemberToProto(m gen.OrganizationMember) *richterv1.Organization
 	}
 }
 
+func OrganizationMemberRowToProto(m gen.ListOrganizationMembersRow) *richterv1.OrganizationMember {
+	return &richterv1.OrganizationMember{
+		OrganizationId: m.OrganizationID.String(),
+		UserId:         m.UserID.String(),
+		Role:           OrganizationRoleToProto(m.Role),
+		Status:         MemberStatusToProto(m.Status),
+		CreatedAt:      svc.TimestampToProto(m.CreatedAt),
+		UpdatedAt:      svc.TimestampToProto(m.UpdatedAt),
+		UserEmail:      m.UserEmail,
+		UserFirstName:  m.UserFirstName,
+		UserLastName:   m.UserLastName,
+	}
+}
+
 func OrganizationRoleToProto(role gen.OrganizationRole) richterv1.OrganizationRole {
 	switch role {
 	case gen.OrganizationRoleOwner:

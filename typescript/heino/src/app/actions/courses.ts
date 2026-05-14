@@ -63,7 +63,6 @@ export async function updateCourse(_state: ActionState, formData: FormData): Pro
 export async function updateCourseStatus(
   id: string,
   slug: string,
-  courseId: string,
   status: CourseStatus,
 ): Promise<ActionState> {
   const { token } = await requireAnyUser();
@@ -71,20 +70,21 @@ export async function updateCourseStatus(
   try {
     await client.updateCourseStatus({ id, status });
     revalidateCourseList(slug);
-    revalidateCourseDetail(slug, courseId);
+    revalidateCourseDetail(slug, id);
     return { success: true };
   } catch {
     return { error: "Không thể cập nhật trạng thái" };
   }
 }
 
-export async function deleteCourse(id: string, slug: string, redirectTo?: string): Promise<void> {
+export async function deleteCourse(id: string, slug: string, redirectTo?: string): Promise<ActionState> {
   const { token } = await requireAnyUser();
   const client = createRichterClient(CourseService, token);
   try {
     await client.deleteCourse({ id });
   } catch {
-    return;
+    return { error: "Không thể xóa khóa học" };
   }
+  revalidateCourseList(slug);
   redirect(redirectTo ?? `/admin/organizations/${slug}/courses`);
 }

@@ -1,6 +1,30 @@
-localhost {
+:80 {
+  handle_path /api/storage/* {
+    # Allow cross-origin PUT/GET for presigned S3 URLs from browser
+    header Access-Control-Allow-Origin "*"
+    header Access-Control-Allow-Methods "GET, PUT, DELETE, HEAD, OPTIONS"
+    header Access-Control-Allow-Headers "*"
+    header Access-Control-Max-Age "86400"
+
+    @preflight {
+      method OPTIONS
+    }
+    respond @preflight 204
+
+    reverse_proxy storage:9000 {
+      header_up Host {upstream_hostport}
+      # Strip SeaweedFS's own CORS headers so Caddy's headers above are the only ones
+      header_down -Access-Control-Allow-Origin
+      header_down -Access-Control-Allow-Methods
+      header_down -Access-Control-Allow-Headers
+      header_down -Access-Control-Max-Age
+      header_down -Access-Control-Allow-Credentials
+    }
+  }
+
   handle_path /api/richter/* {
     reverse_proxy richter:8080
   }
+
   reverse_proxy heino:3000
 }

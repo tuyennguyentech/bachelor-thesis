@@ -60,13 +60,14 @@ export async function updateOrganizationStatus(id: string, slug: string, status:
   }
 }
 
-export async function deleteOrganization(id: string): Promise<void> {
+export async function deleteOrganization(id: string): Promise<ActionState> {
   const { token } = await requireAdmin();
   const client = createRichterClient(OrganizationService, token);
   try {
     await client.deleteOrganization({ id });
   } catch {
-    return;
+    return { error: "Không thể xóa tổ chức" };
   }
+  revalidatePath("/admin/organizations");
   redirect("/admin/organizations");
 }
