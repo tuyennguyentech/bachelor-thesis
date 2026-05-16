@@ -93,7 +93,7 @@ func (s *QuizSvc) SubmitQuiz(
 	questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
 		return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{
 			LessonID: lessonID,
-			Limit:    100,
+			Limit:    1000,
 			Offset:   0,
 		})
 	})

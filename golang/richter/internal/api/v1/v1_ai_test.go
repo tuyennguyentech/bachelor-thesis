@@ -308,7 +308,7 @@ func TestAIAuthz(t *testing.T) {
 
 	// --- ListLessonTranscriptChunks ---
 	t.Run("ListLessonTranscriptChunks", func(t *testing.T) {
-		req := &richterv1.ListLessonTranscriptChunksRequest{LessonId: e.lessonID}
+		req := &richterv1.ListLessonTranscriptChunksRequest{LessonId: e.lessonID, Limit: 50}
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
 			assertCode(t, func() error { _, err := e.aiAnon.ListLessonTranscriptChunks(ctx, req); return err }(), connect.CodeUnauthenticated)
 		})
@@ -664,6 +664,46 @@ func TestAIQuestionEditing(t *testing.T) {
 			return err
 		}(), connect.CodeInvalidArgument)
 	})
+
+	t.Run("RegenerateQuestion/NoTranscript/FailedPrecondition", func(t *testing.T) {
+		// q0ID has no chunk_id and no FDB transcript → FailedPrecondition.
+		assertCode(t, func() error {
+			_, err := e.aiTeacher.RegenerateQuestion(ctx, &richterv1.RegenerateQuestionRequest{
+				QuestionId: q0ID,
+			})
+			return err
+		}(), connect.CodeFailedPrecondition)
+	})
+
+	t.Run("RegenerateQuestion/Student/PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiStudent.RegenerateQuestion(ctx, &richterv1.RegenerateQuestionRequest{
+				QuestionId: q0ID,
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("RegenerateQuestion/WithChunkTranscript/Teacher/OK", func(t *testing.T) {
+		// Insert a chunk with FDB transcript and a question linked to it.
+		chunk := insertTestChunk(t, e.lessonID, 10, "Big-O notation describes the upper bound on an algorithm's time complexity.")
+		chunkQs := insertTestQuestionsForChunk(t, e.lessonID, chunk.ID.String(), 1)
+		res, err := e.aiTeacher.RegenerateQuestion(ctx, &richterv1.RegenerateQuestionRequest{
+			QuestionId: chunkQs[0].ID.String(),
+		})
+		if err != nil {
+			t.Fatalf("RegenerateQuestion: %v", err)
+		}
+		if res.Question == nil {
+			t.Fatal("expected question in response")
+		}
+		if res.Question.QuestionText == "" {
+			t.Error("expected non-empty question text")
+		}
+		if len(res.Question.Options) != 4 {
+			t.Errorf("expected 4 options, got %d", len(res.Question.Options))
+		}
+	})
 }
 
 // ── TestAIChunkConfig ─────────────────────────────────────────────────────────
@@ -678,6 +718,7 @@ func TestAIChunkConfig(t *testing.T) {
 	t.Run("ListLessonTranscriptChunks/ReturnsInserted", func(t *testing.T) {
 		res, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
 			LessonId: e.lessonID,
+			Limit:    50,
 		})
 		if err != nil {
 			t.Fatalf("ListLessonTranscriptChunks: %v", err)
@@ -904,9 +945,11 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 
 	// Setup: transcript_extracted status + two chunks, both with pre-existing questions.
 	// This simulates a run that completed all chunks but was killed before setting status=done.
+	// No FDB transcript content: ForceRegenerate/SingleChunk subtests bypass the skip check
+	// but hit the "empty transcript" guard instead of calling Gemini, saving API quota.
 	insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusTranscriptExtracted)
-	chunk0 := insertTestChunk(t, e.lessonID, 0, "first chunk transcript")
-	chunk1 := insertTestChunk(t, e.lessonID, 1, "second chunk transcript")
+	chunk0 := insertTestChunk(t, e.lessonID, 0, "")
+	chunk1 := insertTestChunk(t, e.lessonID, 1, "")
 	insertTestQuestionsForChunk(t, e.lessonID, chunk0.ID.String(), 1)
 	insertTestQuestionsForChunk(t, e.lessonID, chunk1.ID.String(), 1)
 
@@ -1196,7 +1239,7 @@ func TestAIChunkOperations(t *testing.T) {
 			t.Fatalf("parse lessonID: %v", err)
 		}
 		if err := db.WithConnectionExec(pool, context.Background(), func(q *gen.Queries, _ *pgxpool.Conn) error {
-			chunks, _ := q.ListLessonTranscriptChunks(context.Background(), lid)
+			chunks, _ := q.ListLessonTranscriptChunks(context.Background(), gen.ListLessonTranscriptChunksParams{LessonID: lid, Limit: 500, Offset: 0})
 			for _, c := range chunks {
 				_ = q.DeleteLessonQuestionsForChunk(context.Background(), c.ID)
 			}
@@ -1239,6 +1282,7 @@ func TestAIChunkOperations(t *testing.T) {
 		// Discard chunk should no longer be listable.
 		listRes, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
 			LessonId: e.lessonID,
+			Limit:    50,
 		})
 		if err != nil {
 			t.Fatalf("ListLessonTranscriptChunks after merge: %v", err)
@@ -1306,6 +1350,7 @@ func TestAIChunkOperations(t *testing.T) {
 		}
 		listRes, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
 			LessonId: e.lessonID,
+			Limit:    50,
 		})
 		if err != nil {
 			t.Fatalf("ListLessonTranscriptChunks: %v", err)
@@ -1343,6 +1388,7 @@ func TestAIChunkOperations(t *testing.T) {
 		}
 		listRes, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
 			LessonId: e.lessonID,
+			Limit:    50,
 		})
 		if err != nil {
 			t.Fatalf("ListLessonTranscriptChunks after delete: %v", err)
@@ -1385,6 +1431,7 @@ func TestAIChunkOperations(t *testing.T) {
 		}
 		listRes, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
 			LessonId: e.lessonID,
+			Limit:    50,
 		})
 		if err != nil {
 			t.Fatalf("ListLessonTranscriptChunks: %v", err)
@@ -1470,8 +1517,8 @@ func testUploadVideoToS3(t *testing.T, ctx context.Context, client *minio.Client
 
 // TestAIPipelineFullFlow runs the complete AI pipeline end-to-end:
 //
-//	ExtractTranscriptStream (Whisper transcription + Gemini chunking)
-//	→ ChunkTranscriptStream (Gemini re-chunk, optional)
+//	ExtractTranscriptStream (Whisper transcription only — no Gemini)
+//	→ ChunkTranscriptStream (Gemini chunking)
 //	→ GenerateQuestionsStream (Gemini Q&A generation)
 //
 // Uses testdata/edu-sample.mp4 — a 14-second synthetic binary search lecture.
@@ -1534,10 +1581,17 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		t.Fatalf("set video key on lesson: %v", err)
 	}
 
+	// ── Pre-Phase 1: Seed stale chunks/questions, verify extraction clears them ──
+
+	// Insert dummy chunks and questions to simulate a previous pipeline run.
+	// ExtractTranscriptStream must delete them before writing the new transcript.
+	staleChunk := insertTestChunk(t, e.lessonID, 0, "stale chunk from previous run")
+	insertTestQuestionsForChunk(t, e.lessonID, staleChunk.ID.String(), 2)
+
 	// ── Phase 1: ExtractTranscriptStream ───────────────────────────────────────
 	// Run extraction outside sub-tests so a failure fatally stops generation.
 
-	t.Log("Phase 1: ExtractTranscriptStream — Whisper transcription + Gemini chunking")
+	t.Log("Phase 1: ExtractTranscriptStream — Whisper transcription only")
 	{
 		extractCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
@@ -1566,11 +1620,30 @@ func TestAIPipelineFullFlow(t *testing.T) {
 			if strings.Contains(msg, "429") || strings.Contains(strings.ToLower(msg), "quota") {
 				t.Skipf("Gemini API rate limit exceeded — try again later: %s", msg)
 			}
+			if strings.Contains(msg, "whisper API 4") || strings.Contains(msg, "whisper API 5") ||
+				strings.Contains(msg, "call whisper API") {
+				t.Skipf("Whisper service unavailable or misconfigured — check speaches is running: %s", msg)
+			}
 			t.Fatalf("extraction failed (step=%v): %s", last.Step, msg)
 		}
 	}
 
-	t.Run("ExtractTranscript/StatusIsChunksReadyOrExtracted", func(t *testing.T) {
+	t.Run("ExtractTranscript/StaleChunksAndQuestionsCleared", func(t *testing.T) {
+		res, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
+			LessonId: e.lessonID,
+			Limit:    50,
+		})
+		if err != nil {
+			t.Fatalf("ListLessonTranscriptChunks: %v", err)
+		}
+		for _, c := range res.Chunks {
+			if c.Id == staleChunk.ID.String() {
+				t.Error("stale chunk from previous run was not cleared by ExtractTranscriptStream")
+			}
+		}
+	})
+
+	t.Run("ExtractTranscript/StatusIsTranscriptExtracted", func(t *testing.T) {
 		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
@@ -1578,13 +1651,8 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		if res.Analysis == nil {
 			t.Fatal("expected analysis in response")
 		}
-		// ExtractTranscriptStream now runs a combined Gemini call that returns transcript +
-		// chunks in a single pass, so status goes directly to CHUNKS_READY.
-		// It falls back to TRANSCRIPT_EXTRACTED only when Gemini returns no chunks.
-		ok := res.Analysis.Status == richterv1.AnalysisStatus_ANALYSIS_STATUS_CHUNKS_READY ||
-			res.Analysis.Status == richterv1.AnalysisStatus_ANALYSIS_STATUS_TRANSCRIPT_EXTRACTED
-		if !ok {
-			t.Errorf("status: want CHUNKS_READY or TRANSCRIPT_EXTRACTED, got %v", res.Analysis.Status)
+		if res.Analysis.Status != richterv1.AnalysisStatus_ANALYSIS_STATUS_TRANSCRIPT_EXTRACTED {
+			t.Errorf("status: want TRANSCRIPT_EXTRACTED, got %v", res.Analysis.Status)
 		}
 		if res.Analysis.Transcript == "" {
 			t.Error("expected non-empty transcript after extraction")
@@ -1629,6 +1697,7 @@ func TestAIPipelineFullFlow(t *testing.T) {
 	t.Run("ChunkTranscript/ChunksCreated", func(t *testing.T) {
 		res, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
 			LessonId: e.lessonID,
+			Limit:    50,
 		})
 		if err != nil {
 			t.Fatalf("ListLessonTranscriptChunks: %v", err)
@@ -1745,4 +1814,133 @@ func TestAIPipelineFullFlow(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ── TestGetLessonAnalysis_FDBVisibility ───────────────────────────────────────
+//
+// Verifies that GetLessonAnalysis skips FDB transcript/segments data when
+// analysis status is PENDING (video was just replaced, stale data in FDB).
+// When status is not PENDING, FDB data must be returned.
+
+func TestGetLessonAnalysis_FDBVisibility(t *testing.T) {
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	kvSvc, err := do.Invoke[*kv.KVSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("invoke KVSvc: %v", err)
+	}
+	lessonIDStr := e.lessonID
+
+	const staleTranscript = "stale transcript from old video"
+	staleSegJSON, _ := json.Marshal([]map[string]interface{}{
+		{"start_seconds": 0.0, "end_seconds": 10.0, "text": "stale segment"},
+	})
+
+	// Write FDB data that simulates leftover from a previous analysis.
+	if err := kvSvc.Set("lesson", tuple.Tuple{lessonIDStr, "transcript"}, []byte(staleTranscript)); err != nil {
+		t.Fatalf("FDB write transcript: %v", err)
+	}
+	if err := kvSvc.Set("lesson", tuple.Tuple{lessonIDStr, "segments"}, staleSegJSON); err != nil {
+		t.Fatalf("FDB write segments: %v", err)
+	}
+
+	t.Run("PENDING_status_hides_FDB_data", func(t *testing.T) {
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusPending)
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if res.Analysis == nil {
+			t.Fatal("expected analysis row to exist (status PENDING)")
+		}
+		if res.Analysis.Transcript != "" {
+			t.Errorf("PENDING: expected empty transcript, got %q", res.Analysis.Transcript)
+		}
+		if len(res.Analysis.TranscriptSegments) != 0 {
+			t.Errorf("PENDING: expected 0 segments, got %d", len(res.Analysis.TranscriptSegments))
+		}
+	})
+
+	t.Run("DONE_status_returns_FDB_data", func(t *testing.T) {
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if res.Analysis == nil {
+			t.Fatal("expected analysis row to exist (status DONE)")
+		}
+		if res.Analysis.Transcript != staleTranscript {
+			t.Errorf("DONE: expected transcript %q, got %q", staleTranscript, res.Analysis.Transcript)
+		}
+		if len(res.Analysis.TranscriptSegments) != 1 {
+			t.Errorf("DONE: expected 1 segment, got %d", len(res.Analysis.TranscriptSegments))
+		}
+	})
+
+	t.Run("TRANSCRIPT_EXTRACTED_returns_FDB_data", func(t *testing.T) {
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusTranscriptExtracted)
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if res.Analysis.Transcript != staleTranscript {
+			t.Errorf("TRANSCRIPT_EXTRACTED: expected transcript loaded from FDB, got %q", res.Analysis.Transcript)
+		}
+	})
+}
+
+// ── TestUpdateLessonVideo_SameKey_ResetsAnalysis ──────────────────────────────
+//
+// Verifies that replacing a video with the same storage key (deterministic key
+// like lessons/<id>/video.mp4) still resets analysis status to PENDING and
+// clears questions/chunks. This was a bug where the key-equality check caused
+// stale FDB transcript/segments to remain visible after same-filename replacement.
+
+func TestUpdateLessonVideo_SameKey_ResetsAnalysis(t *testing.T) {
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	const videoKey = "lessons/test-replace/video.mp4"
+
+	// First upload: set the initial video key.
+	if _, err := e.adminLessons.UpdateLessonVideo(ctx, &richterv1.UpdateLessonVideoRequest{
+		Id: e.lessonID, VideoStorageKey: videoKey,
+	}); err != nil {
+		t.Fatalf("first UpdateLessonVideo: %v", err)
+	}
+
+	// Simulate a completed pipeline: insert DONE analysis + a chunk.
+	insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
+	insertTestChunk(t, e.lessonID, 0, "transcript from first video")
+
+	// Second upload with the SAME key (same filename uploaded again).
+	if _, err := e.adminLessons.UpdateLessonVideo(ctx, &richterv1.UpdateLessonVideoRequest{
+		Id: e.lessonID, VideoStorageKey: videoKey,
+	}); err != nil {
+		t.Fatalf("second UpdateLessonVideo (same key): %v", err)
+	}
+
+	// Analysis status must be reset to PENDING.
+	res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+	if err != nil {
+		t.Fatalf("GetLessonAnalysis after same-key replacement: %v", err)
+	}
+	if res.Analysis == nil {
+		t.Fatal("expected analysis row to exist after replacement")
+	}
+	if res.Analysis.Status != richterv1.AnalysisStatus_ANALYSIS_STATUS_PENDING {
+		t.Errorf("expected PENDING after same-key replacement, got %v", res.Analysis.Status)
+	}
+	// GetLessonAnalysis must skip FDB when PENDING — transcript and segments must be empty.
+	if res.Analysis.Transcript != "" {
+		t.Errorf("expected empty transcript for PENDING, got %q", res.Analysis.Transcript)
+	}
+	if len(res.Analysis.TranscriptSegments) != 0 {
+		t.Errorf("expected 0 segments for PENDING, got %d", len(res.Analysis.TranscriptSegments))
+	}
 }

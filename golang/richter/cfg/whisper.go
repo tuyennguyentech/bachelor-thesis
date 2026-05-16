@@ -14,7 +14,7 @@ type WhisperCfg struct {
 }
 
 func NewWhisperCfg() WhisperCfg {
-	return WhisperCfg{Model: "small"}
+	return WhisperCfg{Model: "Systran/faster-whisper-small"}
 }
 
 func NewWhisperCfgSvc(i do.Injector) (*WhisperCfg, error) {

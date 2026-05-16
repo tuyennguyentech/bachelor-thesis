@@ -148,7 +148,16 @@ func (s *CoursesSvc) ListCourses(
 	}
 
 	var courses []gen.Course
-	if req.StatusFilter != nil {
+	if req.Q != nil && *req.Q != "" {
+		courses, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
+			return q.ListCoursesByOrgAndTitleFilter(ctx, gen.ListCoursesByOrgAndTitleFilterParams{
+				OrganizationID: orgID,
+				Column2:        req.GetQ(),
+				Limit:          req.GetLimit(),
+				Offset:         req.GetOffset(),
+			})
+		})
+	} else if req.StatusFilter != nil {
 		sqlStatus, err := CourseStatusToSQL(req.GetStatusFilter())
 		if err != nil {
 			s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("ListCourses.StatusToSQL", err)...)

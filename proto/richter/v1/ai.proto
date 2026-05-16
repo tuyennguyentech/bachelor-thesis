@@ -62,16 +62,6 @@ message TranscriptChunk {
   int32 question_count_config = 8;
 }
 
-message AnalyzeLessonRequest {
-  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
-  // Number of MCQ questions to generate. 0 = use service default (5).
-  int32 question_count = 2 [(buf.validate.field).int32 = {gte: 0, lte: 20}];
-}
-
-message AnalyzeLessonResponse {
-  LessonAnalysis analysis = 1;
-}
-
 message GetLessonAnalysisRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
 }
@@ -129,6 +119,8 @@ message ChunkTranscriptRequest {
 
 message ListLessonTranscriptChunksRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 1000}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
 }
 
 message ListLessonTranscriptChunksResponse {
@@ -274,9 +266,6 @@ message GetWatchProgressResponse {
 }
 
 service AIService {
-  // AnalyzeLesson / AnalyzeLessonStream: legacy single-stage pipeline (unimplemented).
-  rpc AnalyzeLesson(AnalyzeLessonRequest) returns (AnalyzeLessonResponse) {}
-  rpc AnalyzeLessonStream(AnalyzeLessonRequest) returns (stream AnalysisProgressEvent) {}
   rpc GetLessonAnalysis(GetLessonAnalysisRequest) returns (GetLessonAnalysisResponse) {}
 
   // Step 2: Extract transcript + fine segments from video.

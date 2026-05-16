@@ -411,8 +411,13 @@ func TestUsersAuthz(t *testing.T) {
 			FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
 		}
 		t.Run("Anon/OK", func(t *testing.T) {
-			if _, err := anonUsers.RegisterUser(ctx, req); err != nil {
+			got, err := anonUsers.RegisterUser(ctx, req)
+			if err != nil {
 				t.Errorf("expected OK, got %v", err)
+				return
+			}
+			if got.User.GetStatus() != richterv1.UserStatus_USER_STATUS_PENDING {
+				t.Errorf("expected PENDING status for self-registered user, got %v", got.User.GetStatus())
 			}
 		})
 	})

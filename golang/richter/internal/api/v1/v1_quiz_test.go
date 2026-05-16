@@ -230,8 +230,8 @@ func TestQuizLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListLessonAttempts: %v", err)
 		}
-		if res.Total == 0 {
-			t.Error("expected at least 1 attempt in listing")
+		if res.Total != 1 {
+			t.Errorf("expected exactly 1 attempt (upsert per student+lesson), got %d", res.Total)
 		}
 		found := false
 		for _, a := range res.Attempts {
@@ -264,6 +264,12 @@ func TestQuizValidation(t *testing.T) {
 			_, e := c.quiz.SubmitQuiz(ctx, &richterv1.SubmitQuizRequest{LessonId: "not-a-uuid", Answers: []int32{0}})
 			return e
 		}(), connect.CodeInvalidArgument)
+	})
+
+	t.Run("SubmitQuiz/TooManyAnswers", func(t *testing.T) {
+		answers := make([]int32, 501)
+		req := &richterv1.SubmitQuizRequest{LessonId: gofakeit.UUID(), Answers: answers}
+		assertCode(t, func() error { _, err := c.quiz.SubmitQuiz(ctx, req); return err }(), connect.CodeInvalidArgument)
 	})
 
 	t.Run("SubmitQuiz/LessonNoQuestions", func(t *testing.T) {

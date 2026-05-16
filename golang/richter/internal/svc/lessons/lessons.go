@@ -12,10 +12,13 @@ import (
 	"example.com/richter/internal"
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/kv"
 	"example.com/richter/internal/svc"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
@@ -30,6 +33,7 @@ func init() {
 
 type LessonsSvc struct {
 	pg    *db.PostgresSvc
+	kv    *kv.KVSvc
 	log   *log.LogSvc
 	authz *authz.AuthzSvc
 }
@@ -41,6 +45,10 @@ func NewLessonsSvc(i do.Injector) (s *LessonsSvc, err error) {
 	s.pg, err = do.Invoke[*db.PostgresSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc cannot be invoked: %w", err)
+	}
+	s.kv, err = do.Invoke[*kv.KVSvc](i)
+	if err != nil {
+		return nil, fmt.Errorf("KVSvc cannot be invoked: %w", err)
 	}
 	s.log, err = do.Invoke[*log.LogSvc](i)
 	if err != nil {
@@ -316,12 +324,53 @@ func (s *LessonsSvc) UpdateLessonVideo(
 		return nil, err
 	}
 
-	l, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
-		return q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
+	// Collect chunk IDs before the transaction so we can clean up FDB after the PG delete.
+	var chunkIDsToClean []string
+	if existing.VideoStorageKey.Valid {
+		chunks, cerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+			return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{
+				LessonID: existing.ID,
+				Limit:    10000,
+				Offset:   0,
+			})
+		})
+		if cerr == nil {
+			for _, c := range chunks {
+				chunkIDsToClean = append(chunkIDsToClean, c.ID.String())
+			}
+		}
+	}
+
+	// All mutations in one transaction: update video + clear stale analysis data atomically.
+	l, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.Lesson, error) {
+		updated, err := q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
 			ID:              existing.ID,
 			VideoStorageKey: pgtype.Text{String: req.GetVideoStorageKey(), Valid: true},
 			DurationSeconds: pgtype.Int4{Int32: req.GetDurationSeconds(), Valid: req.GetDurationSeconds() > 0},
 		})
+		if err != nil {
+			return gen.Lesson{}, err
+		}
+		// Always reset analysis when a video is (re-)uploaded. The storage key is
+		// deterministic (lessons/<id>/video.ext), so same-filename replacements produce
+		// the same key yet different content — we must still clear stale analysis data.
+		if existing.VideoStorageKey.Valid {
+			if err := q.DeleteLessonAttempts(ctx, existing.ID); err != nil {
+				return gen.Lesson{}, err
+			}
+			if err := q.DeleteLessonQuestions(ctx, existing.ID); err != nil {
+				return gen.Lesson{}, err
+			}
+			if err := q.DeleteLessonTranscriptChunks(ctx, existing.ID); err != nil {
+				return gen.Lesson{}, err
+			}
+			if _, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+				LessonID: existing.ID, Status: gen.LessonAnalysisStatusPending, ErrorMsg: pgtype.Text{},
+			}); err != nil {
+				return gen.Lesson{}, err
+			}
+		}
+		return updated, nil
 	})
 	if err != nil {
 		err = svc.ConnectDBError(err)
@@ -329,25 +378,16 @@ func (s *LessonsSvc) UpdateLessonVideo(
 		return nil, err
 	}
 
-	// Clear stale analysis data when video is replaced so the new video gets a fresh slate.
-	if existing.VideoStorageKey.Valid && existing.VideoStorageKey.String != req.GetVideoStorageKey() {
-		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.DeleteLessonQuestions(ctx, existing.ID)
-		}); err != nil {
-			s.log.WarnContext(ctx, "lessons: failed to clear questions on video replace", "lesson_id", existing.ID.String(), "err", err)
+	// Clean up orphaned FDB data after the PG transaction succeeds.
+	if existing.VideoStorageKey.Valid {
+		lessonIDStr := existing.ID.String()
+		_ = s.kv.Delete("lesson", tuple.Tuple{lessonIDStr, "transcript"})
+		_ = s.kv.Delete("lesson", tuple.Tuple{lessonIDStr, "segments"})
+		for _, id := range chunkIDsToClean {
+			_ = s.kv.Delete("chunk", tuple.Tuple{id, "transcript"})
 		}
-		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.DeleteLessonTranscriptChunks(ctx, existing.ID)
-		}); err != nil {
-			s.log.WarnContext(ctx, "lessons: failed to clear chunks on video replace", "lesson_id", existing.ID.String(), "err", err)
-		}
-		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: existing.ID, Status: gen.LessonAnalysisStatusPending, ErrorMsg: pgtype.Text{},
-			})
-			return err
-		})
 	}
+
 	return &richterv1.UpdateLessonVideoResponse{Lesson: LessonToProto(l)}, nil
 }
 
@@ -378,6 +418,22 @@ func (s *LessonsSvc) DeleteLesson(
 		return nil, err
 	}
 
+	// Collect chunk IDs before deletion for FDB cleanup.
+	lessonIDStr := existing.ID.String()
+	var chunkIDsToClean []string
+	chunks, cerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{
+			LessonID: existing.ID,
+			Limit:    10000,
+			Offset:   0,
+		})
+	})
+	if cerr == nil {
+		for _, c := range chunks {
+			chunkIDsToClean = append(chunkIDsToClean, c.ID.String())
+		}
+	}
+
 	rowsAffected, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (int64, error) {
 		return q.DeleteLesson(ctx, existing.ID)
 	})
@@ -391,5 +447,13 @@ func (s *LessonsSvc) DeleteLesson(
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("DeleteLesson.NotFound", err)...)
 		return nil, err
 	}
+
+	// Clean up FDB data (best-effort; PG row already deleted).
+	_ = s.kv.Delete("lesson", tuple.Tuple{lessonIDStr, "transcript"})
+	_ = s.kv.Delete("lesson", tuple.Tuple{lessonIDStr, "segments"})
+	for _, id := range chunkIDsToClean {
+		_ = s.kv.Delete("chunk", tuple.Tuple{id, "transcript"})
+	}
+
 	return &richterv1.DeleteLessonResponse{}, nil
 }

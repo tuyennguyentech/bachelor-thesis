@@ -19,7 +19,7 @@ message QuizAttempt {
 
 message SubmitQuizRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
-  repeated int32 answers = 2 [(buf.validate.field).repeated.min_items = 1];
+  repeated int32 answers = 2 [(buf.validate.field).repeated = {min_items: 1, max_items: 500}];
 }
 
 message SubmitQuizResponse {

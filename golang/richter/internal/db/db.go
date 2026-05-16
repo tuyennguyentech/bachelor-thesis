@@ -127,35 +127,3 @@ func WithCommitTxExec(
 	}
 	return tx.Commit(ctx)
 }
-
-func WithRollbackTx[O any](
-	pool *PostgresSvc,
-	ctx context.Context,
-	f func(*gen.Queries, pgx.Tx) (O, error),
-) (out O, err error) {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return
-	}
-	defer tx.Rollback(ctx)
-	if out, err = f(gen.New(tx), tx); err != nil {
-		return
-	}
-	return
-}
-
-func WithRollbackTxExec(
-	pool *PostgresSvc,
-	ctx context.Context,
-	f func(*gen.Queries, pgx.Tx) error,
-) (err error) {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return
-	}
-	defer tx.Rollback(ctx)
-	if err = f(gen.New(tx), tx); err != nil {
-		return
-	}
-	return
-}

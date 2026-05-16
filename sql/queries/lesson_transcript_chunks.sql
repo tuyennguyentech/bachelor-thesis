@@ -4,7 +4,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: ListLessonTranscriptChunks :many
-SELECT * FROM lesson_transcript_chunks WHERE lesson_id = $1 ORDER BY order_index ASC;
+SELECT * FROM lesson_transcript_chunks WHERE lesson_id = $1 ORDER BY order_index ASC LIMIT $2 OFFSET $3;
 
 -- name: DeleteLessonTranscriptChunks :exec
 DELETE FROM lesson_transcript_chunks WHERE lesson_id = $1;

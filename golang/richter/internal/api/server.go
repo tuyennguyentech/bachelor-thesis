@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
@@ -41,9 +42,11 @@ func NewServerSvc(i do.Injector) (s *ServerSvc, err error) {
 	p.SetUnencryptedHTTP2(true)
 	s = &ServerSvc{
 		srv: &http.Server{
-			Addr:      fmt.Sprintf("%s:%d", apiCfg.Host, apiCfg.Port),
-			Handler:   v1.Mux,
-			Protocols: p,
+			Addr:              fmt.Sprintf("%s:%d", apiCfg.Host, apiCfg.Port),
+			Handler:           v1.Mux,
+			Protocols:         p,
+			ReadHeaderTimeout: 30 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		},
 	}
 	return
@@ -63,6 +66,8 @@ func (s *ServerSvc) Start(ctx context.Context) {
 	}()
 }
 
-func (s *ServerSvc) Shutdown(ctx context.Context) error {
-	return s.srv.Shutdown(ctx)
+func (s *ServerSvc) Shutdown(_ context.Context) error {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return s.srv.Shutdown(shutdownCtx)
 }

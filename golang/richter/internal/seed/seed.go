@@ -33,6 +33,10 @@ import (
 //go:embed data/dev
 var devDataFS embed.FS
 
+// seedHTTPClient is used for presigned upload requests — 10 minute timeout to
+// handle large seed video files without blocking indefinitely on hung connections.
+var seedHTTPClient = &http.Client{Timeout: 10 * time.Minute}
+
 var Package = do.Package(
 	do.Lazy(NewSeederSvc),
 )
@@ -592,6 +596,13 @@ func (s *SeederSvc) seedDevLessonVideoKeys(ctx context.Context, courses []devCou
 }
 
 func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID, a *devAnalysisSpec) error {
+	// Write transcript to FDB before marking analysis as done; if FDB fails we
+	// don't want a "done" status with no transcript in the DB.
+	if a.Transcript != "" {
+		if err := s.kv.Set("lesson", tuple.Tuple{lessonID.String(), "transcript"}, []byte(a.Transcript)); err != nil {
+			return fmt.Errorf("seed: FDB transcript write failed: %w", err)
+		}
+	}
 	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
 		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
 			LessonID: lessonID,
@@ -601,11 +612,6 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 		return err
 	}); err != nil {
 		return fmt.Errorf("upsert analysis: %w", err)
-	}
-	if a.Transcript != "" {
-		if err := s.kv.Set("lesson", tuple.Tuple{lessonID.String(), "transcript"}, []byte(a.Transcript)); err != nil {
-			s.log.WarnContext(ctx, "seed: FDB transcript write failed", "lesson_id", lessonID.String(), "err", err)
-		}
 	}
 
 	// Delete old questions, then insert fresh ones
@@ -826,7 +832,7 @@ func (s *SeederSvc) uploadFromFile(ctx context.Context, s3Key, localPath string)
 	}
 	req.ContentLength = info.Size()
 	req.Header.Set("Content-Type", "video/mp4")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := seedHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("presigned PUT: %w", err)
 	}

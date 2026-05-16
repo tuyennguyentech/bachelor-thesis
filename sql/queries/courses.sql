@@ -18,6 +18,12 @@ WHERE organization_id = $1 AND status = $2
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 
+-- name: ListCoursesByOrgAndTitleFilter :many
+SELECT * FROM courses
+WHERE organization_id = $1 AND title ILIKE '%' || $2::text || '%'
+ORDER BY created_at DESC, id DESC
+LIMIT $3 OFFSET $4;
+
 -- name: UpdateCourse :one
 UPDATE courses
 SET title = $2, description = $3

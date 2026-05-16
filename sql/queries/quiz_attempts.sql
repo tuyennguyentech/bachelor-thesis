@@ -32,3 +32,6 @@ LIMIT $2 OFFSET $3;
 
 -- name: CountLessonAttempts :one
 SELECT COUNT(*) FROM quiz_attempts WHERE lesson_id = $1;
+
+-- name: DeleteLessonAttempts :exec
+DELETE FROM quiz_attempts WHERE lesson_id = $1;

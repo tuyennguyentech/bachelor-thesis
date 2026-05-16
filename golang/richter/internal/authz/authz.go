@@ -101,11 +101,16 @@ func (a *AuthzSvc) Interceptor() connect.Interceptor {
 	return &jwtInterceptor{a: a}
 }
 
-// RequireAuthenticated returns claims if the request carries a valid token.
+// RequireAuthenticated returns claims if the request carries a valid token
+// from an active account. Disabled or pending accounts are rejected even if
+// their token is cryptographically valid.
 func (a *AuthzSvc) RequireAuthenticated(ctx context.Context) (*jwtv1.JWTClaims, error) {
 	claims, ok := ClaimsFromCtx(ctx)
 	if !ok {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("unauthenticated"))
+	}
+	if claims.GetStatus() != richterv1.UserStatus_USER_STATUS_ACTIVE {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("account is not active"))
 	}
 	return claims, nil
 }

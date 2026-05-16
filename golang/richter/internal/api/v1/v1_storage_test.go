@@ -5,12 +5,16 @@ package v1
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/buf/gen/richter/v1/richterv1connect"
+	"example.com/richter/cfg"
+	"example.com/richter/internal"
 	"github.com/brianvoe/gofakeit/v7"
+	"github.com/samber/do/v2"
 )
 
 func TestStorageAuthz(t *testing.T) {
@@ -174,6 +178,39 @@ func TestStorageAuthz(t *testing.T) {
 			badReq := &richterv1.GetDownloadUrlRequest{Key: "seed/", ExpiresInSeconds: 3600}
 			assertCode(t, func() error { _, e := storageTeacher.GetDownloadUrl(ctx, badReq); return e }(), connect.CodeInvalidArgument)
 		})
+	})
+
+	// Verify upload URL uses public_endpoint (not internal storage endpoint) AND is reachable.
+	// This catches misconfigured public_endpoint (e.g. using a container-only hostname like "caddy"
+	// that a real host browser cannot reach).
+	t.Run("GetUploadUrl/URL_uses_public_endpoint_and_is_reachable", func(t *testing.T) {
+		s3cfg, err := do.Invoke[*cfg.S3Cfg](internal.Injector)
+		if err != nil {
+			t.Fatalf("get s3cfg: %v", err)
+		}
+		res, err := storageTeacher.GetUploadUrl(ctx, &richterv1.GetUploadUrlRequest{
+			Key: validKey, ContentType: "video/mp4", ExpiresInSeconds: 3600,
+		})
+		if err != nil {
+			t.Fatalf("GetUploadUrl: %v", err)
+		}
+		if !strings.HasPrefix(res.UploadUrl, s3cfg.PublicEndpoint) {
+			t.Errorf("upload URL %q does not start with public_endpoint %q — internal endpoint leaked", res.UploadUrl, s3cfg.PublicEndpoint)
+		}
+		// PUT a small payload to the presigned URL to verify it is actually reachable.
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, res.UploadUrl, strings.NewReader("dummy"))
+		if err != nil {
+			t.Fatalf("build PUT request: %v", err)
+		}
+		req.Header.Set("Content-Type", "video/mp4")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT to upload URL failed — public_endpoint %q unreachable: %v", s3cfg.PublicEndpoint, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			t.Errorf("PUT to upload URL returned HTTP %d, want 2xx", resp.StatusCode)
+		}
 	})
 
 	_ = adminOrgs
