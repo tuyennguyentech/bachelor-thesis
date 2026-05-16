@@ -18,3 +18,6 @@ seed-assets/
 
 # Generated test fixture video (regenerate with: espeak-ng + ffmpeg, see testdata/README)
 golang/richter/testdata/*.mp4
+
+# Compiled Go test binaries
+*.test
