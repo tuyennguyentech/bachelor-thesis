@@ -1,10 +1,21 @@
 "use client";
 
-import { useState, useRef, useTransition } from "react";
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { getUploadUrl } from "@/app/actions/storage";
-import { updateLessonVideo } from "@/app/actions/lessons";
+import { StorageService } from "buf/gen/richter/v1/storage_pb";
+import { LessonService } from "buf/gen/richter/v1/courses_pb";
+import { useRichterWebClient } from "@/lib/connect-webclient";
 import { UploadCloudIcon, CheckCircleIcon, Loader2Icon } from "lucide-react";
+
+const ALLOWED_CONTENT_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+]);
 
 interface Props {
   lessonId: string;
@@ -12,20 +23,24 @@ interface Props {
   courseId: string;
   slug: string;
   hasVideo: boolean;
+  token: string;
 }
 
-export function VideoUpload({ lessonId, moduleId, courseId, slug, hasVideo }: Props) {
+export function VideoUpload({ lessonId, moduleId, courseId, slug, hasVideo, token }: Props) {
+  const router = useRouter();
+  const storageClient = useRichterWebClient(StorageService, token);
+  const lessonClient = useRichterWebClient(LessonService, token);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
     setError(null);
     setDone(false);
 
-    if (!file.type.startsWith("video/")) {
+    if (!file.type.startsWith("video/") || !ALLOWED_CONTENT_TYPES.has(file.type)) {
       setError("Chỉ hỗ trợ tệp video (mp4, webm, mov…).");
       return;
     }
@@ -37,7 +52,8 @@ export function VideoUpload({ lessonId, moduleId, courseId, slug, hasVideo }: Pr
 
     let uploadUrl: string;
     try {
-      uploadUrl = await getUploadUrl(key, file.type || "video/mp4");
+      const res = await storageClient.getUploadUrl({ key, contentType: file.type || "video/mp4", expiresInSeconds: 3600 });
+      uploadUrl = res.uploadUrl;
     } catch {
       setError("Không lấy được URL upload. Kiểm tra kết nối storage.");
       setProgress(null);
@@ -59,7 +75,7 @@ export function VideoUpload({ lessonId, moduleId, courseId, slug, hasVideo }: Pr
       });
       xhr.addEventListener("error", () => reject(new Error("Lỗi mạng khi tải lên")));
       xhr.addEventListener("timeout", () => reject(new Error("Upload quá thời gian. Thử lại sau.")));
-      xhr.timeout = 120_000;
+      xhr.timeout = 600_000;
       xhr.open("PUT", uploadUrl);
       xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
       xhr.send(file);
@@ -72,16 +88,37 @@ export function VideoUpload({ lessonId, moduleId, courseId, slug, hasVideo }: Pr
 
     if (!uploadOk) return;
 
-    startTransition(async () => {
-      const res = await updateLessonVideo(lessonId, key, 0, slug, courseId, moduleId);
-      if (res?.error) {
-        setError(res.error);
-        setProgress(null);
-      } else {
-        setProgress(null);
-        setDone(true);
-      }
-    });
+    let durationSeconds = 0;
+    try {
+      durationSeconds = await new Promise<number>((resolve) => {
+        const video = document.createElement("video");
+        const objectUrl = URL.createObjectURL(file);
+        const cleanup = () => URL.revokeObjectURL(objectUrl);
+        const timer = setTimeout(() => { cleanup(); resolve(0); }, 10_000);
+        video.addEventListener("loadedmetadata", () => {
+          clearTimeout(timer);
+          cleanup();
+          resolve(isFinite(video.duration) ? Math.round(video.duration) : 0);
+        });
+        video.addEventListener("error", () => { clearTimeout(timer); cleanup(); resolve(0); });
+        video.src = objectUrl;
+      });
+    } catch {
+      durationSeconds = 0;
+    }
+
+    setIsPending(true);
+    try {
+      await lessonClient.updateLessonVideo({ id: lessonId, videoStorageKey: key, durationSeconds });
+      setProgress(null);
+      setDone(true);
+      router.refresh();
+    } catch {
+      setError("Không thể cập nhật video bài học");
+      setProgress(null);
+    } finally {
+      setIsPending(false);
+    }
   }
 
   return (

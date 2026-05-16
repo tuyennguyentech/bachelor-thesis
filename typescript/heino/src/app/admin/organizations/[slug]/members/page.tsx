@@ -69,7 +69,7 @@ export default async function MembersPage({
 
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Members — {org.name}</h1>
-        <AddMemberDialog organizationId={org.id} slug={slug} />
+        <AddMemberDialog organizationId={org.id} slug={slug} token={token} />
       </div>
 
       <div className="rounded-md border">
@@ -113,6 +113,7 @@ export default async function MembersPage({
                         currentRole={m.role}
                         currentStatus={m.status}
                         slug={slug}
+                        token={token}
                       />
                     </TableCell>
                   </TableRow>

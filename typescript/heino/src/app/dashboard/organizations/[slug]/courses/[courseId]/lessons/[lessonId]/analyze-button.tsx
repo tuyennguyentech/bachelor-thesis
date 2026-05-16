@@ -9,21 +9,19 @@ import {
   PencilIcon, LockIcon, ScissorsIcon, ArrowUpIcon, ArrowDownIcon, PlayIcon,
 } from "lucide-react";
 import {
-  AnalysisProgressStep, AnalysisStatus, GenerateQuestionsStep,
+  AnalysisProgressStep, AnalysisStatus, GenerateQuestionsStep, AIService,
 } from "buf/gen/richter/v1/ai_pb";
 import type { TranscriptChunk, TranscriptSegment, LessonQuestion } from "buf/gen/richter/v1/ai_pb";
-import {
-  getLessonAnalysis, listLessonTranscriptChunks, updateChunkConfig,
-  updateTranscriptSegment, mergeChunks, deleteChunk, splitChunk, adjustChunkBoundary,
-} from "@/app/actions/ai";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { ConnectError } from "@connectrpc/connect";
 import { LessonQuestionsEditor } from "./lesson-questions-editor";
 
 // ── Step progress helpers ─────────────────────────────────────────────────────
 
 const EXTRACT_STEPS = [
   { step: AnalysisProgressStep.DOWNLOADING, label: "Tải video từ storage" },
-  { step: AnalysisProgressStep.UPLOADING, label: "Gửi lên Gemini" },
-  { step: AnalysisProgressStep.ANALYZING, label: "Phiên âm & phân đoạn nội dung" },
+  { step: AnalysisProgressStep.UPLOADING, label: "Trích xuất âm thanh" },
+  { step: AnalysisProgressStep.ANALYZING, label: "Phiên âm bằng Whisper" },
   { step: AnalysisProgressStep.SAVING, label: "Lưu kết quả" },
 ] as const;
 
@@ -118,7 +116,7 @@ function PipelineStep({
 
       {/* title + content */}
       <div className={`flex flex-col gap-2 ${isLast ? "pb-1" : "pb-5"} flex-1 min-w-0`}>
-        <div className="flex items-center gap-1.5 min-h-[28px]">
+        <div className="flex items-center gap-1.5 min-h-7">
           <span className={`text-sm font-medium ${titleClass}`}>{title}</span>
           {optional && (
             <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px">
@@ -221,9 +219,10 @@ interface SegmentRowProps {
   onUpdated: (index: number, text: string) => void;
   onSaved?: () => void;
   disabled: boolean;
+  aiClient: ReturnType<typeof useRichterWebClient<typeof AIService>>;
 }
 
-function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disabled }: SegmentRowProps) {
+function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disabled, aiClient }: SegmentRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(segment.text);
   const [saving, startSaving] = useTransition();
@@ -231,11 +230,13 @@ function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disabled }: 
   function handleSave() {
     if (draft.trim() === segment.text) { setEditing(false); return; }
     startSaving(async () => {
-      const res = await updateTranscriptSegment(lessonId, index, draft.trim());
-      if (!res.error) {
+      try {
+        await aiClient.updateTranscriptSegment({ lessonId, segmentIndex: index, text: draft.trim() });
         onUpdated(index, draft.trim());
         setEditing(false);
         onSaved?.();
+      } catch {
+        // silently ignore errors
       }
     });
   }
@@ -423,7 +424,7 @@ function ChunkEditor({
 
 // ── Question config row ───────────────────────────────────────────────────────
 
-function QuestionConfigRow({ chunk, disabled, coherence }: { chunk: TranscriptChunk; disabled: boolean; coherence?: number }) {
+function QuestionConfigRow({ chunk, disabled, coherence, aiClient }: { chunk: TranscriptChunk; disabled: boolean; coherence?: number; aiClient: ReturnType<typeof useRichterWebClient<typeof AIService>> }) {
   const [count, setCount] = useState(chunk.questionCountConfig || 1);
   const [, startSaving] = useTransition();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -443,7 +444,7 @@ function QuestionConfigRow({ chunk, disabled, coherence }: { chunk: TranscriptCh
     setCount(clamped);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      startSaving(async () => { await updateChunkConfig(chunk.id, clamped); });
+      startSaving(async () => { await aiClient.updateChunkConfig({ chunkId: chunk.id, questionCount: clamped }); });
     }, 600);
   }
 
@@ -516,6 +517,7 @@ interface Props {
   initialSegments?: TranscriptSegment[];
   initialStatus?: AnalysisStatus;
   initialQuestions?: LessonQuestion[];
+  token: string;
 }
 
 export function AnalyzeButton({
@@ -524,9 +526,11 @@ export function AnalyzeButton({
   initialSegments = [],
   initialStatus,
   initialQuestions = [],
+  token,
 }: Props) {
   const router = useRouter();
-  const esRef = useRef<EventSource | null>(null);
+  const aiClient = useRichterWebClient(AIService, token);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabKey>("phienAm");
   const [status, setStatus] = useState<AnalysisStatus | undefined>(initialStatus);
@@ -551,15 +555,30 @@ export function AnalyzeButton({
   const [isReloadingChunks, setIsReloadingChunks] = useState(false);
   const [genWarnings, setGenWarnings] = useState<string[]>([]);
   const [mutatingError, setMutatingError] = useState<string | null>(null);
-  const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [confirmReExtract, setConfirmReExtract] = useState(false);
   const [questions, setQuestions] = useState<LessonQuestion[]>(initialQuestions);
   const [questionsGenKey, setQuestionsGenKey] = useState(0);
-  const autoRunRef = useRef(false);
-  // Tracks whether the pending confirmation should auto-run generate after extract.
-  const confirmAutoRunRef = useRef(true);
 
-  useEffect(() => { return () => { esRef.current?.close(); }; }, []);
+  useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
+
+  // Bug 1 fix: when video is replaced, server resets analysis status to PENDING.
+  // React preserves client component state across prop changes, so we must
+  // explicitly clear stale pipeline state when initialStatus transitions to PENDING.
+  useEffect(() => {
+    if (initialStatus !== AnalysisStatus.PENDING && initialStatus !== undefined) return;
+    abortRef.current?.abort();
+    setSegments([]);
+    setChunks([]);
+    setQuestions([]);
+    setStatus(initialStatus);
+    setExtractState({ phase: "idle" });
+    setChunkState({ phase: "idle" });
+    setGenState({ phase: "idle" });
+    setGenWarnings([]);
+    setExtractTimings({});
+    setChunkTimings({});
+    setConfirmReExtract(false);
+  }, [initialStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const isRunning = extractState.phase === "running" || chunkState.phase === "running";
@@ -574,7 +593,9 @@ export function AnalyzeButton({
     if (!isSyncingExtract && !isSyncingChunk) return;
     const id = setInterval(async () => {
       try {
-        const { analysis, chunks: freshChunks } = await getLessonAnalysis(lessonId);
+        const analysisResult = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+        const analysis = analysisResult?.analysis ?? null;
+        const freshChunks = analysisResult?.chunks ?? [];
         if (!analysis || analysis.status === AnalysisStatus.PROCESSING) return;
         clearInterval(id);
         if (
@@ -603,75 +624,76 @@ export function AnalyzeButton({
     return () => clearInterval(id);
   }, [isSyncingExtract, isSyncingChunk, lessonId, router]);
 
-  // ── SSE helper ──────────────────────────────────────────────────────────────
+  // ── Stream helper ──────────────────────────────────────────────────────────
 
   function startStream(
-    url: string,
+    streamCall: (signal: AbortSignal) => AsyncIterable<{ step: number; message: string }>,
     setState: React.Dispatch<React.SetStateAction<StreamRunState>>,
     setTimings: (fn: (p: Partial<Record<number, { start: number; end?: number }>>) => Partial<Record<number, { start: number; end?: number }>>) => void,
     onDone: () => void,
   ) {
-    esRef.current?.close();
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
     setState({ phase: "running", currentStep: null });
     setTimings(() => ({}));
     setNow(Date.now());
 
-    const es = new EventSource(url);
-    esRef.current = es;
     let lastStep: AnalysisProgressStep | null = null;
 
-    es.onmessage = (e: MessageEvent<string>) => {
-      const data = JSON.parse(e.data) as { step: number; message: string };
-      if (data.step === AnalysisProgressStep.ERROR) {
-        if (lastStep !== null) {
-          const t = Date.now();
-          setTimings(prev => ({ ...prev, [lastStep!]: { ...prev[lastStep!]!, end: t } }));
-        }
-        setState({ phase: "error", failedAt: lastStep, message: data.message || "Thao tác thất bại." });
-        es.close();
-        return;
-      }
-      if (data.step === AnalysisProgressStep.DONE) {
-        if (lastStep !== null) {
-          const t = Date.now();
-          setTimings(prev => ({ ...prev, [lastStep!]: { ...prev[lastStep!]!, end: t } }));
-        }
-        setState({ phase: "done" });
-        es.close();
-        onDone();
-        return;
-      }
-      const newStep = data.step as AnalysisProgressStep;
-      if (newStep !== lastStep) {
-        const t = Date.now();
-        setTimings(prev => {
-          const updated = { ...prev };
-          if (lastStep !== null && updated[lastStep] && !updated[lastStep]!.end) {
-            updated[lastStep] = { ...updated[lastStep]!, end: t };
+    (async () => {
+      try {
+        for await (const event of streamCall(abortController.signal)) {
+          if (event.step === AnalysisProgressStep.ERROR) {
+            if (lastStep !== null) {
+              const t = Date.now();
+              setTimings(prev => ({ ...prev, [lastStep!]: { ...prev[lastStep!]!, end: t } }));
+            }
+            setState({ phase: "error", failedAt: lastStep, message: event.message || "Thao tác thất bại." });
+            return;
           }
-          if (!updated[newStep]) updated[newStep] = { start: t };
-          return updated;
-        });
+          if (event.step === AnalysisProgressStep.DONE) {
+            if (lastStep !== null) {
+              const t = Date.now();
+              setTimings(prev => ({ ...prev, [lastStep!]: { ...prev[lastStep!]!, end: t } }));
+            }
+            setState({ phase: "done" });
+            onDone();
+            return;
+          }
+          const newStep = event.step as AnalysisProgressStep;
+          if (newStep !== lastStep) {
+            const t = Date.now();
+            setTimings(prev => {
+              const updated = { ...prev };
+              if (lastStep !== null && updated[lastStep] && !updated[lastStep]!.end) {
+                updated[lastStep] = { ...updated[lastStep]!, end: t };
+              }
+              if (!updated[newStep]) updated[newStep] = { start: t };
+              return updated;
+            });
+          }
+          lastStep = newStep;
+          setState({ phase: "running", currentStep: newStep });
+        }
+      } catch (err) {
+        if (abortController.signal.aborted) return;
+        const msg = err instanceof ConnectError ? err.message : "Mất kết nối với máy chủ.";
+        setState(prev =>
+          prev.phase === "running"
+            ? { phase: "error", failedAt: prev.currentStep, message: msg }
+            : prev,
+        );
       }
-      lastStep = newStep;
-      setState({ phase: "running", currentStep: newStep });
-    };
-
-    es.onerror = () => {
-      if (es.readyState === EventSource.CONNECTING) return;
-      setState(prev =>
-        prev.phase === "running"
-          ? { phase: "error", failedAt: prev.currentStep, message: "Mất kết nối với máy chủ." }
-          : prev,
-      );
-      es.close();
-    };
+    })();
   }
 
   // ── Extract ─────────────────────────────────────────────────────────────────
 
   async function reloadAfterExtract() {
-    const { analysis, chunks: freshChunks } = await getLessonAnalysis(lessonId);
+    const analysisResult = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+    const analysis = analysisResult?.analysis ?? null;
+    const freshChunks = analysisResult?.chunks ?? [];
     if (analysis) {
       setSegments(analysis.transcriptSegments);
       setChunks(freshChunks);
@@ -682,27 +704,16 @@ export function AnalyzeButton({
     setGenState({ phase: "idle" });
     setGenWarnings([]);
     router.refresh();
-
-    if (autoRunRef.current) {
-      if (freshChunks.length > 0) {
-        handleGenerate(false);
-      } else {
-        autoRunRef.current = false;
-        setIsAutoRunning(false);
-      }
-    }
   }
 
-  function startExtract(withAutoRun: boolean) {
-    autoRunRef.current = withAutoRun;
-    setIsAutoRunning(withAutoRun);
+  function startExtract() {
     setConfirmReExtract(false);
     setChunkState({ phase: "idle" });
     setChunkTimings({});
     setGenState({ phase: "idle" });
     setGenWarnings([]);
     startStream(
-      `/api/ai/extract-transcript?lessonId=${encodeURIComponent(lessonId)}`,
+      (signal) => aiClient.extractTranscriptStream({ lessonId }, { signal }),
       setExtractState,
       setExtractTimings,
       reloadAfterExtract,
@@ -714,8 +725,8 @@ export function AnalyzeButton({
   async function reloadChunks() {
     setIsReloadingChunks(true);
     try {
-      const fresh = await listLessonTranscriptChunks(lessonId);
-      setChunks(fresh);
+      const res = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
+      setChunks(res.chunks);
       setStatus(AnalysisStatus.CHUNKS_READY);
     } finally {
       setIsReloadingChunks(false);
@@ -727,7 +738,7 @@ export function AnalyzeButton({
     setGenState({ phase: "idle" });
     setGenWarnings([]);
     startStream(
-      `/api/ai/chunk-transcript?lessonId=${encodeURIComponent(lessonId)}`,
+      (signal) => aiClient.chunkTranscriptStream({ lessonId }, { signal }),
       setChunkState,
       setChunkTimings,
       reloadChunks,
@@ -743,13 +754,11 @@ export function AnalyzeButton({
     setMutatingOp("merge");
     setMutatingError(null);
     try {
-      const res = await mergeChunks(chunks[idx - 1].id, chunkId);
-      if (!res.error && res.chunk) {
-        const fresh = await listLessonTranscriptChunks(lessonId);
-        setChunks(fresh);
-      } else if (res.error) {
-        setMutatingError(res.error);
-      }
+      await aiClient.mergeChunks({ keepChunkId: chunks[idx - 1].id, discardChunkId: chunkId });
+      const fresh = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
+      setChunks(fresh.chunks);
+    } catch (err) {
+      setMutatingError(err instanceof ConnectError ? err.message : "Không thể gộp đoạn");
     } finally {
       setMutatingChunkId(null);
       setMutatingOp(null);
@@ -763,13 +772,11 @@ export function AnalyzeButton({
     setMutatingOp("merge");
     setMutatingError(null);
     try {
-      const res = await mergeChunks(chunkId, chunks[idx + 1].id);
-      if (!res.error && res.chunk) {
-        const fresh = await listLessonTranscriptChunks(lessonId);
-        setChunks(fresh);
-      } else if (res.error) {
-        setMutatingError(res.error);
-      }
+      await aiClient.mergeChunks({ keepChunkId: chunkId, discardChunkId: chunks[idx + 1].id });
+      const fresh = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
+      setChunks(fresh.chunks);
+    } catch (err) {
+      setMutatingError(err instanceof ConnectError ? err.message : "Không thể gộp đoạn");
     } finally {
       setMutatingChunkId(null);
       setMutatingOp(null);
@@ -781,13 +788,11 @@ export function AnalyzeButton({
     setMutatingOp("move");
     setMutatingError(null);
     try {
-      const res = await adjustChunkBoundary(prevChunkId, nextChunkId, newBoundarySeconds);
-      if (!res.error) {
-        const fresh = await listLessonTranscriptChunks(lessonId);
-        setChunks(fresh);
-      } else {
-        setMutatingError(res.error);
-      }
+      await aiClient.adjustChunkBoundary({ prevChunkId, nextChunkId, newBoundarySeconds });
+      const fresh = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
+      setChunks(fresh.chunks);
+    } catch (err) {
+      setMutatingError(err instanceof ConnectError ? err.message : "Không thể di chuyển segment");
     } finally {
       setMutatingChunkId(null);
       setMutatingOp(null);
@@ -799,13 +804,11 @@ export function AnalyzeButton({
     setMutatingOp("delete");
     setMutatingError(null);
     try {
-      const res = await deleteChunk(chunkId);
-      if (!res.error) {
-        const fresh = await listLessonTranscriptChunks(lessonId);
-        setChunks(fresh);
-      } else {
-        setMutatingError(res.error);
-      }
+      await aiClient.deleteChunk({ chunkId });
+      const fresh = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
+      setChunks(fresh.chunks);
+    } catch (err) {
+      setMutatingError(err instanceof ConnectError ? err.message : "Không thể xóa đoạn");
     } finally {
       setMutatingChunkId(null);
       setMutatingOp(null);
@@ -817,13 +820,11 @@ export function AnalyzeButton({
     setMutatingOp("split");
     setMutatingError(null);
     try {
-      const res = await splitChunk(chunkId, splitAtSeconds);
-      if (!res.error) {
-        const fresh = await listLessonTranscriptChunks(lessonId);
-        setChunks(fresh);
-      } else {
-        setMutatingError(res.error);
-      }
+      await aiClient.splitChunk({ chunkId, splitAtSeconds });
+      const fresh = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
+      setChunks(fresh.chunks);
+    } catch (err) {
+      setMutatingError(err instanceof ConnectError ? err.message : "Không thể tách đoạn");
     } finally {
       setMutatingChunkId(null);
       setMutatingOp(null);
@@ -833,7 +834,8 @@ export function AnalyzeButton({
   // ── Generate questions ───────────────────────────────────────────────────────
 
   async function reloadAfterGenerate() {
-    const { analysis } = await getLessonAnalysis(lessonId);
+    const analysisResult = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+    const analysis = analysisResult?.analysis ?? null;
     if (analysis?.questions) {
       setQuestions(analysis.questions);
       setQuestionsGenKey(k => k + 1);
@@ -844,41 +846,38 @@ export function AnalyzeButton({
   }
 
   function handleGenerate(force?: boolean) {
-    esRef.current?.close();
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
     setGenState({ phase: "running", message: "Đang bắt đầu...", chunkIndex: 0, totalChunks: 0 });
     setGenWarnings([]);
 
     const shouldForce = force ?? questionsGenerated;
-    const params = new URLSearchParams({ lessonId });
-    if (shouldForce) params.set("forceRegenerate", "1");
-    const es = new EventSource(`/api/ai/generate-questions?${params.toString()}`);
-    esRef.current = es;
 
-    es.onmessage = (e: MessageEvent<string>) => {
-      const data = JSON.parse(e.data) as { step: number; message: string; chunkIndex: number; totalChunks: number };
-      if (data.step === GenerateQuestionsStep.ERROR) {
-        setGenWarnings(prev => [...prev, data.message || "Lỗi tạo câu hỏi cho một đoạn"]);
-        setGenState({ phase: "running", message: data.message || "Lỗi, tiếp tục đoạn khác...", chunkIndex: data.chunkIndex, totalChunks: data.totalChunks });
-        return;
+    (async () => {
+      try {
+        for await (const event of aiClient.generateQuestionsStream(
+          { lessonId, chunkId: "", forceRegenerate: shouldForce },
+          { signal: abortController.signal },
+        )) {
+          if (event.step === GenerateQuestionsStep.ERROR) {
+            setGenWarnings(prev => [...prev, event.message || "Lỗi tạo câu hỏi cho một đoạn"]);
+            setGenState({ phase: "running", message: event.message || "Lỗi, tiếp tục đoạn khác...", chunkIndex: event.chunkIndex, totalChunks: event.totalChunks });
+            continue;
+          }
+          if (event.step === GenerateQuestionsStep.DONE) {
+            setGenState({ phase: "done" });
+            reloadAfterGenerate();
+            return;
+          }
+          setGenState({ phase: "running", message: event.message, chunkIndex: event.chunkIndex, totalChunks: event.totalChunks });
+        }
+      } catch (err) {
+        if (abortController.signal.aborted) return;
+        const msg = err instanceof ConnectError ? err.message : "Mất kết nối với máy chủ.";
+        setGenState(prev => prev.phase === "running" ? { phase: "error", message: msg } : prev);
       }
-      if (data.step === GenerateQuestionsStep.DONE) {
-        setGenState({ phase: "done" });
-        es.close();
-        autoRunRef.current = false;
-        setIsAutoRunning(false);
-        reloadAfterGenerate();
-        return;
-      }
-      setGenState({ phase: "running", message: data.message, chunkIndex: data.chunkIndex, totalChunks: data.totalChunks });
-    };
-
-    es.onerror = () => {
-      if (es.readyState === EventSource.CONNECTING) return;
-      setGenState(prev => prev.phase === "running" ? { phase: "error", message: "Mất kết nối với máy chủ." } : prev);
-      autoRunRef.current = false;
-      setIsAutoRunning(false);
-      es.close();
-    };
+    })();
   }
 
   // ── Derived state ───────────────────────────────────────────────────────────
@@ -925,7 +924,7 @@ export function AnalyzeButton({
     },
     {
       key: "doanNoidung",
-      label: "Đoạn nội dung",
+      label: "Phân đoạn video",
       dot: isChunking || isChunkSyncing ? "active" : chunkState.phase === "error" ? "error" : hasChunks ? "done" : undefined,
     },
     {
@@ -946,66 +945,35 @@ export function AnalyzeButton({
           <PipelineStep number={1} title="Phân tích bài giảng" pipelineStatus={step2Status}>
             <div className="flex flex-col gap-2">
               {!confirmReExtract && (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    disabled={isBusy}
-                    onClick={() => {
-                      if (hasSegments) { confirmAutoRunRef.current = true; setConfirmReExtract(true); return; }
-                      startExtract(true);
-                    }}
-                    className="gap-2"
-                  >
-                    {isExtracting && isAutoRunning
-                      ? <Loader2Icon className="size-4 animate-spin" />
-                      : <PlayIcon className="size-4" />}
-                    {isExtracting && isAutoRunning ? "Đang phân tích…" :
-                      hasSegments ? "Trích xuất lại transcript" : "Trích xuất transcript"}
-                  </Button>
-
-                  {hasSegments && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isBusy}
-                      onClick={() => {
-                        confirmAutoRunRef.current = false;
-                        setConfirmReExtract(true);
-                      }}
-                      className="gap-2"
-                    >
-                      {isExtracting && !isAutoRunning
-                        ? <Loader2Icon className="size-4 animate-spin" />
-                        : <RefreshCwIcon className="size-4" />}
-                      {isExtracting && !isAutoRunning ? "Đang trích xuất…" : "Chỉ trích xuất lại"}
-                    </Button>
-                  )}
-
-                  {isExtracting && isAutoRunning && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground gap-1.5"
-                      onClick={() => { autoRunRef.current = false; setIsAutoRunning(false); }}
-                    >
-                      <XIcon className="size-3.5" /> Bỏ tạo câu hỏi tự động
-                    </Button>
-                  )}
-                </div>
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (hasSegments) { setConfirmReExtract(true); return; }
+                    startExtract();
+                  }}
+                  className="gap-2 w-fit"
+                >
+                  {isExtracting
+                    ? <Loader2Icon className="size-4 animate-spin" />
+                    : <PlayIcon className="size-4" />}
+                  {isExtracting ? "Đang trích xuất…" :
+                    hasSegments ? "Trích xuất lại transcript" : "Trích xuất transcript"}
+                </Button>
               )}
 
               {confirmReExtract && (
                 <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs flex flex-col gap-2">
                   <p className="text-amber-700 dark:text-amber-400">
-                    Phân tích lại sẽ <strong>xoá toàn bộ</strong> transcript, đoạn nội dung và câu hỏi hiện tại. Tiếp tục?
+                    Trích xuất lại sẽ <strong>xoá toàn bộ</strong> transcript, đoạn nội dung và câu hỏi hiện tại. Tiếp tục?
                   </p>
                   <div className="flex gap-2">
                     <Button
                       size="sm" variant="destructive" className="h-6 text-xs px-2"
-                      onClick={() => startExtract(confirmAutoRunRef.current)}
+                      onClick={() => startExtract()}
                     >
-                      Xoá & phân tích lại
+                      Xoá & trích xuất lại
                     </Button>
                     <Button
                       size="sm" variant="ghost" className="h-6 text-xs px-2"
@@ -1015,12 +983,6 @@ export function AnalyzeButton({
                     </Button>
                   </div>
                 </div>
-              )}
-
-              {isAutoRunning && !isExtracting && isGenerating && (
-                <p className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                  <Loader2Icon className="size-3 animate-spin" /> Đang tự động tạo câu hỏi...
-                </p>
               )}
 
               {isSyncing && (
@@ -1034,7 +996,7 @@ export function AnalyzeButton({
                 </div>
               )}
               {extractState.phase === "error" && (
-                <p className="text-xs text-destructive">{extractState.message}</p>
+                <p className="text-xs text-destructive" data-testid="extract-error">{extractState.message}</p>
               )}
             </div>
           </PipelineStep>
@@ -1052,6 +1014,7 @@ export function AnalyzeButton({
                   index={i}
                   lessonId={lessonId}
                   disabled={isBusy}
+                  aiClient={aiClient}
                   onUpdated={(idx, text) =>
                     setSegments(prev => prev.map((s, j) => j === idx ? { ...s, text } : s))
                   }
@@ -1060,6 +1023,8 @@ export function AnalyzeButton({
                     setChunkTimings({});
                     setGenState({ phase: "idle" });
                     setGenWarnings([]);
+                    // Bug 3 fix: refresh the RSC so VideoPlayer receives updated segments.
+                    router.refresh();
                   }}
                 />
               ))}
@@ -1092,10 +1057,12 @@ export function AnalyzeButton({
                 </p>
               )}
               {chunkState.phase !== "idle" && chunkState.phase !== "syncing" && (
-                <ProgressStrip steps={CHUNK_STEPS} runState={chunkState} stepTimings={chunkTimings} now={now} />
+                <div data-testid="chunk-progress">
+                  <ProgressStrip steps={CHUNK_STEPS} runState={chunkState} stepTimings={chunkTimings} now={now} />
+                </div>
               )}
               {chunkState.phase === "error" && (
-                <p className="text-xs text-destructive">{chunkState.message}</p>
+                <p className="text-xs text-destructive" data-testid="chunk-error">{chunkState.message}</p>
               )}
             </div>
           </PipelineStep>
@@ -1148,6 +1115,7 @@ export function AnalyzeButton({
                     chunk={chunk}
                     disabled={isBusy}
                     coherence={chunkSegs.length > 0 ? computeCoherence(chunkSegs) : undefined}
+                    aiClient={aiClient}
                   />
                 );
               })}
@@ -1207,18 +1175,19 @@ export function AnalyzeButton({
               </div>
             )}
             {genState.phase === "error" && (
-              <p className="text-xs text-destructive">{genState.message}</p>
+              <p className="text-xs text-destructive" data-testid="gen-error">{genState.message}</p>
             )}
           </div>
 
           {/* Questions list */}
           {questions.length > 0 && (
             <div className="flex flex-col gap-2 border-t pt-3">
-              <p className="text-xs text-muted-foreground font-medium">{questions.length} câu hỏi</p>
+              <p className="text-sm font-medium">Câu hỏi trắc nghiệm ({questions.length} câu)</p>
               <LessonQuestionsEditor
                 key={questionsGenKey}
                 lessonId={lessonId}
                 initialQuestions={questions}
+                token={token}
               />
             </div>
           )}

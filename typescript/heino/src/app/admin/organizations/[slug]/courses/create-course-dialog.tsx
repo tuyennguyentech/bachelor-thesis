@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,29 +12,48 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createCourse, type ActionState } from "@/app/actions/courses";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { CourseService } from "buf/gen/richter/v1/courses_pb";
+import { ConnectError } from "@connectrpc/connect";
 import { PlusIcon } from "lucide-react";
 
-function CreateCourseForm({
-  organizationId,
-  slug,
-  onClose,
-}: {
+interface CreateCourseFormProps {
   organizationId: string;
   slug: string;
+  token: string;
+  userId: string;
   onClose: () => void;
-}) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(createCourse, undefined);
+}
 
-  useEffect(() => {
-    if (state?.success) onClose();
-  }, [state, onClose]);
+function CreateCourseForm({ organizationId, slug: _slug, token, userId, onClose }: CreateCourseFormProps) {
+  const router = useRouter();
+  const courseClient = useRichterWebClient(CourseService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const title = (fd.get("title") as string)?.trim();
+    const description = (fd.get("description") as string)?.trim() ?? "";
+
+    if (!title) { setError("Vui lòng điền đầy đủ thông tin"); return; }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        await courseClient.createCourse({ organizationId, ownerId: userId, title, description });
+        router.refresh();
+        onClose();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể tạo khóa học");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4 pt-2">
-      <input type="hidden" name="organizationId" value={organizationId} />
-      <input type="hidden" name="slug" value={slug} />
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-2">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="space-y-1.5">
         <Label htmlFor="title">Tên khóa học</Label>
         <Input id="title" name="title" required placeholder="VD: Lập trình Python cơ bản" />
@@ -52,7 +72,14 @@ function CreateCourseForm({
   );
 }
 
-export function CreateCourseDialog({ organizationId, slug }: { organizationId: string; slug: string }) {
+interface CreateCourseDialogProps {
+  organizationId: string;
+  slug: string;
+  token: string;
+  userId: string;
+}
+
+export function CreateCourseDialog({ organizationId, slug, token, userId }: CreateCourseDialogProps) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -66,7 +93,7 @@ export function CreateCourseDialog({ organizationId, slug }: { organizationId: s
         <DialogHeader>
           <DialogTitle>Tạo khóa học mới</DialogTitle>
         </DialogHeader>
-        <CreateCourseForm organizationId={organizationId} slug={slug} onClose={() => setOpen(false)} />
+        <CreateCourseForm organizationId={organizationId} slug={slug} token={token} userId={userId} onClose={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

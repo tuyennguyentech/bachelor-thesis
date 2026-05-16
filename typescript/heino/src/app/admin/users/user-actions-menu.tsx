@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   DropdownMenu,
@@ -22,14 +23,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { MoreHorizontalIcon } from "lucide-react";
 import { UserStatus } from "buf/gen/richter/v1/users_pb";
-import { updateUserStatus, deleteUser } from "@/app/actions/users";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { UserService } from "buf/gen/richter/v1/users_pb";
 
 interface UserActionsMenuProps {
   userId: string;
   userStatus: UserStatus;
+  token: string;
 }
 
-export function UserActionsMenu({ userId, userStatus }: UserActionsMenuProps) {
+export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuProps) {
+  const router = useRouter();
+  const userClient = useRichterWebClient(UserService, token);
   const [, startTransition] = useTransition();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -52,7 +57,10 @@ export function UserActionsMenu({ userId, userStatus }: UserActionsMenuProps) {
           {isActive ? (
             <DropdownMenuItem
               onClick={() =>
-                startTransition(async () => { await updateUserStatus(userId, UserStatus.DISABLED); })
+                startTransition(async () => {
+                  await userClient.updateUserStatus({ id: userId, status: UserStatus.DISABLED });
+                  router.refresh();
+                })
               }
             >
               Vô hiệu hóa
@@ -60,7 +68,10 @@ export function UserActionsMenu({ userId, userStatus }: UserActionsMenuProps) {
           ) : isPending ? (
             <DropdownMenuItem
               onClick={() =>
-                startTransition(async () => { await updateUserStatus(userId, UserStatus.ACTIVE); })
+                startTransition(async () => {
+                  await userClient.updateUserStatus({ id: userId, status: UserStatus.ACTIVE });
+                  router.refresh();
+                })
               }
             >
               Phê duyệt
@@ -68,7 +79,10 @@ export function UserActionsMenu({ userId, userStatus }: UserActionsMenuProps) {
           ) : (
             <DropdownMenuItem
               onClick={() =>
-                startTransition(async () => { await updateUserStatus(userId, UserStatus.ACTIVE); })
+                startTransition(async () => {
+                  await userClient.updateUserStatus({ id: userId, status: UserStatus.ACTIVE });
+                  router.refresh();
+                })
               }
             >
               Kích hoạt
@@ -95,7 +109,10 @@ export function UserActionsMenu({ userId, userStatus }: UserActionsMenuProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => startTransition(async () => { await deleteUser(userId); })}
+              onClick={() => startTransition(async () => {
+                await userClient.deleteUser({ id: userId });
+                router.push("/admin/users");
+              })}
             >
               Xóa
             </AlertDialogAction>

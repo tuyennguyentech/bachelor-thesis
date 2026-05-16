@@ -23,7 +23,6 @@ import { AnalyzeButton } from "./analyze-button";
 import { QuizForm, type SafeQuestion } from "./quiz-form";
 import { LessonAttempts } from "./lesson-attempts";
 import { VideoPlayer } from "./video-player";
-import { LessonQuestionsEditor } from "./lesson-questions-editor";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 
@@ -184,8 +183,13 @@ export default async function LessonDetailPage({
       {/* Preview banner */}
       {isPreview && (
         <div className="flex items-center justify-between rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 px-4 py-2 text-sm">
-          <span className="text-yellow-800 dark:text-yellow-300">Đang xem thử dưới dạng học viên</span>
-          <Link href="?" className="text-yellow-700 dark:text-yellow-400 underline text-xs">Thoát xem thử</Link>
+          <span className="text-yellow-800 dark:text-yellow-300 font-medium">Đang xem thử dưới dạng học viên</span>
+          <Link href="?">
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs border-yellow-400 text-yellow-800 hover:bg-yellow-100 dark:text-yellow-300 dark:border-yellow-600 dark:hover:bg-yellow-900/30">
+              <EyeIcon className="size-3.5" />
+              Thoát xem thử
+            </Button>
+          </Link>
         </div>
       )}
 
@@ -195,9 +199,10 @@ export default async function LessonDetailPage({
           videoUrl={videoUrl}
           segments={analysis?.transcriptSegments ?? []}
           transcript={analysis?.transcript ?? ""}
-          checkpoints={checkpoints}
+          checkpoints={!effectiveCanManage || isPreview ? checkpoints : []}
           lessonId={lessonId}
           initialPosition={initialPosition}
+          token={token}
         />
       ) : (
         <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
@@ -217,8 +222,8 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* Teacher/admin: upload + analyze controls */}
-      {canManage && (
+      {/* Teacher/admin: upload + analyze controls — hidden in preview (student sees clean view) */}
+      {canManage && !isPreview && (
         <div className="rounded-lg border p-4 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h2 className="font-medium text-sm">Quản lý video</h2>
@@ -239,6 +244,7 @@ export default async function LessonDetailPage({
                 courseId={courseId}
                 slug={slug}
                 hasVideo={!!lesson.videoStorageKey}
+                token={token}
               />
               {lesson.videoStorageKey && (
                 <>
@@ -262,6 +268,7 @@ export default async function LessonDetailPage({
                       initialSegments={analysis?.transcriptSegments ?? []}
                       initialStatus={analysis?.status}
                       initialQuestions={analysis?.questions ?? []}
+                      token={token}
                     />
                     {analysis?.status === AnalysisStatus.ERROR && (
                       <p className="text-xs text-destructive">{analysis.errorMsg}</p>
@@ -271,19 +278,6 @@ export default async function LessonDetailPage({
               )}
             </>
           )}
-        </div>
-      )}
-
-      {/* Teacher/admin: questions with edit controls */}
-      {hasQuestions && effectiveCanManage && !isPreview && (
-        <div className="rounded-lg border p-4 flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <SparklesIcon className="size-4 text-muted-foreground" />
-            <h2 className="font-medium text-sm">
-              Câu hỏi trắc nghiệm ({analysis!.questions.length} câu)
-            </h2>
-          </div>
-          <LessonQuestionsEditor lessonId={lessonId} initialQuestions={analysis!.questions} />
         </div>
       )}
 
@@ -298,11 +292,11 @@ export default async function LessonDetailPage({
           </div>
           <QuizForm
             questions={safeQuestions}
-            previousAttempt={myAttempt}
-            initialCorrectAnswers={myAttempt ? correctAnswers : undefined}
+            previousAttempt={isPreview ? null : myAttempt}
+            initialCorrectAnswers={correctAnswers.length > 0 ? correctAnswers : undefined}
             lessonId={lessonId}
-            slug={slug}
-            courseId={courseId}
+            isPreview={isPreview}
+            token={token}
           />
         </div>
       )}

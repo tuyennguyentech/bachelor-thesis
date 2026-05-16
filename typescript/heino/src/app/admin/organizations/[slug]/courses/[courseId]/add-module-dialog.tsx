@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,35 +12,47 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createCourseModule, type ActionState } from "@/app/actions/course-modules";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { CourseModuleService } from "buf/gen/richter/v1/courses_pb";
+import { ConnectError } from "@connectrpc/connect";
 import { PlusIcon } from "lucide-react";
 
-function AddModuleForm({
-  courseId,
-  slug,
-  nextOrder,
-  onClose,
-}: {
+interface AddModuleFormProps {
   courseId: string;
   slug: string;
   nextOrder: number;
+  token: string;
   onClose: () => void;
-}) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(
-    createCourseModule,
-    undefined,
-  );
+}
 
-  useEffect(() => {
-    if (state?.success) onClose();
-  }, [state, onClose]);
+function AddModuleForm({ courseId, slug: _slug, nextOrder, token, onClose }: AddModuleFormProps) {
+  const router = useRouter();
+  const moduleClient = useRichterWebClient(CourseModuleService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const title = (fd.get("title") as string)?.trim();
+
+    if (!title) { setError("Vui lòng điền đầy đủ thông tin"); return; }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        await moduleClient.createCourseModule({ courseId, title, orderIndex: nextOrder });
+        router.refresh();
+        onClose();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể tạo chương");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4 pt-2">
-      <input type="hidden" name="courseId" value={courseId} />
-      <input type="hidden" name="slug" value={slug} />
-      <input type="hidden" name="orderIndex" value={nextOrder} />
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-2">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="space-y-1.5">
         <Label htmlFor="title">Tên chương</Label>
         <Input id="title" name="title" required placeholder="VD: Chương 1: Giới thiệu" />
@@ -54,15 +67,14 @@ function AddModuleForm({
   );
 }
 
-export function AddModuleDialog({
-  courseId,
-  slug,
-  nextOrder,
-}: {
+interface AddModuleDialogProps {
   courseId: string;
   slug: string;
   nextOrder: number;
-}) {
+  token: string;
+}
+
+export function AddModuleDialog({ courseId, slug, nextOrder, token }: AddModuleDialogProps) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -80,6 +92,7 @@ export function AddModuleDialog({
           courseId={courseId}
           slug={slug}
           nextOrder={nextOrder}
+          token={token}
           onClose={() => setOpen(false)}
         />
       </DialogContent>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Select,
   SelectContent,
@@ -9,7 +10,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CourseStatus } from "buf/gen/richter/v1/courses_pb";
-import { updateCourseStatus } from "@/app/actions/courses";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { CourseService } from "buf/gen/richter/v1/courses_pb";
 
 const STATUS_OPTIONS: { label: string; value: CourseStatus }[] = [
   { label: "Nháp",         value: CourseStatus.DRAFT },
@@ -17,15 +19,16 @@ const STATUS_OPTIONS: { label: string; value: CourseStatus }[] = [
   { label: "Lưu trữ",      value: CourseStatus.ARCHIVED },
 ];
 
-export function CourseStatusSelect({
-  courseId,
-  slug,
-  currentStatus,
-}: {
+interface Props {
   courseId: string;
   slug: string;
   currentStatus: CourseStatus;
-}) {
+  token: string;
+}
+
+export function CourseStatusSelect({ courseId, slug: _slug, currentStatus, token }: Props) {
+  const router = useRouter();
+  const courseClient = useRichterWebClient(CourseService, token);
   const [isPending, startTransition] = useTransition();
 
   return (
@@ -36,7 +39,8 @@ export function CourseStatusSelect({
         const option = STATUS_OPTIONS.find((o) => String(o.value) === val);
         if (!option) return;
         startTransition(async () => {
-          await updateCourseStatus(courseId, slug, option.value);
+          await courseClient.updateCourseStatus({ id: courseId, status: option.value });
+          router.refresh();
         });
       }}
     >

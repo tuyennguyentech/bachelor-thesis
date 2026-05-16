@@ -16,26 +16,7 @@ async function isTokenValid(token: string): Promise<boolean> {
   }
 }
 
-async function tryRefresh(refreshToken: string): Promise<{ access: string; refresh: string } | null> {
-  const base = process.env.RICHTER_BASE_URL;
-  if (!base) return null;
-  try {
-    const res = await fetch(`${base}/richter.v1.AuthService/RefreshToken`, {
-      method: "POST",
-      headers: { "Content-Type": "application/connect+json" },
-      body: JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) return null;
-    const data: { accessToken?: string; refreshToken?: string } = await res.json();
-    if (!data.accessToken || !data.refreshToken) return null;
-    return { access: data.accessToken, refresh: data.refreshToken };
-  } catch {
-    return null;
-  }
-}
-
 const PROTECTED_PREFIXES = ["/admin", "/dashboard"];
-const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", secure: process.env.NODE_ENV === "production" };
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -47,15 +28,11 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Access token missing or expired — if a refresh token exists, let the server
+  // component's getSession() handle the refresh silently on the next render.
   const refreshToken = request.cookies.get(COOKIE_REFRESH)?.value;
   if (refreshToken) {
-    const tokens = await tryRefresh(refreshToken);
-    if (tokens) {
-      const response = NextResponse.next();
-      response.cookies.set(COOKIE_ACCESS, tokens.access, COOKIE_OPTS);
-      response.cookies.set(COOKIE_REFRESH, tokens.refresh, COOKIE_OPTS);
-      return response;
-    }
+    return NextResponse.next();
   }
 
   const loginUrl = new URL("/login", request.url);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,17 +14,19 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { deleteCourse } from "@/app/actions/courses";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { CourseService } from "buf/gen/richter/v1/courses_pb";
 
-export function DeleteCourseButton({
-  courseId,
-  slug,
-  redirectTo,
-}: {
+interface Props {
   courseId: string;
   slug: string;
   redirectTo?: string;
-}) {
+  token: string;
+}
+
+export function DeleteCourseButton({ courseId, slug, redirectTo, token }: Props) {
+  const router = useRouter();
+  const courseClient = useRichterWebClient(CourseService, token);
   const [pending, startTransition] = useTransition();
 
   return (
@@ -41,7 +44,10 @@ export function DeleteCourseButton({
         <AlertDialogFooter>
           <AlertDialogCancel>Hủy</AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => startTransition(async () => { await deleteCourse(courseId, slug, redirectTo); })}
+            onClick={() => startTransition(async () => {
+              await courseClient.deleteCourse({ id: courseId });
+              router.push(redirectTo ?? `/admin/organizations/${slug}/courses`);
+            })}
           >
             Xóa
           </AlertDialogAction>

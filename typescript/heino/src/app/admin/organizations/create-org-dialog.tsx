@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,22 +12,49 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createOrganization, type ActionState } from "@/app/actions/organizations";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
+import { ConnectError } from "@connectrpc/connect";
 import { PlusIcon } from "lucide-react";
 
-function CreateOrgForm({ onClose }: { onClose: () => void }) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(
-    createOrganization,
-    undefined,
-  );
+interface CreateOrgFormProps {
+  token: string;
+  onClose: () => void;
+}
 
-  useEffect(() => {
-    if (state?.success) onClose();
-  }, [state, onClose]);
+function CreateOrgForm({ token, onClose }: CreateOrgFormProps) {
+  const router = useRouter();
+  const orgClient = useRichterWebClient(OrganizationService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const name = (fd.get("name") as string)?.trim();
+    const slug = (fd.get("slug") as string)?.trim();
+    const createdBy = (fd.get("createdBy") as string)?.trim();
+
+    if (!name || !slug || !createdBy) {
+      setError("Vui lòng điền đầy đủ thông tin");
+      return;
+    }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        await orgClient.createOrganization({ name, slug, createdBy });
+        router.refresh();
+        onClose();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể tạo tổ chức");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4 pt-2">
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-2">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="space-y-1.5">
         <Label htmlFor="name">Tên</Label>
         <Input id="name" name="name" required />
@@ -52,7 +80,11 @@ function CreateOrgForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function CreateOrgDialog() {
+interface CreateOrgDialogProps {
+  token: string;
+}
+
+export function CreateOrgDialog({ token }: CreateOrgDialogProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -67,7 +99,7 @@ export function CreateOrgDialog() {
         <DialogHeader>
           <DialogTitle>Tạo organization mới</DialogTitle>
         </DialogHeader>
-        <CreateOrgForm onClose={() => setOpen(false)} />
+        <CreateOrgForm token={token} onClose={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

@@ -105,6 +105,7 @@ export default async function DashboardCourseDetailPage({
               slug={slug}
               title={course.title}
               description={course.description}
+              token={token}
             />
           </div>
 
@@ -119,7 +120,7 @@ export default async function DashboardCourseDetailPage({
               </p>
             </div>
             {canChangeStatus
-              ? <CourseStatusSelect courseId={course.id} slug={slug} currentStatus={course.status} />
+              ? <CourseStatusSelect courseId={course.id} slug={slug} currentStatus={course.status} token={token} />
               : courseStatusBadge(course.status)
             }
           </div>
@@ -136,7 +137,7 @@ export default async function DashboardCourseDetailPage({
             </h2>
           </div>
           {canManage && (
-            <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modules.length} />
+            <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modules.length} token={token} />
           )}
         </div>
 
@@ -163,6 +164,7 @@ export default async function DashboardCourseDetailPage({
                       slug={slug}
                       title={m.title}
                       orderIndex={m.orderIndex}
+                      token={token}
                     />
                   )}
                 </div>
@@ -193,6 +195,7 @@ export default async function DashboardCourseDetailPage({
                         title={lesson.title}
                         description={lesson.description}
                         orderIndex={lesson.orderIndex}
+                        token={token}
                       />
                     )}
                   </div>
@@ -205,6 +208,7 @@ export default async function DashboardCourseDetailPage({
                       courseId={courseId}
                       slug={slug}
                       nextOrder={m.lessons.length}
+                      token={token}
                     />
                   </div>
                 )}
@@ -225,6 +229,7 @@ export default async function DashboardCourseDetailPage({
             courseId={course.id}
             slug={slug}
             redirectTo={redirectAfterDelete}
+            token={token}
           />
         </div>
       )}

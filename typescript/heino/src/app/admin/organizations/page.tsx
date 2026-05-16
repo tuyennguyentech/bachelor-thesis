@@ -39,7 +39,7 @@ export default async function OrganizationsPage({
         <h1 className="text-xl font-semibold">Tổ chức</h1>
         <div className="flex items-center gap-2">
           <SearchInput placeholder="ID / slug..." slugLabel="slug" />
-          <CreateOrgDialog />
+          <CreateOrgDialog token={token} />
         </div>
       </div>
 
@@ -73,7 +73,7 @@ export default async function OrganizationsPage({
                       : "—"}
                   </TableCell>
                   <TableCell>
-                    <OrgActionsMenu orgId={org.id} orgSlug={org.slug} orgStatus={org.status} />
+                    <OrgActionsMenu orgId={org.id} orgSlug={org.slug} orgStatus={org.status} token={token} />
                   </TableCell>
                 </TableRow>
               ))

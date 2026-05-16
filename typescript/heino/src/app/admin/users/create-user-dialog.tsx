@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,8 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createUser, type ActionState } from "@/app/actions/users";
-import { UserRole, UserStatus } from "buf/gen/richter/v1/users_pb";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { UserService, UserRole, UserStatus } from "buf/gen/richter/v1/users_pb";
+import { ConnectError } from "@connectrpc/connect";
 import { PlusIcon } from "lucide-react";
 
 const ROLE_OPTIONS = [
@@ -33,17 +35,54 @@ const STATUS_OPTIONS = [
   { label: "Vô hiệu",   value: UserStatus.DISABLED },
 ];
 
-function CreateUserForm({ onClose }: { onClose: () => void }) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(createUser, undefined);
+interface CreateUserFormProps {
+  token: string;
+  onClose: () => void;
+}
 
-  useEffect(() => {
-    if (state?.success) onClose();
-  }, [state, onClose]);
+function CreateUserForm({ token, onClose }: CreateUserFormProps) {
+  const router = useRouter();
+  const userClient = useRichterWebClient(UserService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [selectedRole, setSelectedRole] = useState(String(UserRole.NORMAL));
+  const [selectedStatus, setSelectedStatus] = useState(String(UserStatus.ACTIVE));
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const email = (fd.get("email") as string)?.trim();
+    const password = fd.get("password") as string;
+    const firstName = (fd.get("firstName") as string)?.trim();
+    const lastName = (fd.get("lastName") as string)?.trim();
+    const role = parseInt(selectedRole) as UserRole;
+    const status = parseInt(selectedStatus) as UserStatus;
+
+    if (!email || !password || !firstName || !lastName) {
+      setError("Vui lòng điền đầy đủ thông tin");
+      return;
+    }
+    if (isNaN(role) || isNaN(status)) {
+      setError("Vai trò hoặc trạng thái không hợp lệ");
+      return;
+    }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        await userClient.createUserWithRoleAndStatus({ email, password, firstName, lastName, role, status });
+        router.refresh();
+        onClose();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể tạo người dùng");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4 pt-2">
-      {state?.error && (
-        <p className="text-sm text-destructive">{state.error}</p>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-2">
+      {error && (
+        <p className="text-sm text-destructive">{error}</p>
       )}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
@@ -66,7 +105,7 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Vai trò</Label>
-          <Select name="role" defaultValue={String(UserRole.NORMAL)}>
+          <Select value={selectedRole} onValueChange={setSelectedRole}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -79,7 +118,7 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
         </div>
         <div className="space-y-1.5">
           <Label>Trạng thái</Label>
-          <Select name="status" defaultValue={String(UserStatus.ACTIVE)}>
+          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -103,7 +142,11 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function CreateUserDialog() {
+interface CreateUserDialogProps {
+  token: string;
+}
+
+export function CreateUserDialog({ token }: CreateUserDialogProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -118,7 +161,7 @@ export function CreateUserDialog() {
         <DialogHeader>
           <DialogTitle>Tạo user mới</DialogTitle>
         </DialogHeader>
-        <CreateUserForm onClose={() => setOpen(false)} />
+        <CreateUserForm token={token} onClose={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

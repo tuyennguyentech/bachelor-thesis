@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,18 +29,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MoreHorizontalIcon } from "lucide-react";
-import { updateLesson, deleteLesson, type ActionState } from "@/app/actions/lessons";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { LessonService } from "buf/gen/richter/v1/courses_pb";
+import { ConnectError } from "@connectrpc/connect";
 
-function EditLessonForm({
-  id,
-  moduleId,
-  courseId,
-  slug,
-  currentTitle,
-  currentDescription,
-  orderIndex,
-  onClose,
-}: {
+interface EditLessonFormProps {
   id: string;
   moduleId: string;
   courseId: string;
@@ -47,22 +41,39 @@ function EditLessonForm({
   currentTitle: string;
   currentDescription: string;
   orderIndex: number;
+  token: string;
   onClose: () => void;
-}) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(updateLesson, undefined);
+}
 
-  useEffect(() => {
-    if (state?.success) onClose();
-  }, [state, onClose]);
+function EditLessonForm({ id, moduleId: _moduleId, courseId: _courseId, slug: _slug, currentTitle, currentDescription, orderIndex, token, onClose }: EditLessonFormProps) {
+  const router = useRouter();
+  const lessonClient = useRichterWebClient(LessonService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const title = (fd.get("title") as string)?.trim();
+    const description = (fd.get("description") as string)?.trim() ?? "";
+
+    if (!title) { setError("Tên không được để trống"); return; }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        await lessonClient.updateLesson({ id, title, description, orderIndex });
+        router.refresh();
+        onClose();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật bài học");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4 pt-2">
-      <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="moduleId" value={moduleId} />
-      <input type="hidden" name="courseId" value={courseId} />
-      <input type="hidden" name="slug" value={slug} />
-      <input type="hidden" name="orderIndex" value={orderIndex} />
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-2">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="space-y-1.5">
         <Label htmlFor="edit-lesson-title">Tên bài học</Label>
         <Input
@@ -92,15 +103,7 @@ function EditLessonForm({
   );
 }
 
-export function LessonActions({
-  id,
-  moduleId,
-  courseId,
-  slug,
-  title,
-  description,
-  orderIndex,
-}: {
+interface LessonActionsProps {
   id: string;
   moduleId: string;
   courseId: string;
@@ -108,7 +111,12 @@ export function LessonActions({
   title: string;
   description: string;
   orderIndex: number;
-}) {
+  token: string;
+}
+
+export function LessonActions({ id, moduleId, courseId, slug, title, description, orderIndex, token }: LessonActionsProps) {
+  const router = useRouter();
+  const lessonClient = useRichterWebClient(LessonService, token);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -145,6 +153,7 @@ export function LessonActions({
             currentTitle={title}
             currentDescription={description}
             orderIndex={orderIndex}
+            token={token}
             onClose={() => setShowEdit(false)}
           />
         </DialogContent>
@@ -163,7 +172,10 @@ export function LessonActions({
             <AlertDialogAction
               disabled={isPending}
               onClick={() =>
-                startTransition(async () => { await deleteLesson(id, slug, courseId, moduleId); })
+                startTransition(async () => {
+                  await lessonClient.deleteLesson({ id });
+                  router.refresh();
+                })
               }
             >
               Xóa

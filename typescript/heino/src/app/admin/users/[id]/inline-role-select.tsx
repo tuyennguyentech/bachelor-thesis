@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Select,
   SelectContent,
@@ -9,14 +10,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { UserRole } from "buf/gen/richter/v1/users_pb";
-import { updateUserRole } from "@/app/actions/users";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { UserService } from "buf/gen/richter/v1/users_pb";
 
 const ROLE_OPTIONS: { label: string; value: UserRole }[] = [
   { label: "Thường",   value: UserRole.NORMAL },
   { label: "Quản trị", value: UserRole.ADMIN },
 ];
 
-export function InlineRoleSelect({ userId, currentRole }: { userId: string; currentRole: UserRole }) {
+interface Props {
+  userId: string;
+  currentRole: UserRole;
+  token: string;
+}
+
+export function InlineRoleSelect({ userId, currentRole, token }: Props) {
+  const router = useRouter();
+  const userClient = useRichterWebClient(UserService, token);
   const [, startTransition] = useTransition();
 
   return (
@@ -25,7 +35,10 @@ export function InlineRoleSelect({ userId, currentRole }: { userId: string; curr
       onValueChange={(val) => {
         const option = ROLE_OPTIONS.find((o) => String(o.value) === val);
         if (!option) return;
-        startTransition(async () => { await updateUserRole(userId, option.value); });
+        startTransition(async () => {
+          await userClient.updateUserRole({ id: userId, role: option.value });
+          router.refresh();
+        });
       }}
     >
       <SelectTrigger className="w-36">

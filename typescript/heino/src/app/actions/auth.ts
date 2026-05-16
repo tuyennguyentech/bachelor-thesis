@@ -5,20 +5,12 @@ import { redirect } from "next/navigation";
 import { createRichterClient } from "@/lib/connect-client";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import { UserService, UserRole } from "buf/gen/richter/v1/users_pb";
-import { COOKIE_ACCESS, COOKIE_REFRESH, getSession, verifyJwt } from "@/lib/auth";
+import { COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, getSession, verifyJwt, safeNext } from "@/lib/auth";
 import { Code, ConnectError } from "@connectrpc/connect";
 
 export type LoginState = { error?: string } | undefined;
 export type RegisterState = { error?: string; success?: boolean } | undefined;
 
-const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", secure: process.env.NODE_ENV === "production" };
-
-const ALLOWED_NEXT_PREFIXES = ["/admin", "/dashboard"];
-
-function safeNext(next: string | null): string | null {
-  if (next && ALLOWED_NEXT_PREFIXES.some((p) => next.startsWith(p))) return next;
-  return null;
-}
 
 export async function login(_state: LoginState, formData: FormData): Promise<LoginState> {
   const email = (formData.get("email") as string)?.trim();
@@ -35,7 +27,7 @@ export async function login(_state: LoginState, formData: FormData): Promise<Log
 
     const cookieStore = await cookies();
     cookieStore.set(COOKIE_ACCESS, res.accessToken, COOKIE_OPTS);
-    cookieStore.set(COOKIE_REFRESH, res.refreshToken, COOKIE_OPTS);
+    cookieStore.set(COOKIE_REFRESH, res.refreshToken, REFRESH_COOKIE_OPTS);
   } catch (err) {
     if (err instanceof ConnectError && err.code === Code.PermissionDenied) {
       return { error: "Tài khoản chưa được kích hoạt" };
@@ -78,10 +70,12 @@ export async function logout() {
   const cookieStore = await cookies();
   const refreshToken = cookieStore.get(COOKIE_REFRESH)?.value;
 
-  if (refreshToken) {
+  // Only attempt server-side revocation when we have a valid access token;
+  // without it the Logout RPC is unauthenticated and will be rejected.
+  const session = await getSession();
+  if (refreshToken && session?.token) {
     try {
-      const session = await getSession();
-      const client = createRichterClient(AuthService, session?.token);
+      const client = createRichterClient(AuthService, session.token);
       await client.logout({ refreshToken });
     } catch {}
   }

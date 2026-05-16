@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,36 +29,48 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MoreHorizontalIcon } from "lucide-react";
-import { updateCourseModule, deleteCourseModule, type ActionState } from "@/app/actions/course-modules";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { CourseModuleService } from "buf/gen/richter/v1/courses_pb";
+import { ConnectError } from "@connectrpc/connect";
 
-function EditModuleForm({
-  id,
-  courseId,
-  slug,
-  currentTitle,
-  orderIndex,
-  onClose,
-}: {
+interface EditModuleFormProps {
   id: string;
   courseId: string;
   slug: string;
   currentTitle: string;
   orderIndex: number;
+  token: string;
   onClose: () => void;
-}) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(updateCourseModule, undefined);
+}
 
-  useEffect(() => {
-    if (state?.success) onClose();
-  }, [state, onClose]);
+function EditModuleForm({ id, courseId: _courseId, slug: _slug, currentTitle, orderIndex, token, onClose }: EditModuleFormProps) {
+  const router = useRouter();
+  const moduleClient = useRichterWebClient(CourseModuleService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const title = (fd.get("title") as string)?.trim();
+
+    if (!title) { setError("Tên không được để trống"); return; }
+
+    setError(null);
+    startTransition(async () => {
+      try {
+        await moduleClient.updateCourseModule({ id, title, orderIndex });
+        router.refresh();
+        onClose();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật chương");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4 pt-2">
-      <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="courseId" value={courseId} />
-      <input type="hidden" name="slug" value={slug} />
-      <input type="hidden" name="orderIndex" value={orderIndex} />
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 pt-2">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="space-y-1.5">
         <Label htmlFor="edit-module-title">Tên chương</Label>
         <Input
@@ -78,19 +91,18 @@ function EditModuleForm({
   );
 }
 
-export function ModuleActions({
-  id,
-  courseId,
-  slug,
-  title,
-  orderIndex,
-}: {
+interface ModuleActionsProps {
   id: string;
   courseId: string;
   slug: string;
   title: string;
   orderIndex: number;
-}) {
+  token: string;
+}
+
+export function ModuleActions({ id, courseId, slug, title, orderIndex, token }: ModuleActionsProps) {
+  const router = useRouter();
+  const moduleClient = useRichterWebClient(CourseModuleService, token);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -125,6 +137,7 @@ export function ModuleActions({
             slug={slug}
             currentTitle={title}
             orderIndex={orderIndex}
+            token={token}
             onClose={() => setShowEdit(false)}
           />
         </DialogContent>
@@ -143,7 +156,10 @@ export function ModuleActions({
             <AlertDialogAction
               disabled={isPending}
               onClick={() =>
-                startTransition(async () => { await deleteCourseModule(id, slug, courseId); })
+                startTransition(async () => {
+                  await moduleClient.deleteCourseModule({ id });
+                  router.refresh();
+                })
               }
             >
               Xóa

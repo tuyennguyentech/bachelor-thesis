@@ -77,6 +77,7 @@ export default async function ModuleDetailPage({
             courseId={courseId}
             slug={slug}
             nextOrder={lessons.length}
+            token={token}
           />
         </div>
 
@@ -108,6 +109,7 @@ export default async function ModuleDetailPage({
                   title={lesson.title}
                   description={lesson.description}
                   orderIndex={lesson.orderIndex}
+                  token={token}
                 />
               </div>
             ))}

@@ -1,26 +1,53 @@
 "use client";
 
-import { useActionState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { updateUserProfile, type ActionState } from "@/app/actions/users";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { UserService } from "buf/gen/richter/v1/users_pb";
+import { ConnectError } from "@connectrpc/connect";
 
 interface Props {
   userId: string;
   firstName: string;
   lastName: string;
   middleName?: string;
+  token: string;
 }
 
-export function EditProfileForm({ userId, firstName, lastName, middleName }: Props) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(updateUserProfile, undefined);
+export function EditProfileForm({ userId, firstName, lastName, middleName, token }: Props) {
+  const router = useRouter();
+  const userClient = useRichterWebClient(UserService, token);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const firstNameVal = (fd.get("firstName") as string)?.trim();
+    const lastNameVal = (fd.get("lastName") as string)?.trim();
+    const middleNameVal = (fd.get("middleName") as string)?.trim() || undefined;
+
+    setError(null);
+    setSuccess(false);
+    startTransition(async () => {
+      try {
+        await userClient.updateUserProfile({ id: userId, firstName: firstNameVal, lastName: lastNameVal, middleName: middleNameVal });
+        setSuccess(true);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật thông tin");
+      }
+    });
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-3">
-      <input type="hidden" name="id" value={userId} />
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
-      {state?.success && <p className="text-sm text-green-600">Đã lưu</p>}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {success && <p className="text-sm text-green-600">Đã lưu</p>}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="lastName">Họ</Label>

@@ -60,7 +60,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
       {/* Edit info */}
       <div className="rounded-lg border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Thông tin chung</h2>
-        <EditOrgForm key={org.name} orgId={org.id} orgSlug={org.slug} orgName={org.name} />
+        <EditOrgForm key={org.name} orgId={org.id} orgSlug={org.slug} orgName={org.name} token={token} />
       </div>
 
       {/* Status */}
@@ -74,7 +74,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
               : "—"}
           </p>
         </div>
-        <OrgStatusSelect orgId={org.id} orgSlug={org.slug} currentStatus={org.status} />
+        <OrgStatusSelect orgId={org.id} orgSlug={org.slug} currentStatus={org.status} token={token} />
       </div>
 
       {/* Danger zone */}
@@ -83,7 +83,7 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
           <p className="font-medium text-sm">Xóa organization</p>
           <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
         </div>
-        <DeleteOrgButton orgId={org.id} />
+        <DeleteOrgButton orgId={org.id} token={token} />
       </div>
     </div>
   );

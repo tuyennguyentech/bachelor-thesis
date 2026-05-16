@@ -50,6 +50,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         <h2 className="font-medium">Thông tin cá nhân</h2>
         <EditProfileForm
           userId={user.id}
+          token={token}
           firstName={user.firstName}
           lastName={user.lastName}
           middleName={user.middleName}
@@ -73,18 +74,18 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
           </div>
           <div className="space-y-1.5">
             <p className="text-sm text-muted-foreground">Vai trò</p>
-            <InlineRoleSelect userId={user.id} currentRole={user.role} />
+            <InlineRoleSelect userId={user.id} currentRole={user.role} token={token} />
           </div>
           <div className="space-y-1.5">
             <p className="text-sm text-muted-foreground">Trạng thái</p>
-            <InlineStatusSelect userId={user.id} currentStatus={user.status} />
+            <InlineStatusSelect userId={user.id} currentStatus={user.status} token={token} />
           </div>
         </div>
       </div>
 
       <div className="rounded-lg border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Đổi mật khẩu</h2>
-        <EditPasswordForm userId={user.id} />
+        <EditPasswordForm userId={user.id} token={token} />
       </div>
 
       <div className="rounded-lg border border-destructive/30 p-4 flex items-center justify-between">
@@ -92,7 +93,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
           <p className="font-medium text-sm">Xóa user</p>
           <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
         </div>
-        <DeleteUserButton userId={user.id} />
+        <DeleteUserButton userId={user.id} token={token} />
       </div>
     </div>
   );

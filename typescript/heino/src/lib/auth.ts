@@ -13,7 +13,7 @@ import {
   OrganizationRole,
   type OrganizationMember,
 } from "buf/gen/richter/v1/organization_members_pb";
-import { type JWTClaims, JWTClaimsSchema } from "buf/gen/richter/jwt/v1/jwt_pb";
+import { type JWTClaims, JWTClaimsSchema, TokenType } from "buf/gen/richter/jwt/v1/jwt_pb";
 import { createRichterClient } from "./connect-client";
 
 export type { JWTClaims };
@@ -24,7 +24,14 @@ const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 export const COOKIE_ACCESS = "dyadia_access";
 export const COOKIE_REFRESH = "dyadia_refresh";
 
-const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", secure: process.env.NODE_ENV === "production" };
+export const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", secure: process.env.NODE_ENV === "production" };
+export const REFRESH_COOKIE_OPTS = { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 };
+
+const ALLOWED_NEXT_PREFIXES = ["/admin", "/dashboard"];
+export function safeNext(next: string | null | undefined): string | null {
+  if (next && ALLOWED_NEXT_PREFIXES.some((p) => next === p || next.startsWith(p + "/"))) return next;
+  return null;
+}
 
 export interface Session {
   claims: JWTClaims;
@@ -35,7 +42,9 @@ export async function verifyJwt(token: string): Promise<JWTClaims | null> {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return fromJson(JWTClaimsSchema, payload as any);
+    const claims = fromJson(JWTClaimsSchema, payload as any);
+    if (claims.tokenType !== TokenType.ACCESS) return null;
+    return claims;
   } catch {
     return null;
   }
@@ -65,7 +74,7 @@ export const getSession = cache(async (): Promise<Session | null> => {
       return null;
     }
     cookieStore.set(COOKIE_ACCESS, res.accessToken, COOKIE_OPTS);
-    cookieStore.set(COOKIE_REFRESH, res.refreshToken, COOKIE_OPTS);
+    cookieStore.set(COOKIE_REFRESH, res.refreshToken, REFRESH_COOKIE_OPTS);
     return { claims, token: res.accessToken };
   } catch {
     return null;

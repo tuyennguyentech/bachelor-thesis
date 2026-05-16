@@ -85,6 +85,7 @@ export default async function CourseDetailPage({
           slug={slug}
           title={course.title}
           description={course.description}
+          token={token}
         />
       </div>
 
@@ -99,7 +100,7 @@ export default async function CourseDetailPage({
               : "—"}
           </p>
         </div>
-        <CourseStatusSelect courseId={course.id} slug={slug} currentStatus={course.status} />
+        <CourseStatusSelect courseId={course.id} slug={slug} currentStatus={course.status} token={token} />
       </div>
 
       {/* Chương học */}
@@ -109,7 +110,7 @@ export default async function CourseDetailPage({
             <BookOpenIcon className="size-4 text-muted-foreground" />
             <h2 className="font-medium">Nội dung chương ({modules.length})</h2>
           </div>
-          <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modules.length} />
+          <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modules.length} token={token} />
         </div>
 
         {modules.length === 0 ? (
@@ -138,6 +139,7 @@ export default async function CourseDetailPage({
                   slug={slug}
                   title={m.title}
                   orderIndex={m.orderIndex}
+                  token={token}
                 />
               </div>
             ))}
@@ -151,7 +153,7 @@ export default async function CourseDetailPage({
           <p className="font-medium text-sm">Xóa khóa học</p>
           <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
         </div>
-        <DeleteCourseButton courseId={course.id} slug={slug} />
+        <DeleteCourseButton courseId={course.id} slug={slug} token={token} />
       </div>
     </div>
   );

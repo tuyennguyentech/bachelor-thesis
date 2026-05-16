@@ -15,6 +15,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { roleName, memberStatusBadge } from "@/lib/org-utils";
 import { Pagination } from "@/components/pagination";
+import { CreateOrgDialog } from "./create-org-dialog";
 
 const LIMIT = 20;
 
@@ -47,7 +48,10 @@ export default async function OrganizationsPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Tổ chức của tôi</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Tổ chức của tôi</h1>
+        <CreateOrgDialog token={token} userId={claims.sub} />
+      </div>
 
       <div className="rounded-md border">
         <Table>

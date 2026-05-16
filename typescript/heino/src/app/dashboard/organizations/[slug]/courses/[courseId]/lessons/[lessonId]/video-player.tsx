@@ -2,10 +2,11 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import type { TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
 import { InteractiveTranscript } from "./interactive-transcript";
 import { QuizCheckpoint, type CheckpointQuestion } from "./quiz-checkpoint";
 import { FileTextIcon, VideoOffIcon } from "lucide-react";
-import { updateWatchProgress } from "@/app/actions/ai";
+import { useRichterWebClient } from "@/lib/connect-webclient";
 
 interface Props {
   videoUrl: string;
@@ -14,12 +15,14 @@ interface Props {
   checkpoints: CheckpointQuestion[];
   lessonId?: string;
   initialPosition?: number;
+  token: string;
 }
 
 // Save watch position at most every SAVE_INTERVAL_S seconds of real time.
 const SAVE_INTERVAL_S = 10;
 
-export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lessonId, initialPosition = 0 }: Props) {
+export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lessonId, initialPosition = 0, token }: Props) {
+  const aiClient = useRichterWebClient(AIService, token);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastSavedPos = useRef<number>(-1);
   // IDs of checkpoints that have been shown this session
@@ -41,7 +44,7 @@ export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lesso
     if (!lessonId) return;
     if (Math.abs(pos - lastSavedPos.current) < 1) return;
     lastSavedPos.current = pos;
-    void updateWatchProgress(lessonId, pos);
+    void aiClient.updateWatchProgress({ lessonId, positionSeconds: pos });
   }, [lessonId]);
 
   // Sort checkpoints by startSeconds so we can find the first upcoming one

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Select,
   SelectContent,
@@ -9,7 +10,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { OrganizationStatus } from "buf/gen/richter/v1/organizations_pb";
-import { updateOrganizationStatus } from "@/app/actions/organizations";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 
 const STATUS_OPTIONS: { label: string; value: OrganizationStatus }[] = [
   { label: "Hoạt động", value: OrganizationStatus.ACTIVE },
@@ -17,15 +19,16 @@ const STATUS_OPTIONS: { label: string; value: OrganizationStatus }[] = [
   { label: "Lưu trữ",   value: OrganizationStatus.ARCHIVED },
 ];
 
-export function OrgStatusSelect({
-  orgId,
-  orgSlug,
-  currentStatus,
-}: {
+interface Props {
   orgId: string;
   orgSlug: string;
   currentStatus: OrganizationStatus;
-}) {
+  token: string;
+}
+
+export function OrgStatusSelect({ orgId, orgSlug: _orgSlug, currentStatus, token }: Props) {
+  const router = useRouter();
+  const orgClient = useRichterWebClient(OrganizationService, token);
   const [isPending, startTransition] = useTransition();
 
   return (
@@ -36,7 +39,8 @@ export function OrgStatusSelect({
         const option = STATUS_OPTIONS.find((o) => String(o.value) === val);
         if (!option) return;
         startTransition(async () => {
-          await updateOrganizationStatus(orgId, orgSlug, option.value);
+          await orgClient.updateOrganizationStatus({ id: orgId, status: option.value });
+          router.refresh();
         });
       }}
     >

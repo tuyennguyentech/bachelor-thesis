@@ -47,6 +47,8 @@ export default async function ProfilePage() {
         <h2 className="font-medium">Thông tin cá nhân</h2>
         <EditProfileForm
           key={`${user.firstName}|${user.middleName ?? ""}|${user.lastName}`}
+          userId={claims.sub}
+          token={token}
           firstName={user.firstName}
           lastName={user.lastName}
           middleName={user.middleName}
@@ -55,7 +57,7 @@ export default async function ProfilePage() {
 
       <div className="rounded-lg border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Đổi mật khẩu</h2>
-        <EditPasswordForm />
+        <EditPasswordForm userId={claims.sub} token={token} />
       </div>
     </div>
   );

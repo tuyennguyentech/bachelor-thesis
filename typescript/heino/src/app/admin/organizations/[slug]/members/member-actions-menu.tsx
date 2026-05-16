@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +25,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { MoreHorizontalIcon } from "lucide-react";
 import { OrganizationRole, MemberStatus } from "buf/gen/richter/v1/organization_members_pb";
-import { updateMemberRole, updateMemberStatus, removeMember } from "@/app/actions/members";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { OrganizationMemberService } from "buf/gen/richter/v1/organization_members_pb";
+import { ConnectError } from "@connectrpc/connect";
 
 interface MemberActionsMenuProps {
   organizationId: string;
@@ -32,6 +35,7 @@ interface MemberActionsMenuProps {
   currentRole: OrganizationRole;
   currentStatus: MemberStatus;
   slug: string;
+  token: string;
 }
 
 export function MemberActionsMenu({
@@ -39,8 +43,11 @@ export function MemberActionsMenu({
   userId,
   currentRole,
   currentStatus,
-  slug,
+  slug: _slug,
+  token,
 }: MemberActionsMenuProps) {
+  const router = useRouter();
+  const memberClient = useRichterWebClient(OrganizationMemberService, token);
   const [isPending, startTransition] = useTransition();
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,8 +77,12 @@ export function MemberActionsMenu({
                   onClick={() =>
                     startTransition(async () => {
                       setError(null);
-                      const res = await updateMemberRole(organizationId, userId, value, slug);
-                      if (res?.error) setError(res.error);
+                      try {
+                        await memberClient.updateOrganizationMemberRole({ organizationId, userId, role: value });
+                        router.refresh();
+                      } catch (err) {
+                        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật vai trò");
+                      }
                     })
                   }
                 >
@@ -94,8 +105,12 @@ export function MemberActionsMenu({
                   onClick={() =>
                     startTransition(async () => {
                       setError(null);
-                      const res = await updateMemberStatus(organizationId, userId, value, slug);
-                      if (res?.error) setError(res.error);
+                      try {
+                        await memberClient.updateOrganizationMemberStatus({ organizationId, userId, status: value });
+                        router.refresh();
+                      } catch (err) {
+                        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật trạng thái");
+                      }
                     })
                   }
                 >
@@ -128,8 +143,12 @@ export function MemberActionsMenu({
               onClick={() =>
                 startTransition(async () => {
                   setError(null);
-                  const res = await removeMember(organizationId, userId, slug);
-                  if (res?.error) setError(res.error);
+                  try {
+                    await memberClient.removeOrganizationMember({ organizationId, userId });
+                    router.refresh();
+                  } catch (err) {
+                    setError(err instanceof ConnectError ? err.message : "Không thể xóa thành viên");
+                  }
                 })
               }
             >

@@ -86,6 +86,7 @@ export function QuizCheckpoint({ question, onContinue }: Props) {
         size="sm"
         variant={answered ? "default" : "outline"}
         className="self-start gap-2"
+        disabled={!answered}
         onClick={onContinue}
       >
         <PlayIcon className="size-3.5" />

@@ -59,6 +59,7 @@ export function InteractiveTranscript({ segments, videoRef }: Props) {
   return (
     <div
       ref={containerRef}
+      data-testid="interactive-transcript"
       className="max-h-72 overflow-y-auto flex flex-col gap-0.5 pr-1"
     >
       {segments.map((seg, i) => (
@@ -66,6 +67,8 @@ export function InteractiveTranscript({ segments, videoRef }: Props) {
           key={i}
           ref={(el) => { segmentRefs.current[i] = el; }}
           onClick={() => seekTo(seg)}
+          data-testid={`transcript-segment-${i}`}
+          data-start-seconds={seg.startSeconds}
           className={`text-left w-full rounded px-2 py-1.5 text-sm transition-colors ${
             i === activeIndex
               ? "bg-primary/10 text-primary font-medium"

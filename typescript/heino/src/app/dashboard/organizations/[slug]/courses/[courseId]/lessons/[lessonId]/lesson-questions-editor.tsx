@@ -7,12 +7,9 @@ import {
   CheckIcon, XIcon, Loader2Icon,
 } from "lucide-react";
 import type { LessonQuestion } from "buf/gen/richter/v1/ai_pb";
-import {
-  updateLessonQuestion,
-  createManualQuestion,
-  deleteLessonQuestion,
-  regenerateQuestion,
-} from "@/app/actions/ai";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { ConnectError } from "@connectrpc/connect";
 
 // ── Question form (shared by edit & add) ──────────────────────────────────────
 
@@ -183,9 +180,10 @@ interface QuestionRowProps {
   index: number;
   onUpdate: (q: LessonQuestion) => void;
   onDelete: (id: string) => void;
+  aiClient: ReturnType<typeof useRichterWebClient<typeof AIService>>;
 }
 
-function QuestionRow({ question: q, index, onUpdate, onDelete }: QuestionRowProps) {
+function QuestionRow({ question: q, index, onUpdate, onDelete, aiClient }: QuestionRowProps) {
   const [editing, setEditing] = useState(false);
   const [saving, startSave] = useTransition();
   const [regenerating, startRegen] = useTransition();
@@ -196,25 +194,35 @@ function QuestionRow({ question: q, index, onUpdate, onDelete }: QuestionRowProp
   function handleSave(data: QuestionFormData) {
     setSaveError(null);
     startSave(async () => {
-      const res = await updateLessonQuestion(q.id, data);
-      if (res.error) { setSaveError(res.error); return; }
-      if (res.question) { onUpdate(res.question); setEditing(false); }
+      try {
+        const res = await aiClient.updateLessonQuestion({ questionId: q.id, ...data });
+        if (res.question) { onUpdate(res.question); setEditing(false); }
+      } catch (err) {
+        setSaveError(err instanceof ConnectError ? err.message : "Không thể lưu câu hỏi");
+      }
     });
   }
 
   function handleRegen() {
     setRegenError(null);
     startRegen(async () => {
-      const res = await regenerateQuestion(q.id);
-      if (res.error) { setRegenError(res.error); return; }
-      if (res.question) onUpdate(res.question);
+      try {
+        const res = await aiClient.regenerateQuestion({ questionId: q.id });
+        if (res.question) onUpdate(res.question);
+      } catch (err) {
+        setRegenError(err instanceof ConnectError ? err.message : "Không thể tạo lại câu hỏi");
+      }
     });
   }
 
   function handleDelete() {
     startDelete(async () => {
-      const res = await deleteLessonQuestion(q.id);
-      if (!res.error) onDelete(q.id);
+      try {
+        await aiClient.deleteLessonQuestion({ questionId: q.id });
+        onDelete(q.id);
+      } catch {
+        // silently ignore
+      }
     });
   }
 
@@ -297,7 +305,7 @@ function QuestionRow({ question: q, index, onUpdate, onDelete }: QuestionRowProp
         ⏱ {q.startSeconds > 0 ? `${Math.floor(q.startSeconds / 60)}:${String(Math.floor(q.startSeconds % 60)).padStart(2, "0")}` : "—"}
       </p>
 
-      {regenError && <p className="text-xs text-destructive ml-4">{regenError}</p>}
+      {regenError && <p data-testid="regen-error" className="text-xs text-destructive ml-4">{regenError}</p>}
     </div>
   );
 }
@@ -307,9 +315,11 @@ function QuestionRow({ question: q, index, onUpdate, onDelete }: QuestionRowProp
 interface Props {
   lessonId: string;
   initialQuestions: LessonQuestion[];
+  token: string;
 }
 
-export function LessonQuestionsEditor({ lessonId, initialQuestions }: Props) {
+export function LessonQuestionsEditor({ lessonId, initialQuestions, token }: Props) {
+  const aiClient = useRichterWebClient(AIService, token);
   const [questions, setQuestions] = useState<LessonQuestion[]>(initialQuestions);
   const [addingNew, setAddingNew] = useState(false);
   const [addSaving, startAddSave] = useTransition();
@@ -326,11 +336,14 @@ export function LessonQuestionsEditor({ lessonId, initialQuestions }: Props) {
   function handleAdd(data: QuestionFormData) {
     setAddError(null);
     startAddSave(async () => {
-      const res = await createManualQuestion(lessonId, data);
-      if (res.error) { setAddError(res.error); return; }
-      if (res.question) {
-        setQuestions((qs) => [...qs, res.question!]);
-        setAddingNew(false);
+      try {
+        const res = await aiClient.createManualQuestion({ lessonId, ...data });
+        if (res.question) {
+          setQuestions((qs) => [...qs, res.question!]);
+          setAddingNew(false);
+        }
+      } catch (err) {
+        setAddError(err instanceof ConnectError ? err.message : "Không thể thêm câu hỏi");
       }
     });
   }
@@ -344,6 +357,7 @@ export function LessonQuestionsEditor({ lessonId, initialQuestions }: Props) {
           index={i}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          aiClient={aiClient}
         />
       ))}
 

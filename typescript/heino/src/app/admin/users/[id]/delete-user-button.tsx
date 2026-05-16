@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,9 +14,17 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { deleteUser } from "@/app/actions/users";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { UserService } from "buf/gen/richter/v1/users_pb";
 
-export function DeleteUserButton({ userId }: { userId: string }) {
+interface Props {
+  userId: string;
+  token: string;
+}
+
+export function DeleteUserButton({ userId, token }: Props) {
+  const router = useRouter();
+  const userClient = useRichterWebClient(UserService, token);
   const [pending, startTransition] = useTransition();
 
   return (
@@ -35,7 +44,10 @@ export function DeleteUserButton({ userId }: { userId: string }) {
         <AlertDialogFooter>
           <AlertDialogCancel>Hủy</AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => startTransition(async () => { await deleteUser(userId) })}
+            onClick={() => startTransition(async () => {
+              await userClient.deleteUser({ id: userId });
+              router.push("/admin/users");
+            })}
           >
             Xóa
           </AlertDialogAction>

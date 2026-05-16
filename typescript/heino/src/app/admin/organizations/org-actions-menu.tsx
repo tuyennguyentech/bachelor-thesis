@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   DropdownMenu,
@@ -22,15 +23,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { MoreHorizontalIcon } from "lucide-react";
 import { OrganizationStatus } from "buf/gen/richter/v1/organizations_pb";
-import { updateOrganizationStatus, deleteOrganization } from "@/app/actions/organizations";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 
 interface OrgActionsMenuProps {
   orgId: string;
   orgSlug: string;
   orgStatus: OrganizationStatus;
+  token: string;
 }
 
-export function OrgActionsMenu({ orgId, orgSlug, orgStatus }: OrgActionsMenuProps) {
+export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsMenuProps) {
+  const router = useRouter();
+  const orgClient = useRichterWebClient(OrganizationService, token);
   const [, startTransition] = useTransition();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -54,7 +59,8 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus }: OrgActionsMenuProp
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await updateOrganizationStatus(orgId, orgSlug, OrganizationStatus.SUSPENDED);
+                  await orgClient.updateOrganizationStatus({ id: orgId, status: OrganizationStatus.SUSPENDED });
+                  router.refresh();
                 })
               }
             >
@@ -64,7 +70,8 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus }: OrgActionsMenuProp
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await updateOrganizationStatus(orgId, orgSlug, OrganizationStatus.ACTIVE);
+                  await orgClient.updateOrganizationStatus({ id: orgId, status: OrganizationStatus.ACTIVE });
+                  router.refresh();
                 })
               }
             >
@@ -92,7 +99,10 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus }: OrgActionsMenuProp
           <AlertDialogFooter>
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => startTransition(async () => { await deleteOrganization(orgId); })}
+              onClick={() => startTransition(async () => {
+                await orgClient.deleteOrganization({ id: orgId });
+                router.push("/admin/organizations");
+              })}
             >
               Xóa
             </AlertDialogAction>

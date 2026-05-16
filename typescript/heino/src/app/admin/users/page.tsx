@@ -40,7 +40,7 @@ export default async function UsersPage({
         <h1 className="text-xl font-semibold">Người dùng</h1>
         <div className="flex items-center gap-2">
           <SearchInput placeholder="ID / email..." />
-          <CreateUserDialog />
+          <CreateUserDialog token={token} />
         </div>
       </div>
 
@@ -78,7 +78,7 @@ export default async function UsersPage({
                       : "—"}
                   </TableCell>
                   <TableCell>
-                    <UserActionsMenu userId={user.id} userStatus={user.status} />
+                    <UserActionsMenu userId={user.id} userStatus={user.status} token={token} />
                   </TableCell>
                 </TableRow>
               ))

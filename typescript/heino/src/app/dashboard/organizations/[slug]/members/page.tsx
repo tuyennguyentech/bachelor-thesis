@@ -80,7 +80,7 @@ export default async function DashboardMembersPage({
 
       {canManage && (
         <div className="flex justify-end">
-          <AddMemberDialog organizationId={org.id} slug={slug} />
+          <AddMemberDialog organizationId={org.id} slug={slug} token={token} />
         </div>
       )}
 
@@ -130,6 +130,7 @@ export default async function DashboardMembersPage({
                           currentRole={m.role}
                           currentStatus={m.status}
                           slug={slug}
+                          token={token}
                         />
                       </TableCell>
                     )}

@@ -27,7 +27,7 @@ export default async function CoursesPage({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ page?: string }>;
 }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const { slug } = await params;
   const sp = await searchParams;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
@@ -77,7 +77,7 @@ export default async function CoursesPage({
           </Button>
           <h1 className="text-xl font-semibold">Khóa học</h1>
         </div>
-        <CreateCourseDialog organizationId={org.id} slug={slug} />
+        <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />
       </div>
 
       <div className="rounded-md border">

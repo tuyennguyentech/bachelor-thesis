@@ -125,27 +125,32 @@ Conventional Commits with scopes: `feat(heino):`, `fix(richter):`, `refactor(sql
 ## Runtime & Process Rules (MUST follow every session)
 
 ### NEVER use detached/shell background processes
-**Do not** use `nohup ... &` or shell `cmd &` (including inside Agent scripts) — these detach from Claude Code's control and leak as orphans when the session ends.
+**Forbidden — cause orphan leaks:**
+- `nohup ... &` — detach khỏi session
+- Shell `cmd &` bên trong Bash tool hoặc Agent script — tách process khỏi tầm kiểm soát
+- `Bash(run_in_background: true)` để start server — process sống sót sau khi Agent/session tắt, leak vào session tiếp theo
 
-**DO use Claude Code's managed background tools** — these are session-managed and do NOT leak:
-- `Bash(run_in_background: true)` — starts process, Claude Code tracks it, one notification when done.
-- `Monitor(persistent: true)` — streams stdout as notifications, killed automatically when session ends or via `TaskStop`.
+**Allowed — session-managed, tự tắt khi session kết thúc:**
+- `Monitor(persistent: true)` — dùng để start server (richter, heino) khi cần chạy test tự động. Claude Code kill process này khi session kết thúc hoặc `TaskStop`.
 
-**Shell `cmd &` inside an Agent is NOT acceptable** — even with `kill $PID` cleanup, proven unreliable in practice: Agent exited with processes still alive, creating orphan richter instances that corrupted test state.
-
-**Correct approach for running heino/richter servers + tests autonomously:**
+**Correct approach để chạy server + test tự động (không cần hỏi user):**
 ```
-# 1. Start server (managed background)
-Bash(run_in_background: true): ./container-shell.sh richter -- go run ./golang/richter/ -c ...
+# 1. Start richter via Monitor (không dùng run_in_background)
+Monitor: ./container-shell.sh richter -- go run ./golang/richter/ -c richter.base.toml,richter.test.toml
 
-# 2. Wait for ready (single notification when done)
-Bash(run_in_background: true): until curl -s http://richter:8080 >/dev/null; do sleep 1; done
+# 2. Đợi server sẵn sàng (foreground, poll)
+Bash: until curl -sf http://richter:8080 >/dev/null; do sleep 2; done
 
-# 3. Run tests (foreground)
-Bash: ./container-shell.sh heino -- pnpm -F heino exec playwright test ...
+# 3. Chạy test (foreground)
+Bash: ./container-shell.sh richter -- ./scripts/test/golang/richter/test.sh
+# hoặc Playwright:
+Bash: ./container-shell.sh heino -- pnpm -F heino exec playwright test
+
+# 4. Dừng server
+TaskStop: <monitor task id>
 ```
 
-Or use `Monitor` to tail the server log and detect readiness before proceeding.
+**Go integration tests** (`test.sh`): Tự spin up test server trong process — **không cần start server riêng**, chỉ cần chạy `test.sh` foreground.
 
 First, always check `ps aux` and kill any orphan richter/heino not owned by the current session. Never reuse orphan processes from a previous session.
 
@@ -162,7 +167,7 @@ Every command — servers, tests, migrations, seed — must run inside `containe
 # Richter service — dev DB
 ./scripts/setup/environment.dev/container-shell.sh richter -- go run ./golang/richter/ -c golang/richter/richter.base.toml,golang/richter/richter.local.toml
 
-# Playwright E2E tests
+# Playwright E2E tests — richter PHẢI dùng richter.test.toml (test DB), KHÔNG dùng richter.local.toml
 ./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino exec playwright test
 
 # Go integration tests
@@ -170,6 +175,11 @@ Every command — servers, tests, migrations, seed — must run inside `containe
 ```
 
 Config via `-c` flag for richter. Never hardcode hostnames/passwords/endpoints in source.
+
+**CRITICAL — Test vs Dev config:**
+- `richter.test.toml` = test DB (`dyadia_test`) + test bucket (`dyadia-test`). Dùng khi chạy Playwright E2E tests và Go integration tests.
+- `richter.local.toml` = dev DB (`dyadia`) + dev bucket (`dyadia`). Chỉ dùng cho development, KHÔNG dùng khi test.
+- Trước khi chạy Playwright, luôn kiểm tra richter đang dùng `richter.test.toml`.
 
 ### DB reset for tests
 ```sh

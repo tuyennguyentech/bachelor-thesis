@@ -2,7 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { submitQuiz } from "@/app/actions/quiz";
+import { useRichterWebClient } from "@/lib/connect-webclient";
+import { QuizService } from "buf/gen/richter/v1/quiz_pb";
+import { ConnectError } from "@connectrpc/connect";
 import { CheckCircleIcon, XCircleIcon, SendIcon } from "lucide-react";
 import type { QuizAttempt } from "buf/gen/richter/v1/quiz_pb";
 
@@ -19,11 +21,12 @@ interface Props {
   /** Correct answers provided server-side only after the user has already submitted. */
   initialCorrectAnswers?: number[];
   lessonId: string;
-  slug: string;
-  courseId: string;
+  isPreview?: boolean;
+  token: string;
 }
 
-export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, lessonId, slug, courseId }: Props) {
+export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, lessonId, isPreview, token }: Props) {
+  const quizClient = useRichterWebClient(QuizService, token);
   const [selected, setSelected] = useState<(number | null)[]>(() =>
     Array.from({ length: questions.length }, (_, i) =>
       previousAttempt ? ((previousAttempt.answers ?? [])[i] ?? null) : null,
@@ -52,13 +55,24 @@ export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, le
     const answers = selected as number[];
     setError(null);
     startTransition(async () => {
-      const res = await submitQuiz(lessonId, answers, slug, courseId);
-      if (res?.error) {
-        setError(res.error);
-      } else if (res) {
-        setResult({ score: res.score ?? 0, total: res.total ?? 0 });
-        setCorrectAnswers(res.correctAnswers);
-        setSelected(answers);
+      try {
+        const ca = initialCorrectAnswers ?? [];
+        const revealedAnswers = ca.length > 0 ? ca : undefined;
+        if (isPreview) {
+          const score = ca.length > 0
+            ? answers.filter((a, i) => a === (ca[i] ?? -1)).length
+            : 0;
+          setResult({ score, total: ca.length });
+          setCorrectAnswers(revealedAnswers);
+          setSelected(answers);
+        } else {
+          const res = await quizClient.submitQuiz({ lessonId, answers });
+          setResult({ score: res.attempt?.score ?? 0, total: res.attempt?.total ?? 0 });
+          setCorrectAnswers(revealedAnswers);
+          setSelected(answers);
+        }
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Nộp bài thất bại. Vui lòng thử lại.");
       }
     });
   }
@@ -72,7 +86,7 @@ export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, le
           <CheckCircleIcon className="size-5 text-green-500 shrink-0" />
           <span className="text-sm font-medium">
             Kết quả: {result.score}/{result.total} câu đúng (
-            {Math.round((result.score / result.total) * 100)}%)
+            {result.total > 0 ? Math.round((result.score / result.total) * 100) : 0}%)
           </span>
         </div>
       )}

@@ -28,14 +28,15 @@ export default async function DashboardCoursesPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
   const { slug } = await params;
   const sp = await searchParams;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const offset = (page - 1) * LIMIT;
+  const q = sp.q?.trim() || undefined;
 
-  const { token } = await requireAnyUser();
+  const { claims, token } = await requireAnyUser();
 
   const orgClient = createRichterClient(OrganizationService, token);
   let org;
@@ -58,6 +59,7 @@ export default async function DashboardCoursesPage({
       organizationId: org.id,
       limit: LIMIT,
       offset,
+      ...(q ? { q } : {}),
     });
     courses = res.courses ?? [];
   } catch {
@@ -77,7 +79,7 @@ export default async function DashboardCoursesPage({
           </Button>
           <h1 className="text-xl font-semibold">Khóa học</h1>
         </div>
-        {canManage && <CreateCourseDialog organizationId={org.id} slug={slug} />}
+        {canManage && <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />}
       </div>
 
       <div className="rounded-md border">
@@ -124,7 +126,7 @@ export default async function DashboardCoursesPage({
       <Pagination
         page={page}
         hasNext={hasNext}
-        buildHref={(p) => `/dashboard/organizations/${slug}/courses?page=${p}`}
+        buildHref={(p) => `/dashboard/organizations/${slug}/courses?page=${p}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
       />
     </div>
   );
