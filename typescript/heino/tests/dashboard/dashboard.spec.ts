@@ -46,6 +46,9 @@ test.describe("Dashboard home", () => {
 test.describe("Dashboard sidebar navigation", () => {
   test("sidebar has Tổ chức and Hồ sơ links", async ({ userPage: page }) => {
     await page.goto("/dashboard");
-    await expect(page.getByRole("navigation")).toBeVisible();
+    const nav = page.getByRole("navigation");
+    await expect(nav).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Tổ chức" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Hồ sơ" })).toBeVisible();
   });
 });

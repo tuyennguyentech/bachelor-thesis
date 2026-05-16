@@ -125,6 +125,8 @@ test.describe("Video upload flow", () => {
     await page.goto(lessonUrl);
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // Wait for router.refresh() to finish before hard-navigating
+    await page.waitForLoadState("networkidle");
 
     // Hard reload — server must render "Thay video" since video_key is now set
     await page.goto(lessonUrl);
@@ -136,6 +138,8 @@ test.describe("Video upload flow", () => {
     await page.goto(lessonUrl);
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // Wait for router.refresh() to finish before hard-navigating
+    await page.waitForLoadState("networkidle");
 
     // Reload so button is server-rendered as "Thay video"
     await page.goto(lessonUrl);

@@ -45,7 +45,6 @@ test.describe("Members list page", () => {
     await page.goto(MEMBERS_URL);
     // Table should have at least one data row (seeded members exist)
     const rows = page.getByRole("row");
-    await expect(rows).toHaveCount.call(rows, await rows.count());
     expect(await rows.count()).toBeGreaterThan(1); // more than just the header
   });
 

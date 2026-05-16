@@ -37,6 +37,14 @@ test.describe("Dashboard profile page", () => {
     await page.getByLabel("Tên", { exact: true }).fill("Alice");
     await page.getByRole("button", { name: "Lưu thay đổi" }).click();
     await expect(page.getByText("Đã lưu thay đổi")).toBeVisible();
+
+    // Revert to original seed values so other tests (e.g. members.spec.ts) see "Alice Nguyen"
+    await page.getByLabel("Họ").clear();
+    await page.getByLabel("Họ").fill("Nguyen");
+    await page.getByLabel("Tên", { exact: true }).clear();
+    await page.getByLabel("Tên", { exact: true }).fill("Alice");
+    await page.getByRole("button", { name: "Lưu thay đổi" }).click();
+    await expect(page.getByText("Đã lưu thay đổi")).toBeVisible();
   });
 
   test("shows error when password mismatch", async ({ userPage: page }) => {
