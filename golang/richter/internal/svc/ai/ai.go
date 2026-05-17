@@ -180,10 +180,41 @@ func (s *AISvc) GetLessonAnalysis(
 		protoChunks = append(protoChunks, chunkToProto(c))
 	}
 
-	return &richterv1.GetLessonAnalysisResponse{
+	resp := &richterv1.GetLessonAnalysisResponse{
 		Analysis: analysisToProto(analysis, questions, transcript, segments),
 		Chunks:   protoChunks,
-	}, nil
+	}
+
+	// Defense against cheating: a student calling this RPC directly (or inspecting the
+	// page's RSC payload) must not see the correct answer or explanation until they
+	// have submitted their own attempt. Teachers/admins always see them; org-member
+	// students see them only after submission.
+	if resp.Analysis != nil && len(resp.Analysis.Questions) > 0 {
+		canSeeAnswers := false
+		if _, err := s.authz.RequireOrgRole(ctx, orgID,
+			gen.OrganizationRoleOwner,
+			gen.OrganizationRoleAdmin,
+			gen.OrganizationRoleTeacher,
+		); err == nil {
+			canSeeAnswers = true
+		} else if claims, _ := s.authz.RequireAuthenticated(ctx); claims != nil {
+			if userID, perr := svc.ParseUUID(claims.GetSub()); perr == nil {
+				if _, aerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.QuizAttempt, error) {
+					return q.GetMyQuizAttempt(ctx, gen.GetMyQuizAttemptParams{LessonID: lessonID, UserID: userID})
+				}); aerr == nil {
+					canSeeAnswers = true
+				}
+			}
+		}
+		if !canSeeAnswers {
+			for _, q := range resp.Analysis.Questions {
+				q.CorrectAnswer = -1
+				q.Explanation = ""
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 // ── Step 2: ExtractTranscriptStream ──────────────────────────────────────────
@@ -553,6 +584,16 @@ func (s *AISvc) ChunkTranscriptStream(
 	})
 	if saveErr != nil {
 		s.log.ErrorContext(ctx, "ai: failed to save chunks", svc.LogAttrs("ChunkTranscriptStream", saveErr)...)
+		// Persist the specific error message so the defer's generic "interrupted"
+		// fallback doesn't overwrite it after we return.
+		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
+				LessonID: lessonID,
+				Status:   gen.LessonAnalysisStatusError,
+				ErrorMsg: pgtype.Text{String: "Lỗi khi lưu đoạn nội dung: " + saveErr.Error(), Valid: true},
+			})
+		})
+		chunkStatusFinalized = true
 		_ = stream.Send(&richterv1.AnalysisProgressEvent{
 			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
 			Message: "Lỗi khi lưu đoạn nội dung: " + saveErr.Error(),
@@ -1019,6 +1060,13 @@ func (s *AISvc) GenerateQuestionsStream(
 		if err != nil {
 			return svc.ConnectDBError(err)
 		}
+		// Defense in depth: requireTeacherRole only checks the requested lesson.
+		// Without this, a teacher of lesson A could pass a chunk_id from lesson B
+		// and end up generating/saving questions tied to chunk B under lesson A
+		// (or wiping lesson B's questions).
+		if c.LessonID != lessonID {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunk does not belong to the requested lesson"))
+		}
 		chunks = []gen.LessonTranscriptChunk{c}
 	} else {
 		chunks, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
@@ -1060,10 +1108,6 @@ func (s *AISvc) GenerateQuestionsStream(
 	}
 	resultCh := make(chan genResult, total)
 
-	// Cancel goroutines when the function returns (client disconnect, etc.).
-	genCtx, genCancel := context.WithCancel(ctx)
-	defer genCancel()
-
 	// Determine if any chunk needs Gemini (not all chunks will be skipped).
 	needsGemini := req.GetForceRegenerate() || req.GetChunkId() != ""
 	if !needsGemini {
@@ -1075,12 +1119,16 @@ func (s *AISvc) GenerateQuestionsStream(
 		}
 	}
 
-	// Create a single Gemini client shared across all chunk goroutines.
-	// One client = one HTTP connection pool; avoids N connection setups.
+	// Cancel goroutines when the function returns (client disconnect, etc.).
+	// CRITICAL: register defers so that on return, genCancel runs BEFORE
+	// geminiClient.Close — defers fire LIFO, so genCancel must be registered
+	// AFTER (i.e. closer to return) the client close defer. Otherwise an
+	// in-flight goroutine could try to use a closed Gemini HTTP client.
 	var geminiClient *genai.Client
 	if needsGemini {
 		var clientErr error
-		geminiClient, clientErr = s.newGeminiClient(genCtx)
+		// Use the parent ctx, not genCtx — newGeminiClient is short-lived setup.
+		geminiClient, clientErr = s.newGeminiClient(ctx)
 		if clientErr != nil {
 			_ = stream.Send(&richterv1.GenerateQuestionsProgressEvent{
 				Step:    richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_ERROR,
@@ -1090,6 +1138,8 @@ func (s *AISvc) GenerateQuestionsStream(
 		}
 		defer geminiClient.Close()
 	}
+	genCtx, genCancel := context.WithCancel(ctx)
+	defer genCancel()
 
 	const maxParallel = 3
 	sem := make(chan struct{}, maxParallel)

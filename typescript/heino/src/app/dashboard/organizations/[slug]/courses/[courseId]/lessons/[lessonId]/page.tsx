@@ -142,7 +142,14 @@ export default async function LessonDetailPage({
     options: q.options,
     explanation: q.explanation,
   }));
-  const correctAnswers = (analysis?.questions ?? []).map((q) => q.correctAnswer);
+  // Only expose correct answers to clients allowed to see them. Server also strips
+  // correct_answer (sentinel -1) for unauthorized callers as defense-in-depth.
+  // - Teachers/admins (canManage) — including preview mode — get the real values.
+  // - Students get them only after submitting an attempt.
+  const canSeeAnswers = canManage || !!myAttempt;
+  const correctAnswers = canSeeAnswers
+    ? (analysis?.questions ?? []).map((q) => q.correctAnswer)
+    : [];
 
   // For managers (teacher/admin), show correct answers in video checkpoints as a teaching aid.
   // For students who have not yet submitted, omit correctAnswer so they can answer without bias.

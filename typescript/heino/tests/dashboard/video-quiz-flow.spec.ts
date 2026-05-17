@@ -24,34 +24,20 @@
 
 import path from "path";
 import type { Page } from "@playwright/test";
-import { test, expect } from "../fixtures";
+import {
+  test,
+  expect,
+  goToSeededLesson,
+  SEED_HUST_CS_SLUG as ORG_SLUG,
+  SEED_DSA_LESSON_BIG_O as SEEDED_LESSON,
+} from "../fixtures";
 
-const ORG_SLUG = "hust-cs";
 const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
 const TEST_VIDEO = path.join(__dirname, "../fixtures/test-video.mp4");
 const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample.mp4");
 
-const SEEDED_COURSE = "Cấu trúc dữ liệu và Giải thuật";
-const SEEDED_LESSON = "Bài 1: Big-O, Omega, Theta notation";
-
 function uid(base: string) {
   return `${base} ${Date.now()}`;
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/** Navigate to the seeded DSA course using ?q= search, then to the given lesson. */
-async function goToSeededLesson(page: Page, lessonTitle: string): Promise<string> {
-  await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEEDED_COURSE)}`);
-  const row = page.getByRole("row").filter({ hasText: SEEDED_COURSE });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
-  if (!courseHref) throw new Error(`Seeded course "${SEEDED_COURSE}" not found`);
-  await page.goto(courseHref);
-  const lessonLink = page.getByRole("link").filter({ hasText: lessonTitle }).first();
-  const lessonHref = await lessonLink.getAttribute("href");
-  if (!lessonHref) throw new Error(`Lesson link not found for "${lessonTitle}"`);
-  await page.goto(lessonHref);
-  return lessonHref;
 }
 
 /** Creates a fresh course → module → lesson, returns the lesson URL. */
@@ -90,7 +76,7 @@ async function createLesson(
 async function triggerCheckpoint(page: Page, seconds: number) {
   await page.waitForFunction(() => "__triggerVideoCheckpoint" in window, { timeout: 5_000 });
   await page.evaluate((s) => {
-    (window as any).__triggerVideoCheckpoint(s);
+    (window as unknown as { __triggerVideoCheckpoint: (s: number) => void }).__triggerVideoCheckpoint(s);
   }, seconds);
 }
 
@@ -702,6 +688,75 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     });
   });
 
+  // NOTE: this test must run before "after video replacement" — the replacement
+  // wipes chunks/transcript and resets status to PENDING, which locks the "Phân đoạn lại"
+  // PipelineStep and hides the "Mở rộng" toggle button this test relies on.
+  test("chunk step labels appear during ChunkTranscriptStream", async ({ teacherPage: page }) => {
+    if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
+    test.setTimeout(300_000);
+    // The pipeline lesson has a complete transcript — re-run chunking to observe progress labels.
+    await page.goto(lessonUrl);
+    await page.reload();
+
+    // Navigate to "Phân đoạn video" tab where the "Phân đoạn lại" button lives
+    await page.getByRole("button", { name: "Phân đoạn video" }).click();
+    // PipelineStep 1 is collapsed after pipeline — expand it so the button is in the DOM
+    await page.getByLabel("Mở rộng").first().click();
+    await page.getByRole("button", { name: "Phân đoạn lại" }).click();
+
+    const chunkPanel = page.locator('[data-testid="chunk-progress"]');
+    await expect(chunkPanel).toBeVisible({ timeout: 10_000 });
+    await expect(chunkPanel.getByText("Phân tích nội dung với Gemini")).toBeVisible();
+    await expect(chunkPanel.getByText("Lưu các đoạn")).toBeVisible();
+
+    // Wait for the re-chunk to actually finish so subsequent tests in this block
+    // see chunks (not an empty list during the in-flight ChunkTranscriptStream).
+    await expect(page.getByRole("button", { name: "Phân đoạn lại" })).toBeVisible({ timeout: 120_000 });
+    await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
+  });
+
+  // Regression test for the Vietnamese-coherence bug: before the fix, the
+  // CoherenceBadge always read 0% (or under 30%) for VN audio because the regex
+  // didn't match Latin Extended Additional diacritics. This test runs after the
+  // real Whisper+Gemini pipeline and asserts that at least one chunk shows
+  // a non-zero coherence percentage.
+  test("after pipeline: CoherenceBadge renders a valid % for every chunk", async ({ teacherPage: page }) => {
+    if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
+    await page.goto(lessonUrl);
+    await page.reload();
+
+    // The badge appears in two places under the "Phân đoạn video" tab:
+    //   • Step 2 "Chỉnh sửa đoạn" (collapsible, default closed)
+    //   • Step 3 "Cấu hình số câu hỏi" (always open — isLast)
+    // Step 3 is enough to verify per-chunk coherence is computed and rendered.
+    await page.getByRole("button", { name: "Phân đoạn video" }).click();
+
+    const badges = page.getByTestId("coherence-badge");
+    await expect(badges.first()).toBeVisible({ timeout: 10_000 });
+
+    const count = await badges.count();
+    expect(count).toBeGreaterThan(0);
+
+    let maxScore = 0;
+    for (let i = 0; i < count; i++) {
+      const raw = await badges.nth(i).getAttribute("data-score");
+      expect(raw, `badge ${i} missing data-score`).not.toBeNull();
+      const score = parseInt(raw!, 10);
+      expect(Number.isFinite(score), `badge ${i} score must be a number`).toBe(true);
+      expect(score).toBeGreaterThanOrEqual(0);
+      expect(score).toBeLessThanOrEqual(100);
+      // Rendered text matches the attribute → no rounding mismatch.
+      await expect(badges.nth(i)).toHaveText(`${score}%`);
+      if (score > maxScore) maxScore = score;
+    }
+
+    // Bug fix verification: pre-fix every chunk read 0% because the regex
+    // dropped most VN tokens. Any non-zero value confirms the new formula
+    // (Unicode \p{L} tokenization + stopwords + lexical-chain + overlap)
+    // is reaching real content.
+    expect(maxScore, "all chunks read 0% — coherence regression").toBeGreaterThan(0);
+  });
+
   test("after video replacement: transcript state and VideoPlayer clear", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     test.setTimeout(60_000);
@@ -722,25 +777,6 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     // AnalyzeButton state reset: button reverts to "Trích xuất transcript" (not "Trích xuất lại transcript")
     await expect(page.getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Trích xuất lại transcript" })).not.toBeVisible();
-  });
-
-  test("chunk step labels appear during ChunkTranscriptStream", async ({ teacherPage: page }) => {
-    if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    test.setTimeout(300_000);
-    // The pipeline lesson has a complete transcript — re-run chunking to observe progress labels.
-    await page.goto(lessonUrl);
-    await page.reload();
-
-    // Navigate to "Phân đoạn video" tab where the "Phân đoạn lại" button lives
-    await page.getByRole("button", { name: "Phân đoạn video" }).click();
-    // PipelineStep 1 is collapsed after pipeline — expand it so the button is in the DOM
-    await page.getByLabel("Mở rộng").first().click();
-    await page.getByRole("button", { name: "Phân đoạn lại" }).click();
-
-    const chunkPanel = page.locator('[data-testid="chunk-progress"]');
-    await expect(chunkPanel).toBeVisible({ timeout: 10_000 });
-    await expect(chunkPanel.getByText("Phân tích nội dung với Gemini")).toBeVisible();
-    await expect(chunkPanel.getByText("Lưu các đoạn")).toBeVisible();
   });
 });
 

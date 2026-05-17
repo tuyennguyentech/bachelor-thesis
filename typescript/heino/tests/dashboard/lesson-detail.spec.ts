@@ -11,10 +11,14 @@
  * - Teacher sees "Thay video", video key, and AI section on lesson with video_key
  */
 
-import { test, expect } from "../fixtures";
-import type { Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  goToSeededLesson,
+  SEED_HUST_CS_SLUG as ORG_SLUG,
+  SEED_DSA_LESSON_BIG_O as SEEDED_LESSON_BIG_O,
+} from "../fixtures";
 
-const ORG_SLUG = "hust-cs";
 const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
 
 function uid(base: string) {
@@ -164,31 +168,6 @@ test.describe("Lesson detail — progress section", () => {
     await expect(page.getByText("Tiến độ học viên")).toBeVisible();
   });
 });
-
-// ── Seeded lesson navigation helper ───────────────────────────────────────
-
-const SEEDED_COURSE = "Cấu trúc dữ liệu và Giải thuật";
-const SEEDED_LESSON_BIG_O = "Bài 1: Big-O, Omega, Theta notation";
-const HUST_CS_COURSES_BASE = `/dashboard/organizations/hust-cs/courses`;
-
-// Paginates through the courses list (ordered newest-first) to find the seeded
-// DSA course, then navigates to the given lesson inside it.
-async function goToSeededLesson(page: Page, lessonTitle: string): Promise<void> {
-  for (let p = 1; p <= 30; p++) {
-    await page.goto(`${HUST_CS_COURSES_BASE}?page=${p}`);
-    const courseRow = page.getByRole("row").filter({ hasText: SEEDED_COURSE });
-    if ((await courseRow.count()) > 0) {
-      const courseHref = await courseRow.getByRole("link").first().getAttribute("href");
-      await page.goto(`${courseHref}`);
-      const lessonLink = page.getByRole("link").filter({ hasText: lessonTitle }).first();
-      const lessonHref = await lessonLink.getAttribute("href");
-      await page.goto(`${lessonHref}`);
-      return;
-    }
-    if ((await page.getByRole("link", { name: "Sau →" }).count()) === 0) break;
-  }
-  throw new Error(`Seeded course "${SEEDED_COURSE}" not found within 30 pages`);
-}
 
 // ── Seeded lesson — student sees previous quiz attempt ─────────────────────
 

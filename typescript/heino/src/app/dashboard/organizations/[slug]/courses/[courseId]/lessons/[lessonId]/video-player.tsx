@@ -45,7 +45,7 @@ export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lesso
     if (Math.abs(pos - lastSavedPos.current) < 1) return;
     lastSavedPos.current = pos;
     void aiClient.updateWatchProgress({ lessonId, positionSeconds: pos });
-  }, [lessonId]);
+  }, [lessonId, aiClient]);
 
   // Sort checkpoints by startSeconds so we can find the first upcoming one
   const pending = checkpoints

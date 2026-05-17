@@ -40,7 +40,11 @@ export interface Session {
 
 export async function verifyJwt(token: string): Promise<JWTClaims | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
+    const { payload } = await jwtVerify(token, JWT_SECRET, {
+      algorithms: ["HS256"],
+      issuer: "dyadia",
+      audience: "dyadia-client",
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const claims = fromJson(JWTClaimsSchema, payload as any);
     if (claims.tokenType !== TokenType.ACCESS) return null;

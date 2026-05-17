@@ -106,7 +106,7 @@ func (s *LessonsSvc) fetchLesson(ctx context.Context, id string) (gen.Lesson, er
 	return l, nil
 }
 
-func (s *LessonsSvc) descToPgText(desc string) pgtype.Text {
+func descToPgText(desc string) pgtype.Text {
 	return pgtype.Text{String: desc, Valid: desc != ""}
 }
 
@@ -136,7 +136,7 @@ func (s *LessonsSvc) CreateLesson(
 		return q.CreateLesson(ctx, gen.CreateLessonParams{
 			ModuleID:    module.ID,
 			Title:       req.GetTitle(),
-			Description: s.descToPgText(req.GetDescription()),
+			Description: descToPgText(req.GetDescription()),
 			OrderIndex:  req.GetOrderIndex(),
 		})
 	})
@@ -285,7 +285,7 @@ func (s *LessonsSvc) UpdateLesson(
 		return q.UpdateLesson(ctx, gen.UpdateLessonParams{
 			ID:          existing.ID,
 			Title:       req.GetTitle(),
-			Description: s.descToPgText(req.GetDescription()),
+			Description: descToPgText(req.GetDescription()),
 			OrderIndex:  req.GetOrderIndex(),
 		})
 	})

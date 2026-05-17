@@ -190,6 +190,7 @@ function QuestionRow({ question: q, index, onUpdate, onDelete, aiClient }: Quest
   const [deleting, startDelete] = useTransition();
   const [saveError, setSaveError] = useState<string | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function handleSave(data: QuestionFormData) {
     setSaveError(null);
@@ -216,12 +217,13 @@ function QuestionRow({ question: q, index, onUpdate, onDelete, aiClient }: Quest
   }
 
   function handleDelete() {
+    setDeleteError(null);
     startDelete(async () => {
       try {
         await aiClient.deleteLessonQuestion({ questionId: q.id });
         onDelete(q.id);
-      } catch {
-        // silently ignore
+      } catch (err) {
+        setDeleteError(err instanceof ConnectError ? err.message : "Không thể xoá câu hỏi");
       }
     });
   }
@@ -306,6 +308,7 @@ function QuestionRow({ question: q, index, onUpdate, onDelete, aiClient }: Quest
       </p>
 
       {regenError && <p data-testid="regen-error" className="text-xs text-destructive ml-4">{regenError}</p>}
+      {deleteError && <p data-testid="delete-error" className="text-xs text-destructive ml-4">{deleteError}</p>}
     </div>
   );
 }

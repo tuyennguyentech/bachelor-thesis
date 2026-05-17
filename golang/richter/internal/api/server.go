@@ -66,8 +66,12 @@ func (s *ServerSvc) Start(ctx context.Context) {
 	}()
 }
 
-func (s *ServerSvc) Shutdown(_ context.Context) error {
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return s.srv.Shutdown(shutdownCtx)
+func (s *ServerSvc) Shutdown(ctx context.Context) error {
+	// Respect caller's deadline if any, otherwise bound shutdown at 30s so we don't hang forever.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+	return s.srv.Shutdown(ctx)
 }

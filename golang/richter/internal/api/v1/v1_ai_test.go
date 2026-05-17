@@ -935,6 +935,93 @@ func TestAIStatusMapping(t *testing.T) {
 	}
 }
 
+// ── TestGetLessonAnalysis_StripsCorrectAnswers ───────────────────────────────
+
+// TestGetLessonAnalysis_StripsCorrectAnswers verifies that GetLessonAnalysis hides
+// correct_answer (-1 sentinel) and explanation (empty) from students who have not
+// yet submitted, while teachers/admins and students with a prior attempt see real
+// values. Regression test: prior to this fix, the page's RSC payload (and the raw
+// RPC response) leaked every question's correct answer to all org members.
+func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
+	questions := insertTestQuestions(t, e.lessonID, 3)
+
+	realAnswers := make([]int32, len(questions))
+	for i, q := range questions {
+		realAnswers[i] = q.CorrectAnswer
+	}
+
+	assertQuestions := func(t *testing.T, qs []*richterv1.LessonQuestion, wantStripped bool) {
+		t.Helper()
+		if len(qs) != len(questions) {
+			t.Fatalf("question count: want %d, got %d", len(questions), len(qs))
+		}
+		for i, q := range qs {
+			if wantStripped {
+				if q.CorrectAnswer != -1 {
+					t.Errorf("question[%d]: expected stripped CorrectAnswer=-1, got %d", i, q.CorrectAnswer)
+				}
+				if q.Explanation != "" {
+					t.Errorf("question[%d]: expected stripped Explanation, got %q", i, q.Explanation)
+				}
+			} else {
+				if q.CorrectAnswer != realAnswers[i] {
+					t.Errorf("question[%d]: CorrectAnswer want %d, got %d", i, realAnswers[i], q.CorrectAnswer)
+				}
+				if q.Explanation == "" {
+					t.Errorf("question[%d]: expected non-empty Explanation", i)
+				}
+			}
+		}
+	}
+
+	t.Run("Teacher/SeesRealAnswers", func(t *testing.T) {
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		assertQuestions(t, res.Analysis.Questions, false)
+	})
+
+	t.Run("Owner/SeesRealAnswers", func(t *testing.T) {
+		res, err := e.aiOwner.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		assertQuestions(t, res.Analysis.Questions, false)
+	})
+
+	t.Run("StudentWithoutAttempt/AnswersStripped", func(t *testing.T) {
+		// student2 has not submitted any attempt yet.
+		res, err := e.aiStudent2.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		assertQuestions(t, res.Analysis.Questions, true)
+	})
+
+	t.Run("StudentWithAttempt/SeesRealAnswers", func(t *testing.T) {
+		// student submits, then re-fetches: correct_answer should now be revealed
+		// because the user has already taken the quiz once.
+		studentQuiz := richterv1connect.NewQuizServiceClient(httpClientWithToken(e.studentToken), e.url)
+		if _, err := studentQuiz.SubmitQuiz(ctx, &richterv1.SubmitQuizRequest{
+			LessonId: e.lessonID,
+			Answers:  []int32{0, 0, 0},
+		}); err != nil {
+			t.Fatalf("SubmitQuiz: %v", err)
+		}
+
+		res, err := e.aiStudent.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		assertQuestions(t, res.Analysis.Questions, false)
+	})
+}
+
 // ── TestAIGenerateQuestionsResumable ─────────────────────────────────────────
 
 // TestAIGenerateQuestionsResumable verifies the skip-if-already-done logic and
@@ -1064,6 +1151,33 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 		if events[0].Step == richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK &&
 			strings.Contains(events[0].Message, "bỏ qua") {
 			t.Error("single-chunk mode must not skip even when chunk already has questions")
+		}
+	})
+
+	// Regression test for cross-lesson IDOR: a teacher of lesson A must not be
+	// able to target a chunk_id from lesson B (even within the same org). Without
+	// the c.LessonID == lessonID guard, the chunk-mode branch would happily wipe
+	// & repopulate the foreign chunk's questions under lesson A.
+	t.Run("CrossLessonChunk/InvalidArgument", func(t *testing.T) {
+		// Create a second lesson in the same module → its chunks belong to a different lesson.
+		otherLesson, err := e.adminLessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+			ModuleId: e.moduleID, Title: gofakeit.JobTitle(), OrderIndex: 99,
+		})
+		if err != nil {
+			t.Fatalf("create second lesson: %v", err)
+		}
+		foreignChunk := insertTestChunk(t, otherLesson.Lesson.Id, 0, "")
+
+		s, err := e.aiTeacher.GenerateQuestionsStream(ctx, &richterv1.GenerateQuestionsRequest{
+			LessonId: e.lessonID,
+			ChunkId:  foreignChunk.ID.String(),
+		})
+		if err != nil {
+			t.Fatalf("GenerateQuestionsStream call: %v", err)
+		}
+		s.Receive()
+		if got := s.Err(); connect.CodeOf(got) != connect.CodeInvalidArgument {
+			t.Errorf("cross-lesson chunk: want CodeInvalidArgument, got %v (err=%v)", connect.CodeOf(got), got)
 		}
 	})
 }

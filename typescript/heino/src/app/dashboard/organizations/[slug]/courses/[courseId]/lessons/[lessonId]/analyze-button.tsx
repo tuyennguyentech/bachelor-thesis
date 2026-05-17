@@ -226,17 +226,19 @@ function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disabled, ai
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(segment.text);
   const [saving, startSaving] = useTransition();
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function handleSave() {
     if (draft.trim() === segment.text) { setEditing(false); return; }
+    setSaveError(null);
     startSaving(async () => {
       try {
         await aiClient.updateTranscriptSegment({ lessonId, segmentIndex: index, text: draft.trim() });
         onUpdated(index, draft.trim());
         setEditing(false);
         onSaved?.();
-      } catch {
-        // silently ignore errors
+      } catch (err) {
+        setSaveError(err instanceof ConnectError ? err.message : "Không thể lưu — thử lại");
       }
     });
   }
@@ -248,16 +250,19 @@ function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disabled, ai
       </span>
       <div className="flex-1 min-w-0">
         {editing ? (
-          <textarea
-            autoFocus
-            className="w-full resize-none rounded border border-input bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none"
-            rows={3}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") { setDraft(segment.text); setEditing(false); }
-            }}
-          />
+          <>
+            <textarea
+              autoFocus
+              className="w-full resize-none rounded border border-input bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none"
+              rows={3}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { setDraft(segment.text); setEditing(false); setSaveError(null); }
+              }}
+            />
+            {saveError && <p className="text-xs text-destructive mt-0.5">{saveError}</p>}
+          </>
         ) : (
           <p className="text-foreground leading-relaxed">{segment.text}</p>
         )}
@@ -292,26 +297,85 @@ function getChunkSegments(chunk: TranscriptChunk, allSegments: TranscriptSegment
   );
 }
 
+const COHERENCE_STOPWORDS = new Set([
+  // Vietnamese function words
+  "là", "của", "và", "có", "được", "cho", "để", "trong", "với", "này",
+  "đó", "đây", "như", "khi", "nếu", "mà", "nhưng", "hoặc", "vì", "nên",
+  "đã", "đang", "sẽ", "không", "phải", "chỉ", "cũng", "rất", "lại", "thì",
+  "về", "ở", "từ", "bằng", "theo", "qua", "trên", "dưới", "sau", "trước",
+  "tôi", "bạn", "nó", "họ", "chúng", "ta", "mình", "ai", "gì", "nào",
+  "sao", "đâu", "một", "hai", "ba", "các", "những", "mỗi", "nhiều", "ít",
+  "thế", "ra", "vào", "lên", "xuống", "đi", "đến", "tới", "nữa", "thêm",
+  "rồi", "vẫn", "còn", "hay", "chứ", "à", "nhé", "đấy", "ấy", "luôn",
+  // English function words
+  "the", "is", "are", "was", "were", "be", "been", "being",
+  "to", "of", "in", "on", "at", "by", "for", "with", "from",
+  "and", "or", "but", "if", "then", "as", "that", "this", "these", "those",
+  "it", "its", "he", "she", "they", "we", "you", "me", "my", "our", "your",
+  "do", "does", "did", "not", "no", "so", "such", "very", "more", "most",
+  "all", "any", "some", "can", "will", "would", "should", "could", "may",
+  "has", "have", "had", "an", "there", "here", "what", "which", "who",
+]);
+
+function tokenizeForCoherence(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of text.toLowerCase().matchAll(/\p{L}{2,}/gu)) {
+    const w = m[0];
+    if (!COHERENCE_STOPWORDS.has(w)) out.add(w);
+  }
+  return out;
+}
+
+// Lexical cohesion score in [0,1] for a chunk's segments. Combines:
+//   (1) chunk-wide lexical chain density — fraction of distinct content
+//       words that recur in ≥2 segments;
+//   (2) mean adjacent overlap coefficient — for each consecutive pair,
+//       |A ∩ B| / min(|A|, |B|), averaged.
+// Both signals approach 1 when the chunk stays on one topic and 0 when
+// neighbouring sentences share no vocabulary.
 function computeCoherence(segs: TranscriptSegment[]): number {
   if (segs.length === 0) return 0;
   if (segs.length === 1) return 1;
-  const allWords = segs.flatMap(s => (s.text.toLowerCase().match(/\b[a-zA-ZÀ-ɏ]{4,}\b/g) ?? []));
-  if (allWords.length === 0) return 0;
-  const uniqueWords = new Set(allWords);
-  return 1 - uniqueWords.size / allWords.length;
+  const tokens = segs.map(s => tokenizeForCoherence(s.text));
+
+  const docFreq = new Map<string, number>();
+  for (const set of tokens) for (const w of set) docFreq.set(w, (docFreq.get(w) ?? 0) + 1);
+  if (docFreq.size === 0) return 0;
+  let repeated = 0;
+  for (const c of docFreq.values()) if (c >= 2) repeated++;
+  const chainRatio = repeated / docFreq.size;
+
+  let sum = 0, pairs = 0;
+  for (let i = 1; i < tokens.length; i++) {
+    const a = tokens[i - 1], b = tokens[i];
+    if (a.size === 0 && b.size === 0) continue;
+    if (a.size === 0 || b.size === 0) { pairs++; continue; }
+    let inter = 0;
+    for (const w of a) if (b.has(w)) inter++;
+    sum += inter / Math.min(a.size, b.size);
+    pairs++;
+  }
+  const adj = pairs === 0 ? 0 : sum / pairs;
+
+  return 0.5 * chainRatio + 0.5 * adj;
 }
 
 // ── Coherence badge ───────────────────────────────────────────────────────────
 
 function CoherenceBadge({ score }: { score: number }) {
   const pct = Math.round(score * 100);
-  const color = pct >= 70
+  const color = pct >= 30
     ? "text-green-700 dark:text-green-400 border-green-300 dark:border-green-800"
-    : pct >= 40
+    : pct >= 15
     ? "text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-800"
     : "text-red-700 dark:text-red-400 border-red-300 dark:border-red-800";
   return (
-    <span className={`text-xs border rounded px-1.5 py-px font-mono ${color}`} title="Mức độ gắn kết nội dung">
+    <span
+      data-testid="coherence-badge"
+      data-score={pct}
+      className={`text-xs border rounded px-1.5 py-px font-mono ${color}`}
+      title="Mức độ gắn kết nội dung (overlap từ vựng giữa các câu liền kề)"
+    >
       {pct}%
     </span>
   );
@@ -426,12 +490,15 @@ function ChunkEditor({
 
 function QuestionConfigRow({ chunk, disabled, coherence, aiClient }: { chunk: TranscriptChunk; disabled: boolean; coherence?: number; aiClient: ReturnType<typeof useRichterWebClient<typeof AIService>> }) {
   const [count, setCount] = useState(chunk.questionCountConfig || 1);
+  const [prevConfig, setPrevConfig] = useState(chunk.questionCountConfig || 1);
   const [, startSaving] = useTransition();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  // Adopt parent's value when it changes externally (e.g. after a save round-trip refreshes the list).
+  if (prevConfig !== (chunk.questionCountConfig || 1)) {
+    setPrevConfig(chunk.questionCountConfig || 1);
     setCount(chunk.questionCountConfig || 1);
-  }, [chunk.id, chunk.questionCountConfig]);
+  }
 
   useEffect(() => {
     return () => {
@@ -622,7 +689,7 @@ export function AnalyzeButton({
       }
     }, 5000);
     return () => clearInterval(id);
-  }, [isSyncingExtract, isSyncingChunk, lessonId, router]);
+  }, [isSyncingExtract, isSyncingChunk, lessonId, router, aiClient]);
 
   // ── Stream helper ──────────────────────────────────────────────────────────
 
@@ -840,6 +907,7 @@ export function AnalyzeButton({
       setQuestions(analysis.questions);
       setQuestionsGenKey(k => k + 1);
     }
+    if (analysis) setStatus(analysis.status);
     router.refresh();
     // Auto-navigate to the questions tab to show the result.
     setActiveTab("cauHoi");

@@ -7,10 +7,19 @@ const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 const COOKIE_ACCESS = "dyadia_access";
 const COOKIE_REFRESH = "dyadia_refresh";
 
-async function isTokenValid(token: string): Promise<boolean> {
+// TOKEN_TYPE_ACCESS = 1 per richter/jwt/v1/jwt.proto. Refresh tokens carry
+// TOKEN_TYPE_REFRESH = 2 and have a much longer lifetime — they must never
+// satisfy the access cookie check, even if signed with the same secret.
+const TOKEN_TYPE_ACCESS = 1;
+
+async function isAccessTokenValid(token: string): Promise<boolean> {
   try {
-    await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-    return true;
+    const { payload } = await jwtVerify(token, JWT_SECRET, {
+      algorithms: ["HS256"],
+      issuer: "dyadia",
+      audience: "dyadia-client",
+    });
+    return payload.token_type === TOKEN_TYPE_ACCESS;
   } catch {
     return false;
   }
@@ -24,7 +33,7 @@ export async function proxy(request: NextRequest) {
   if (!isProtected) return NextResponse.next();
 
   const accessToken = request.cookies.get(COOKIE_ACCESS)?.value;
-  if (accessToken && (await isTokenValid(accessToken))) {
+  if (accessToken && (await isAccessTokenValid(accessToken))) {
     return NextResponse.next();
   }
 
