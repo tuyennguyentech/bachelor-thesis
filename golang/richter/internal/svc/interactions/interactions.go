@@ -140,6 +140,10 @@ func (s *InteractionsSvc) CreateManualInteraction(
 		kind = richterv1.InteractionKind_INTERACTION_KIND_MCQ
 	case *richterv1.CreateManualInteractionRequest_FillBlank:
 		kind = richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK
+	case *richterv1.CreateManualInteractionRequest_Listening:
+		kind = richterv1.InteractionKind_INTERACTION_KIND_LISTENING
+	case *richterv1.CreateManualInteractionRequest_Reading:
+		kind = richterv1.InteractionKind_INTERACTION_KIND_READING
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unsupported interaction config type"))
 	}
@@ -214,6 +218,24 @@ func (s *InteractionsSvc) UpdateInteraction(
 		h := Get(richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK)
 		if h == nil {
 			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no fill_blank handler"))
+		}
+		configJSON, err = h.ConfigFromUpdateProto(req)
+		if err != nil {
+			return nil, err
+		}
+	case *richterv1.UpdateInteractionRequest_Listening:
+		h := Get(richterv1.InteractionKind_INTERACTION_KIND_LISTENING)
+		if h == nil {
+			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no listening handler"))
+		}
+		configJSON, err = h.ConfigFromUpdateProto(req)
+		if err != nil {
+			return nil, err
+		}
+	case *richterv1.UpdateInteractionRequest_Reading:
+		h := Get(richterv1.InteractionKind_INTERACTION_KIND_READING)
+		if h == nil {
+			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no reading handler"))
 		}
 		configJSON, err = h.ConfigFromUpdateProto(req)
 		if err != nil {
