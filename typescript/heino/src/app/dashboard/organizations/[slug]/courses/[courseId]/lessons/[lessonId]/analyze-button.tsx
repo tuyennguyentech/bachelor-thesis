@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
-  SparklesIcon, Loader2Icon, CheckIcon, XIcon,
+  Loader2Icon, CheckIcon, XIcon,
   ChevronRightIcon, ChevronDownIcon, RefreshCwIcon, MergeIcon, Trash2Icon,
   PencilIcon, LockIcon, ScissorsIcon, ArrowUpIcon, ArrowDownIcon, PlayIcon,
 } from "lucide-react";
@@ -17,7 +17,7 @@ import { LessonService } from "buf/gen/richter/v1/courses_pb";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { ConnectError } from "@connectrpc/connect";
-import { InteractionEditorList } from "./interaction-editor-list";
+import { TabExercises } from "./tab-exercises";
 
 // ── Step progress helpers ─────────────────────────────────────────────────────
 
@@ -887,12 +887,6 @@ export function AnalyzeButton({
 
   const step5Status: PipelineStepStatus = hasChunks ? "available" : "locked";
 
-  const step7Status: PipelineStepStatus =
-    !hasChunks ? "locked" :
-    isGenerating ? "active" :
-    genState.phase === "error" ? "error" :
-    questionsGenerated ? "done" : "available";
-
   const tabDefs: { key: TabKey; label: string; dot?: "done" | "active" | "error" }[] = [
     {
       key: "phienAm",
@@ -1086,103 +1080,23 @@ export function AnalyzeButton({
 
       {/* ── Tab 3: Bài tập ── */}
       {activeTab === "baiTap" && (
-        <div className="flex flex-col gap-4">
-          {/* Feedback mode picker */}
-          <div className="rounded-md border border-border bg-muted/20 p-3 flex flex-col gap-2">
-            <p className="text-xs font-medium text-foreground">Chế độ phản hồi</p>
-            <div className="flex flex-col gap-1.5">
-              {([
-                { value: FeedbackMode.HIDDEN, label: "Ẩn", desc: "Chỉ hiện tổng điểm, không tiết lộ đáp án" },
-                { value: FeedbackMode.AFTER_SUBMIT, label: "Sau khi nộp bài", desc: "Đáp án đúng + giải thích hiện sau khi nộp (mặc định)" },
-                { value: FeedbackMode.AFTER_EACH, label: "Sau mỗi câu", desc: "Phản hồi ngay sau khi chọn đáp án (luyện tập)" },
-              ] as const).map(({ value, label, desc }) => (
-                <label
-                  key={value}
-                  className={`flex items-start gap-2 rounded-md px-2 py-1.5 cursor-pointer border transition-colors
-                    ${feedbackMode === value ? "border-primary/50 bg-primary/5" : "border-transparent hover:bg-muted/40"}`}
-                >
-                  <input
-                    type="radio"
-                    name="feedbackMode"
-                    value={value}
-                    checked={feedbackMode === value}
-                    disabled={savingFeedback}
-                    onChange={() => handleFeedbackModeChange(value)}
-                    className="mt-0.5 shrink-0"
-                  />
-                  <div>
-                    <p className="text-xs font-medium">{label}</p>
-                    <p className="text-xs text-muted-foreground">{desc}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
-            {savingFeedback && <p className="text-xs text-muted-foreground">Đang lưu…</p>}
-          </div>
-
-          {/* Generate button + progress */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2 mb-1">
-              <span className={`text-sm font-medium ${step7Status === "locked" ? "text-muted-foreground" : "text-foreground"}`}>
-                Tạo câu hỏi bằng AI
-              </span>
-              {step7Status === "locked" && (
-                <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px flex items-center gap-1">
-                  <LockIcon className="size-2.5" /> Cần phân đoạn trước
-                </span>
-              )}
-            </div>
-            <Button
-              variant={questionsGenerated ? "outline" : "default"}
-              size="sm"
-              disabled={isBusy || chunks.length === 0}
-              onClick={() => handleGenerate()}
-              className="gap-2 w-fit"
-            >
-              {isGenerating
-                ? <Loader2Icon className="size-4 animate-spin" />
-                : questionsGenerated
-                  ? <RefreshCwIcon className="size-4" />
-                  : <SparklesIcon className="size-4" />}
-              {isGenerating ? "Đang tạo câu hỏi…" :
-                questionsGenerated ? "Tạo lại câu hỏi" : "Tạo câu hỏi"}
-            </Button>
-            {genState.phase === "running" && (
-              <p className="text-xs text-muted-foreground">
-                {genState.message}
-                {genState.totalChunks > 0 && ` (${genState.chunkIndex + 1}/${genState.totalChunks})`}
-              </p>
-            )}
-            {genState.phase === "done" && (
-              <p className="text-xs text-green-700 dark:text-green-400 font-medium" data-testid="gen-done">
-                {genWarnings.length > 0
-                  ? `Hoàn thành (${genWarnings.length} đoạn gặp lỗi — xem chi tiết bên dưới)`
-                  : "Câu hỏi đã được tạo thành công!"}
-              </p>
-            )}
-            {genWarnings.length > 0 && (
-              <div className="flex flex-col gap-0.5">
-                {genWarnings.map((w, i) => (
-                  <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{w}</p>
-                ))}
-              </div>
-            )}
-            {genState.phase === "error" && (
-              <p className="text-xs text-destructive" data-testid="gen-error">{genState.message}</p>
-            )}
-          </div>
-
-          {/* Questions list — always visible so teacher can add manually */}
-          <div className="flex flex-col gap-2 border-t pt-3">
-            <p className="text-sm font-medium">Câu hỏi trắc nghiệm ({interactions.length} câu)</p>
-            <InteractionEditorList
-              key={questionsGenKey}
-              lessonId={lessonId}
-              initialInteractions={interactions}
-              token={token}
-            />
-          </div>
-        </div>
+        <TabExercises
+          key={questionsGenKey}
+          lessonId={lessonId}
+          chunks={chunks}
+          segments={segments}
+          initialInteractions={interactions}
+          token={token}
+          disabled={isBusy}
+          genState={genState}
+          genWarnings={genWarnings}
+          questionsGenerated={questionsGenerated}
+          feedbackMode={feedbackMode}
+          savingFeedback={savingFeedback}
+          onFeedbackModeChange={handleFeedbackModeChange}
+          onGenerateLesson={handleGenerate}
+          onInteractionsChange={setInteractions}
+        />
       )}
     </div>
   );

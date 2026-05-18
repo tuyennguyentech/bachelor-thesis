@@ -163,6 +163,7 @@ message CreateManualInteractionRequest {
   string prompt = 2 [(buf.validate.field).string.min_len = 1];
   string explanation = 3;
   float start_seconds = 4 [(buf.validate.field).float.gte = 0];
+  string chunk_id = 5;
   oneof config {
     McqConfig mcq = 20;
     FillBlankConfig fill_blank = 21;

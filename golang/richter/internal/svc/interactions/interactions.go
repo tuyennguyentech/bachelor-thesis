@@ -170,17 +170,23 @@ func (s *InteractionsSvc) CreateManualInteraction(
 		if err != nil {
 			return gen.LessonInteraction{}, fmt.Errorf("compute order_index: %w", err)
 		}
+		chunkID := pgtype.UUID{}
+		if id := req.GetChunkId(); id != "" {
+			if parsed, parseErr := svc.ParseUUID(id); parseErr == nil {
+				chunkID = parsed
+			}
+		}
 		return q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
-			LessonID:    lessonID,
-			ChunkID:     pgtype.UUID{},
-			Kind:        kindToDBString(kind),
+			LessonID:     lessonID,
+			ChunkID:      chunkID,
+			Kind:         kindToDBString(kind),
 			StartSeconds: float32(req.GetStartSeconds()),
-			OrderIndex:  nextIdx,
-			Prompt:      req.GetPrompt(),
-			Explanation: req.GetExplanation(),
-			Config:      configJSON,
-			MaxScore:    1.0,
-			GeneratedBy: "manual",
+			OrderIndex:   nextIdx,
+			Prompt:       req.GetPrompt(),
+			Explanation:  req.GetExplanation(),
+			Config:       configJSON,
+			MaxScore:     1.0,
+			GeneratedBy:  "manual",
 		})
 	})
 	if err != nil {
