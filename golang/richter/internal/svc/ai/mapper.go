@@ -2,15 +2,81 @@ package ai
 
 import (
 	"encoding/json"
-	"log/slog"
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/svc"
+	"example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func analysisToProto(a gen.LessonAnalysis, questions []gen.LessonQuestion, transcript string, segments []transcriptSegment) *richterv1.LessonAnalysis {
+// interactionConfigJSON is the on-disk shape for interaction_config / default_interaction_config.
+type interactionConfigJSON struct {
+	Count    int32    `json:"count,omitempty"`
+	Kinds    []string `json:"kinds,omitempty"`
+	Strategy string   `json:"strategy,omitempty"`
+}
+
+// interactionConfigToJSON serializes a ChunkInteractionConfig proto to JSON for DB storage.
+// Returns nil when cfg is nil or effectively empty.
+func interactionConfigToJSON(cfg *richterv1.ChunkInteractionConfig) []byte {
+	if cfg == nil {
+		return nil
+	}
+	kinds := make([]string, 0, len(cfg.GetKinds()))
+	for _, k := range cfg.GetKinds() {
+		kinds = append(kinds, interactions.KindToDBString(k))
+	}
+	strategy := ""
+	switch cfg.GetStrategy() {
+	case richterv1.GenerationStrategy_GENERATION_STRATEGY_AI_CHOOSE:
+		strategy = "ai_choose"
+	case richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION:
+		strategy = "even"
+	}
+	raw := interactionConfigJSON{Count: cfg.GetCount(), Kinds: kinds, Strategy: strategy}
+	if raw.Count == 0 && len(raw.Kinds) == 0 && raw.Strategy == "" {
+		return nil
+	}
+	data, _ := json.Marshal(raw)
+	return data
+}
+
+// interactionConfigFromJSON deserializes DB JSON into a ChunkInteractionConfig proto.
+// Returns nil when data is empty or contains only zero values.
+func interactionConfigFromJSON(data []byte) *richterv1.ChunkInteractionConfig {
+	if len(data) == 0 {
+		return nil
+	}
+	var raw interactionConfigJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	if raw.Count == 0 && len(raw.Kinds) == 0 && raw.Strategy == "" {
+		return nil
+	}
+	kinds := make([]richterv1.InteractionKind, 0, len(raw.Kinds))
+	for _, ks := range raw.Kinds {
+		k := interactions.DBStringToKind(ks)
+		if k != richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED {
+			kinds = append(kinds, k)
+		}
+	}
+	strategy := richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED
+	switch raw.Strategy {
+	case "ai_choose":
+		strategy = richterv1.GenerationStrategy_GENERATION_STRATEGY_AI_CHOOSE
+	case "even":
+		strategy = richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION
+	}
+	return &richterv1.ChunkInteractionConfig{
+		Count:    raw.Count,
+		Kinds:    kinds,
+		Strategy: strategy,
+	}
+}
+
+func analysisToProto(a gen.LessonAnalysis, ints []gen.LessonInteraction, stripAnswers bool, transcript string, segments []transcriptSegment, defaultCfg *richterv1.ChunkInteractionConfig) *richterv1.LessonAnalysis {
 	status := richterv1.AnalysisStatus_ANALYSIS_STATUS_UNSPECIFIED
 	switch a.Status {
 	case gen.LessonAnalysisStatusPending:
@@ -32,9 +98,9 @@ func analysisToProto(a gen.LessonAnalysis, questions []gen.LessonQuestion, trans
 		errMsg = a.ErrorMsg.String
 	}
 
-	var protoQs []*richterv1.LessonQuestion
-	for _, q := range questions {
-		protoQs = append(protoQs, questionToProto(q))
+	protoInts := make([]*richterv1.LessonInteraction, 0, len(ints))
+	for _, i := range ints {
+		protoInts = append(protoInts, interactions.InteractionToProto(i, stripAnswers))
 	}
 
 	var createdAt, updatedAt *timestamppb.Timestamp
@@ -55,14 +121,15 @@ func analysisToProto(a gen.LessonAnalysis, questions []gen.LessonQuestion, trans
 	}
 
 	return &richterv1.LessonAnalysis{
-		LessonId:           a.LessonID.String(),
-		Status:             status,
-		ErrorMsg:           errMsg,
-		Transcript:         transcript,
-		Questions:          protoQs,
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
-		TranscriptSegments: protoSegs,
+		LessonId:                   a.LessonID.String(),
+		Status:                     status,
+		ErrorMsg:                   errMsg,
+		Transcript:                 transcript,
+		Interactions:               protoInts,
+		CreatedAt:                  createdAt,
+		UpdatedAt:                  updatedAt,
+		TranscriptSegments:         protoSegs,
+		DefaultInteractionConfig:   defaultCfg,
 	}
 }
 
@@ -76,45 +143,6 @@ func chunkToProto(c gen.LessonTranscriptChunk) *richterv1.TranscriptChunk {
 		Summary:             c.Summary,
 		QuestionCountConfig: c.QuestionCountConfig,
 		CoherenceScore:      c.CoherenceScore,
-	}
-}
-
-func questionToProto(q gen.LessonQuestion) *richterv1.LessonQuestion {
-	var opts []string
-	if err := json.Unmarshal(q.Options, &opts); err != nil {
-		slog.Warn("questionToProto: corrupted options JSON in DB", "question_id", q.ID.String(), "err", err)
-	}
-
-	protoOpts := make([]*richterv1.MCQOption, 0, len(opts))
-	for _, o := range opts {
-		protoOpts = append(protoOpts, &richterv1.MCQOption{Text: o})
-	}
-
-	explanation := ""
-	if q.Explanation.Valid {
-		explanation = q.Explanation.String
-	}
-
-	var createdAt *timestamppb.Timestamp
-	if q.CreatedAt.Valid {
-		createdAt = svc.TimestampToProto(q.CreatedAt)
-	}
-
-	chunkID := ""
-	if q.ChunkID.Valid {
-		chunkID = q.ChunkID.String()
-	}
-
-	return &richterv1.LessonQuestion{
-		Id:            q.ID.String(),
-		LessonId:      q.LessonID.String(),
-		QuestionText:  q.QuestionText,
-		Options:       protoOpts,
-		CorrectAnswer: q.CorrectAnswer,
-		Explanation:   explanation,
-		OrderIndex:    q.OrderIndex,
-		CreatedAt:     createdAt,
-		StartSeconds:  float32(q.StartSeconds),
-		ChunkId:       chunkID,
+		InteractionConfig:   interactionConfigFromJSON(c.InteractionConfig),
 	}
 }

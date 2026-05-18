@@ -23,6 +23,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// AIRegenerateFunc is provided by the AI service via DI to allow InteractionsSvc
+// to regenerate a single interaction using Gemini without a direct import cycle.
+type AIRegenerateFunc func(ctx context.Context, interactionID pgtype.UUID, newKind richterv1.InteractionKind) (*gen.LessonInteraction, error)
+
 var Package = do.Package(
 	do.Lazy(NewInteractionsSvc),
 )
@@ -32,8 +36,9 @@ func init() {
 }
 
 type InteractionsSvc struct {
-	pg    *db.PostgresSvc
-	authz *authz.AuthzSvc
+	pg      *db.PostgresSvc
+	authz   *authz.AuthzSvc
+	aiRegen AIRegenerateFunc // injected by AISvc; nil in test/unit contexts
 }
 
 var _ richterv1connect.InteractionServiceHandler = (*InteractionsSvc)(nil)
@@ -47,7 +52,10 @@ func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("AuthzSvc: %w", err)
 	}
-	return &InteractionsSvc{pg: pg, authz: az}, nil
+	// Optional: AI regeneration capability provided by AISvc. Nil-safe — falls
+	// back to CodeUnimplemented if not registered (e.g., in unit tests).
+	aiRegen, _ := do.Invoke[AIRegenerateFunc](i)
+	return &InteractionsSvc{pg: pg, authz: az, aiRegen: aiRegen}, nil
 }
 
 func (s *InteractionsSvc) Handler() (string, http.Handler) {
@@ -504,7 +512,36 @@ func (s *InteractionsSvc) RegenerateInteraction(
 	ctx context.Context,
 	req *richterv1.RegenerateInteractionRequest,
 ) (*richterv1.RegenerateInteractionResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
+	if s.aiRegen == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("AI regeneration not available"))
+	}
+	interactionID, err := svc.ParseUUID(req.GetInteractionId())
+	if err != nil {
+		return nil, err
+	}
+
+	// Load interaction to verify auth via lesson.
+	existing, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
+		return q.GetLessonInteractionByID(ctx, interactionID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, existing.LessonID); err != nil {
+		return nil, err
+	}
+
+	// Determine kind: use new_kind if specified, otherwise keep existing.
+	newKind := req.GetNewKind()
+	if newKind == richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED {
+		newKind = dbStringToKind(existing.Kind)
+	}
+
+	updated, err := s.aiRegen(ctx, interactionID, newKind)
+	if err != nil {
+		return nil, err
+	}
+	return &richterv1.RegenerateInteractionResponse{Interaction: InteractionToProto(*updated, false)}, nil
 }
 
 // ── ListAttempts ──────────────────────────────────────────────────────────────

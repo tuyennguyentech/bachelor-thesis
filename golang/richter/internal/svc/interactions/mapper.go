@@ -103,6 +103,9 @@ func kindToDBString(kind richterv1.InteractionKind) string {
 	}
 }
 
+// DBStringToKind converts a database kind string to the proto InteractionKind.
+func DBStringToKind(s string) richterv1.InteractionKind { return dbStringToKind(s) }
+
 func dbStringToKind(s string) richterv1.InteractionKind {
 	switch s {
 	case "mcq":

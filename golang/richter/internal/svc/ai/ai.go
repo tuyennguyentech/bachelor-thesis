@@ -42,6 +42,15 @@ import (
 
 var Package = do.Package(
 	do.Lazy(NewAISvc),
+	// Provide AIRegenerateFunc so InteractionsSvc can regenerate single interactions
+	// without creating a circular import (ai ↔ interactions).
+	do.Lazy[svcinteractions.AIRegenerateFunc](func(i do.Injector) (svcinteractions.AIRegenerateFunc, error) {
+		ai, err := do.Invoke[*AISvc](i)
+		if err != nil {
+			return nil, err
+		}
+		return ai.doRegenerateInteraction, nil
+	}),
 )
 
 func init() {
@@ -214,7 +223,7 @@ func (s *AISvc) GetLessonAnalysis(
 
 	strip := svcinteractions.ShouldStripAnswers(lesson.FeedbackMode, isTeacher, hasSubmitted)
 	return &richterv1.GetLessonAnalysisResponse{
-		Analysis: analysisToProto(analysis, ints, strip, transcript, segments),
+		Analysis: analysisToProto(analysis, ints, strip, transcript, segments, interactionConfigFromJSON(lesson.DefaultInteractionConfig)),
 		Chunks:   protoChunks,
 	}, nil
 }
@@ -1101,6 +1110,80 @@ func (s *AISvc) AdjustChunkBoundary(
 	}, nil
 }
 
+// ── Generation config helpers ─────────────────────────────────────────────────
+
+const defaultGenerationCount = 2
+
+// kindCount pairs a kind with how many interactions to generate for it in a single chunk.
+type kindCount struct {
+	kind  richterv1.InteractionKind
+	count int32
+}
+
+// resolveKindCounts merges (chunk config → lesson default → server default → request overrides)
+// and returns an ordered list of (kind, count) pairs whose total equals the effective count.
+func resolveKindCounts(
+	chunk gen.LessonTranscriptChunk,
+	lesson gen.Lesson,
+	reqKinds []richterv1.InteractionKind,
+	reqCount int32,
+	_ richterv1.GenerationStrategy, // strategy reserved; currently uses even-distribution
+) []kindCount {
+	// Merge configs from least to most specific.
+	var cfgKinds []richterv1.InteractionKind
+	cfgCount := int32(chunk.QuestionCountConfig)
+
+	if d := interactionConfigFromJSON(lesson.DefaultInteractionConfig); d != nil {
+		if len(d.Kinds) > 0 {
+			cfgKinds = d.Kinds
+		}
+		if d.Count > 0 {
+			cfgCount = d.Count
+		}
+	}
+	if c := interactionConfigFromJSON(chunk.InteractionConfig); c != nil {
+		if len(c.Kinds) > 0 {
+			cfgKinds = c.Kinds
+		}
+		if c.Count > 0 {
+			cfgCount = c.Count
+		}
+	}
+
+	// Request-level overrides take highest priority.
+	if len(reqKinds) > 0 {
+		cfgKinds = reqKinds
+	}
+	if reqCount > 0 {
+		cfgCount = reqCount
+	}
+
+	// Server defaults for any remaining unset fields.
+	if len(cfgKinds) == 0 {
+		cfgKinds = []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ}
+	}
+	if cfgCount <= 0 {
+		cfgCount = defaultGenerationCount
+	}
+
+	// Distribute cfgCount items across kinds (even distribution / round-robin).
+	kindMap := make(map[richterv1.InteractionKind]int32, len(cfgKinds))
+	for i := int32(0); i < cfgCount; i++ {
+		k := cfgKinds[i%int32(len(cfgKinds))]
+		kindMap[k]++
+	}
+	// Preserve order of cfgKinds for deterministic output.
+	seen := make(map[richterv1.InteractionKind]bool)
+	result := make([]kindCount, 0, len(kindMap))
+	for _, k := range cfgKinds {
+		if !seen[k] {
+			seen[k] = true
+			result = append(result, kindCount{k, kindMap[k]})
+		}
+	}
+	return result
+}
+
 // ── Step 7: GenerateInteractionsStream ───────────────────────────────────────
 
 func (s *AISvc) GenerateInteractionsStream(
@@ -1129,9 +1212,7 @@ func (s *AISvc) GenerateInteractionsStream(
 		if err != nil {
 			return svc.ConnectDBError(err)
 		}
-		// Defense in depth: requireTeacherRole only checks the requested lesson.
-		// Without this, a teacher of lesson A could pass a chunk_id from lesson B
-		// and end up generating/saving interactions tied to chunk B under lesson A.
+		// Defense in depth: ensure the chunk belongs to the requested lesson.
 		if c.LessonID != lessonID {
 			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunk does not belong to the requested lesson"))
 		}
@@ -1149,9 +1230,17 @@ func (s *AISvc) GenerateInteractionsStream(
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript chunks found — run Step 4 (chunk transcript) first"))
 	}
 
+	// Load lesson for default_interaction_config fallback.
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
+	})
+	if err != nil {
+		return svc.ConnectDBError(err)
+	}
+
 	total := int32(len(chunks))
 
-	// Pre-load which chunks already have interactions to support skip-if-exists.
+	// Pre-load which chunks already have interactions (skip-if-exists optimisation).
 	chunkHasInteractions := map[string]bool{}
 	if !req.GetForceRegenerate() && req.GetChunkId() == "" {
 		existingInts, intErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
@@ -1167,31 +1256,18 @@ func (s *AISvc) GenerateInteractionsStream(
 		}
 	}
 
-	// Determine interaction kind for this generation run.
-	reqKind := req.GetInteractionKind()
-	if reqKind == richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED {
-		reqKind = richterv1.InteractionKind_INTERACTION_KIND_MCQ
+	// Resolve request-level overrides (applied on top of per-chunk config in the loop).
+	reqKinds := req.GetInteractionKinds()
+	// Honour legacy interaction_kind field if interaction_kinds is empty.
+	if len(reqKinds) == 0 {
+		if lk := req.GetInteractionKind(); lk != richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED { //nolint:staticcheck // deprecated field
+			reqKinds = []richterv1.InteractionKind{lk}
+		}
 	}
-	kindHandler := svcinteractions.Get(reqKind)
-	if kindHandler == nil {
-		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for interaction kind %v", reqKind))
-	}
-	geminiGen, hasGenerator := kindHandler.(svcinteractions.GeminiGenerator)
-	if !hasGenerator {
-		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("interaction kind %v does not support AI generation", reqKind))
-	}
-	reqKindStr := svcinteractions.KindToDBString(reqKind)
+	reqCount := req.GetCountPerChunk()
+	reqStrategy := req.GetStrategy()
 
-	type genResult struct {
-		i       int
-		chunk   gen.LessonTranscriptChunk
-		items   []generatedItem
-		err     error
-		skipped bool
-	}
-	resultCh := make(chan genResult, total)
-
-	// Determine if any chunk needs Gemini (not all chunks will be skipped).
+	// Determine if any chunk actually needs Gemini.
 	needsGemini := req.GetForceRegenerate() || req.GetChunkId() != ""
 	if !needsGemini {
 		for _, chunk := range chunks {
@@ -1202,106 +1278,96 @@ func (s *AISvc) GenerateInteractionsStream(
 		}
 	}
 
-	// Cancel goroutines when the function returns (client disconnect, etc.).
-	// CRITICAL: register defers so that on return, genCancel runs BEFORE
-	// geminiClient.Close — defers fire LIFO, so genCancel must be registered
-	// AFTER (i.e. closer to return) the client close defer. Otherwise an
-	// in-flight goroutine could try to use a closed Gemini HTTP client.
 	var geminiClient *genai.Client
 	if needsGemini {
-		var clientErr error
-		// Use the parent ctx, not genCtx — newGeminiClient is short-lived setup.
-		geminiClient, clientErr = s.newGeminiClient(ctx)
-		if clientErr != nil {
+		geminiClient, err = s.newGeminiClient(ctx)
+		if err != nil {
 			_ = stream.Send(&richterv1.GenerateInteractionsProgressEvent{
 				Step:    richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message: clientErr.Error(),
+				Message: err.Error(),
 			})
 			return nil
 		}
 		defer geminiClient.Close()
 	}
-	genCtx, genCancel := context.WithCancel(ctx)
-	defer genCancel()
 
-	const maxParallel = 3
-	sem := make(chan struct{}, maxParallel)
-
-	toReceive := int(total)
+	// Sequential processing — simpler, easier to debug, and one bad chunk doesn't stall others.
 	for i, chunk := range chunks {
-		if !req.GetForceRegenerate() && req.GetChunkId() == "" && chunkHasInteractions[chunk.ID.String()] {
-			resultCh <- genResult{i: i, chunk: chunk, skipped: true}
-			continue
-		}
-		i, chunk := i, chunk
-		go func() {
-			select {
-			case sem <- struct{}{}:
-			case <-genCtx.Done():
-				return
-			}
-			defer func() { <-sem }()
-			chunkTranscript := s.fetchChunkTranscript(chunk.ID.String())
-			if strings.TrimSpace(chunkTranscript) == "" {
-				select {
-				case resultCh <- genResult{i: i, chunk: chunk, err: fmt.Errorf("không có nội dung transcript, bỏ qua")}:
-				case <-genCtx.Done():
-				}
-				return
-			}
-			items, genErr := s.runGeminiGenerateItems(genCtx, geminiClient, chunk, chunkTranscript, geminiGen, reqKindStr)
-			select {
-			case resultCh <- genResult{i: i, chunk: chunk, items: items, err: genErr}:
-			case <-genCtx.Done():
-			}
-		}()
-	}
-
-	for range toReceive {
-		var result genResult
 		select {
 		case <-ctx.Done():
 			return nil
-		case result = <-resultCh:
+		default:
 		}
 
-		if result.skipped {
+		if !req.GetForceRegenerate() && req.GetChunkId() == "" && chunkHasInteractions[chunk.ID.String()] {
 			_ = stream.Send(&richterv1.GenerateInteractionsProgressEvent{
 				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
-				Message:     fmt.Sprintf("Đoạn %d/%d đã có bài tập, bỏ qua", result.i+1, total),
-				ChunkIndex:  int32(result.i),
+				Message:     fmt.Sprintf("Đoạn %d/%d đã có bài tập, bỏ qua", i+1, total),
+				ChunkIndex:  int32(i),
 				TotalChunks: total,
 			})
 			continue
 		}
-		if result.err != nil {
-			s.log.ErrorContext(ctx, "ai: failed to generate interactions for chunk",
-				"chunk_id", result.chunk.ID.String(), "chunk_index", result.i, "err", result.err)
+
+		chunkTranscript := s.fetchChunkTranscript(chunk.ID.String())
+		if strings.TrimSpace(chunkTranscript) == "" {
+			s.log.WarnContext(ctx, "ai: chunk has no transcript, skipping", "chunk_id", chunk.ID.String())
 			if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
 				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message:     fmt.Sprintf("Lỗi đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, result.err.Error()),
-				ChunkIndex:  int32(result.i),
+				Message:     fmt.Sprintf("Đoạn %d/%d không có nội dung transcript, bỏ qua", i+1, total),
+				ChunkIndex:  int32(i),
 				TotalChunks: total,
 			}); sendErr != nil {
 				return nil
 			}
 			continue
 		}
+
+		// Resolve effective per-kind counts for this chunk.
+		kindCounts := resolveKindCounts(chunk, lesson, reqKinds, reqCount, reqStrategy)
+
+		var allItems []generatedItem
+		for _, kc := range kindCounts {
+			handler := svcinteractions.Get(kc.kind)
+			if handler == nil {
+				s.log.WarnContext(ctx, "ai: no handler for kind, skipping", "kind", kc.kind)
+				continue
+			}
+			geminiGen, ok := handler.(svcinteractions.GeminiGenerator)
+			if !ok {
+				s.log.WarnContext(ctx, "ai: kind has no Gemini generator, skipping", "kind", kc.kind)
+				continue
+			}
+			chunkCopy := chunk
+			chunkCopy.QuestionCountConfig = kc.count
+			kindStr := svcinteractions.KindToDBString(kc.kind)
+			items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr)
+			if genErr != nil {
+				s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "err", genErr)
+				continue
+			}
+			allItems = append(allItems, items...)
+		}
+
 		if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
 			Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
-			Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s", result.i+1, total, result.chunk.Summary),
-			ChunkIndex:  int32(result.i),
+			Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s (%d bài tập)", i+1, total, chunk.Summary, len(allItems)),
+			ChunkIndex:  int32(i),
 			TotalChunks: total,
 		}); sendErr != nil {
 			return nil
 		}
-		if _, saveErr := s.saveInteractionsForChunk(ctx, lessonID, result.chunk.ID, result.items); saveErr != nil {
+
+		if len(allItems) == 0 {
+			continue
+		}
+		if _, saveErr := s.saveInteractionsForChunk(ctx, lessonID, chunk.ID, allItems); saveErr != nil {
 			s.log.ErrorContext(ctx, "ai: failed to save interactions for chunk",
-				"chunk_id", result.chunk.ID.String(), "err", saveErr)
+				"chunk_id", chunk.ID.String(), "err", saveErr)
 			if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
 				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message:     fmt.Sprintf("Lỗi lưu bài tập đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, saveErr.Error()),
-				ChunkIndex:  int32(result.i),
+				Message:     fmt.Sprintf("Lỗi lưu bài tập đoạn %d/%d: %s — bỏ qua, tiếp tục", i+1, total, saveErr.Error()),
+				ChunkIndex:  int32(i),
 				TotalChunks: total,
 			}); sendErr != nil {
 				return nil
@@ -1816,7 +1882,30 @@ func (s *AISvc) UpdateChunkInteractionConfig(
 	ctx context.Context,
 	req *richterv1.UpdateChunkInteractionConfigRequest,
 ) (*richterv1.UpdateChunkInteractionConfigResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
+	chunkID, err := svc.ParseUUID(req.GetChunkId())
+	if err != nil {
+		return nil, err
+	}
+	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, chunkID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
+		return nil, err
+	}
+
+	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.UpdateChunkInteractionConfig(ctx, gen.UpdateChunkInteractionConfigParams{
+			ID:                chunkID,
+			InteractionConfig: interactionConfigToJSON(req.GetInteractionConfig()),
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.UpdateChunkInteractionConfigResponse{Chunk: chunkToProto(updated)}, nil
 }
 
 // ── UpdateLessonDefaultInteractionConfig ──────────────────────────────────────
@@ -1825,7 +1914,96 @@ func (s *AISvc) UpdateLessonDefaultInteractionConfig(
 	ctx context.Context,
 	req *richterv1.UpdateLessonDefaultInteractionConfigRequest,
 ) (*richterv1.UpdateLessonDefaultInteractionConfigResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
+		return nil, err
+	}
+	if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.UpdateLessonDefaultInteractionConfig(ctx, gen.UpdateLessonDefaultInteractionConfigParams{
+			ID:                       lessonID,
+			DefaultInteractionConfig: interactionConfigToJSON(req.GetDefaultInteractionConfig()),
+		})
+	}); err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.UpdateLessonDefaultInteractionConfigResponse{}, nil
+}
+
+// ── doRegenerateInteraction ───────────────────────────────────────────────────
+
+// doRegenerateInteraction is provided to InteractionsSvc as AIRegenerateFunc via DI.
+// It loads the existing interaction, calls Gemini for one item, and replaces the DB row.
+func (s *AISvc) doRegenerateInteraction(
+	ctx context.Context,
+	interactionID pgtype.UUID,
+	newKind richterv1.InteractionKind,
+) (*gen.LessonInteraction, error) {
+	existing, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
+		return q.GetLessonInteractionByID(ctx, interactionID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if !existing.ChunkID.Valid {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("interaction has no chunk — cannot AI-regenerate"))
+	}
+
+	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+		return q.GetLessonTranscriptChunk(ctx, existing.ChunkID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	handler := svcinteractions.Get(newKind)
+	if handler == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for kind %v", newKind))
+	}
+	geminiGen, ok := handler.(svcinteractions.GeminiGenerator)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("kind %v does not support AI generation", newKind))
+	}
+
+	chunkTranscript := s.fetchChunkTranscript(chunk.ID.String())
+	if strings.TrimSpace(chunkTranscript) == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("chunk has no transcript content"))
+	}
+
+	geminiClient, err := s.newGeminiClient(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	defer geminiClient.Close()
+
+	// Generate exactly 1 item by overriding QuestionCountConfig.
+	chunkForRegen := chunk
+	chunkForRegen.QuestionCountConfig = 1
+	kindStr := svcinteractions.KindToDBString(newKind)
+	items, err := s.runGeminiGenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI generation failed: %w", err))
+	}
+	if len(items) == 0 {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI did not produce any output"))
+	}
+
+	item := items[0]
+	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
+		return q.ReplaceInteraction(ctx, gen.ReplaceInteractionParams{
+			ID:          interactionID,
+			Kind:        item.kindStr,
+			Prompt:      item.prompt,
+			Explanation: item.explanation,
+			Config:      item.configJSON,
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &updated, nil
 }
 
 // ── Whisper helpers ───────────────────────────────────────────────────────────
