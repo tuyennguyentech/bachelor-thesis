@@ -40,3 +40,9 @@ FROM lessons l
 JOIN course_modules cm ON cm.id = l.module_id
 JOIN courses c ON c.id = cm.course_id
 WHERE l.id = $1;
+
+-- name: UpdateLessonFeedbackMode :one
+UPDATE lessons SET feedback_mode = $2 WHERE id = $1 RETURNING *;
+
+-- name: UpdateLessonDefaultInteractionConfig :one
+UPDATE lessons SET default_interaction_config = $2 WHERE id = $1 RETURNING *;

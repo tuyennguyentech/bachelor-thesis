@@ -198,6 +198,18 @@ message DeleteInteractionRequest {
 
 message DeleteInteractionResponse {}
 
+// ── Regenerate single ─────────────────────────────────────────────────────────
+
+message RegenerateInteractionRequest {
+  string interaction_id = 1 [(buf.validate.field).string.uuid = true];
+  // If unspecified, keep the existing kind.
+  InteractionKind new_kind = 2;
+}
+
+message RegenerateInteractionResponse {
+  LessonInteraction interaction = 1;
+}
+
 // ── Submit / Get attempt ─────────────────────────────────────────────────────
 
 message AttemptResponseInput {
@@ -256,6 +268,8 @@ service InteractionService {
   rpc UpdateInteraction(UpdateInteractionRequest) returns (UpdateInteractionResponse) {}
   // Teacher: delete an interaction.
   rpc DeleteInteraction(DeleteInteractionRequest) returns (DeleteInteractionResponse) {}
+  // Teacher: AI-regenerate a single interaction (same or new kind).
+  rpc RegenerateInteraction(RegenerateInteractionRequest) returns (RegenerateInteractionResponse) {}
   // Teacher: list student attempt summaries.
   rpc ListAttempts(ListAttemptsRequest) returns (ListAttemptsResponse) {}
 

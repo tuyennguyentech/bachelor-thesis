@@ -498,6 +498,15 @@ func (s *InteractionsSvc) GetMyAttempt(
 	return &richterv1.GetMyAttemptResponse{Attempt: AttemptToProto(r.attempt, r.responses)}, nil
 }
 
+// ── RegenerateInteraction ─────────────────────────────────────────────────────
+
+func (s *InteractionsSvc) RegenerateInteraction(
+	ctx context.Context,
+	req *richterv1.RegenerateInteractionRequest,
+) (*richterv1.RegenerateInteractionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
+}
+
 // ── ListAttempts ──────────────────────────────────────────────────────────────
 
 func (s *InteractionsSvc) ListAttempts(

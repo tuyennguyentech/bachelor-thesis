@@ -26,6 +26,7 @@ import (
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/kv"
 	"example.com/richter/internal/svc"
+	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
@@ -149,15 +150,15 @@ func (s *AISvc) GetLessonAnalysis(
 		return nil, svc.ConnectDBError(err)
 	}
 
-	questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
-		return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{
+	ints, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+		return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{
 			LessonID: lessonID,
 			Limit:    500,
 			Offset:   0,
 		})
 	})
 	if err != nil {
-		s.log.ErrorContext(ctx, "ai: failed to list lesson questions", svc.LogAttrs("ListLessonQuestions", err)...)
+		s.log.ErrorContext(ctx, "ai: failed to list lesson interactions", svc.LogAttrs("ListLessonInteractions", err)...)
 	}
 
 	chunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
@@ -181,41 +182,41 @@ func (s *AISvc) GetLessonAnalysis(
 		protoChunks = append(protoChunks, chunkToProto(c))
 	}
 
-	resp := &richterv1.GetLessonAnalysisResponse{
-		Analysis: analysisToProto(analysis, questions, transcript, segments),
-		Chunks:   protoChunks,
+	// Determine answer visibility: teachers always see answers; students only after submission.
+	isTeacher := false
+	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	); err == nil {
+		isTeacher = true
 	}
 
-	// Defense against cheating: a student calling this RPC directly (or inspecting the
-	// page's RSC payload) must not see the correct answer or explanation until they
-	// have submitted their own attempt. Teachers/admins always see them; org-member
-	// students see them only after submission.
-	if resp.Analysis != nil && len(resp.Analysis.Questions) > 0 {
-		canSeeAnswers := false
-		if _, err := s.authz.RequireOrgRole(ctx, orgID,
-			gen.OrganizationRoleOwner,
-			gen.OrganizationRoleAdmin,
-			gen.OrganizationRoleTeacher,
-		); err == nil {
-			canSeeAnswers = true
-		} else if claims, _ := s.authz.RequireAuthenticated(ctx); claims != nil {
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	hasSubmitted := false
+	if !isTeacher {
+		if claims, _ := s.authz.RequireAuthenticated(ctx); claims != nil {
 			if userID, perr := svc.ParseUUID(claims.GetSub()); perr == nil {
-				if _, aerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.QuizAttempt, error) {
-					return q.GetMyQuizAttempt(ctx, gen.GetMyQuizAttemptParams{LessonID: lessonID, UserID: userID})
+				if _, aerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
+					return q.GetMyLessonAttempt(ctx, gen.GetMyLessonAttemptParams{LessonID: lessonID, UserID: userID})
 				}); aerr == nil {
-					canSeeAnswers = true
+					hasSubmitted = true
 				}
 			}
 		}
-		if !canSeeAnswers {
-			for _, q := range resp.Analysis.Questions {
-				q.CorrectAnswer = -1
-				q.Explanation = ""
-			}
-		}
 	}
 
-	return resp, nil
+	strip := svcinteractions.ShouldStripAnswers(lesson.FeedbackMode, isTeacher, hasSubmitted)
+	return &richterv1.GetLessonAnalysisResponse{
+		Analysis: analysisToProto(analysis, ints, strip, transcript, segments),
+		Chunks:   protoChunks,
+	}, nil
 }
 
 // ── Step 2: ExtractTranscriptStream ──────────────────────────────────────────
@@ -374,10 +375,10 @@ func (s *AISvc) ExtractTranscriptStream(
 		}
 	}
 
-	// Clear stale chunks and questions from any previous run.
+	// Clear stale chunks and interactions from any previous run.
 	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		if err := q.DeleteLessonQuestions(ctx, lessonID); err != nil {
-			s.log.WarnContext(ctx, "ai: failed to delete stale questions on re-extract", "err", err)
+		if err := q.DeleteLessonInteractionsByLesson(ctx, lessonID); err != nil {
+			s.log.WarnContext(ctx, "ai: failed to delete stale interactions on re-extract", "err", err)
 		}
 		return q.DeleteLessonTranscriptChunks(ctx, lessonID)
 	}); err != nil {
@@ -589,15 +590,15 @@ func (s *AISvc) ChunkTranscriptStream(
 	var staleChunkIDs []string
 
 	saveErr := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
-		// Delete old questions and chunks atomically.
+		// Delete old interactions and chunks atomically.
 		existing, err := q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 500, Offset: 0})
 		if err != nil {
 			return fmt.Errorf("list existing chunks: %w", err)
 		}
 		for _, ec := range existing {
 			staleChunkIDs = append(staleChunkIDs, ec.ID.String())
-			if err := q.DeleteLessonQuestionsForChunk(ctx, ec.ID); err != nil {
-				return fmt.Errorf("delete questions for chunk %s: %w", ec.ID, err)
+			if err := q.DeleteLessonInteractionsByChunk(ctx, ec.ID); err != nil {
+				return fmt.Errorf("delete interactions for chunk %s: %w", ec.ID, err)
 			}
 		}
 		if err := q.DeleteLessonTranscriptChunks(ctx, lessonID); err != nil {
@@ -816,7 +817,7 @@ func (s *AISvc) MergeChunks(
 
 	var mergedChunk gen.LessonTranscriptChunk
 	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
-		if err := q.DeleteLessonQuestionsForChunk(ctx, discardID); err != nil {
+		if err := q.DeleteLessonInteractionsByChunk(ctx, discardID); err != nil {
 			return fmt.Errorf("delete discard questions: %w", err)
 		}
 		if err := q.DeleteLessonTranscriptChunk(ctx, discardID); err != nil {
@@ -863,7 +864,7 @@ func (s *AISvc) DeleteChunk(
 	}
 
 	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
-		if err := q.DeleteLessonQuestionsForChunk(ctx, chunkID); err != nil {
+		if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
 			return fmt.Errorf("delete questions: %w", err)
 		}
 		if err := q.DeleteLessonTranscriptChunk(ctx, chunkID); err != nil {
@@ -1100,12 +1101,12 @@ func (s *AISvc) AdjustChunkBoundary(
 	}, nil
 }
 
-// ── Step 7: GenerateQuestionsStream ──────────────────────────────────────────
+// ── Step 7: GenerateInteractionsStream ───────────────────────────────────────
 
-func (s *AISvc) GenerateQuestionsStream(
+func (s *AISvc) GenerateInteractionsStream(
 	ctx context.Context,
-	req *richterv1.GenerateQuestionsRequest,
-	stream *connect.ServerStream[richterv1.GenerateQuestionsProgressEvent],
+	req *richterv1.GenerateInteractionsRequest,
+	stream *connect.ServerStream[richterv1.GenerateInteractionsProgressEvent],
 ) error {
 	lessonID, err := svc.ParseUUID(req.GetLessonId())
 	if err != nil {
@@ -1130,8 +1131,7 @@ func (s *AISvc) GenerateQuestionsStream(
 		}
 		// Defense in depth: requireTeacherRole only checks the requested lesson.
 		// Without this, a teacher of lesson A could pass a chunk_id from lesson B
-		// and end up generating/saving questions tied to chunk B under lesson A
-		// (or wiping lesson B's questions).
+		// and end up generating/saving interactions tied to chunk B under lesson A.
 		if c.LessonID != lessonID {
 			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunk does not belong to the requested lesson"))
 		}
@@ -1151,28 +1151,43 @@ func (s *AISvc) GenerateQuestionsStream(
 
 	total := int32(len(chunks))
 
-	// Pre-load question counts for all chunks to avoid N+1 in the loop below.
-	chunkHasQuestions := map[string]bool{}
+	// Pre-load which chunks already have interactions to support skip-if-exists.
+	chunkHasInteractions := map[string]bool{}
 	if !req.GetForceRegenerate() && req.GetChunkId() == "" {
-		existingQs, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
-			return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{LessonID: lessonID, Limit: 5000, Offset: 0})
+		existingInts, intErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+			return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{LessonID: lessonID, Limit: 5000, Offset: 0})
 		})
-		if qErr != nil {
-			s.log.WarnContext(ctx, "ai: could not load existing questions for skip check; will attempt all chunks", "err", qErr)
+		if intErr != nil {
+			s.log.WarnContext(ctx, "ai: could not load existing interactions for skip check; will attempt all chunks", "err", intErr)
 		}
-		for _, eq := range existingQs {
-			if eq.ChunkID.Valid {
-				chunkHasQuestions[eq.ChunkID.String()] = true
+		for _, ei := range existingInts {
+			if ei.ChunkID.Valid {
+				chunkHasInteractions[ei.ChunkID.String()] = true
 			}
 		}
 	}
 
+	// Determine interaction kind for this generation run.
+	reqKind := req.GetInteractionKind()
+	if reqKind == richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED {
+		reqKind = richterv1.InteractionKind_INTERACTION_KIND_MCQ
+	}
+	kindHandler := svcinteractions.Get(reqKind)
+	if kindHandler == nil {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for interaction kind %v", reqKind))
+	}
+	geminiGen, hasGenerator := kindHandler.(svcinteractions.GeminiGenerator)
+	if !hasGenerator {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("interaction kind %v does not support AI generation", reqKind))
+	}
+	reqKindStr := svcinteractions.KindToDBString(reqKind)
+
 	type genResult struct {
-		i         int
-		chunk     gen.LessonTranscriptChunk
-		questions []mcqQuestion
-		err       error
-		skipped   bool
+		i       int
+		chunk   gen.LessonTranscriptChunk
+		items   []generatedItem
+		err     error
+		skipped bool
 	}
 	resultCh := make(chan genResult, total)
 
@@ -1180,7 +1195,7 @@ func (s *AISvc) GenerateQuestionsStream(
 	needsGemini := req.GetForceRegenerate() || req.GetChunkId() != ""
 	if !needsGemini {
 		for _, chunk := range chunks {
-			if !chunkHasQuestions[chunk.ID.String()] {
+			if !chunkHasInteractions[chunk.ID.String()] {
 				needsGemini = true
 				break
 			}
@@ -1198,8 +1213,8 @@ func (s *AISvc) GenerateQuestionsStream(
 		// Use the parent ctx, not genCtx — newGeminiClient is short-lived setup.
 		geminiClient, clientErr = s.newGeminiClient(ctx)
 		if clientErr != nil {
-			_ = stream.Send(&richterv1.GenerateQuestionsProgressEvent{
-				Step:    richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_ERROR,
+			_ = stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+				Step:    richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
 				Message: clientErr.Error(),
 			})
 			return nil
@@ -1214,7 +1229,7 @@ func (s *AISvc) GenerateQuestionsStream(
 
 	toReceive := int(total)
 	for i, chunk := range chunks {
-		if !req.GetForceRegenerate() && req.GetChunkId() == "" && chunkHasQuestions[chunk.ID.String()] {
+		if !req.GetForceRegenerate() && req.GetChunkId() == "" && chunkHasInteractions[chunk.ID.String()] {
 			resultCh <- genResult{i: i, chunk: chunk, skipped: true}
 			continue
 		}
@@ -1234,9 +1249,9 @@ func (s *AISvc) GenerateQuestionsStream(
 				}
 				return
 			}
-			qs, genErr := s.runGeminiGenerateQuestions(genCtx, geminiClient, chunk, chunkTranscript)
+			items, genErr := s.runGeminiGenerateItems(genCtx, geminiClient, chunk, chunkTranscript, geminiGen, reqKindStr)
 			select {
-			case resultCh <- genResult{i: i, chunk: chunk, questions: qs, err: genErr}:
+			case resultCh <- genResult{i: i, chunk: chunk, items: items, err: genErr}:
 			case <-genCtx.Done():
 			}
 		}()
@@ -1251,19 +1266,19 @@ func (s *AISvc) GenerateQuestionsStream(
 		}
 
 		if result.skipped {
-			_ = stream.Send(&richterv1.GenerateQuestionsProgressEvent{
-				Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK,
-				Message:     fmt.Sprintf("Đoạn %d/%d đã có câu hỏi, bỏ qua", result.i+1, total),
+			_ = stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
+				Message:     fmt.Sprintf("Đoạn %d/%d đã có bài tập, bỏ qua", result.i+1, total),
 				ChunkIndex:  int32(result.i),
 				TotalChunks: total,
 			})
 			continue
 		}
 		if result.err != nil {
-			s.log.ErrorContext(ctx, "ai: failed to generate questions for chunk",
+			s.log.ErrorContext(ctx, "ai: failed to generate interactions for chunk",
 				"chunk_id", result.chunk.ID.String(), "chunk_index", result.i, "err", result.err)
-			if sendErr := stream.Send(&richterv1.GenerateQuestionsProgressEvent{
-				Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_ERROR,
+			if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
 				Message:     fmt.Sprintf("Lỗi đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, result.err.Error()),
 				ChunkIndex:  int32(result.i),
 				TotalChunks: total,
@@ -1272,20 +1287,20 @@ func (s *AISvc) GenerateQuestionsStream(
 			}
 			continue
 		}
-		if sendErr := stream.Send(&richterv1.GenerateQuestionsProgressEvent{
-			Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK,
+		if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+			Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
 			Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s", result.i+1, total, result.chunk.Summary),
 			ChunkIndex:  int32(result.i),
 			TotalChunks: total,
 		}); sendErr != nil {
 			return nil
 		}
-		if _, saveErr := s.saveQuestionsForChunk(ctx, lessonID, result.chunk.ID, result.questions); saveErr != nil {
-			s.log.ErrorContext(ctx, "ai: failed to save questions for chunk",
+		if _, saveErr := s.saveInteractionsForChunk(ctx, lessonID, result.chunk.ID, result.items); saveErr != nil {
+			s.log.ErrorContext(ctx, "ai: failed to save interactions for chunk",
 				"chunk_id", result.chunk.ID.String(), "err", saveErr)
-			if sendErr := stream.Send(&richterv1.GenerateQuestionsProgressEvent{
-				Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_ERROR,
-				Message:     fmt.Sprintf("Lỗi lưu câu hỏi đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, saveErr.Error()),
+			if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
+				Message:     fmt.Sprintf("Lỗi lưu bài tập đoạn %d/%d: %s — bỏ qua, tiếp tục", result.i+1, total, saveErr.Error()),
 				ChunkIndex:  int32(result.i),
 				TotalChunks: total,
 			}); sendErr != nil {
@@ -1306,8 +1321,8 @@ func (s *AISvc) GenerateQuestionsStream(
 		}
 	}
 
-	return stream.Send(&richterv1.GenerateQuestionsProgressEvent{
-		Step:        richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_DONE,
+	return stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+		Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_DONE,
 		TotalChunks: total,
 	})
 }
@@ -1629,230 +1644,54 @@ func buildChunkTranscript(segs []transcriptSegment, startSec, endSec float32) st
 	return strings.TrimSpace(b.String())
 }
 
-func (s *AISvc) insertQuestionsInTx(ctx context.Context, q *gen.Queries, lessonID, chunkID pgtype.UUID, questions []mcqQuestion) ([]gen.LessonQuestion, error) {
-	saved := make([]gen.LessonQuestion, 0, len(questions))
-	for i, qst := range questions {
-		if qst.CorrectAnswer < 0 || qst.CorrectAnswer >= len(qst.Options) {
-			s.log.WarnContext(ctx, "ai: skipping question with invalid correct_answer index",
-				"question_index", i, "correct_answer", qst.CorrectAnswer, "options_count", len(qst.Options))
-			continue
-		}
-		optJSON, err := json.Marshal(qst.Options)
-		if err != nil {
-			return saved, fmt.Errorf("marshal options for question %d: %w", i, err)
-		}
-		lq, err := q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
-			LessonID:      lessonID,
-			QuestionText:  qst.QuestionText,
-			Options:       optJSON,
-			CorrectAnswer: int32(qst.CorrectAnswer),
-			Explanation:   pgtype.Text{String: qst.Explanation, Valid: qst.Explanation != ""},
-			OrderIndex:    int32(i),
-			StartSeconds:  float64(qst.StartSeconds),
-			ChunkID:       chunkID,
-		})
-		if err != nil {
-			return saved, err
-		}
-		saved = append(saved, lq)
-	}
-	return saved, nil
+// generatedItem is the common output of any Gemini generation run.
+type generatedItem struct {
+	prompt      string
+	explanation string
+	startSecs   float32
+	configJSON  []byte
+	kindStr     string
 }
 
-func (s *AISvc) saveQuestionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, questions []mcqQuestion) ([]gen.LessonQuestion, error) {
-	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonQuestion, error) {
-		if err := q.DeleteLessonQuestionsForChunk(ctx, chunkID); err != nil {
-			return nil, err
-		}
-		return s.insertQuestionsInTx(ctx, q, lessonID, chunkID, questions)
-	})
-}
-
-// ── Step 8: Question editing ──────────────────────────────────────────────────
-
-func (s *AISvc) authorizeQuestionWrite(ctx context.Context, questionIDStr string) (gen.LessonQuestion, error) {
-	questionID, err := svc.ParseUUID(questionIDStr)
-	if err != nil {
-		return gen.LessonQuestion{}, err
-	}
-	q, err := db.WithConnection(s.pg, ctx, func(qq *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
-		return qq.GetLessonQuestionByID(ctx, questionID)
-	})
-	if err != nil {
-		return gen.LessonQuestion{}, svc.ConnectDBError(err)
-	}
-	if err := s.requireTeacherRole(ctx, q.LessonID); err != nil {
-		return gen.LessonQuestion{}, err
-	}
-	return q, nil
-}
-
-func (s *AISvc) UpdateLessonQuestion(
+// runGeminiGenerateItems calls Gemini using the provided GeminiGenerator interface
+// and returns a list of generatedItem parsed from the response.
+func (s *AISvc) runGeminiGenerateItems(
 	ctx context.Context,
-	req *richterv1.UpdateLessonQuestionRequest,
-) (*richterv1.UpdateLessonQuestionResponse, error) {
-	authorized, err := s.authorizeQuestionWrite(ctx, req.GetQuestionId())
-	if err != nil {
-		return nil, err
-	}
-	if req.GetCorrectAnswer() < 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("correct_answer must be non-negative"))
-	}
-	if req.GetCorrectAnswer() >= int32(len(req.GetOptions())) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("correct_answer must be less than number of options"))
-	}
-	questionID := authorized.ID
-	optJSON, err := json.Marshal(req.GetOptions())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid options"))
-	}
-	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
-		return q.UpdateLessonQuestion(ctx, gen.UpdateLessonQuestionParams{
-			ID:            questionID,
-			QuestionText:  req.GetQuestionText(),
-			Options:       optJSON,
-			CorrectAnswer: req.GetCorrectAnswer(),
-			Explanation:   pgtype.Text{String: req.GetExplanation(), Valid: req.GetExplanation() != ""},
-			StartSeconds:  float64(req.GetStartSeconds()),
-		})
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	return &richterv1.UpdateLessonQuestionResponse{Question: questionToProto(updated)}, nil
-}
-
-func (s *AISvc) CreateManualQuestion(
-	ctx context.Context,
-	req *richterv1.CreateManualQuestionRequest,
-) (*richterv1.CreateManualQuestionResponse, error) {
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
-		return nil, err
-	}
-	if req.GetCorrectAnswer() < 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("correct_answer must be non-negative"))
-	}
-	if req.GetCorrectAnswer() >= int32(len(req.GetOptions())) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("correct_answer must be less than number of options"))
-	}
-	optJSON, err := json.Marshal(req.GetOptions())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid options"))
-	}
-	created, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.LessonQuestion, error) {
-		nextIdx, err := q.GetLessonQuestionNextOrderIndex(ctx, lessonID)
-		if err != nil {
-			return gen.LessonQuestion{}, fmt.Errorf("compute order_index: %w", err)
-		}
-		return q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
-			LessonID:      lessonID,
-			QuestionText:  req.GetQuestionText(),
-			Options:       optJSON,
-			CorrectAnswer: req.GetCorrectAnswer(),
-			Explanation:   pgtype.Text{String: req.GetExplanation(), Valid: req.GetExplanation() != ""},
-			OrderIndex:    nextIdx,
-			StartSeconds:  float64(req.GetStartSeconds()),
-			ChunkID:       pgtype.UUID{},
-		})
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	return &richterv1.CreateManualQuestionResponse{Question: questionToProto(created)}, nil
-}
-
-func (s *AISvc) DeleteLessonQuestion(
-	ctx context.Context,
-	req *richterv1.DeleteLessonQuestionRequest,
-) (*richterv1.DeleteLessonQuestionResponse, error) {
-	authorized, err := s.authorizeQuestionWrite(ctx, req.GetQuestionId())
-	if err != nil {
-		return nil, err
-	}
-	questionID := authorized.ID
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		return q.DeleteLessonQuestionByID(ctx, questionID)
-	}); err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	return &richterv1.DeleteLessonQuestionResponse{}, nil
-}
-
-func (s *AISvc) RegenerateQuestion(
-	ctx context.Context,
-	req *richterv1.RegenerateQuestionRequest,
-) (*richterv1.RegenerateQuestionResponse, error) {
-	q, err := s.authorizeQuestionWrite(ctx, req.GetQuestionId())
-	if err != nil {
-		return nil, err
-	}
-	if s.geminiCfg.APIKey == "" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("Gemini API key not configured"))
-	}
-
-	var contextText string
-	var chunkStart, chunkEnd float32
-
-	if q.ChunkID.Valid {
-		chunk, cerr := db.WithConnection(s.pg, ctx, func(qq *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-			return qq.GetLessonTranscriptChunk(ctx, q.ChunkID)
-		})
-		if cerr == nil {
-			contextText = s.fetchChunkTranscript(chunk.ID.String())
-			chunkStart = float32(chunk.StartSeconds)
-			chunkEnd = float32(chunk.EndSeconds)
-		}
-	}
-	if contextText == "" {
-		// Fall back to lesson-level transcript from FDB
-		if data, _ := s.kv.Get(kvNsLesson, tuple.Tuple{q.LessonID.String(), "transcript"}); len(data) > 0 {
-			contextText = string(data)
-		}
-		chunkStart = float32(q.StartSeconds) - 30
-		if chunkStart < 0 {
-			chunkStart = 0
-		}
-		chunkEnd = float32(q.StartSeconds) + 60
-	}
-	if contextText == "" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript available to regenerate question"))
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	client *genai.Client,
+	chunk gen.LessonTranscriptChunk,
+	transcript string,
+	generator svcinteractions.GeminiGenerator,
+	kindStr string,
+) ([]generatedItem, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	client, err := s.newGeminiClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer client.Close()
-
 	model := client.GenerativeModel(s.geminiCfg.Model)
-	model.SetTemperature(0.5)
+	model.SetTemperature(0.3)
 	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(2048)
+	model.SetMaxOutputTokens(8192)
 
-	prompt := fmt.Sprintf(`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo MỘT câu hỏi trắc nghiệm mới để kiểm tra hiểu biết của học sinh. Câu hỏi có 4 lựa chọn (A, B, C, D), chỉ 1 đáp án đúng.
-
-Nội dung (khoảng %.1f - %.1f giây):
+	prompt := fmt.Sprintf(`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d bài tập để kiểm tra hiểu biết của học sinh.
 %s
 
-Trả về JSON:
-{
-  "question_text": "Câu hỏi?",
-  "options": ["Lựa chọn A", "Lựa chọn B", "Lựa chọn C", "Lựa chọn D"],
-  "correct_answer": 0,
-  "explanation": "Giải thích đáp án đúng",
-  "start_seconds": %.1f
-}`,
-		chunkStart, chunkEnd, contextText, float32(q.StartSeconds),
+Đoạn nội dung (%.1f - %.1f giây):
+%s
+
+start_seconds là thời điểm (giây) trong khoảng %.1f - %.1f mà nội dung liên quan xuất hiện.
+
+Mỗi item trong mảng "items" phải tuân theo JSON schema sau:
+%s
+
+Trả về JSON object: {"items": [...]}`,
+		chunk.QuestionCountConfig,
+		generator.GeminiPromptHint(),
+		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		transcript,
+		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		generator.GeminiSchema(),
 	)
 
-	s.log.InfoContext(ctx, "[GEMINI] RegenerateQuestion: calling GenerateContent", "question_id", req.GetQuestionId())
+	s.log.InfoContext(ctx, "[GEMINI] GenerateItems: calling GenerateContent", "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
@@ -1863,29 +1702,61 @@ Trả về JSON:
 		return nil, err
 	}
 
-	var result mcqQuestion
+	var result struct {
+		Items []json.RawMessage `json:"items"`
+	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return nil, fmt.Errorf("parse gemini response: %w", err)
 	}
-	if result.CorrectAnswer < 0 || result.CorrectAnswer >= len(result.Options) {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalid correct_answer from AI"))
-	}
 
-	optJSON, _ := json.Marshal(result.Options)
-	updated, err := db.WithConnection(s.pg, ctx, func(qq *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
-		return qq.UpdateLessonQuestion(ctx, gen.UpdateLessonQuestionParams{
-			ID:            q.ID,
-			QuestionText:  result.QuestionText,
-			Options:       optJSON,
-			CorrectAnswer: int32(result.CorrectAnswer),
-			Explanation:   pgtype.Text{String: result.Explanation, Valid: result.Explanation != ""},
-			StartSeconds:  float64(result.StartSeconds),
+	items := make([]generatedItem, 0, len(result.Items))
+	for i, rawItem := range result.Items {
+		prompt, explanation, startSecs, configJSON, err := generator.ParseGeminiItem(rawItem)
+		if err != nil {
+			s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
+			continue
+		}
+		items = append(items, generatedItem{
+			prompt:      prompt,
+			explanation: explanation,
+			startSecs:   startSecs,
+			configJSON:  configJSON,
+			kindStr:     kindStr,
 		})
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
 	}
-	return &richterv1.RegenerateQuestionResponse{Question: questionToProto(updated)}, nil
+	return items, nil
+}
+
+func (s *AISvc) insertInteractionsInTx(ctx context.Context, q *gen.Queries, lessonID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
+	saved := make([]gen.LessonInteraction, 0, len(items))
+	for i, item := range items {
+		li, err := q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
+			LessonID:     lessonID,
+			ChunkID:      chunkID,
+			Kind:         item.kindStr,
+			StartSeconds: item.startSecs,
+			OrderIndex:   int32(i),
+			Prompt:       item.prompt,
+			Explanation:  item.explanation,
+			Config:       item.configJSON,
+			MaxScore:     1.0,
+			GeneratedBy:  "ai",
+		})
+		if err != nil {
+			return saved, err
+		}
+		saved = append(saved, li)
+	}
+	return saved, nil
+}
+
+func (s *AISvc) saveInteractionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
+	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonInteraction, error) {
+		if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
+			return nil, err
+		}
+		return s.insertInteractionsInTx(ctx, q, lessonID, chunkID, items)
+	})
 }
 
 // ── Video watch progress (FoundationDB) ──────────────────────────────────────
@@ -1937,6 +1808,24 @@ func (s *AISvc) GetWatchProgress(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get watch progress: %w", err))
 	}
 	return &richterv1.GetWatchProgressResponse{PositionSeconds: float32(pos)}, nil
+}
+
+// ── UpdateChunkInteractionConfig ──────────────────────────────────────────────
+
+func (s *AISvc) UpdateChunkInteractionConfig(
+	ctx context.Context,
+	req *richterv1.UpdateChunkInteractionConfigRequest,
+) (*richterv1.UpdateChunkInteractionConfigResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
+}
+
+// ── UpdateLessonDefaultInteractionConfig ──────────────────────────────────────
+
+func (s *AISvc) UpdateLessonDefaultInteractionConfig(
+	ctx context.Context,
+	req *richterv1.UpdateLessonDefaultInteractionConfigRequest,
+) (*richterv1.UpdateLessonDefaultInteractionConfigResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
 }
 
 // ── Whisper helpers ───────────────────────────────────────────────────────────

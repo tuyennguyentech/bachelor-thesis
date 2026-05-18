@@ -15,12 +15,6 @@ UPDATE lesson_transcript_chunks SET question_count_config = $2 WHERE id = $1 RET
 -- name: GetLessonTranscriptChunk :one
 SELECT * FROM lesson_transcript_chunks WHERE id = $1;
 
--- name: DeleteLessonQuestionsForChunk :exec
-DELETE FROM lesson_questions WHERE chunk_id = $1;
-
--- name: CountLessonQuestionsForChunk :one
-SELECT COUNT(*) FROM lesson_questions WHERE chunk_id = $1;
-
 -- name: DeleteLessonTranscriptChunk :exec
 DELETE FROM lesson_transcript_chunks WHERE id = $1;
 
@@ -32,6 +26,12 @@ RETURNING *;
 
 -- name: UpdateChunkCoherence :exec
 UPDATE lesson_transcript_chunks SET coherence_score = $2 WHERE id = $1;
+
+-- name: UpdateChunkInteractionConfig :one
+UPDATE lesson_transcript_chunks
+SET interaction_config = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING *;
 
 -- name: ReorderLessonChunks :exec
 UPDATE lesson_transcript_chunks

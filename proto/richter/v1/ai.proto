@@ -4,6 +4,9 @@ package richter.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "richter/v1/interactions.proto";
+
+option go_package = "example.com/buf/gen/richter/v1;richterv1";
 
 enum AnalysisStatus {
   ANALYSIS_STATUS_UNSPECIFIED = 0;
@@ -13,25 +16,8 @@ enum AnalysisStatus {
   ANALYSIS_STATUS_ERROR = 4;
   // Stage 1 done: transcript + segments extracted; chunks not yet created.
   ANALYSIS_STATUS_TRANSCRIPT_EXTRACTED = 5;
-  // Stage 2 done: chunks created; questions not yet generated.
+  // Stage 2 done: chunks created; interactions not yet generated.
   ANALYSIS_STATUS_CHUNKS_READY = 6;
-}
-
-message MCQOption {
-  string text = 1;
-}
-
-message LessonQuestion {
-  string id = 1;
-  string lesson_id = 2;
-  string question_text = 3;
-  repeated MCQOption options = 4;
-  int32 correct_answer = 5;
-  string explanation = 6;
-  int32 order_index = 7;
-  google.protobuf.Timestamp created_at = 8;
-  float start_seconds = 9;
-  string chunk_id = 10;
 }
 
 message TranscriptSegment {
@@ -45,10 +31,31 @@ message LessonAnalysis {
   AnalysisStatus status = 2;
   string transcript = 3;
   string error_msg = 4;
-  repeated LessonQuestion questions = 5;
+  repeated LessonInteraction interactions = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
   repeated TranscriptSegment transcript_segments = 8;
+  // Lesson-level default config for chunks without their own interaction_config.
+  ChunkInteractionConfig default_interaction_config = 9;
+}
+
+// Strategy for distributing kinds when AI generates multiple interactions.
+enum GenerationStrategy {
+  GENERATION_STRATEGY_UNSPECIFIED = 0;
+  // AI picks the most appropriate kind per question from the allowed list.
+  GENERATION_STRATEGY_AI_CHOOSE = 1;
+  // Distribute evenly across allowed kinds in order.
+  GENERATION_STRATEGY_EVEN_DISTRIBUTION = 2;
+}
+
+// Per-chunk (or lesson-default) config for AI interaction generation.
+message ChunkInteractionConfig {
+  // Number of interactions to generate. 0 = use server default (2).
+  int32 count = 1 [(buf.validate.field).int32 = {gte: 0, lte: 20}];
+  // Allowed kinds for this chunk. Empty = use server default (MCQ only).
+  repeated InteractionKind kinds = 2;
+  // How to distribute among chosen kinds.
+  GenerationStrategy strategy = 3;
 }
 
 message TranscriptChunk {
@@ -64,6 +71,8 @@ message TranscriptChunk {
   // refreshed when the chunk's segments change. Higher = chunk stays on one
   // topic. See coherence.go on the server for the exact formula.
   float coherence_score = 9;
+  // Per-chunk AI generation config. Null = not configured; use lesson default.
+  ChunkInteractionConfig interaction_config = 10;
 }
 
 message GetLessonAnalysisRequest {
@@ -184,71 +193,57 @@ message AdjustChunkBoundaryResponse {
   TranscriptChunk next_chunk = 2;
 }
 
-// ── Step 7: Generate questions ────────────────────────────────────────────────
+// ── Step 7: Generate interactions ────────────────────────────────────────────
 
-enum GenerateQuestionsStep {
-  GENERATE_QUESTIONS_STEP_UNSPECIFIED = 0;
-  GENERATE_QUESTIONS_STEP_CHUNK = 1;
-  GENERATE_QUESTIONS_STEP_DONE = 2;
-  GENERATE_QUESTIONS_STEP_ERROR = 3;
+enum GenerateInteractionsStep {
+  GENERATE_INTERACTIONS_STEP_UNSPECIFIED = 0;
+  GENERATE_INTERACTIONS_STEP_CHUNK = 1;
+  GENERATE_INTERACTIONS_STEP_DONE = 2;
+  GENERATE_INTERACTIONS_STEP_ERROR = 3;
 }
 
-message GenerateQuestionsProgressEvent {
-  GenerateQuestionsStep step = 1;
+message GenerateInteractionsProgressEvent {
+  GenerateInteractionsStep step = 1;
   string message = 2;
   int32 chunk_index = 3;
   int32 total_chunks = 4;
 }
 
-message GenerateQuestionsRequest {
+message GenerateInteractionsRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
-  // If non-empty, regenerate only for this chunk.
+  // If non-empty, generate only for this chunk.
   string chunk_id = 2;
-  // If true, regenerate questions even for chunks that already have questions.
+  // If true, regenerate even for chunks that already have interactions.
   bool force_regenerate = 3;
+  // Deprecated: use interaction_kinds instead. Still honored for backward compat.
+  InteractionKind interaction_kind = 4 [deprecated = true];
+  // Allowed kinds for this generation run. Empty = use chunk/lesson config.
+  repeated InteractionKind interaction_kinds = 5;
+  // Override per-chunk count. 0 = use chunk/lesson config.
+  int32 count_per_chunk = 6 [(buf.validate.field).int32 = {gte: 0, lte: 20}];
+  // Strategy override. UNSPECIFIED = use chunk/lesson config.
+  GenerationStrategy strategy = 7;
 }
 
-// ── Question editing ──────────────────────────────────────────────────────────
+// ── Chunk / lesson config update ─────────────────────────────────────────────
 
-message UpdateLessonQuestionRequest {
-  string question_id = 1 [(buf.validate.field).string.uuid = true];
-  string question_text = 2 [(buf.validate.field).string.min_len = 1];
-  repeated string options = 3 [(buf.validate.field).repeated.min_items = 2];
-  int32 correct_answer = 4 [(buf.validate.field).int32.gte = 0];
-  string explanation = 5;
-  float start_seconds = 6 [(buf.validate.field).float.gte = 0];
+message UpdateChunkInteractionConfigRequest {
+  string chunk_id = 1 [(buf.validate.field).string.uuid = true];
+  // Pass null/empty to clear the config (revert to lesson default).
+  ChunkInteractionConfig interaction_config = 2;
 }
 
-message UpdateLessonQuestionResponse {
-  LessonQuestion question = 1;
+message UpdateChunkInteractionConfigResponse {
+  TranscriptChunk chunk = 1;
 }
 
-message CreateManualQuestionRequest {
+message UpdateLessonDefaultInteractionConfigRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
-  string question_text = 2 [(buf.validate.field).string.min_len = 1];
-  repeated string options = 3 [(buf.validate.field).repeated.min_items = 2];
-  int32 correct_answer = 4 [(buf.validate.field).int32.gte = 0];
-  string explanation = 5;
-  float start_seconds = 6 [(buf.validate.field).float.gte = 0];
+  // Pass null/empty to clear the default.
+  ChunkInteractionConfig default_interaction_config = 2;
 }
 
-message CreateManualQuestionResponse {
-  LessonQuestion question = 1;
-}
-
-message DeleteLessonQuestionRequest {
-  string question_id = 1 [(buf.validate.field).string.uuid = true];
-}
-
-message DeleteLessonQuestionResponse {}
-
-message RegenerateQuestionRequest {
-  string question_id = 1 [(buf.validate.field).string.uuid = true];
-}
-
-message RegenerateQuestionResponse {
-  LessonQuestion question = 1;
-}
+message UpdateLessonDefaultInteractionConfigResponse {}
 
 // ── Video watch progress (stored in FoundationDB) ─────────────────────────────
 
@@ -289,14 +284,12 @@ service AIService {
   rpc SplitChunk(SplitChunkRequest) returns (SplitChunkResponse) {}
   rpc AdjustChunkBoundary(AdjustChunkBoundaryRequest) returns (AdjustChunkBoundaryResponse) {}
 
-  // Step 7: Generate MCQ questions for all chunks (or re-generate for one chunk).
-  rpc GenerateQuestionsStream(GenerateQuestionsRequest) returns (stream GenerateQuestionsProgressEvent) {}
+  // Step 5e: Per-chunk and lesson-level AI generation config.
+  rpc UpdateChunkInteractionConfig(UpdateChunkInteractionConfigRequest) returns (UpdateChunkInteractionConfigResponse) {}
+  rpc UpdateLessonDefaultInteractionConfig(UpdateLessonDefaultInteractionConfigRequest) returns (UpdateLessonDefaultInteractionConfigResponse) {}
 
-  // Step 8: Question editing.
-  rpc UpdateLessonQuestion(UpdateLessonQuestionRequest) returns (UpdateLessonQuestionResponse) {}
-  rpc CreateManualQuestion(CreateManualQuestionRequest) returns (CreateManualQuestionResponse) {}
-  rpc DeleteLessonQuestion(DeleteLessonQuestionRequest) returns (DeleteLessonQuestionResponse) {}
-  rpc RegenerateQuestion(RegenerateQuestionRequest) returns (RegenerateQuestionResponse) {}
+  // Step 7: Generate interactions for all chunks (or one chunk); supports multi-kind + strategy.
+  rpc GenerateInteractionsStream(GenerateInteractionsRequest) returns (stream GenerateInteractionsProgressEvent) {}
 
   // Video watch progress — stored in FoundationDB, not PostgreSQL.
   rpc UpdateWatchProgress(UpdateWatchProgressRequest) returns (UpdateWatchProgressResponse) {}
