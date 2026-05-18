@@ -75,6 +75,7 @@ func chunkToProto(c gen.LessonTranscriptChunk) *richterv1.TranscriptChunk {
 		EndSeconds:          float32(c.EndSeconds),
 		Summary:             c.Summary,
 		QuestionCountConfig: c.QuestionCountConfig,
+		CoherenceScore:      c.CoherenceScore,
 	}
 }
 

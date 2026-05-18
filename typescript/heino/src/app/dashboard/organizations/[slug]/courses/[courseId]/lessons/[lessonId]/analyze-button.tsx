@@ -297,76 +297,15 @@ function getChunkSegments(chunk: TranscriptChunk, allSegments: TranscriptSegment
   );
 }
 
-const COHERENCE_STOPWORDS = new Set([
-  // Vietnamese function words
-  "là", "của", "và", "có", "được", "cho", "để", "trong", "với", "này",
-  "đó", "đây", "như", "khi", "nếu", "mà", "nhưng", "hoặc", "vì", "nên",
-  "đã", "đang", "sẽ", "không", "phải", "chỉ", "cũng", "rất", "lại", "thì",
-  "về", "ở", "từ", "bằng", "theo", "qua", "trên", "dưới", "sau", "trước",
-  "tôi", "bạn", "nó", "họ", "chúng", "ta", "mình", "ai", "gì", "nào",
-  "sao", "đâu", "một", "hai", "ba", "các", "những", "mỗi", "nhiều", "ít",
-  "thế", "ra", "vào", "lên", "xuống", "đi", "đến", "tới", "nữa", "thêm",
-  "rồi", "vẫn", "còn", "hay", "chứ", "à", "nhé", "đấy", "ấy", "luôn",
-  // English function words
-  "the", "is", "are", "was", "were", "be", "been", "being",
-  "to", "of", "in", "on", "at", "by", "for", "with", "from",
-  "and", "or", "but", "if", "then", "as", "that", "this", "these", "those",
-  "it", "its", "he", "she", "they", "we", "you", "me", "my", "our", "your",
-  "do", "does", "did", "not", "no", "so", "such", "very", "more", "most",
-  "all", "any", "some", "can", "will", "would", "should", "could", "may",
-  "has", "have", "had", "an", "there", "here", "what", "which", "who",
-]);
-
-function tokenizeForCoherence(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const m of text.toLowerCase().matchAll(/\p{L}{2,}/gu)) {
-    const w = m[0];
-    if (!COHERENCE_STOPWORDS.has(w)) out.add(w);
-  }
-  return out;
-}
-
-// Lexical cohesion score in [0,1] for a chunk's segments. Combines:
-//   (1) chunk-wide lexical chain density — fraction of distinct content
-//       words that recur in ≥2 segments;
-//   (2) mean adjacent overlap coefficient — for each consecutive pair,
-//       |A ∩ B| / min(|A|, |B|), averaged.
-// Both signals approach 1 when the chunk stays on one topic and 0 when
-// neighbouring sentences share no vocabulary.
-function computeCoherence(segs: TranscriptSegment[]): number {
-  if (segs.length === 0) return 0;
-  if (segs.length === 1) return 1;
-  const tokens = segs.map(s => tokenizeForCoherence(s.text));
-
-  const docFreq = new Map<string, number>();
-  for (const set of tokens) for (const w of set) docFreq.set(w, (docFreq.get(w) ?? 0) + 1);
-  if (docFreq.size === 0) return 0;
-  let repeated = 0;
-  for (const c of docFreq.values()) if (c >= 2) repeated++;
-  const chainRatio = repeated / docFreq.size;
-
-  let sum = 0, pairs = 0;
-  for (let i = 1; i < tokens.length; i++) {
-    const a = tokens[i - 1], b = tokens[i];
-    if (a.size === 0 && b.size === 0) continue;
-    if (a.size === 0 || b.size === 0) { pairs++; continue; }
-    let inter = 0;
-    for (const w of a) if (b.has(w)) inter++;
-    sum += inter / Math.min(a.size, b.size);
-    pairs++;
-  }
-  const adj = pairs === 0 ? 0 : sum / pairs;
-
-  return 0.5 * chainRatio + 0.5 * adj;
-}
-
 // ── Coherence badge ───────────────────────────────────────────────────────────
+// Score is computed and persisted server-side (see richter coherence.go) and
+// arrives on the chunk proto as `coherence_score` ∈ [0, 1].
 
 function CoherenceBadge({ score }: { score: number }) {
   const pct = Math.round(score * 100);
-  const color = pct >= 30
+  const color = pct >= 35
     ? "text-green-700 dark:text-green-400 border-green-300 dark:border-green-800"
-    : pct >= 15
+    : pct >= 20
     ? "text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-800"
     : "text-red-700 dark:text-red-400 border-red-300 dark:border-red-800";
   return (
@@ -374,7 +313,7 @@ function CoherenceBadge({ score }: { score: number }) {
       data-testid="coherence-badge"
       data-score={pct}
       className={`text-xs border rounded px-1.5 py-px font-mono ${color}`}
-      title="Mức độ gắn kết nội dung (overlap từ vựng giữa các câu liền kề)"
+      title="Mức độ gắn kết nội dung (tỉ lệ từ trong mỗi câu thuộc về vốn từ chủ đề chung của đoạn)"
     >
       {pct}%
     </span>
@@ -406,7 +345,6 @@ function ChunkEditor({
   isMerging, isDeleting, isSplitting, isMoving, disabled,
 }: ChunkEditorProps) {
   const busy = disabled || isMerging || isDeleting || isSplitting || isMoving;
-  const coherence = computeCoherence(chunkSegments);
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/20 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 bg-muted/40">
@@ -414,7 +352,7 @@ function ChunkEditor({
           <p className="font-medium text-sm truncate">{chunk.summary}</p>
           <p className="text-xs text-muted-foreground">{formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}</p>
         </div>
-        {chunkSegments.length > 0 && <CoherenceBadge score={coherence} />}
+        {chunkSegments.length > 0 && <CoherenceBadge score={chunk.coherenceScore} />}
         <div className="flex items-center gap-1 shrink-0">
           {prevChunkId && (
             <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs h-6"
@@ -1182,7 +1120,7 @@ export function AnalyzeButton({
                     key={chunk.id}
                     chunk={chunk}
                     disabled={isBusy}
-                    coherence={chunkSegs.length > 0 ? computeCoherence(chunkSegs) : undefined}
+                    coherence={chunkSegs.length > 0 ? chunk.coherenceScore : undefined}
                     aiClient={aiClient}
                   />
                 );

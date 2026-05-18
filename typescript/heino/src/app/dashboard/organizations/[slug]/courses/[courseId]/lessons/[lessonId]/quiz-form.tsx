@@ -13,6 +13,7 @@ export interface SafeQuestion {
   questionText: string;
   options: { text: string }[];
   explanation: string;
+  startSeconds: number;
 }
 
 interface Props {
@@ -23,9 +24,16 @@ interface Props {
   lessonId: string;
   isPreview?: boolean;
   token: string;
+  /**
+   * When set, only questions whose id is in this set are rendered. Used during
+   * a first watch to progressively reveal questions as the student passes each
+   * checkpoint on the video. When undefined, all questions render (review mode
+   * after submission, or teacher preview).
+   */
+  visibleQuestionIds?: Set<string>;
 }
 
-export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, lessonId, isPreview, token }: Props) {
+export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, lessonId, isPreview, token, visibleQuestionIds }: Props) {
   const quizClient = useRichterWebClient(QuizService, token);
   const [selected, setSelected] = useState<(number | null)[]>(() =>
     Array.from({ length: questions.length }, (_, i) =>
@@ -78,6 +86,10 @@ export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, le
   }
 
   const allAnswered = selected.every((v) => v !== null);
+  const isQuestionVisible = (id: string) => !visibleQuestionIds || visibleQuestionIds.has(id);
+  const visibleCount = visibleQuestionIds
+    ? questions.filter((q) => visibleQuestionIds.has(q.id)).length
+    : questions.length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -91,7 +103,14 @@ export function QuizForm({ questions, previousAttempt, initialCorrectAnswers, le
         </div>
       )}
 
+      {visibleQuestionIds && visibleCount < questions.length && !submitted && (
+        <p className="text-sm text-muted-foreground">
+          Đã mở khóa {visibleCount} / {questions.length} câu hỏi — tiếp tục xem video để mở khóa câu còn lại.
+        </p>
+      )}
+
       {questions.map((q, qi) => {
+        if (!isQuestionVisible(q.id)) return null;
         const sel = selected[qi];
         const hasAnswers = correctAnswers != null && correctAnswers.length > 0;
         const correct = hasAnswers ? (correctAnswers[qi] ?? -1) : -1;

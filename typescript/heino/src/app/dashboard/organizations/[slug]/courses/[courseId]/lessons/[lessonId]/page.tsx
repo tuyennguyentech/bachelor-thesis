@@ -20,9 +20,10 @@ import {
 } from "lucide-react";
 import { VideoUpload } from "./video-upload";
 import { AnalyzeButton } from "./analyze-button";
-import { QuizForm, type SafeQuestion } from "./quiz-form";
+import { type SafeQuestion } from "./quiz-form";
 import { LessonAttempts } from "./lesson-attempts";
 import { VideoPlayer } from "./video-player";
+import { StudentLessonView } from "./student-lesson-view";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 
@@ -136,11 +137,14 @@ export default async function LessonDetailPage({
   const hasQuestions = isDone && analysis?.questions && analysis.questions.length > 0;
 
   // Strip correctAnswer before sending to the student's browser — only teachers see them directly.
+  // startSeconds is kept so the client can progressively reveal questions as
+  // the student passes each checkpoint on the video.
   const safeQuestions: SafeQuestion[] = (analysis?.questions ?? []).map((q) => ({
     id: q.id,
     questionText: q.questionText,
     options: q.options,
     explanation: q.explanation,
+    startSeconds: q.startSeconds,
   }));
   // Only expose correct answers to clients allowed to see them. Server also strips
   // correct_answer (sentinel -1) for unauthorized callers as defense-in-depth.
@@ -200,17 +204,33 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* Video player */}
+      {/* Video player (+ progressive quiz reveal for students) */}
       {videoUrl ? (
-        <VideoPlayer
-          videoUrl={videoUrl}
-          segments={analysis?.transcriptSegments ?? []}
-          transcript={analysis?.transcript ?? ""}
-          checkpoints={!effectiveCanManage || isPreview ? checkpoints : []}
-          lessonId={lessonId}
-          initialPosition={initialPosition}
-          token={token}
-        />
+        !effectiveCanManage || isPreview ? (
+          <StudentLessonView
+            videoUrl={videoUrl}
+            segments={analysis?.transcriptSegments ?? []}
+            transcript={analysis?.transcript ?? ""}
+            checkpoints={checkpoints}
+            lessonId={lessonId}
+            initialPosition={initialPosition}
+            token={token}
+            questions={hasQuestions ? safeQuestions : []}
+            previousAttempt={isPreview ? null : myAttempt}
+            initialCorrectAnswers={correctAnswers.length > 0 ? correctAnswers : undefined}
+            isPreview={isPreview}
+          />
+        ) : (
+          <VideoPlayer
+            videoUrl={videoUrl}
+            segments={analysis?.transcriptSegments ?? []}
+            transcript={analysis?.transcript ?? ""}
+            checkpoints={[]}
+            lessonId={lessonId}
+            initialPosition={initialPosition}
+            token={token}
+          />
+        )
       ) : (
         <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
           <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
@@ -288,25 +308,9 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* MCQ: student gets interactive quiz form */}
-      {hasQuestions && (!effectiveCanManage || isPreview) && (
-        <div className="rounded-lg border p-4 flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <SparklesIcon className="size-4 text-muted-foreground" />
-            <h2 className="font-medium text-sm">
-              Câu hỏi trắc nghiệm ({analysis!.questions.length} câu)
-            </h2>
-          </div>
-          <QuizForm
-            questions={safeQuestions}
-            previousAttempt={isPreview ? null : myAttempt}
-            initialCorrectAnswers={correctAnswers.length > 0 ? correctAnswers : undefined}
-            lessonId={lessonId}
-            isPreview={isPreview}
-            token={token}
-          />
-        </div>
-      )}
+      {/* (Student MCQ form is rendered inside StudentLessonView above so the
+          question list can be progressively revealed as the student passes
+          each checkpoint on the video.) */}
 
       {/* Teacher/admin: student progress */}
       {effectiveCanManage && attemptsData && (

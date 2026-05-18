@@ -1,6 +1,6 @@
 -- name: InsertLessonTranscriptChunk :one
-INSERT INTO lesson_transcript_chunks (lesson_id, order_index, start_seconds, end_seconds, summary, question_count_config)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO lesson_transcript_chunks (lesson_id, order_index, start_seconds, end_seconds, summary, question_count_config, coherence_score)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: ListLessonTranscriptChunks :many
@@ -26,9 +26,12 @@ DELETE FROM lesson_transcript_chunks WHERE id = $1;
 
 -- name: UpdateChunkMetadata :one
 UPDATE lesson_transcript_chunks
-SET start_seconds = $2, end_seconds = $3, summary = $4
+SET start_seconds = $2, end_seconds = $3, summary = $4, coherence_score = $5
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateChunkCoherence :exec
+UPDATE lesson_transcript_chunks SET coherence_score = $2 WHERE id = $1;
 
 -- name: ReorderLessonChunks :exec
 UPDATE lesson_transcript_chunks

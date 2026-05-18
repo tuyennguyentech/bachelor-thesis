@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/validate"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/buf/gen/richter/v1/richterv1connect"
+	"example.com/richter/cfg"
 	"example.com/richter/internal"
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
@@ -17,9 +18,11 @@ import (
 	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/samber/do/v2"
 )
 
@@ -32,10 +35,12 @@ func init() {
 }
 
 type LessonsSvc struct {
-	pg    *db.PostgresSvc
-	kv    *kv.KVSvc
-	log   *log.LogSvc
-	authz *authz.AuthzSvc
+	pg       *db.PostgresSvc
+	kv       *kv.KVSvc
+	log      *log.LogSvc
+	authz    *authz.AuthzSvc
+	s3client *minio.Client
+	s3cfg    *cfg.S3Cfg
 }
 
 var _ richterv1connect.LessonServiceHandler = (*LessonsSvc)(nil)
@@ -57,6 +62,17 @@ func NewLessonsSvc(i do.Injector) (s *LessonsSvc, err error) {
 	s.authz, err = do.Invoke[*authz.AuthzSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("AuthzSvc cannot be invoked: %w", err)
+	}
+	s.s3cfg, err = do.Invoke[*cfg.S3Cfg](i)
+	if err != nil {
+		return nil, fmt.Errorf("S3Cfg cannot be invoked: %w", err)
+	}
+	s.s3client, err = minio.New(s.s3cfg.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(s.s3cfg.AccessKeyID, s.s3cfg.SecretAccessKey, ""),
+		Secure: s.s3cfg.UseSSL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("minio client init: %w", err)
 	}
 	return
 }
@@ -388,6 +404,17 @@ func (s *LessonsSvc) UpdateLessonVideo(
 		}
 	}
 
+	// Delete the old S3 object when the storage key actually changes (e.g.
+	// replacing video.mp4 with video.webm). Same-key replacements have already
+	// overwritten the file via presigned PUT and need no cleanup.
+	if existing.VideoStorageKey.Valid && existing.VideoStorageKey.String != req.GetVideoStorageKey() {
+		oldKey := existing.VideoStorageKey.String
+		if err := s.s3client.RemoveObject(ctx, s.s3cfg.Bucket, oldKey, minio.RemoveObjectOptions{}); err != nil {
+			s.log.WarnContext(ctx, "lessons: failed to delete old video from storage",
+				"old_key", oldKey, "err", err)
+		}
+	}
+
 	return &richterv1.UpdateLessonVideoResponse{Lesson: LessonToProto(l)}, nil
 }
 
@@ -446,6 +473,14 @@ func (s *LessonsSvc) DeleteLesson(
 		err = connect.NewError(connect.CodeNotFound, fmt.Errorf("lesson not found: %s", existing.ID))
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("DeleteLesson.NotFound", err)...)
 		return nil, err
+	}
+
+	// Clean up the S3 video object after the PG row is gone. Best-effort.
+	if existing.VideoStorageKey.Valid {
+		if err := s.s3client.RemoveObject(ctx, s.s3cfg.Bucket, existing.VideoStorageKey.String, minio.RemoveObjectOptions{}); err != nil {
+			s.log.WarnContext(ctx, "lessons: failed to delete lesson video from storage",
+				"key", existing.VideoStorageKey.String, "err", err)
+		}
 	}
 
 	// Clean up FDB data (best-effort; PG row already deleted).

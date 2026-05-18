@@ -60,6 +60,10 @@ message TranscriptChunk {
   string summary = 6;
   string transcript = 7;
   int32 question_count_config = 8;
+  // Lexical-cohesion coverage score [0, 1] computed at chunking time and
+  // refreshed when the chunk's segments change. Higher = chunk stays on one
+  // topic. See coherence.go on the server for the exact formula.
+  float coherence_score = 9;
 }
 
 message GetLessonAnalysisRequest {

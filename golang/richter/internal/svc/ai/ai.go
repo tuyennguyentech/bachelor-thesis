@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -363,6 +364,16 @@ func (s *AISvc) ExtractTranscriptStream(
 		}
 	}
 
+	// Collect chunk IDs for FDB cleanup before the PG delete cascades them away.
+	var staleChunkIDs []string
+	if existingChunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 10000, Offset: 0})
+	}); err == nil {
+		for _, c := range existingChunks {
+			staleChunkIDs = append(staleChunkIDs, c.ID.String())
+		}
+	}
+
 	// Clear stale chunks and questions from any previous run.
 	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
 		if err := q.DeleteLessonQuestions(ctx, lessonID); err != nil {
@@ -371,6 +382,11 @@ func (s *AISvc) ExtractTranscriptStream(
 		return q.DeleteLessonTranscriptChunks(ctx, lessonID)
 	}); err != nil {
 		s.log.WarnContext(ctx, "ai: failed to clear stale chunks on re-extract", "err", err)
+	}
+
+	// Best-effort FDB cleanup for the chunks we just deleted from PG.
+	for _, id := range staleChunkIDs {
+		_ = s.kv.Delete(kvNsChunk, tuple.Tuple{id, "transcript"})
 	}
 	finalStatus := gen.LessonAnalysisStatusTranscriptExtracted
 
@@ -439,6 +455,33 @@ func (s *AISvc) UpdateTranscriptSegment(
 	rebuiltTranscript := strings.Join(parts, " ")
 	if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonID.String(), "transcript"}, []byte(rebuiltTranscript)); err != nil {
 		s.log.WarnContext(ctx, "ai: failed to rebuild transcript after segment edit", "err", err)
+	}
+
+	// If chunks already exist, rebuild each chunk's FDB transcript AND its
+	// coherence score from the (now-edited) segments. Without this, the chunk
+	// transcripts shipped to Gemini for question regeneration would contain the
+	// OLD segment text and the coverage score would still reflect the old
+	// vocabulary.
+	if chunks, cerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 10000, Offset: 0})
+	}); cerr == nil {
+		for _, c := range chunks {
+			segsInChunk := chunkSegments(segments, float32(c.StartSeconds), float32(c.EndSeconds))
+			chunkText := buildChunkTranscript(segments, float32(c.StartSeconds), float32(c.EndSeconds))
+			if chunkText != "" {
+				if err := s.kv.Set(kvNsChunk, tuple.Tuple{c.ID.String(), "transcript"}, []byte(chunkText)); err != nil {
+					s.log.WarnContext(ctx, "ai: failed to rebuild chunk transcript after segment edit",
+						"chunk_id", c.ID.String(), "err", err)
+				}
+			}
+			newCoherence := computeChunkCoherence(segsInChunk)
+			if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+				return q.UpdateChunkCoherence(ctx, gen.UpdateChunkCoherenceParams{ID: c.ID, CoherenceScore: newCoherence})
+			}); err != nil {
+				s.log.WarnContext(ctx, "ai: failed to update chunk coherence after segment edit",
+					"chunk_id", c.ID.String(), "err", err)
+			}
+		}
 	}
 
 	seg := segments[idx]
@@ -543,6 +586,7 @@ func (s *AISvc) ChunkTranscriptStream(
 
 	type chunkFDBEntry struct{ id, transcript string }
 	var chunkFDBEntries []chunkFDBEntry
+	var staleChunkIDs []string
 
 	saveErr := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
 		// Delete old questions and chunks atomically.
@@ -551,6 +595,7 @@ func (s *AISvc) ChunkTranscriptStream(
 			return fmt.Errorf("list existing chunks: %w", err)
 		}
 		for _, ec := range existing {
+			staleChunkIDs = append(staleChunkIDs, ec.ID.String())
 			if err := q.DeleteLessonQuestionsForChunk(ctx, ec.ID); err != nil {
 				return fmt.Errorf("delete questions for chunk %s: %w", ec.ID, err)
 			}
@@ -560,6 +605,8 @@ func (s *AISvc) ChunkTranscriptStream(
 		}
 
 		for i, ch := range chunks {
+			chunkSegs := chunkSegments(allSegs, ch.StartSeconds, ch.EndSeconds)
+			coherence := computeChunkCoherence(chunkSegs)
 			dbChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
 				LessonID:            lessonID,
 				OrderIndex:          int32(i),
@@ -567,6 +614,7 @@ func (s *AISvc) ChunkTranscriptStream(
 				EndSeconds:          float64(ch.EndSeconds),
 				Summary:             ch.Summary,
 				QuestionCountConfig: 1,
+				CoherenceScore:      coherence,
 			})
 			if err != nil {
 				return fmt.Errorf("insert chunk %d: %w", i, err)
@@ -611,6 +659,14 @@ func (s *AISvc) ChunkTranscriptStream(
 		s.log.ErrorContext(ctx, "ai: failed to update status to chunks_ready", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
 	}
 	chunkStatusFinalized = true
+
+	// Clear FDB transcripts for the OLD chunks that were just deleted in the tx
+	// above. Their PG rows are gone but their FDB content was previously written
+	// under their (now-orphaned) chunk_ids, which never collide with the fresh
+	// chunk ids we generate below.
+	for _, id := range staleChunkIDs {
+		_ = s.kv.Delete(kvNsChunk, tuple.Tuple{id, "transcript"})
+	}
 
 	for _, e := range chunkFDBEntries {
 		if e.transcript == "" {
@@ -755,6 +811,9 @@ func (s *AISvc) MergeChunks(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("write merged transcript to FDB: %w", err))
 	}
 
+	allSegs := s.loadSegmentsFromFDB(keepChunk.LessonID.String())
+	mergedCoherence := computeChunkCoherence(chunkSegments(allSegs, float32(mergedStart), float32(mergedEnd)))
+
 	var mergedChunk gen.LessonTranscriptChunk
 	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
 		if err := q.DeleteLessonQuestionsForChunk(ctx, discardID); err != nil {
@@ -764,10 +823,11 @@ func (s *AISvc) MergeChunks(
 			return fmt.Errorf("delete discard chunk: %w", err)
 		}
 		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
-			ID:           keepID,
-			StartSeconds: mergedStart,
-			EndSeconds:   mergedEnd,
-			Summary:      keepChunk.Summary,
+			ID:             keepID,
+			StartSeconds:   mergedStart,
+			EndSeconds:     mergedEnd,
+			Summary:        keepChunk.Summary,
+			CoherenceScore: mergedCoherence,
 		})
 		if err != nil {
 			return fmt.Errorf("update keep chunk boundaries: %w", err)
@@ -849,6 +909,8 @@ func (s *AISvc) SplitChunk(
 	allSegs := s.loadSegmentsFromFDB(chunk.LessonID.String())
 	firstTranscript := buildChunkTranscript(allSegs, float32(chunk.StartSeconds), splitAt)
 	secondTranscript := buildChunkTranscript(allSegs, splitAt, float32(chunk.EndSeconds))
+	firstCoherence := computeChunkCoherence(chunkSegments(allSegs, float32(chunk.StartSeconds), splitAt))
+	secondCoherence := computeChunkCoherence(chunkSegments(allSegs, splitAt, float32(chunk.EndSeconds)))
 
 	type splitResult struct {
 		first       gen.LessonTranscriptChunk
@@ -859,6 +921,7 @@ func (s *AISvc) SplitChunk(
 		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
 			ID: chunk.ID, StartSeconds: chunk.StartSeconds,
 			EndSeconds: float64(splitAt), Summary: chunk.Summary,
+			CoherenceScore: firstCoherence,
 		})
 		if err != nil {
 			return splitResult{}, svc.ConnectDBError(err)
@@ -878,6 +941,7 @@ func (s *AISvc) SplitChunk(
 			LessonID: chunk.LessonID, OrderIndex: maxOrder + 1,
 			StartSeconds: float64(splitAt), EndSeconds: chunk.EndSeconds,
 			Summary: chunk.Summary, QuestionCountConfig: chunk.QuestionCountConfig,
+			CoherenceScore: secondCoherence,
 		})
 		if err != nil {
 			return splitResult{}, svc.ConnectDBError(err)
@@ -974,6 +1038,8 @@ func (s *AISvc) AdjustChunkBoundary(
 	allSegs := s.loadSegmentsFromFDB(prevChunk.LessonID.String())
 	prevTranscript := buildChunkTranscript(allSegs, float32(prevChunk.StartSeconds), newBoundary)
 	nextTranscript := buildChunkTranscript(allSegs, newBoundary, float32(nextChunk.EndSeconds))
+	prevCoherence := computeChunkCoherence(chunkSegments(allSegs, float32(prevChunk.StartSeconds), newBoundary))
+	nextCoherence := computeChunkCoherence(chunkSegments(allSegs, newBoundary, float32(nextChunk.EndSeconds)))
 
 	type boundaryResult struct {
 		prev gen.LessonTranscriptChunk
@@ -995,12 +1061,14 @@ func (s *AISvc) AdjustChunkBoundary(
 		}
 		updPrev, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
 			ID: prevID, StartSeconds: currentPrev.StartSeconds, EndSeconds: float64(newBoundary), Summary: currentPrev.Summary,
+			CoherenceScore: prevCoherence,
 		})
 		if err != nil {
 			return boundaryResult{}, svc.ConnectDBError(err)
 		}
 		updNext, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
 			ID: nextID, StartSeconds: float64(newBoundary), EndSeconds: currentNext.EndSeconds, Summary: currentNext.Summary,
+			CoherenceScore: nextCoherence,
 		})
 		if err != nil {
 			return boundaryResult{}, svc.ConnectDBError(err)
@@ -1431,7 +1499,7 @@ Trả về JSON:
   ]
 }`)
 
-	s.log.WarnContext(ctx, "[GEMINI] ChunkTranscript: calling GenerateContent")
+	s.log.InfoContext(ctx, "[GEMINI] ChunkTranscript: calling GenerateContent")
 	resp, err := model.GenerateContent(ctx, genai.Text(sb.String()))
 	if err != nil {
 		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
@@ -1454,7 +1522,17 @@ Trả về JSON:
 		if ch.EndSeconds <= ch.StartSeconds {
 			ch.EndSeconds = ch.StartSeconds + 30
 		}
+		if ch.StartSeconds < 0 {
+			ch.StartSeconds = 0
+		}
 	}
+	// Sort by start_seconds so the saved order_index matches video timeline.
+	// Gemini sometimes returns chunks out of order, especially with longer
+	// transcripts — without this fix the chunk editor displays them in the
+	// LLM's arrival order rather than the natural watching order.
+	sort.SliceStable(result.Chunks, func(i, j int) bool {
+		return result.Chunks[i].StartSeconds < result.Chunks[j].StartSeconds
+	})
 	return result.Chunks, nil
 }
 
@@ -1493,7 +1571,7 @@ Lưu ý: start_seconds là thời điểm (giây) trong video mà nội dung li�
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 	)
 
-	s.log.WarnContext(ctx, "[GEMINI] GenerateQuestions: calling GenerateContent", "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
+	s.log.InfoContext(ctx, "[GEMINI] GenerateQuestions: calling GenerateContent", "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
@@ -1774,7 +1852,7 @@ Trả về JSON:
 		chunkStart, chunkEnd, contextText, float32(q.StartSeconds),
 	)
 
-	s.log.WarnContext(ctx, "[GEMINI] RegenerateQuestion: calling GenerateContent", "question_id", req.GetQuestionId())
+	s.log.InfoContext(ctx, "[GEMINI] RegenerateQuestion: calling GenerateContent", "question_id", req.GetQuestionId())
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))

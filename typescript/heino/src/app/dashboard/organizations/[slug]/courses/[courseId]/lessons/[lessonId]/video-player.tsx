@@ -16,15 +16,30 @@ interface Props {
   lessonId?: string;
   initialPosition?: number;
   token: string;
+  /**
+   * Called once when the student dismisses each checkpoint (i.e. has actually
+   * been shown the question). Used by the parent to reveal the corresponding
+   * question in the bottom QuizForm — students should not see the full list
+   * before reaching each mark on the video.
+   */
+  onCheckpointPassed?: (questionId: string) => void;
+  /**
+   * Fired once the first time the student presses Play in this session.
+   * The student-quiz view uses this to reveal questions that have no
+   * checkpoint mark (start_seconds <= 0) — they're "free" intro questions
+   * that have no other reveal trigger.
+   */
+  onFirstPlay?: () => void;
 }
 
 // Save watch position at most every SAVE_INTERVAL_S seconds of real time.
 const SAVE_INTERVAL_S = 10;
 
-export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lessonId, initialPosition = 0, token }: Props) {
+export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lessonId, initialPosition = 0, token, onCheckpointPassed, onFirstPlay }: Props) {
   const aiClient = useRichterWebClient(AIService, token);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastSavedPos = useRef<number>(-1);
+  const firstPlayFired = useRef<boolean>(false);
   // IDs of checkpoints that have been shown this session
   const [passedIds, setPassedIds] = useState<Set<string>>(new Set());
   const [activeCheckpoint, setActiveCheckpoint] = useState<CheckpointQuestion | null>(null);
@@ -77,10 +92,12 @@ export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lesso
 
   const handleContinue = useCallback(() => {
     if (!activeCheckpoint) return;
-    setPassedIds((prev) => new Set([...prev, activeCheckpoint.id]));
+    const passedId = activeCheckpoint.id;
+    setPassedIds((prev) => new Set([...prev, passedId]));
     setActiveCheckpoint(null);
+    onCheckpointPassed?.(passedId);
     videoRef.current?.play();
-  }, [activeCheckpoint]);
+  }, [activeCheckpoint, onCheckpointPassed]);
 
   // E2E test hook: allows tests to trigger a checkpoint without a real seekable video.
   // Registered once via empty deps; reads current values through refs to avoid re-registration
@@ -117,7 +134,13 @@ export function VideoPlayer({ videoUrl, segments, transcript, checkpoints, lesso
             onTimeUpdate={handleTimeUpdate}
             onError={() => setVideoError(true)}
             onPause={() => { if (videoRef.current) saveProgress(videoRef.current.currentTime); }}
-            onPlay={() => { if (activeCheckpoint) videoRef.current?.pause(); }}
+            onPlay={() => {
+              if (activeCheckpoint) videoRef.current?.pause();
+              if (!firstPlayFired.current) {
+                firstPlayFired.current = true;
+                onFirstPlay?.();
+              }
+            }}
             onSeeked={() => {
               if (activeCheckpoint && videoRef.current) {
                 videoRef.current.currentTime = activeCheckpoint.startSeconds;
