@@ -9,12 +9,15 @@ import {
   PencilIcon, LockIcon, ScissorsIcon, ArrowUpIcon, ArrowDownIcon, PlayIcon,
 } from "lucide-react";
 import {
-  AnalysisProgressStep, AnalysisStatus, GenerateQuestionsStep, AIService,
+  AnalysisProgressStep, AnalysisStatus, GenerateInteractionsStep, AIService,
 } from "buf/gen/richter/v1/ai_pb";
-import type { TranscriptChunk, TranscriptSegment, LessonQuestion } from "buf/gen/richter/v1/ai_pb";
+import type { TranscriptChunk, TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
+import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
+import { LessonService } from "buf/gen/richter/v1/courses_pb";
+import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { ConnectError } from "@connectrpc/connect";
-import { LessonQuestionsEditor } from "./lesson-questions-editor";
+import { InteractionEditorList } from "./interaction-editor-list";
 
 // ── Step progress helpers ─────────────────────────────────────────────────────
 
@@ -62,7 +65,7 @@ type GenRunState =
 
 // ── Tab types ─────────────────────────────────────────────────────────────────
 
-type TabKey = "phienAm" | "doanNoidung" | "cauHoi";
+type TabKey = "phienAm" | "doanNoidung" | "baiTap";
 
 // ── Pipeline step wrapper ─────────────────────────────────────────────────────
 
@@ -424,55 +427,6 @@ function ChunkEditor({
   );
 }
 
-// ── Question config row ───────────────────────────────────────────────────────
-
-function QuestionConfigRow({ chunk, disabled, coherence, aiClient }: { chunk: TranscriptChunk; disabled: boolean; coherence?: number; aiClient: ReturnType<typeof useRichterWebClient<typeof AIService>> }) {
-  const [count, setCount] = useState(chunk.questionCountConfig || 1);
-  const [prevConfig, setPrevConfig] = useState(chunk.questionCountConfig || 1);
-  const [, startSaving] = useTransition();
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Adopt parent's value when it changes externally (e.g. after a save round-trip refreshes the list).
-  if (prevConfig !== (chunk.questionCountConfig || 1)) {
-    setPrevConfig(chunk.questionCountConfig || 1);
-    setCount(chunk.questionCountConfig || 1);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  function handleChange(val: number) {
-    const clamped = Math.min(20, Math.max(1, val));
-    setCount(clamped);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      startSaving(async () => { await aiClient.updateChunkConfig({ chunkId: chunk.id, questionCount: clamped }); });
-    }, 600);
-  }
-
-  return (
-    <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
-      <div className="flex-1 min-w-0">
-        <p className="font-medium truncate">{chunk.summary}</p>
-        <p className="text-muted-foreground">{formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}</p>
-      </div>
-      {coherence !== undefined && <CoherenceBadge score={coherence} />}
-      <label className="flex items-center gap-1.5 shrink-0 text-muted-foreground">
-        Số câu hỏi:
-        <input
-          type="number" min={1} max={20} value={count}
-          disabled={disabled}
-          onChange={(e) => handleChange(parseInt(e.target.value, 10) || 1)}
-          className="w-12 rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground text-center disabled:opacity-50"
-        />
-      </label>
-    </div>
-  );
-}
-
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
 function TabBar({
@@ -521,7 +475,8 @@ interface Props {
   initialChunks?: TranscriptChunk[];
   initialSegments?: TranscriptSegment[];
   initialStatus?: AnalysisStatus;
-  initialQuestions?: LessonQuestion[];
+  initialInteractions?: LessonInteraction[];
+  initialFeedbackMode?: FeedbackMode;
   token: string;
 }
 
@@ -530,14 +485,31 @@ export function AnalyzeButton({
   initialChunks = [],
   initialSegments = [],
   initialStatus,
-  initialQuestions = [],
+  initialInteractions = [],
+  initialFeedbackMode = FeedbackMode.AFTER_SUBMIT,
   token,
 }: Props) {
   const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
+  const lessonClient = useRichterWebClient(LessonService, token);
+  const [feedbackMode, setFeedbackMode] = useState<FeedbackMode>(initialFeedbackMode);
+  const [savingFeedback, startSaveFeedback] = useTransition();
   const abortRef = useRef<AbortController | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabKey>("phienAm");
+
+  function handleFeedbackModeChange(mode: FeedbackMode) {
+    setFeedbackMode(mode);
+    startSaveFeedback(async () => {
+      try {
+        await lessonClient.updateLessonFeedbackMode({ id: lessonId, feedbackMode: mode });
+        router.refresh();
+      } catch {
+        // revert on failure
+        setFeedbackMode(feedbackMode);
+      }
+    });
+  }
   const [status, setStatus] = useState<AnalysisStatus | undefined>(initialStatus);
   const [extractState, setExtractState] = useState<StreamRunState>(() => {
     if (initialStatus !== AnalysisStatus.PROCESSING) return { phase: "idle" };
@@ -561,7 +533,7 @@ export function AnalyzeButton({
   const [genWarnings, setGenWarnings] = useState<string[]>([]);
   const [mutatingError, setMutatingError] = useState<string | null>(null);
   const [confirmReExtract, setConfirmReExtract] = useState(false);
-  const [questions, setQuestions] = useState<LessonQuestion[]>(initialQuestions);
+  const [interactions, setInteractions] = useState<LessonInteraction[]>(initialInteractions);
   const [questionsGenKey, setQuestionsGenKey] = useState(0);
 
   useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
@@ -574,7 +546,7 @@ export function AnalyzeButton({
     abortRef.current?.abort();
     setSegments([]);
     setChunks([]);
-    setQuestions([]);
+    setInteractions([]);
     setStatus(initialStatus);
     setExtractState({ phase: "idle" });
     setChunkState({ phase: "idle" });
@@ -841,14 +813,14 @@ export function AnalyzeButton({
   async function reloadAfterGenerate() {
     const analysisResult = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
     const analysis = analysisResult?.analysis ?? null;
-    if (analysis?.questions) {
-      setQuestions(analysis.questions);
+    if (analysis?.interactions) {
+      setInteractions(analysis.interactions);
       setQuestionsGenKey(k => k + 1);
     }
     if (analysis) setStatus(analysis.status);
     router.refresh();
     // Auto-navigate to the questions tab to show the result.
-    setActiveTab("cauHoi");
+    setActiveTab("baiTap");
   }
 
   function handleGenerate(force?: boolean) {
@@ -862,16 +834,16 @@ export function AnalyzeButton({
 
     (async () => {
       try {
-        for await (const event of aiClient.generateQuestionsStream(
+        for await (const event of aiClient.generateInteractionsStream(
           { lessonId, chunkId: "", forceRegenerate: shouldForce },
           { signal: abortController.signal },
         )) {
-          if (event.step === GenerateQuestionsStep.ERROR) {
+          if (event.step === GenerateInteractionsStep.ERROR) {
             setGenWarnings(prev => [...prev, event.message || "Lỗi tạo câu hỏi cho một đoạn"]);
             setGenState({ phase: "running", message: event.message || "Lỗi, tiếp tục đoạn khác...", chunkIndex: event.chunkIndex, totalChunks: event.totalChunks });
             continue;
           }
-          if (event.step === GenerateQuestionsStep.DONE) {
+          if (event.step === GenerateInteractionsStep.DONE) {
             setGenState({ phase: "done" });
             reloadAfterGenerate();
             return;
@@ -898,7 +870,7 @@ export function AnalyzeButton({
 
   const hasSegments = segments.length > 0;
   const hasChunks = chunks.length > 0;
-  const questionsGenerated = genState.phase === "done" || status === AnalysisStatus.DONE;
+  const questionsGenerated = genState.phase === "done" || status === AnalysisStatus.DONE || interactions.length > 0;
 
   const step2Status: PipelineStepStatus =
     isExtracting || isSyncing ? "active" :
@@ -914,7 +886,6 @@ export function AnalyzeButton({
     hasChunks ? "done" : "available";
 
   const step5Status: PipelineStepStatus = hasChunks ? "available" : "locked";
-  const step6Status: PipelineStepStatus = hasChunks ? "available" : "locked";
 
   const step7Status: PipelineStepStatus =
     !hasChunks ? "locked" :
@@ -934,8 +905,8 @@ export function AnalyzeButton({
       dot: isChunking || isChunkSyncing ? "active" : chunkState.phase === "error" ? "error" : hasChunks ? "done" : undefined,
     },
     {
-      key: "cauHoi",
-      label: "Câu hỏi",
+      key: "baiTap",
+      label: "Bài tập",
       dot: isGenerating ? "active" : genState.phase === "error" ? "error" : questionsGenerated ? "done" : undefined,
     },
   ];
@@ -1076,7 +1047,7 @@ export function AnalyzeButton({
           {/* Step 2: Edit chunks */}
           <PipelineStep
             number={2} title="Chỉnh sửa đoạn" pipelineStatus={step5Status}
-            optional collapsible defaultOpen={false}
+            optional collapsible defaultOpen={false} isLast
           >
             <div className="flex flex-col gap-1.5">
               {isReloadingChunks ? (
@@ -1110,34 +1081,50 @@ export function AnalyzeButton({
             </div>
           </PipelineStep>
 
-          {/* Step 3: Question count config */}
-          <PipelineStep number={3} title="Cấu hình số câu hỏi" pipelineStatus={step6Status} isLast>
-            <div className="flex flex-col gap-1.5">
-              {chunks.map(chunk => {
-                const chunkSegs = getChunkSegments(chunk, segments);
-                return (
-                  <QuestionConfigRow
-                    key={chunk.id}
-                    chunk={chunk}
-                    disabled={isBusy}
-                    coherence={chunkSegs.length > 0 ? chunk.coherenceScore : undefined}
-                    aiClient={aiClient}
-                  />
-                );
-              })}
-            </div>
-          </PipelineStep>
         </div>
       )}
 
-      {/* ── Tab 3: Câu hỏi ── */}
-      {activeTab === "cauHoi" && (
+      {/* ── Tab 3: Bài tập ── */}
+      {activeTab === "baiTap" && (
         <div className="flex flex-col gap-4">
+          {/* Feedback mode picker */}
+          <div className="rounded-md border border-border bg-muted/20 p-3 flex flex-col gap-2">
+            <p className="text-xs font-medium text-foreground">Chế độ phản hồi</p>
+            <div className="flex flex-col gap-1.5">
+              {([
+                { value: FeedbackMode.HIDDEN, label: "Ẩn", desc: "Chỉ hiện tổng điểm, không tiết lộ đáp án" },
+                { value: FeedbackMode.AFTER_SUBMIT, label: "Sau khi nộp bài", desc: "Đáp án đúng + giải thích hiện sau khi nộp (mặc định)" },
+                { value: FeedbackMode.AFTER_EACH, label: "Sau mỗi câu", desc: "Phản hồi ngay sau khi chọn đáp án (luyện tập)" },
+              ] as const).map(({ value, label, desc }) => (
+                <label
+                  key={value}
+                  className={`flex items-start gap-2 rounded-md px-2 py-1.5 cursor-pointer border transition-colors
+                    ${feedbackMode === value ? "border-primary/50 bg-primary/5" : "border-transparent hover:bg-muted/40"}`}
+                >
+                  <input
+                    type="radio"
+                    name="feedbackMode"
+                    value={value}
+                    checked={feedbackMode === value}
+                    disabled={savingFeedback}
+                    onChange={() => handleFeedbackModeChange(value)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <div>
+                    <p className="text-xs font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {savingFeedback && <p className="text-xs text-muted-foreground">Đang lưu…</p>}
+          </div>
+
           {/* Generate button + progress */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2 mb-1">
               <span className={`text-sm font-medium ${step7Status === "locked" ? "text-muted-foreground" : "text-foreground"}`}>
-                Tạo câu hỏi
+                Tạo câu hỏi bằng AI
               </span>
               {step7Status === "locked" && (
                 <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px flex items-center gap-1">
@@ -1185,26 +1172,16 @@ export function AnalyzeButton({
             )}
           </div>
 
-          {/* Questions list */}
-          {questions.length > 0 && (
-            <div className="flex flex-col gap-2 border-t pt-3">
-              <p className="text-sm font-medium">Câu hỏi trắc nghiệm ({questions.length} câu)</p>
-              <LessonQuestionsEditor
-                key={questionsGenKey}
-                lessonId={lessonId}
-                initialQuestions={questions}
-                token={token}
-              />
-            </div>
-          )}
-
-          {questions.length === 0 && !isGenerating && (
-            <div className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border rounded-lg">
-              {chunks.length === 0
-                ? "Phân đoạn nội dung trước để tạo câu hỏi."
-                : "Bấm \"Tạo câu hỏi\" để bắt đầu."}
-            </div>
-          )}
+          {/* Questions list — always visible so teacher can add manually */}
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <p className="text-sm font-medium">Câu hỏi trắc nghiệm ({interactions.length} câu)</p>
+            <InteractionEditorList
+              key={questionsGenKey}
+              lessonId={lessonId}
+              initialInteractions={interactions}
+              token={token}
+            />
+          </div>
         </div>
       )}
     </div>
