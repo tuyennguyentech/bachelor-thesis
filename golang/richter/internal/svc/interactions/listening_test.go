@@ -1,0 +1,154 @@
+package interactions
+
+import (
+	"encoding/json"
+	"math"
+	"testing"
+)
+
+func TestListeningGradeDictation(t *testing.T) {
+	h := &listeningHandler{}
+
+	cfg := listeningConfigJSON{
+		AudioObjectKey: "lessons/uuid/audio.mp3",
+		Mode:           "dictation",
+		ExpectedText:   "The quick brown fox jumps over the lazy dog",
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+
+	t.Run("exact match", func(t *testing.T) {
+		resp := listeningResponseJSON{Transcription: "The quick brown fox jumps over the lazy dog"}
+		respJSON, _ := json.Marshal(resp)
+		score, max, _, err := h.Grade(cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if max != 1.0 {
+			t.Errorf("maxScore: want 1.0, got %v", max)
+		}
+		if math.Abs(float64(score-1.0)) > 0.01 {
+			t.Errorf("score: want ~1.0, got %v", score)
+		}
+	})
+
+	t.Run("case insensitive match", func(t *testing.T) {
+		resp := listeningResponseJSON{Transcription: "the quick brown fox jumps over the lazy dog"}
+		respJSON, _ := json.Marshal(resp)
+		score, _, _, err := h.Grade(cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if math.Abs(float64(score-1.0)) > 0.01 {
+			t.Errorf("score: want ~1.0, got %v", score)
+		}
+	})
+
+	t.Run("empty transcription gives 0", func(t *testing.T) {
+		resp := listeningResponseJSON{Transcription: ""}
+		respJSON, _ := json.Marshal(resp)
+		score, _, _, err := h.Grade(cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if score != 0.0 {
+			t.Errorf("score: want 0, got %v", score)
+		}
+	})
+
+	t.Run("partial overlap between 0 and 1", func(t *testing.T) {
+		resp := listeningResponseJSON{Transcription: "quick brown fox"}
+		respJSON, _ := json.Marshal(resp)
+		score, _, _, err := h.Grade(cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if score <= 0 || score >= 1.0 {
+			t.Errorf("score: want 0 < score < 1, got %v", score)
+		}
+	})
+}
+
+func TestListeningGradeComprehension(t *testing.T) {
+	h := &listeningHandler{}
+
+	cfg := listeningConfigJSON{
+		AudioObjectKey: "lessons/uuid/audio.mp3",
+		Mode:           "comprehension",
+		ComprehensionQuestions: []nestedMcqConfigJSON{
+			{Options: []string{"A", "B", "C", "D"}, CorrectAnswer: 0},
+			{Options: []string{"A", "B", "C", "D"}, CorrectAnswer: 2},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+
+	t.Run("all correct", func(t *testing.T) {
+		resp := listeningResponseJSON{ComprehensionAnswers: []int32{0, 2}}
+		respJSON, _ := json.Marshal(resp)
+		score, max, _, err := h.Grade(cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if max != 2.0 {
+			t.Errorf("maxScore: want 2, got %v", max)
+		}
+		if score != 2.0 {
+			t.Errorf("score: want 2, got %v", score)
+		}
+	})
+
+	t.Run("partial correct", func(t *testing.T) {
+		resp := listeningResponseJSON{ComprehensionAnswers: []int32{0, 1}} // second wrong
+		respJSON, _ := json.Marshal(resp)
+		score, max, _, err := h.Grade(cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if max != 2.0 || score != 1.0 {
+			t.Errorf("want 1/2, got %v/%v", score, max)
+		}
+	})
+}
+
+func TestListeningGradeUnknownMode(t *testing.T) {
+	h := &listeningHandler{}
+	cfg := listeningConfigJSON{AudioObjectKey: "key", Mode: "unknown"}
+	cfgJSON, _ := json.Marshal(cfg)
+	resp := listeningResponseJSON{}
+	respJSON, _ := json.Marshal(resp)
+	_, _, _, err := h.Grade(cfgJSON, respJSON)
+	if err == nil {
+		t.Error("expected error for unknown mode, got nil")
+	}
+}
+
+func TestNormalizeText(t *testing.T) {
+	cases := []struct{ input, want string }{
+		{"Hello, World!", "hello world"},
+		{"  multiple   spaces  ", "multiple spaces"},
+		{"Café au lait", "cafe au lait"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		got := normalizeText(tc.input)
+		if got != tc.want {
+			t.Errorf("normalizeText(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestWordOverlapRatio(t *testing.T) {
+	if r := wordOverlapRatio("", ""); r != 1.0 {
+		t.Errorf("both empty: want 1.0, got %v", r)
+	}
+	if r := wordOverlapRatio("abc", ""); r != 0.0 {
+		t.Errorf("one empty: want 0.0, got %v", r)
+	}
+	if r := wordOverlapRatio("fox dog", "fox dog"); r != 1.0 {
+		t.Errorf("identical: want 1.0, got %v", r)
+	}
+	// Jaccard({fox,dog}, {fox,cat}) = 1/3
+	r := wordOverlapRatio("fox dog", "fox cat")
+	if math.Abs(r-1.0/3.0) > 0.01 {
+		t.Errorf("partial: want ~0.333, got %v", r)
+	}
+}
