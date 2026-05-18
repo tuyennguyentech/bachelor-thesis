@@ -11,6 +11,7 @@ import { useRichterWebClient } from "@/lib/connect-webclient";
 import { ConnectError } from "@connectrpc/connect";
 import { getRenderer, extractConfig } from "@/interactions/registry";
 import type { McqConfig, FillBlankConfig, ListeningConfig, ReadingConfig } from "@/interactions/types";
+import { RegenerateModal } from "./regenerate-modal";
 
 // ── Form data ─────────────────────────────────────────────────────────────────
 
@@ -227,9 +228,9 @@ interface Props {
 export function InteractionRow({ interaction: it, index, lessonId, token, disabled, onUpdate, onDelete }: Props) {
   const interactionClient = useRichterWebClient(InteractionService, token);
   const [editing, setEditing] = useState(false);
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [saving, startSave] = useTransition();
   const [deleting, startDelete] = useTransition();
-  const [regenerating, startRegenerate] = useTransition();
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -266,18 +267,7 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
     });
   }
 
-  function handleRegenerate() {
-    startRegenerate(async () => {
-      try {
-        const res = await interactionClient.regenerateInteraction({ interactionId: it.id, newKind: 0 });
-        if (res.interaction) onUpdate(res.interaction);
-      } catch {
-        // silent — will add proper error UI in Step 5
-      }
-    });
-  }
-
-  const busy = disabled || saving || deleting || regenerating;
+  const busy = disabled || saving || deleting;
 
   if (editing) {
     return (
@@ -294,6 +284,16 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
       </div>
     );
   }
+
+  const regenerateModal = (
+    <RegenerateModal
+      open={regenerateOpen}
+      onClose={() => setRegenerateOpen(false)}
+      interaction={it}
+      token={token}
+      onRegenerated={(updated) => { onUpdate(updated); setRegenerateOpen(false); }}
+    />
+  );
 
   const mcq = it.config.case === "mcq" ? it.config.value : null;
   const fb = it.config.case === "fillBlank" ? it.config.value : null;
@@ -317,10 +317,10 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
           </Button>
           <Button
             variant="ghost" size="sm" className="size-6 p-0" title="Tạo lại"
-            disabled={busy} onClick={handleRegenerate}
+            disabled={busy} onClick={() => setRegenerateOpen(true)}
             data-testid="regenerate-interaction-btn"
           >
-            {regenerating ? <Loader2Icon className="size-3 animate-spin" /> : <RefreshCwIcon className="size-3" />}
+            <RefreshCwIcon className="size-3" />
           </Button>
           <Button
             variant="ghost" size="sm"
@@ -352,6 +352,7 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
       {fb && <p className="text-xs text-muted-foreground ml-4 font-mono">{fb.template}</p>}
       {it.explanation && <p className="text-xs text-muted-foreground ml-4 italic">{it.explanation}</p>}
       {deleteError && <p className="text-xs text-destructive ml-4">{deleteError}</p>}
+      {regenerateModal}
     </div>
   );
 }

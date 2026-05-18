@@ -823,7 +823,7 @@ export function AnalyzeButton({
     setActiveTab("baiTap");
   }
 
-  function handleGenerate(force?: boolean) {
+  function handleGenerate(force?: boolean, chunkId?: string) {
     abortRef.current?.abort();
     const abortController = new AbortController();
     abortRef.current = abortController;
@@ -835,7 +835,7 @@ export function AnalyzeButton({
     (async () => {
       try {
         for await (const event of aiClient.generateInteractionsStream(
-          { lessonId, chunkId: "", forceRegenerate: shouldForce },
+          { lessonId, chunkId: chunkId ?? "", forceRegenerate: shouldForce },
           { signal: abortController.signal },
         )) {
           if (event.step === GenerateInteractionsStep.ERROR) {
@@ -1095,6 +1095,7 @@ export function AnalyzeButton({
           savingFeedback={savingFeedback}
           onFeedbackModeChange={handleFeedbackModeChange}
           onGenerateLesson={handleGenerate}
+          onGenerateChunk={(chunkId, force) => handleGenerate(force, chunkId)}
           onInteractionsChange={setInteractions}
         />
       )}

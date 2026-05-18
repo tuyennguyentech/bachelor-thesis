@@ -14,6 +14,8 @@ import {
   InteractionRow, InteractionForm,
   emptyFormForKind, buildProtoConfig,
 } from "./interaction-row";
+import { ChunkConfigModal } from "./chunk-config-modal";
+import { ChunkGenerateConfirmModal } from "./generate-confirm-modal";
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
@@ -44,22 +46,23 @@ interface Props {
   onInteractionUpdate: (it: LessonInteraction) => void;
   onInteractionDelete: (id: string) => void;
   onInteractionAdd: (it: LessonInteraction) => void;
-  // Step 5 callbacks (stubs for now)
-  onOpenConfig: (chunkId: string) => void;
-  onGenerateChunk: (chunkId: string) => void;
+  onGenerateChunk: (chunkId: string, force: boolean) => void;
 }
 
 export function ChunkInteractionsCard({
-  chunk, chunkInteractions, lessonId, token, disabled, defaultOpen = true,
-  onInteractionUpdate, onInteractionDelete, onInteractionAdd,
-  onOpenConfig, onGenerateChunk,
+  chunk: initialChunk, chunkInteractions, lessonId, token, disabled, defaultOpen = true,
+  onInteractionUpdate, onInteractionDelete, onInteractionAdd, onGenerateChunk,
 }: Props) {
   const interactionClient = useRichterWebClient(InteractionService, token);
+  const [chunk, setChunk] = useState(initialChunk);
   const [open, setOpen] = useState(defaultOpen);
   const [addingKind, setAddingKind] = useState<InteractionKind | null>(null);
   const [showKindPicker, setShowKindPicker] = useState(false);
   const [addSaving, startAddSave] = useTransition();
   const [addError, setAddError] = useState<string | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
+  const [pendingGenerateAfterConfig, setPendingGenerateAfterConfig] = useState(false);
 
   function handleAdd(data: ReturnType<typeof emptyFormForKind>) {
     setAddError(null);
@@ -84,6 +87,24 @@ export function ChunkInteractionsCard({
     });
   }
 
+  function handleClickGenerate() {
+    if (!chunk.interactionConfig) {
+      // no config yet — open config modal first, then generate after save
+      setPendingGenerateAfterConfig(true);
+      setConfigOpen(true);
+    } else {
+      setGenerateConfirmOpen(true);
+    }
+  }
+
+  function handleConfigSaved(updated: TranscriptChunk) {
+    setChunk(updated);
+    if (pendingGenerateAfterConfig) {
+      setPendingGenerateAfterConfig(false);
+      setGenerateConfirmOpen(true);
+    }
+  }
+
   const interactionCount = chunkInteractions.length;
 
   return (
@@ -95,7 +116,9 @@ export function ChunkInteractionsCard({
           className="flex items-center gap-2 flex-1 min-w-0 text-left"
           onClick={() => setOpen(o => !o)}
         >
-          {open ? <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />}
+          {open
+            ? <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{chunk.summary}</p>
             <p className="text-xs text-muted-foreground">
@@ -110,14 +133,14 @@ export function ChunkInteractionsCard({
           <Button
             variant="ghost" size="sm" className="size-6 p-0" title="Cấu hình bài tập cho phân đoạn này"
             disabled={disabled}
-            onClick={() => onOpenConfig(chunk.id)}
+            onClick={() => { setPendingGenerateAfterConfig(false); setConfigOpen(true); }}
           >
             <SettingsIcon className="size-3" />
           </Button>
           <Button
             variant="ghost" size="sm" className="size-6 p-0" title="Tạo bài tập bằng AI"
             disabled={disabled}
-            onClick={() => onGenerateChunk(chunk.id)}
+            onClick={handleClickGenerate}
           >
             <SparklesIcon className="size-3" />
           </Button>
@@ -191,6 +214,23 @@ export function ChunkInteractionsCard({
           )}
         </div>
       )}
+
+      {/* Modals */}
+      <ChunkConfigModal
+        open={configOpen}
+        onClose={() => { setConfigOpen(false); setPendingGenerateAfterConfig(false); }}
+        chunk={chunk}
+        token={token}
+        onSaved={handleConfigSaved}
+      />
+      <ChunkGenerateConfirmModal
+        open={generateConfirmOpen}
+        onClose={() => setGenerateConfirmOpen(false)}
+        chunk={chunk}
+        existingCount={interactionCount}
+        onConfirm={(force) => onGenerateChunk(chunk.id, force)}
+        onOpenConfig={() => { setGenerateConfirmOpen(false); setConfigOpen(true); }}
+      />
     </div>
   );
 }

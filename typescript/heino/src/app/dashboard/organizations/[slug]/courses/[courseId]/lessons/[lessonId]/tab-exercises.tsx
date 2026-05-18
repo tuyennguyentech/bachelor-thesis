@@ -9,6 +9,8 @@ import type { TranscriptChunk, TranscriptSegment, ChunkInteractionConfig } from 
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { ChunkInteractionsCard } from "./chunk-interactions-card";
+import { LessonDefaultConfigModal } from "./lesson-default-config-modal";
+import { LessonGenerateConfirmModal } from "./generate-confirm-modal";
 
 // ── Types mirrored from analyze-button ───────────────────────────────────────
 
@@ -34,6 +36,7 @@ interface Props {
   savingFeedback: boolean;
   onFeedbackModeChange: (mode: FeedbackMode) => void;
   onGenerateLesson: (force?: boolean) => void;
+  onGenerateChunk: (chunkId: string, force: boolean) => void;
   onInteractionsChange: (interactions: LessonInteraction[]) => void;
   defaultInteractionConfig?: ChunkInteractionConfig;
 }
@@ -44,9 +47,13 @@ export function TabExercises({
   lessonId, chunks, initialInteractions, token, disabled,
   genState, genWarnings, questionsGenerated,
   feedbackMode, savingFeedback, onFeedbackModeChange,
-  onGenerateLesson, onInteractionsChange,
+  onGenerateLesson, onGenerateChunk, onInteractionsChange,
+  defaultInteractionConfig: initialDefaultCfg,
 }: Props) {
   const [interactions, setInteractions] = useState<LessonInteraction[]>(initialInteractions);
+  const [defaultCfg, setDefaultCfg] = useState(initialDefaultCfg);
+  const [defaultConfigOpen, setDefaultConfigOpen] = useState(false);
+  const [lessonGenerateOpen, setLessonGenerateOpen] = useState(false);
 
   function updateInteractions(updated: LessonInteraction[]) {
     setInteractions(updated);
@@ -100,8 +107,8 @@ export function TabExercises({
           <Button
             variant={questionsGenerated ? "outline" : "default"}
             size="sm"
-            disabled={disabled || !hasChunks}
-            onClick={() => onGenerateLesson(questionsGenerated)}
+            disabled={disabled || !hasChunks || isGenerating}
+            onClick={() => setLessonGenerateOpen(true)}
             className="gap-2"
             data-testid="generate-all-btn"
           >
@@ -113,8 +120,11 @@ export function TabExercises({
             {isGenerating ? "Đang tạo…" : questionsGenerated ? "Tạo lại toàn lesson" : "Tạo AI toàn lesson"}
           </Button>
 
-          {/* Lesson default config — stub button, wired in Step 5 */}
-          <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground" disabled={disabled}>
+          <Button
+            variant="ghost" size="sm" className="gap-2 text-muted-foreground"
+            disabled={disabled}
+            onClick={() => setDefaultConfigOpen(true)}
+          >
             <SettingsIcon className="size-4" />
             Cấu hình mặc định
           </Button>
@@ -170,8 +180,7 @@ export function TabExercises({
                 onInteractionUpdate={handleUpdate}
                 onInteractionDelete={handleDelete}
                 onInteractionAdd={handleAdd}
-                onOpenConfig={() => {/* Step 5 */}}
-                onGenerateChunk={() => {/* Step 5 */}}
+                onGenerateChunk={onGenerateChunk}
               />
             );
           })}
@@ -202,6 +211,24 @@ export function TabExercises({
           </p>
         </div>
       )}
+
+      {/* ── Modals ── */}
+      <LessonDefaultConfigModal
+        open={defaultConfigOpen}
+        onClose={() => setDefaultConfigOpen(false)}
+        lessonId={lessonId}
+        token={token}
+        initialConfig={defaultCfg}
+        onSaved={(cfg) => setDefaultCfg(cfg)}
+      />
+      <LessonGenerateConfirmModal
+        open={lessonGenerateOpen}
+        onClose={() => setLessonGenerateOpen(false)}
+        chunks={chunks}
+        totalExisting={interactions.length}
+        defaultConfig={defaultCfg}
+        onConfirm={(force) => onGenerateLesson(force)}
+      />
     </div>
   );
 }
