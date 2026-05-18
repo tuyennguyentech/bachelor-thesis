@@ -1,113 +1,332 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { SparklesIcon } from "lucide-react";
+import { useRef, useState, useCallback, useTransition } from "react";
+import { SendIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
+import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
+import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
+import type { TranscriptSegment, TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
+import { ConnectError } from "@connectrpc/connect";
+import { useRichterWebClient } from "@/lib/connect-webclient";
 import { VideoPlayer } from "./video-player";
-import { QuizForm, type SafeQuestion } from "./quiz-form";
-import type { TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
-import type { QuizAttempt } from "buf/gen/richter/v1/quiz_pb";
-import type { CheckpointQuestion } from "./quiz-checkpoint";
+import { LessonSidebar } from "./lesson-sidebar";
+import { LessonResult } from "./lesson-result";
+import type { QuizResult } from "./lesson-result";
+import { InteractionCheckpoint } from "./interaction-checkpoint";
+import { CheckpointMarkerStrip } from "./checkpoint-marker-strip";
+import { getRenderer, extractConfig, extractLocalResponse } from "@/interactions/registry";
+import type { FillBlankResponse, McqResponse } from "@/interactions/types";
 
 interface Props {
-  // VideoPlayer
   videoUrl: string;
   segments: TranscriptSegment[];
   transcript: string;
-  checkpoints: CheckpointQuestion[];
+  chunks: TranscriptChunk[];
   lessonId: string;
   initialPosition: number;
+  initialDuration?: number;
   token: string;
-
-  // QuizForm
-  questions: SafeQuestion[];
-  previousAttempt: QuizAttempt | null;
-  initialCorrectAnswers?: number[];
+  interactions: LessonInteraction[];
+  previousResult: QuizResult | null;
+  feedbackMode: FeedbackMode;
   isPreview: boolean;
 }
 
-// StudentLessonView wraps VideoPlayer + QuizForm in the student flow so the
-// two share a "revealed question" set. Without this wrapper the QuizForm
-// below the video would spoil every question's text before the student
-// actually reached its mark on the timeline.
+type MarkerStatus = "pending" | "active" | "passed";
+
+interface Marker {
+  id: string;
+  index: number;
+  startSeconds: number;
+  status: MarkerStatus;
+}
+
 export function StudentLessonView({
-  videoUrl, segments, transcript, checkpoints, lessonId, initialPosition, token,
-  questions, previousAttempt, initialCorrectAnswers, isPreview,
+  videoUrl,
+  segments,
+  transcript,
+  chunks,
+  lessonId,
+  initialPosition,
+  initialDuration = 0,
+  token,
+  interactions,
+  previousResult,
+  feedbackMode,
+  isPreview,
 }: Props) {
-  // Initial reveal:
-  // - Already submitted (previousAttempt) → reveal everything for review.
-  // - Otherwise EMPTY. Saved watch progress only seeks the video; it does NOT
-  //   pre-unlock questions. Student must reach each mark in this session:
-  //     • start_seconds > 0  → via checkpoint Continue (handleCheckpointPassed)
-  //     • start_seconds ≤ 0  → via first Play (handleFirstPlay), since there
-  //                            is no checkpoint mark to "reach" for these.
-  const initialRevealed = useMemo<Set<string>>(() => {
-    const s = new Set<string>();
-    if (previousAttempt) for (const q of questions) s.add(q.id);
-    return s;
-  }, [questions, previousAttempt]);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const interactionClient = useRichterWebClient(InteractionService, token);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [duration, setDuration] = useState(initialDuration);
 
-  const [revealedIds, setRevealedIds] = useState<Set<string>>(initialRevealed);
+  const [submitted, setSubmitted] = useState(previousResult !== null);
+  const [result, setResult] = useState<QuizResult | null>(previousResult);
 
-  function handleCheckpointPassed(id: string) {
-    setRevealedIds((prev) => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
-  }
-
-  function handleFirstPlay() {
-    setRevealedIds((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const q of questions) {
-        if (q.startSeconds <= 0 && !next.has(q.id)) {
-          next.add(q.id);
-          changed = true;
-        }
+  // Track answered interaction IDs and their local responses
+  const [passedIds, setPassedIds] = useState<Set<string>>(
+    () => previousResult !== null ? new Set(interactions.map((it) => it.id)) : new Set(),
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [responses, setResponses] = useState<Map<string, any>>(
+    () => {
+      if (!previousResult) return new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = new Map<string, any>();
+      for (const r of previousResult.responses) {
+        if (r.response != null) m.set(r.interactionId, r.response);
       }
-      return changed ? next : prev;
+      return m;
+    },
+  );
+  // Which checkpoint is currently active (paused on)
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const allAnswered = interactions.length > 0 && passedIds.size >= interactions.length;
+  const readyToSubmit = allAnswered && !submitted;
+
+  // Build checkpoint markers for the strip (only interactions with a real timestamp)
+  const timedInteractions = interactions.filter((it) => it.startSeconds > 0);
+  const markers: Marker[] = timedInteractions.map((it, i) => ({
+    id: it.id,
+    index: i + 1,
+    startSeconds: it.startSeconds,
+    status: passedIds.has(it.id) ? "passed" : it.id === activeId ? "active" : "pending",
+  }));
+
+  // The current active interaction object
+  const activeInteraction = activeId
+    ? interactions.find((it) => it.id === activeId) ?? null
+    : null;
+
+  // Pending checkpoints (not yet passed) ordered by startSeconds
+  const pendingCheckpoints = interactions
+    .filter((it) => it.startSeconds > 0 && !passedIds.has(it.id))
+    .sort((a, b) => a.startSeconds - b.startSeconds);
+
+  const handleTimeUpdate = useCallback(
+    (t: number) => {
+      if (submitted || activeId) return;
+      const hit = pendingCheckpoints.find((c) => t >= c.startSeconds);
+      if (hit) {
+        videoRef.current?.pause();
+        setActiveId(hit.id);
+      }
+    },
+    [submitted, activeId, pendingCheckpoints],
+  );
+
+  const handleFirstPlay = useCallback(() => {
+    // Unlock interactions with startSeconds <= 0 immediately on first play
+    const earlyIds = interactions.filter((it) => it.startSeconds <= 0).map((it) => it.id);
+    if (earlyIds.length > 0) {
+      setPassedIds((prev) => new Set([...prev, ...earlyIds]));
+    }
+  }, [interactions]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleAnswer(id: string, response: any) {
+    setResponses((prev) => new Map(prev).set(id, response));
+  }
+
+  function handleContinue(id: string) {
+    setPassedIds((prev) => new Set([...prev, id]));
+    setActiveId(null);
+    videoRef.current?.play();
+  }
+
+  function handleSeek(seconds: number) {
+    if (videoRef.current) videoRef.current.currentTime = seconds;
+  }
+
+  function handleRetake() {
+    setSubmitted(false);
+    setResult(null);
+    setPassedIds(new Set());
+    setResponses(new Map());
+    setActiveId(null);
+    setError(null);
+  }
+
+  function handleSubmit() {
+    if (!allAnswered || submitted || isPending) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        if (isPreview) {
+          const respList = interactions.map((it) => {
+            const localResp = responses.get(it.id) ?? null;
+            const config = extractConfig(it);
+            let score = 0, maxScore = 1;
+            if (config && localResp) {
+              try {
+                const renderer = getRenderer(it.kind);
+                if (renderer.gradeLocal) {
+                  const g = renderer.gradeLocal(config, localResp);
+                  score = g.score;
+                  maxScore = g.maxScore;
+                }
+              } catch { /* unsupported kind */ }
+            }
+            return { interactionId: it.id, response: localResp, score, maxScore };
+          });
+          setResult({
+            totalScore: respList.reduce((acc, r) => acc + r.score, 0),
+            maxScore: respList.reduce((acc, r) => acc + r.maxScore, 0),
+            responses: respList,
+          });
+        } else {
+          const protoResponses = interactions.map((it) => {
+            const localResp = responses.get(it.id);
+            if (it.config.case === "fillBlank") {
+              return {
+                interactionId: it.id,
+                response: {
+                  case: "fillBlank" as const,
+                  value: { answers: (localResp as FillBlankResponse | undefined)?.answers ?? [] },
+                },
+              };
+            }
+            // default: MCQ
+            return {
+              interactionId: it.id,
+              response: {
+                case: "mcqSelected" as const,
+                value: (localResp as McqResponse | undefined)?.selected ?? 0,
+              },
+            };
+          });
+          const res = await interactionClient.submitAttempt({ lessonId, responses: protoResponses });
+          const attempt = res.attempt;
+          if (attempt) {
+            setResult({
+              totalScore: attempt.totalScore,
+              maxScore: attempt.maxScore,
+              responses: attempt.responses.map((r) => ({
+                interactionId: r.interactionId,
+                response: extractLocalResponse(r),
+                score: r.score,
+                maxScore: r.maxScore,
+              })),
+            });
+          }
+        }
+        setSubmitted(true);
+      } catch (err) {
+        setError(err instanceof ConnectError ? err.message : "Nộp bài thất bại. Vui lòng thử lại.");
+      }
     });
   }
 
-  const hasQuestions = questions.length > 0;
-  // Teachers in preview mode see everything (no progressive reveal).
-  const visibleIds = isPreview ? undefined : revealedIds;
+  const hasSidebar = chunks.length > 0 || segments.length > 0 || !!transcript;
 
   return (
-    <>
-      <VideoPlayer
-        videoUrl={videoUrl}
-        segments={segments}
-        transcript={transcript}
-        checkpoints={checkpoints}
-        lessonId={lessonId}
-        initialPosition={initialPosition}
-        token={token}
-        onCheckpointPassed={handleCheckpointPassed}
-        onFirstPlay={handleFirstPlay}
-      />
+    <div className={hasSidebar ? "grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4" : "flex flex-col gap-4"}>
+      {/* ── Left / main column ── */}
+      <div className="flex flex-col gap-3">
+        <VideoPlayer
+          videoRef={videoRef}
+          videoUrl={videoUrl}
+          segments={[]}
+          transcript=""
+          checkpoints={[]}
+          lessonId={lessonId}
+          initialPosition={initialPosition}
+          token={token}
+          onTimeUpdate={handleTimeUpdate}
+          onFirstPlay={handleFirstPlay}
+          onDurationChange={setDuration}
+          showTranscript={false}
+        />
 
-      {hasQuestions && (
-        <div className="rounded-lg border p-4 flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <SparklesIcon className="size-4 text-muted-foreground" />
-            <h2 className="font-medium text-sm">
-              Câu hỏi trắc nghiệm ({questions.length} câu)
-            </h2>
+        {/* Checkpoint marker strip */}
+        {!submitted && interactions.length > 0 && (
+          <CheckpointMarkerStrip
+            markers={markers}
+            duration={duration}
+            onSeek={handleSeek}
+          />
+        )}
+
+        {/* State machine card */}
+        {interactions.length > 0 && (
+          <div className="rounded-lg border p-4 flex flex-col gap-3">
+            {/* Not started — idle tip */}
+            {!submitted && !activeInteraction && passedIds.size === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Video sẽ tạm dừng tại {interactions.length} mốc câu hỏi trong khi xem.
+                Trả lời từng câu để tiếp tục.
+              </p>
+            )}
+
+            {/* In progress */}
+            {!submitted && !activeInteraction && passedIds.size > 0 && !allAnswered && (
+              <p className="text-sm text-muted-foreground">
+                Đã trả lời {passedIds.size}/{interactions.length} câu — tiếp tục xem video.
+              </p>
+            )}
+
+            {/* Active checkpoint */}
+            {!submitted && activeInteraction && (
+              <InteractionCheckpoint
+                interaction={activeInteraction}
+                index={interactions.indexOf(activeInteraction) + 1}
+                total={interactions.length}
+                feedbackMode={feedbackMode}
+                initialResponse={responses.get(activeInteraction.id) ?? null}
+                locked={false}
+                onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
+                onContinue={() => handleContinue(activeInteraction.id)}
+                token={token}
+              />
+            )}
+
+            {/* Ready to submit */}
+            {readyToSubmit && !activeInteraction && (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Đã trả lời đủ {interactions.length}/{interactions.length} câu. Sẵn sàng nộp bài!
+                </p>
+                <Button
+                  size="sm"
+                  className="self-start gap-2"
+                  disabled={isPending}
+                  onClick={handleSubmit}
+                >
+                  <SendIcon className="size-4" />
+                  {isPending ? "Đang nộp…" : "Nộp bài"}
+                </Button>
+              </div>
+            )}
+
+            {/* Submitted — show result */}
+            {submitted && result && (
+              <LessonResult
+                result={result}
+                interactions={interactions}
+                feedbackMode={feedbackMode}
+                onRetake={handleRetake}
+              />
+            )}
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
-          <QuizForm
-            questions={questions}
-            previousAttempt={isPreview ? null : previousAttempt}
-            initialCorrectAnswers={initialCorrectAnswers}
-            lessonId={lessonId}
-            isPreview={isPreview}
-            token={token}
-            visibleQuestionIds={visibleIds}
+        )}
+      </div>
+
+      {/* ── Right sidebar ── */}
+      {hasSidebar && (
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <LessonSidebar
+            chunks={chunks}
+            segments={segments}
+            transcript={transcript}
+            videoRef={videoRef}
           />
         </div>
       )}
-    </>
+    </div>
   );
 }
