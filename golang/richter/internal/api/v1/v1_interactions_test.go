@@ -831,3 +831,193 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 		t.Errorf("expected 2 answers, got %d", len(rr.Reading.Answers))
 	}
 }
+
+// ── TestCreateManualInteractionChunkAssociation ───────────────────────────────
+
+// TestCreateManualInteractionChunkAssociation verifies that CreateManualInteraction
+// correctly associates the new interaction with a chunk when chunk_id is provided,
+// and creates an unattached interaction when chunk_id is empty.
+func TestCreateManualInteractionChunkAssociation(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	// Setup: org + lesson via admin.
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+	if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgID, UserId: teacherID,
+		Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	}); err != nil {
+		t.Fatalf("add teacher: %v", err)
+	}
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPass)
+	teacherInteractions := richterv1connect.NewInteractionServiceClient(httpClientWithToken(teacherToken), url)
+
+	courseRes, _ := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	modRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonID := lessonRes.Lesson.Id
+
+	chunk := insertTestChunk(t, lessonID, 0, "")
+	chunkID := chunk.ID.String()
+
+	t.Run("WithChunkID/AssociatesInteraction", func(t *testing.T) {
+		res, err := teacherInteractions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+			LessonId:     lessonID,
+			ChunkId:      chunkID,
+			Prompt:       gofakeit.Sentence(5),
+			StartSeconds: 10,
+			Config: &richterv1.CreateManualInteractionRequest_Mcq{
+				Mcq: &richterv1.McqConfig{
+					Options:       []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}},
+					CorrectAnswer: 0,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateManualInteraction: %v", err)
+		}
+		if res.Interaction == nil {
+			t.Fatal("expected interaction in response")
+		}
+		if res.Interaction.ChunkId != chunkID {
+			t.Errorf("chunk_id: want %q, got %q", chunkID, res.Interaction.ChunkId)
+		}
+	})
+
+	t.Run("WithoutChunkID/NoAssociation", func(t *testing.T) {
+		res, err := teacherInteractions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+			LessonId:     lessonID,
+			Prompt:       gofakeit.Sentence(5),
+			StartSeconds: 20,
+			Config: &richterv1.CreateManualInteractionRequest_Mcq{
+				Mcq: &richterv1.McqConfig{
+					Options:       []*richterv1.McqOption{{Text: "X"}, {Text: "Y"}, {Text: "Z"}, {Text: "W"}},
+					CorrectAnswer: 1,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateManualInteraction (no chunk_id): %v", err)
+		}
+		if res.Interaction == nil {
+			t.Fatal("expected interaction in response")
+		}
+		if res.Interaction.ChunkId != "" {
+			t.Errorf("chunk_id: want empty, got %q", res.Interaction.ChunkId)
+		}
+	})
+}
+
+// ── TestRegenerateInteraction ─────────────────────────────────────────────────
+
+// TestRegenerateInteraction verifies authz and the unimplemented path (no AI
+// configured in the integration-test environment).
+func TestRegenerateInteraction(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	// Setup: org + teacher + student + lesson.
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	for _, m := range []struct {
+		id   string
+		role richterv1.OrganizationRole
+	}{
+		{teacherID, richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER},
+		{studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+	} {
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: m.id,
+			Role: m.role, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add member: %v", err)
+		}
+	}
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPass)
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+
+	teacherIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(teacherToken), url)
+	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
+
+	courseRes, _ := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	modRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonID := lessonRes.Lesson.Id
+
+	ints := insertTestInteractions(t, lessonID, 1)
+	interactionID := ints[0].ID.String()
+
+	t.Run("Student/PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := studentIA.RegenerateInteraction(ctx, &richterv1.RegenerateInteractionRequest{
+				InteractionId: interactionID,
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("Teacher/NoChunk/FailedPrecondition", func(t *testing.T) {
+		// The interaction was inserted without a chunkID. doRegenerateInteraction
+		// checks chunk validity before calling Gemini and returns FailedPrecondition.
+		// This confirms auth passes and the call reaches the handler logic.
+		assertCode(t, func() error {
+			_, err := teacherIA.RegenerateInteraction(ctx, &richterv1.RegenerateInteractionRequest{
+				InteractionId: interactionID,
+			})
+			return err
+		}(), connect.CodeFailedPrecondition)
+	})
+
+	t.Run("InvalidInteractionID", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := teacherIA.RegenerateInteraction(ctx, &richterv1.RegenerateInteractionRequest{
+				InteractionId: "not-a-uuid",
+			})
+			return err
+		}(), connect.CodeInvalidArgument)
+	})
+}

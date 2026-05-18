@@ -272,9 +272,9 @@ func TestAIAuthz(t *testing.T) {
 		})
 	})
 
-	// --- GenerateQuestionsStream ---
-	t.Run("GenerateQuestionsStream", func(t *testing.T) {
-		req := &richterv1.GenerateQuestionsRequest{LessonId: e.lessonID}
+	// --- GenerateInteractionsStream ---
+	t.Run("GenerateInteractionsStream", func(t *testing.T) {
+		req := &richterv1.GenerateInteractionsRequest{LessonId: e.lessonID}
 
 		streamErr := func(s interface {
 			Receive() bool
@@ -288,20 +288,20 @@ func TestAIAuthz(t *testing.T) {
 		}
 
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {
-			s, err := e.aiAnon.GenerateQuestionsStream(ctx, req)
+			s, err := e.aiAnon.GenerateInteractionsStream(ctx, req)
 			assertCode(t, streamErr(s, err), connect.CodeUnauthenticated)
 		})
 		t.Run("NonMember/PermissionDenied", func(t *testing.T) {
-			s, err := e.aiNonMember.GenerateQuestionsStream(ctx, req)
+			s, err := e.aiNonMember.GenerateInteractionsStream(ctx, req)
 			assertCode(t, streamErr(s, err), connect.CodePermissionDenied)
 		})
 		t.Run("Student/PermissionDenied", func(t *testing.T) {
-			s, err := e.aiStudent.GenerateQuestionsStream(ctx, req)
+			s, err := e.aiStudent.GenerateInteractionsStream(ctx, req)
 			assertCode(t, streamErr(s, err), connect.CodePermissionDenied)
 		})
 		// Teacher authorized, but no chunks → FailedPrecondition
 		t.Run("Teacher/NoChunks/FailedPrecondition", func(t *testing.T) {
-			s, err := e.aiTeacher.GenerateQuestionsStream(ctx, req)
+			s, err := e.aiTeacher.GenerateInteractionsStream(ctx, req)
 			assertCode(t, streamErr(s, err), connect.CodeFailedPrecondition)
 		})
 	})
@@ -531,180 +531,6 @@ func TestAIWatchProgress(t *testing.T) {
 	})
 }
 
-// ── TestAIQuestionEditing ─────────────────────────────────────────────────────
-
-func TestAIQuestionEditing(t *testing.T) {
-	e := setupAIEnv(t)
-	ctx := context.Background()
-
-	// Seed 2 questions for the lesson.
-	questions := insertTestQuestions(t, e.lessonID, 2)
-	q0ID := questions[0].ID.String()
-
-	t.Run("CreateManualQuestion/Teacher/OK", func(t *testing.T) {
-		opts := []string{"A", "B", "C", "D"}
-		res, err := e.aiTeacher.CreateManualQuestion(ctx, &richterv1.CreateManualQuestionRequest{
-			LessonId:      e.lessonID,
-			QuestionText:  gofakeit.Sentence(5),
-			Options:       opts,
-			CorrectAnswer: 1,
-			Explanation:   "explanation",
-			StartSeconds:  10.0,
-		})
-		if err != nil {
-			t.Fatalf("CreateManualQuestion: %v", err)
-		}
-		if res.Question == nil {
-			t.Fatal("expected question in response")
-		}
-		if res.Question.CorrectAnswer != 1 {
-			t.Errorf("correct_answer: want 1, got %d", res.Question.CorrectAnswer)
-		}
-	})
-
-	t.Run("CreateManualQuestion/Student/PermissionDenied", func(t *testing.T) {
-		assertCode(t, func() error {
-			_, err := e.aiStudent.CreateManualQuestion(ctx, &richterv1.CreateManualQuestionRequest{
-				LessonId:      e.lessonID,
-				QuestionText:  "q?",
-				Options:       []string{"A", "B", "C", "D"},
-				CorrectAnswer: 0,
-				StartSeconds:  0,
-			})
-			return err
-		}(), connect.CodePermissionDenied)
-	})
-
-	t.Run("CreateManualQuestion/NonMember/PermissionDenied", func(t *testing.T) {
-		assertCode(t, func() error {
-			_, err := e.aiNonMember.CreateManualQuestion(ctx, &richterv1.CreateManualQuestionRequest{
-				LessonId:      e.lessonID,
-				QuestionText:  "q?",
-				Options:       []string{"A", "B", "C", "D"},
-				CorrectAnswer: 0,
-				StartSeconds:  0,
-			})
-			return err
-		}(), connect.CodePermissionDenied)
-	})
-
-	t.Run("UpdateLessonQuestion/Teacher/OK", func(t *testing.T) {
-		newText := gofakeit.Sentence(6)
-		res, err := e.aiTeacher.UpdateLessonQuestion(ctx, &richterv1.UpdateLessonQuestionRequest{
-			QuestionId:    q0ID,
-			QuestionText:  newText,
-			Options:       []string{"X", "Y", "Z", "W"},
-			CorrectAnswer: 2,
-			Explanation:   "updated explanation",
-			StartSeconds:  5.0,
-		})
-		if err != nil {
-			t.Fatalf("UpdateLessonQuestion: %v", err)
-		}
-		if res.Question.QuestionText != newText {
-			t.Errorf("question text: want %q, got %q", newText, res.Question.QuestionText)
-		}
-		if res.Question.CorrectAnswer != 2 {
-			t.Errorf("correct_answer: want 2, got %d", res.Question.CorrectAnswer)
-		}
-	})
-
-	t.Run("UpdateLessonQuestion/Student/PermissionDenied", func(t *testing.T) {
-		assertCode(t, func() error {
-			_, err := e.aiStudent.UpdateLessonQuestion(ctx, &richterv1.UpdateLessonQuestionRequest{
-				QuestionId:    q0ID,
-				QuestionText:  "hack",
-				Options:       []string{"A", "B", "C", "D"},
-				CorrectAnswer: 0,
-				StartSeconds:  0,
-			})
-			return err
-		}(), connect.CodePermissionDenied)
-	})
-
-	t.Run("DeleteLessonQuestion/Student/PermissionDenied", func(t *testing.T) {
-		assertCode(t, func() error {
-			_, err := e.aiStudent.DeleteLessonQuestion(ctx, &richterv1.DeleteLessonQuestionRequest{
-				QuestionId: q0ID,
-			})
-			return err
-		}(), connect.CodePermissionDenied)
-	})
-
-	t.Run("DeleteLessonQuestion/Teacher/OK", func(t *testing.T) {
-		// Use the second question so q0ID still exists for other sub-tests.
-		q1ID := questions[1].ID.String()
-		if _, err := e.aiTeacher.DeleteLessonQuestion(ctx, &richterv1.DeleteLessonQuestionRequest{
-			QuestionId: q1ID,
-		}); err != nil {
-			t.Fatalf("DeleteLessonQuestion: %v", err)
-		}
-		// Verify it's gone: GetLessonAnalysis should no longer return it.
-		analysisRes, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
-		if err != nil {
-			t.Fatalf("GetLessonAnalysis: %v", err)
-		}
-		for _, q := range analysisRes.Analysis.GetQuestions() {
-			if q.Id == q1ID {
-				t.Errorf("deleted question %s still present in analysis", q1ID)
-			}
-		}
-	})
-
-	t.Run("UpdateLessonQuestion/InvalidOptions/BadRequest", func(t *testing.T) {
-		// Correct answer index out of range for given options count.
-		assertCode(t, func() error {
-			_, err := e.aiTeacher.UpdateLessonQuestion(ctx, &richterv1.UpdateLessonQuestionRequest{
-				QuestionId:    q0ID,
-				QuestionText:  "q?",
-				Options:       []string{"A", "B", "C", "D"},
-				CorrectAnswer: -1, // protovalidate: gte=0 should reject this
-				StartSeconds:  0,
-			})
-			return err
-		}(), connect.CodeInvalidArgument)
-	})
-
-	t.Run("RegenerateQuestion/NoTranscript/FailedPrecondition", func(t *testing.T) {
-		// q0ID has no chunk_id and no FDB transcript → FailedPrecondition.
-		assertCode(t, func() error {
-			_, err := e.aiTeacher.RegenerateQuestion(ctx, &richterv1.RegenerateQuestionRequest{
-				QuestionId: q0ID,
-			})
-			return err
-		}(), connect.CodeFailedPrecondition)
-	})
-
-	t.Run("RegenerateQuestion/Student/PermissionDenied", func(t *testing.T) {
-		assertCode(t, func() error {
-			_, err := e.aiStudent.RegenerateQuestion(ctx, &richterv1.RegenerateQuestionRequest{
-				QuestionId: q0ID,
-			})
-			return err
-		}(), connect.CodePermissionDenied)
-	})
-
-	t.Run("RegenerateQuestion/WithChunkTranscript/Teacher/OK", func(t *testing.T) {
-		// Insert a chunk with FDB transcript and a question linked to it.
-		chunk := insertTestChunk(t, e.lessonID, 10, "Big-O notation describes the upper bound on an algorithm's time complexity.")
-		chunkQs := insertTestQuestionsForChunk(t, e.lessonID, chunk.ID.String(), 1)
-		res, err := e.aiTeacher.RegenerateQuestion(ctx, &richterv1.RegenerateQuestionRequest{
-			QuestionId: chunkQs[0].ID.String(),
-		})
-		if err != nil {
-			t.Fatalf("RegenerateQuestion: %v", err)
-		}
-		if res.Question == nil {
-			t.Fatal("expected question in response")
-		}
-		if res.Question.QuestionText == "" {
-			t.Error("expected non-empty question text")
-		}
-		if len(res.Question.Options) != 4 {
-			t.Errorf("expected 4 options, got %d", len(res.Question.Options))
-		}
-	})
-}
 
 // ── TestAIChunkConfig ─────────────────────────────────────────────────────────
 
@@ -859,9 +685,8 @@ func TestAIChunkConfig(t *testing.T) {
 	})
 }
 
-// insertTestQuestionsForChunk inserts questions for a specific chunk in the DB.
-// Unlike insertTestQuestions, it does NOT delete existing questions for the lesson.
-func insertTestQuestionsForChunk(t *testing.T, lessonID, chunkIDStr string, count int) []gen.LessonQuestion {
+// insertTestInteractionsForChunk inserts MCQ interactions for a specific chunk in the DB.
+func insertTestInteractionsForChunk(t *testing.T, lessonID, chunkIDStr string, count int) []gen.LessonInteraction {
 	t.Helper()
 	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
 	if err != nil {
@@ -875,27 +700,32 @@ func insertTestQuestionsForChunk(t *testing.T, lessonID, chunkIDStr string, coun
 	if err := cid.Scan(chunkIDStr); err != nil {
 		t.Fatalf("parse chunkID: %v", err)
 	}
-	questions := make([]gen.LessonQuestion, 0, count)
+	interactions := make([]gen.LessonInteraction, 0, count)
 	for i := range count {
-		optJSON, _ := json.Marshal([]string{"A", "B", "C", "D"})
-		lq, err := db.WithConnection(pool, context.Background(), func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
-			return q.CreateLessonQuestion(context.Background(), gen.CreateLessonQuestionParams{
-				LessonID:      lid,
-				QuestionText:  gofakeit.Sentence(6),
-				Options:       optJSON,
-				CorrectAnswer: 0,
-				Explanation:   pgtype.Text{},
-				OrderIndex:    int32(i),
-				StartSeconds:  float64(i * 30),
-				ChunkID:       cid,
+		configJSON, _ := json.Marshal(struct {
+			Options       []string `json:"options"`
+			CorrectAnswer int      `json:"correct_answer"`
+		}{Options: []string{"A", "B", "C", "D"}, CorrectAnswer: 0})
+		li, err := db.WithConnection(pool, context.Background(), func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
+			return q.InsertLessonInteraction(context.Background(), gen.InsertLessonInteractionParams{
+				LessonID:     lid,
+				ChunkID:      cid,
+				Kind:         "mcq",
+				StartSeconds: float32(i * 30),
+				OrderIndex:   int32(i),
+				Prompt:       gofakeit.Sentence(6),
+				Explanation:  "",
+				Config:       configJSON,
+				MaxScore:     1.0,
+				GeneratedBy:  "ai",
 			})
 		})
 		if err != nil {
-			t.Fatalf("create question for chunk %d: %v", i, err)
+			t.Fatalf("insert interaction for chunk %d: %v", i, err)
 		}
-		questions = append(questions, lq)
+		interactions = append(interactions, li)
 	}
-	return questions
+	return interactions
 }
 
 // ── TestAIStatusMapping ───────────────────────────────────────────────────────
@@ -947,32 +777,41 @@ func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
 	ctx := context.Background()
 
 	insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
-	questions := insertTestQuestions(t, e.lessonID, 3)
+	interactions := insertTestInteractions(t, e.lessonID, 3)
 
-	realAnswers := make([]int32, len(questions))
-	for i, q := range questions {
-		realAnswers[i] = q.CorrectAnswer
+	realAnswers := make([]int, len(interactions))
+	for i, it := range interactions {
+		var cfg struct {
+			CorrectAnswer int `json:"correct_answer"`
+		}
+		_ = json.Unmarshal(it.Config, &cfg)
+		realAnswers[i] = cfg.CorrectAnswer
 	}
 
-	assertQuestions := func(t *testing.T, qs []*richterv1.LessonQuestion, wantStripped bool) {
+	assertInteractions := func(t *testing.T, its []*richterv1.LessonInteraction, wantStripped bool) {
 		t.Helper()
-		if len(qs) != len(questions) {
-			t.Fatalf("question count: want %d, got %d", len(questions), len(qs))
+		if len(its) != len(interactions) {
+			t.Fatalf("interaction count: want %d, got %d", len(interactions), len(its))
 		}
-		for i, q := range qs {
+		for i, it := range its {
+			mcq := it.GetMcq()
+			if mcq == nil {
+				t.Errorf("interaction[%d]: expected McqConfig", i)
+				continue
+			}
 			if wantStripped {
-				if q.CorrectAnswer != -1 {
-					t.Errorf("question[%d]: expected stripped CorrectAnswer=-1, got %d", i, q.CorrectAnswer)
+				if mcq.CorrectAnswer != -1 {
+					t.Errorf("interaction[%d]: expected stripped CorrectAnswer=-1, got %d", i, mcq.CorrectAnswer)
 				}
-				if q.Explanation != "" {
-					t.Errorf("question[%d]: expected stripped Explanation, got %q", i, q.Explanation)
+				if it.Explanation != "" {
+					t.Errorf("interaction[%d]: expected stripped Explanation, got %q", i, it.Explanation)
 				}
 			} else {
-				if q.CorrectAnswer != realAnswers[i] {
-					t.Errorf("question[%d]: CorrectAnswer want %d, got %d", i, realAnswers[i], q.CorrectAnswer)
+				if int(mcq.CorrectAnswer) != realAnswers[i] {
+					t.Errorf("interaction[%d]: CorrectAnswer want %d, got %d", i, realAnswers[i], mcq.CorrectAnswer)
 				}
-				if q.Explanation == "" {
-					t.Errorf("question[%d]: expected non-empty Explanation", i)
+				if it.Explanation == "" {
+					t.Errorf("interaction[%d]: expected non-empty Explanation", i)
 				}
 			}
 		}
@@ -983,7 +822,7 @@ func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
 		}
-		assertQuestions(t, res.Analysis.Questions, false)
+		assertInteractions(t, res.Analysis.GetInteractions(), false)
 	})
 
 	t.Run("Owner/SeesRealAnswers", func(t *testing.T) {
@@ -991,7 +830,7 @@ func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
 		}
-		assertQuestions(t, res.Analysis.Questions, false)
+		assertInteractions(t, res.Analysis.GetInteractions(), false)
 	})
 
 	t.Run("StudentWithoutAttempt/AnswersStripped", func(t *testing.T) {
@@ -1000,53 +839,148 @@ func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
 		}
-		assertQuestions(t, res.Analysis.Questions, true)
+		assertInteractions(t, res.Analysis.GetInteractions(), true)
 	})
 
 	t.Run("StudentWithAttempt/SeesRealAnswers", func(t *testing.T) {
-		// student submits, then re-fetches: correct_answer should now be revealed
-		// because the user has already taken the quiz once.
-		studentQuiz := richterv1connect.NewQuizServiceClient(httpClientWithToken(e.studentToken), e.url)
-		if _, err := studentQuiz.SubmitQuiz(ctx, &richterv1.SubmitQuizRequest{
-			LessonId: e.lessonID,
-			Answers:  []int32{0, 0, 0},
+		// student submits, then re-fetches: correct_answer should now be revealed.
+		studentInteractions := richterv1connect.NewInteractionServiceClient(httpClientWithToken(e.studentToken), e.url)
+		responses := make([]*richterv1.AttemptResponseInput, len(interactions))
+		for i, it := range interactions {
+			responses[i] = &richterv1.AttemptResponseInput{
+				InteractionId: it.ID.String(),
+				Response:      &richterv1.AttemptResponseInput_McqSelected{McqSelected: 0},
+			}
+		}
+		if _, err := studentInteractions.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId:  e.lessonID,
+			Responses: responses,
 		}); err != nil {
-			t.Fatalf("SubmitQuiz: %v", err)
+			t.Fatalf("SubmitAttempt: %v", err)
 		}
 
 		res, err := e.aiStudent.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
 		}
-		assertQuestions(t, res.Analysis.Questions, false)
+		assertInteractions(t, res.Analysis.GetInteractions(), false)
+	})
+}
+
+// ── TestGetLessonAnalysis_FeedbackModes ──────────────────────────────────────
+
+// TestGetLessonAnalysis_FeedbackModes checks correctAnswer visibility per feedbackMode.
+// HIDDEN  → always stripped (even after student submits).
+// AFTER_EACH → never stripped (student sees answers before submitting).
+// AFTER_SUBMIT is already covered by TestGetLessonAnalysis_StripsCorrectAnswers.
+func TestGetLessonAnalysis_FeedbackModes(t *testing.T) {
+	ctx := context.Background()
+
+	assertStripped := func(t *testing.T, its []*richterv1.LessonInteraction, wantStripped bool, label string) {
+		t.Helper()
+		for i, it := range its {
+			mcq := it.GetMcq()
+			if mcq == nil {
+				t.Errorf("[%s] interaction[%d]: no McqConfig", label, i)
+				continue
+			}
+			if wantStripped && mcq.CorrectAnswer != -1 {
+				t.Errorf("[%s] interaction[%d]: want CorrectAnswer=-1 (stripped), got %d", label, i, mcq.CorrectAnswer)
+			}
+			if !wantStripped && mcq.CorrectAnswer < 0 {
+				t.Errorf("[%s] interaction[%d]: want real CorrectAnswer, got %d", label, i, mcq.CorrectAnswer)
+			}
+		}
+	}
+
+	t.Run("HIDDEN/AlwaysStripped", func(t *testing.T) {
+		e := setupAIEnv(t)
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
+		ints := insertTestInteractions(t, e.lessonID, 2)
+
+		// Set feedback mode = HIDDEN
+		if _, err := e.adminLessons.UpdateLessonFeedbackMode(ctx, &richterv1.UpdateLessonFeedbackModeRequest{
+			Id:           e.lessonID,
+			FeedbackMode: richterv1.FeedbackMode_FEEDBACK_MODE_HIDDEN,
+		}); err != nil {
+			t.Fatalf("UpdateLessonFeedbackMode: %v", err)
+		}
+
+		// Before submission: stripped
+		res, err := e.aiStudent.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis (before submit): %v", err)
+		}
+		assertStripped(t, res.Analysis.GetInteractions(), true, "before-submit")
+
+		// Student submits
+		studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(e.studentToken), e.url)
+		resps := make([]*richterv1.AttemptResponseInput, len(ints))
+		for i, it := range ints {
+			resps[i] = &richterv1.AttemptResponseInput{
+				InteractionId: it.ID.String(),
+				Response:      &richterv1.AttemptResponseInput_McqSelected{McqSelected: 0},
+			}
+		}
+		if _, err := studentIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{LessonId: e.lessonID, Responses: resps}); err != nil {
+			t.Fatalf("SubmitAttempt: %v", err)
+		}
+
+		// After submission: STILL stripped (HIDDEN mode never reveals)
+		res2, err := e.aiStudent.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis (after submit): %v", err)
+		}
+		assertStripped(t, res2.Analysis.GetInteractions(), true, "after-submit")
+	})
+
+	t.Run("AFTER_EACH/NeverStripped", func(t *testing.T) {
+		e := setupAIEnv(t)
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
+		insertTestInteractions(t, e.lessonID, 2)
+
+		// Set feedback mode = AFTER_EACH
+		if _, err := e.adminLessons.UpdateLessonFeedbackMode(ctx, &richterv1.UpdateLessonFeedbackModeRequest{
+			Id:           e.lessonID,
+			FeedbackMode: richterv1.FeedbackMode_FEEDBACK_MODE_AFTER_EACH,
+		}); err != nil {
+			t.Fatalf("UpdateLessonFeedbackMode: %v", err)
+		}
+
+		// Before any submission: student should see real answers (AFTER_EACH reveals immediately)
+		res, err := e.aiStudent.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		assertStripped(t, res.Analysis.GetInteractions(), false, "before-submit-after_each")
 	})
 }
 
 // ── TestAIGenerateQuestionsResumable ─────────────────────────────────────────
 
-// TestAIGenerateQuestionsResumable verifies the skip-if-already-done logic and
+// TestAIGenerateInteractionsResumable verifies the skip-if-already-done logic and
 // force_regenerate override introduced for pipeline resumability.
-func TestAIGenerateQuestionsResumable(t *testing.T) {
+func TestAIGenerateInteractionsResumable(t *testing.T) {
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
-	// Setup: transcript_extracted status + two chunks, both with pre-existing questions.
+	// Setup: transcript_extracted status + two chunks, both with pre-existing interactions.
 	// This simulates a run that completed all chunks but was killed before setting status=done.
 	// No FDB transcript content: ForceRegenerate/SingleChunk subtests bypass the skip check
 	// but hit the "empty transcript" guard instead of calling Gemini, saving API quota.
 	insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusTranscriptExtracted)
 	chunk0 := insertTestChunk(t, e.lessonID, 0, "")
 	chunk1 := insertTestChunk(t, e.lessonID, 1, "")
-	insertTestQuestionsForChunk(t, e.lessonID, chunk0.ID.String(), 1)
-	insertTestQuestionsForChunk(t, e.lessonID, chunk1.ID.String(), 1)
+	insertTestInteractionsForChunk(t, e.lessonID, chunk0.ID.String(), 1)
+	insertTestInteractionsForChunk(t, e.lessonID, chunk1.ID.String(), 1)
 
-	streamAll := func(t *testing.T, req *richterv1.GenerateQuestionsRequest) []*richterv1.GenerateQuestionsProgressEvent {
+	streamAll := func(t *testing.T, req *richterv1.GenerateInteractionsRequest) []*richterv1.GenerateInteractionsProgressEvent {
 		t.Helper()
-		s, err := e.aiTeacher.GenerateQuestionsStream(ctx, req)
+		s, err := e.aiTeacher.GenerateInteractionsStream(ctx, req)
 		if err != nil {
-			t.Fatalf("GenerateQuestionsStream call: %v", err)
+			t.Fatalf("GenerateInteractionsStream call: %v", err)
 		}
-		var events []*richterv1.GenerateQuestionsProgressEvent
+		var events []*richterv1.GenerateInteractionsProgressEvent
 		for s.Receive() {
 			events = append(events, s.Msg())
 		}
@@ -1057,7 +991,7 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 	}
 
 	t.Run("AllChunksPreDone/SkipsAll", func(t *testing.T) {
-		events := streamAll(t, &richterv1.GenerateQuestionsRequest{LessonId: e.lessonID})
+		events := streamAll(t, &richterv1.GenerateInteractionsRequest{LessonId: e.lessonID})
 
 		// Expect: skip(chunk0), skip(chunk1), DONE — 3 events total.
 		if len(events) != 3 {
@@ -1066,7 +1000,7 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 
 		// First two events: CHUNK step with "bỏ qua" message.
 		for i, ev := range events[:2] {
-			if ev.Step != richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK {
+			if ev.Step != richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK {
 				t.Errorf("event[%d]: want CHUNK step, got %v", i, ev.Step)
 			}
 			if !strings.Contains(ev.Message, "bỏ qua") {
@@ -1079,13 +1013,13 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 
 		// Last event: DONE.
 		last := events[len(events)-1]
-		if last.Step != richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_DONE {
+		if last.Step != richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_DONE {
 			t.Errorf("last event: want DONE, got %v", last.Step)
 		}
 	})
 
 	t.Run("AllChunksPreDone/SetsAnalysisStatusDone", func(t *testing.T) {
-		streamAll(t, &richterv1.GenerateQuestionsRequest{LessonId: e.lessonID})
+		streamAll(t, &richterv1.GenerateInteractionsRequest{LessonId: e.lessonID})
 
 		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
 		if err != nil {
@@ -1101,14 +1035,14 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 		// If Gemini is not reachable/not configured, this produces an ERROR event (not a skip).
 		forceCtx, forceCancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer forceCancel()
-		s, err := e.aiTeacher.GenerateQuestionsStream(forceCtx, &richterv1.GenerateQuestionsRequest{
+		s, err := e.aiTeacher.GenerateInteractionsStream(forceCtx, &richterv1.GenerateInteractionsRequest{
 			LessonId:        e.lessonID,
 			ForceRegenerate: true,
 		})
 		if err != nil {
-			t.Fatalf("GenerateQuestionsStream call: %v", err)
+			t.Fatalf("GenerateInteractionsStream call: %v", err)
 		}
-		var events []*richterv1.GenerateQuestionsProgressEvent
+		var events []*richterv1.GenerateInteractionsProgressEvent
 		for s.Receive() {
 			events = append(events, s.Msg())
 		}
@@ -1119,24 +1053,24 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 		}
 		// First CHUNK event must NOT contain "bỏ qua".
 		firstChunk := events[0]
-		if firstChunk.Step == richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK &&
+		if firstChunk.Step == richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK &&
 			strings.Contains(firstChunk.Message, "bỏ qua") {
 			t.Error("force_regenerate=true should not produce skip events")
 		}
 	})
 
 	t.Run("SingleChunkMode/DoesNotSkip", func(t *testing.T) {
-		// chunk_id set → single-chunk mode → always regenerates regardless of existing questions.
+		// chunk_id set → single-chunk mode → always regenerates regardless of existing interactions.
 		singleCtx, singleCancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer singleCancel()
-		s, err := e.aiTeacher.GenerateQuestionsStream(singleCtx, &richterv1.GenerateQuestionsRequest{
+		s, err := e.aiTeacher.GenerateInteractionsStream(singleCtx, &richterv1.GenerateInteractionsRequest{
 			LessonId: e.lessonID,
 			ChunkId:  chunk0.ID.String(),
 		})
 		if err != nil {
-			t.Fatalf("GenerateQuestionsStream call: %v", err)
+			t.Fatalf("GenerateInteractionsStream call: %v", err)
 		}
-		var events []*richterv1.GenerateQuestionsProgressEvent
+		var events []*richterv1.GenerateInteractionsProgressEvent
 		for s.Receive() {
 			events = append(events, s.Msg())
 		}
@@ -1145,21 +1079,17 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 		if len(events) == 0 {
 			t.Fatal("expected at least one event in single-chunk mode")
 		}
-		// Should not be a CHUNK-step skip event ("đã có câu hỏi, bỏ qua").
+		// Should not be a CHUNK-step skip event ("đã có tương tác, bỏ qua").
 		// An ERROR-step event is acceptable (e.g. Gemini rate limit) — it means
 		// we attempted generation, which is the correct behaviour for single-chunk mode.
-		if events[0].Step == richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK &&
+		if events[0].Step == richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK &&
 			strings.Contains(events[0].Message, "bỏ qua") {
-			t.Error("single-chunk mode must not skip even when chunk already has questions")
+			t.Error("single-chunk mode must not skip even when chunk already has interactions")
 		}
 	})
 
-	// Regression test for cross-lesson IDOR: a teacher of lesson A must not be
-	// able to target a chunk_id from lesson B (even within the same org). Without
-	// the c.LessonID == lessonID guard, the chunk-mode branch would happily wipe
-	// & repopulate the foreign chunk's questions under lesson A.
+	// Regression test for cross-lesson IDOR.
 	t.Run("CrossLessonChunk/InvalidArgument", func(t *testing.T) {
-		// Create a second lesson in the same module → its chunks belong to a different lesson.
 		otherLesson, err := e.adminLessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
 			ModuleId: e.moduleID, Title: gofakeit.JobTitle(), OrderIndex: 99,
 		})
@@ -1168,12 +1098,12 @@ func TestAIGenerateQuestionsResumable(t *testing.T) {
 		}
 		foreignChunk := insertTestChunk(t, otherLesson.Lesson.Id, 0, "")
 
-		s, err := e.aiTeacher.GenerateQuestionsStream(ctx, &richterv1.GenerateQuestionsRequest{
+		s, err := e.aiTeacher.GenerateInteractionsStream(ctx, &richterv1.GenerateInteractionsRequest{
 			LessonId: e.lessonID,
 			ChunkId:  foreignChunk.ID.String(),
 		})
 		if err != nil {
-			t.Fatalf("GenerateQuestionsStream call: %v", err)
+			t.Fatalf("GenerateInteractionsStream call: %v", err)
 		}
 		s.Receive()
 		if got := s.Err(); connect.CodeOf(got) != connect.CodeInvalidArgument {
@@ -1355,7 +1285,7 @@ func TestAIChunkOperations(t *testing.T) {
 		if err := db.WithConnectionExec(pool, context.Background(), func(q *gen.Queries, _ *pgxpool.Conn) error {
 			chunks, _ := q.ListLessonTranscriptChunks(context.Background(), gen.ListLessonTranscriptChunksParams{LessonID: lid, Limit: 500, Offset: 0})
 			for _, c := range chunks {
-				_ = q.DeleteLessonQuestionsForChunk(context.Background(), c.ID)
+				_ = q.DeleteLessonInteractionsByChunk(context.Background(), c.ID)
 			}
 			return q.DeleteLessonTranscriptChunks(context.Background(), lid)
 		}); err != nil {
@@ -1423,11 +1353,11 @@ func TestAIChunkOperations(t *testing.T) {
 		}(), connect.CodeInvalidArgument)
 	})
 
-	t.Run("MergeChunks/QuestionsDeletedForDiscard", func(t *testing.T) {
+	t.Run("MergeChunks/InteractionsDeletedForDiscard", func(t *testing.T) {
 		insertAnalysis()
 		c0 := insertTestChunk(t, e.lessonID, 0, "first")
 		c1 := insertTestChunk(t, e.lessonID, 1, "second")
-		qs := insertTestQuestionsForChunk(t, e.lessonID, c1.ID.String(), 2)
+		its := insertTestInteractionsForChunk(t, e.lessonID, c1.ID.String(), 2)
 
 		if _, err := e.aiTeacher.MergeChunks(ctx, &richterv1.MergeChunksRequest{
 			KeepChunkId:    c0.ID.String(),
@@ -1436,15 +1366,15 @@ func TestAIChunkOperations(t *testing.T) {
 			t.Fatalf("MergeChunks: %v", err)
 		}
 
-		// Verify discard chunk's questions are gone.
+		// Verify discard chunk's interactions are gone.
 		analysisRes, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
 		}
-		discardQIDs := map[string]bool{qs[0].ID.String(): true, qs[1].ID.String(): true}
-		for _, q := range analysisRes.Analysis.GetQuestions() {
-			if discardQIDs[q.Id] {
-				t.Errorf("question %s from discarded chunk still present", q.Id)
+		discardIDs := map[string]bool{its[0].ID.String(): true, its[1].ID.String(): true}
+		for _, it := range analysisRes.Analysis.GetInteractions() {
+			if discardIDs[it.Id] {
+				t.Errorf("interaction %s from discarded chunk still present", it.Id)
 			}
 		}
 	})
@@ -1514,10 +1444,10 @@ func TestAIChunkOperations(t *testing.T) {
 		}
 	})
 
-	t.Run("DeleteChunk/AlsoDeletesQuestions", func(t *testing.T) {
+	t.Run("DeleteChunk/AlsoDeletesInteractions", func(t *testing.T) {
 		insertAnalysis()
-		c := insertTestChunk(t, e.lessonID, 0, "chunk with questions")
-		qs := insertTestQuestionsForChunk(t, e.lessonID, c.ID.String(), 3)
+		c := insertTestChunk(t, e.lessonID, 0, "chunk with interactions")
+		its := insertTestInteractionsForChunk(t, e.lessonID, c.ID.String(), 3)
 
 		if _, err := e.aiTeacher.DeleteChunk(ctx, &richterv1.DeleteChunkRequest{ChunkId: c.ID.String()}); err != nil {
 			t.Fatalf("DeleteChunk: %v", err)
@@ -1526,10 +1456,10 @@ func TestAIChunkOperations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
 		}
-		deletedQIDs := map[string]bool{qs[0].ID.String(): true, qs[1].ID.String(): true, qs[2].ID.String(): true}
-		for _, q := range analysisRes.Analysis.GetQuestions() {
-			if deletedQIDs[q.Id] {
-				t.Errorf("question %s from deleted chunk still present", q.Id)
+		deletedIDs := map[string]bool{its[0].ID.String(): true, its[1].ID.String(): true, its[2].ID.String(): true}
+		for _, it := range analysisRes.Analysis.GetInteractions() {
+			if deletedIDs[it.Id] {
+				t.Errorf("interaction %s from deleted chunk still present", it.Id)
 			}
 		}
 	})
@@ -1633,7 +1563,7 @@ func testUploadVideoToS3(t *testing.T, ctx context.Context, client *minio.Client
 //
 //	ExtractTranscriptStream (Whisper transcription only — no Gemini)
 //	→ ChunkTranscriptStream (Gemini chunking)
-//	→ GenerateQuestionsStream (Gemini Q&A generation)
+//	→ GenerateInteractionsStream (Gemini Q&A generation)
 //
 // Uses testdata/edu-sample.mp4 — a 14-second synthetic binary search lecture.
 //
@@ -1695,12 +1625,12 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		t.Fatalf("set video key on lesson: %v", err)
 	}
 
-	// ── Pre-Phase 1: Seed stale chunks/questions, verify extraction clears them ──
+	// ── Pre-Phase 1: Seed stale chunks/interactions, verify extraction clears them ──
 
-	// Insert dummy chunks and questions to simulate a previous pipeline run.
+	// Insert dummy chunks and interactions to simulate a previous pipeline run.
 	// ExtractTranscriptStream must delete them before writing the new transcript.
 	staleChunk := insertTestChunk(t, e.lessonID, 0, "stale chunk from previous run")
-	insertTestQuestionsForChunk(t, e.lessonID, staleChunk.ID.String(), 2)
+	insertTestInteractionsForChunk(t, e.lessonID, staleChunk.ID.String(), 2)
 
 	// ── Phase 1: ExtractTranscriptStream ───────────────────────────────────────
 	// Run extraction outside sub-tests so a failure fatally stops generation.
@@ -1840,20 +1770,20 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		}
 	})
 
-	// ── Phase 3: GenerateQuestionsStream ──────────────────────────────────────
+	// ── Phase 3: GenerateInteractionsStream ──────────────────────────────────────
 
-	t.Log("Phase 3: GenerateQuestionsStream")
+	t.Log("Phase 3: GenerateInteractionsStream")
 	{
 		genCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 
-		stream, err := e.aiTeacher.GenerateQuestionsStream(genCtx, &richterv1.GenerateQuestionsRequest{
+		stream, err := e.aiTeacher.GenerateInteractionsStream(genCtx, &richterv1.GenerateInteractionsRequest{
 			LessonId: e.lessonID,
 		})
 		if err != nil {
-			t.Fatalf("GenerateQuestionsStream call: %v", err)
+			t.Fatalf("GenerateInteractionsStream call: %v", err)
 		}
-		var events []*richterv1.GenerateQuestionsProgressEvent
+		var events []*richterv1.GenerateInteractionsProgressEvent
 		for stream.Receive() {
 			ev := stream.Msg()
 			events = append(events, ev)
@@ -1863,19 +1793,19 @@ func TestAIPipelineFullFlow(t *testing.T) {
 			t.Fatalf("stream error: %v", err)
 		}
 		if len(events) == 0 {
-			t.Fatal("no events received from GenerateQuestionsStream")
+			t.Fatal("no events received from GenerateInteractionsStream")
 		}
 		last := events[len(events)-1]
-		if last.Step != richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_DONE {
+		if last.Step != richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_DONE {
 			msg := last.Message
 			if strings.Contains(msg, "429") || strings.Contains(strings.ToLower(msg), "quota") {
 				t.Skipf("Gemini API rate limit exceeded — try again later: %s", msg)
 			}
-			t.Fatalf("question generation failed (step=%v): %s", last.Step, msg)
+			t.Fatalf("interaction generation failed (step=%v): %s", last.Step, msg)
 		}
 	}
 
-	t.Run("GenerateQuestions/StatusIsDoneWithQuestions", func(t *testing.T) {
+	t.Run("GenerateInteractions/StatusIsDoneWithInteractions", func(t *testing.T) {
 		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
 		if err != nil {
 			t.Fatalf("GetLessonAnalysis: %v", err)
@@ -1886,34 +1816,39 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		if res.Analysis.Status != richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE {
 			t.Errorf("status: want DONE, got %v", res.Analysis.Status)
 		}
-		if len(res.Analysis.GetQuestions()) == 0 {
-			t.Error("expected at least one question after generation")
+		if len(res.Analysis.GetInteractions()) == 0 {
+			t.Error("expected at least one interaction after generation")
 		}
-		t.Logf("  %d questions generated", len(res.Analysis.GetQuestions()))
-		for i, q := range res.Analysis.GetQuestions() {
-			if q.QuestionText == "" {
-				t.Errorf("question[%d]: empty question text", i)
+		t.Logf("  %d interactions generated", len(res.Analysis.GetInteractions()))
+		for i, it := range res.Analysis.GetInteractions() {
+			if it.Prompt == "" {
+				t.Errorf("interaction[%d]: empty prompt", i)
 			}
-			if len(q.Options) != 4 {
-				t.Errorf("question[%d]: expected 4 options, got %d", i, len(q.Options))
+			mcq := it.GetMcq()
+			if mcq == nil {
+				t.Errorf("interaction[%d]: expected McqConfig", i)
+				continue
 			}
-			if q.CorrectAnswer < 0 || q.CorrectAnswer >= int32(len(q.Options)) {
-				t.Errorf("question[%d]: correct_answer %d out of range", i, q.CorrectAnswer)
+			if len(mcq.Options) != 4 {
+				t.Errorf("interaction[%d]: expected 4 options, got %d", i, len(mcq.Options))
+			}
+			if mcq.CorrectAnswer < 0 || mcq.CorrectAnswer >= int32(len(mcq.Options)) {
+				t.Errorf("interaction[%d]: correct_answer %d out of range", i, mcq.CorrectAnswer)
 			}
 		}
 	})
 
-	t.Run("GenerateQuestions/ResumeSkipsExistingChunks", func(t *testing.T) {
+	t.Run("GenerateInteractions/ResumeSkipsExistingChunks", func(t *testing.T) {
 		genCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
-		stream, err := e.aiTeacher.GenerateQuestionsStream(genCtx, &richterv1.GenerateQuestionsRequest{
+		stream, err := e.aiTeacher.GenerateInteractionsStream(genCtx, &richterv1.GenerateInteractionsRequest{
 			LessonId: e.lessonID,
 		})
 		if err != nil {
-			t.Fatalf("GenerateQuestionsStream (resume) call: %v", err)
+			t.Fatalf("GenerateInteractionsStream (resume) call: %v", err)
 		}
-		var events []*richterv1.GenerateQuestionsProgressEvent
+		var events []*richterv1.GenerateInteractionsProgressEvent
 		for stream.Receive() {
 			events = append(events, stream.Msg())
 		}
@@ -1921,7 +1856,7 @@ func TestAIPipelineFullFlow(t *testing.T) {
 			t.Fatalf("resume stream error: %v", err)
 		}
 		for i, ev := range events {
-			if ev.Step == richterv1.GenerateQuestionsStep_GENERATE_QUESTIONS_STEP_CHUNK {
+			if ev.Step == richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK {
 				if !strings.Contains(ev.Message, "bỏ qua") {
 					t.Errorf("resume event[%d]: expected skip but got %q", i, ev.Message)
 				}
@@ -2057,4 +1992,168 @@ func TestUpdateLessonVideo_SameKey_ResetsAnalysis(t *testing.T) {
 	if len(res.Analysis.TranscriptSegments) != 0 {
 		t.Errorf("expected 0 segments for PENDING, got %d", len(res.Analysis.TranscriptSegments))
 	}
+}
+
+// ── TestInteractionConfigRoundTrip ────────────────────────────────────────────
+
+// TestInteractionConfigRoundTrip verifies that UpdateChunkInteractionConfig and
+// UpdateLessonDefaultInteractionConfig persist their config and are returned by
+// the appropriate read endpoints.
+func TestInteractionConfigRoundTrip(t *testing.T) {
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	chunk := insertTestChunk(t, e.lessonID, 0, "")
+	chunkID := chunk.ID.String()
+
+	t.Run("UpdateChunkInteractionConfig/Teacher/OK", func(t *testing.T) {
+		res, err := e.aiTeacher.UpdateChunkInteractionConfig(ctx, &richterv1.UpdateChunkInteractionConfigRequest{
+			ChunkId: chunkID,
+			InteractionConfig: &richterv1.ChunkInteractionConfig{
+				Count:    3,
+				Kinds:    []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ, richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK},
+				Strategy: richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION,
+			},
+		})
+		if err != nil {
+			t.Fatalf("UpdateChunkInteractionConfig: %v", err)
+		}
+		if res.Chunk == nil {
+			t.Fatal("expected chunk in response")
+		}
+		cfg := res.Chunk.InteractionConfig
+		if cfg == nil {
+			t.Fatal("expected interaction_config in returned chunk")
+		}
+		if cfg.Count != 3 {
+			t.Errorf("count: want 3, got %d", cfg.Count)
+		}
+		if len(cfg.Kinds) != 2 {
+			t.Errorf("kinds: want 2, got %d", len(cfg.Kinds))
+		}
+		if cfg.Strategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION {
+			t.Errorf("strategy: want EVEN_DISTRIBUTION, got %v", cfg.Strategy)
+		}
+	})
+
+	t.Run("UpdateChunkInteractionConfig/PersistedInListChunks", func(t *testing.T) {
+		listRes, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{
+			LessonId: e.lessonID, Limit: 50,
+		})
+		if err != nil {
+			t.Fatalf("ListLessonTranscriptChunks: %v", err)
+		}
+		var found *richterv1.TranscriptChunk
+		for _, c := range listRes.Chunks {
+			if c.Id == chunkID {
+				found = c
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("chunk %s not found in list", chunkID)
+		}
+		if found.InteractionConfig == nil {
+			t.Fatal("expected interaction_config in listed chunk")
+		}
+		if found.InteractionConfig.Count != 3 {
+			t.Errorf("persisted count: want 3, got %d", found.InteractionConfig.Count)
+		}
+	})
+
+	t.Run("UpdateChunkInteractionConfig/Student/PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiStudent.UpdateChunkInteractionConfig(ctx, &richterv1.UpdateChunkInteractionConfigRequest{
+				ChunkId:           chunkID,
+				InteractionConfig: &richterv1.ChunkInteractionConfig{Count: 1},
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("UpdateChunkInteractionConfig/NonMember/PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiNonMember.UpdateChunkInteractionConfig(ctx, &richterv1.UpdateChunkInteractionConfigRequest{
+				ChunkId:           chunkID,
+				InteractionConfig: &richterv1.ChunkInteractionConfig{Count: 1},
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("UpdateChunkInteractionConfig/InvalidChunkID", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiTeacher.UpdateChunkInteractionConfig(ctx, &richterv1.UpdateChunkInteractionConfigRequest{
+				ChunkId:           "not-a-uuid",
+				InteractionConfig: &richterv1.ChunkInteractionConfig{Count: 1},
+			})
+			return err
+		}(), connect.CodeInvalidArgument)
+	})
+
+	t.Run("UpdateLessonDefaultInteractionConfig/Teacher/OK", func(t *testing.T) {
+		_, err := e.aiTeacher.UpdateLessonDefaultInteractionConfig(ctx, &richterv1.UpdateLessonDefaultInteractionConfigRequest{
+			LessonId: e.lessonID,
+			DefaultInteractionConfig: &richterv1.ChunkInteractionConfig{
+				Count:    4,
+				Kinds:    []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ},
+				Strategy: richterv1.GenerationStrategy_GENERATION_STRATEGY_AI_CHOOSE,
+			},
+		})
+		if err != nil {
+			t.Fatalf("UpdateLessonDefaultInteractionConfig: %v", err)
+		}
+	})
+
+	t.Run("UpdateLessonDefaultInteractionConfig/PersistedInGetLessonAnalysis", func(t *testing.T) {
+		// GetLessonAnalysis only returns a non-nil Analysis when an analysis row exists.
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusDone)
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if res.Analysis == nil {
+			t.Fatal("expected analysis in response")
+		}
+		cfg := res.Analysis.DefaultInteractionConfig
+		if cfg == nil {
+			t.Fatal("expected default_interaction_config in analysis")
+		}
+		if cfg.Count != 4 {
+			t.Errorf("default count: want 4, got %d", cfg.Count)
+		}
+		if cfg.Strategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_AI_CHOOSE {
+			t.Errorf("default strategy: want AI_CHOOSE, got %v", cfg.Strategy)
+		}
+	})
+
+	t.Run("UpdateLessonDefaultInteractionConfig/Student/PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiStudent.UpdateLessonDefaultInteractionConfig(ctx, &richterv1.UpdateLessonDefaultInteractionConfigRequest{
+				LessonId:                 e.lessonID,
+				DefaultInteractionConfig: &richterv1.ChunkInteractionConfig{Count: 1},
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("UpdateLessonDefaultInteractionConfig/NonMember/PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiNonMember.UpdateLessonDefaultInteractionConfig(ctx, &richterv1.UpdateLessonDefaultInteractionConfigRequest{
+				LessonId:                 e.lessonID,
+				DefaultInteractionConfig: &richterv1.ChunkInteractionConfig{Count: 1},
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("UpdateLessonDefaultInteractionConfig/InvalidLessonID", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := e.aiTeacher.UpdateLessonDefaultInteractionConfig(ctx, &richterv1.UpdateLessonDefaultInteractionConfigRequest{
+				LessonId:                 "not-a-uuid",
+				DefaultInteractionConfig: &richterv1.ChunkInteractionConfig{Count: 1},
+			})
+			return err
+		}(), connect.CodeInvalidArgument)
+	})
 }
