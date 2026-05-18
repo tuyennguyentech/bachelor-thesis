@@ -1120,18 +1120,27 @@ type kindCount struct {
 	count int32
 }
 
-// resolveKindCounts merges (chunk config → lesson default → server default → request overrides)
-// and returns an ordered list of (kind, count) pairs whose total equals the effective count.
-func resolveKindCounts(
+// generationPlan describes how to generate interactions for one chunk.
+// Exactly one of useAIChoose or len(evenCounts)>0 is set.
+type generationPlan struct {
+	useAIChoose bool
+	aiKinds     []richterv1.InteractionKind // AI_CHOOSE: allowed kinds
+	aiCount     int32                       // AI_CHOOSE: total items to request
+	evenCounts  []kindCount                 // EVEN_DISTRIBUTION: per-kind counts
+}
+
+// resolveGenerationPlan merges chunk config → lesson default → server default → request overrides
+// and returns the effective generation plan.
+func resolveGenerationPlan(
 	chunk gen.LessonTranscriptChunk,
 	lesson gen.Lesson,
 	reqKinds []richterv1.InteractionKind,
 	reqCount int32,
-	_ richterv1.GenerationStrategy, // strategy reserved; currently uses even-distribution
-) []kindCount {
-	// Merge configs from least to most specific.
+	reqStrategy richterv1.GenerationStrategy,
+) generationPlan {
 	var cfgKinds []richterv1.InteractionKind
 	cfgCount := int32(chunk.QuestionCountConfig)
+	cfgStrategy := richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED
 
 	if d := interactionConfigFromJSON(lesson.DefaultInteractionConfig); d != nil {
 		if len(d.Kinds) > 0 {
@@ -1140,6 +1149,9 @@ func resolveKindCounts(
 		if d.Count > 0 {
 			cfgCount = d.Count
 		}
+		if d.Strategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED {
+			cfgStrategy = d.Strategy
+		}
 	}
 	if c := interactionConfigFromJSON(chunk.InteractionConfig); c != nil {
 		if len(c.Kinds) > 0 {
@@ -1147,6 +1159,9 @@ func resolveKindCounts(
 		}
 		if c.Count > 0 {
 			cfgCount = c.Count
+		}
+		if c.Strategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED {
+			cfgStrategy = c.Strategy
 		}
 	}
 
@@ -1157,8 +1172,11 @@ func resolveKindCounts(
 	if reqCount > 0 {
 		cfgCount = reqCount
 	}
+	if reqStrategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED {
+		cfgStrategy = reqStrategy
+	}
 
-	// Server defaults for any remaining unset fields.
+	// Server defaults.
 	if len(cfgKinds) == 0 {
 		cfgKinds = []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ}
 	}
@@ -1166,13 +1184,17 @@ func resolveKindCounts(
 		cfgCount = defaultGenerationCount
 	}
 
-	// Distribute cfgCount items across kinds (even distribution / round-robin).
+	// UNSPECIFIED → AI_CHOOSE (default).
+	if cfgStrategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION {
+		return generationPlan{useAIChoose: true, aiKinds: cfgKinds, aiCount: cfgCount}
+	}
+
+	// EVEN_DISTRIBUTION: round-robin across cfgKinds.
 	kindMap := make(map[richterv1.InteractionKind]int32, len(cfgKinds))
 	for i := int32(0); i < cfgCount; i++ {
 		k := cfgKinds[i%int32(len(cfgKinds))]
 		kindMap[k]++
 	}
-	// Preserve order of cfgKinds for deterministic output.
 	seen := make(map[richterv1.InteractionKind]bool)
 	result := make([]kindCount, 0, len(kindMap))
 	for _, k := range cfgKinds {
@@ -1181,7 +1203,52 @@ func resolveKindCounts(
 			result = append(result, kindCount{k, kindMap[k]})
 		}
 	}
-	return result
+	return generationPlan{evenCounts: result}
+}
+
+// buildAIChoosePrompt constructs the Gemini prompt for AI_CHOOSE mode.
+// Each allowed kind contributes its prompt hint and schema; the model picks per item.
+func buildAIChoosePrompt(
+	chunk gen.LessonTranscriptChunk,
+	transcript string,
+	totalCount int32,
+	specs []aiChooseKindSpec,
+) string {
+	var kindDescs strings.Builder
+	kindNames := make([]string, 0, len(specs))
+	for _, sp := range specs {
+		fmt.Fprintf(&kindDescs, "- \"%s\": %s\n  Schema cho loại này:\n%s\n\n",
+			sp.kindStr, sp.generator.GeminiPromptHint(), sp.generator.GeminiSchema())
+		kindNames = append(kindNames, `"`+sp.kindStr+`"`)
+	}
+	allowedList := strings.Join(kindNames, ", ")
+
+	return fmt.Sprintf(
+		`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d bài tập để kiểm tra hiểu biết của học sinh.
+
+Với mỗi bài tập, chọn loại phù hợp nhất từ các loại cho phép:
+%s
+Đoạn nội dung (%.1f - %.1f giây):
+%s
+
+start_seconds là thời điểm (giây) trong khoảng %.1f - %.1f mà nội dung liên quan xuất hiện.
+
+Mỗi item trong mảng "items" PHẢI có trường "kind" (một trong: %s) và các trường tương ứng với loại đó theo schema ở trên.
+
+Trả về JSON object: {"items": [...]}`,
+		totalCount,
+		kindDescs.String(),
+		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		transcript,
+		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		allowedList,
+	)
+}
+
+// aiChooseKindSpec is used internally by buildAIChoosePrompt and runGeminiGenerateItemsAIChoose.
+type aiChooseKindSpec struct {
+	kindStr   string
+	generator svcinteractions.GeminiGenerator
 }
 
 // ── Step 7: GenerateInteractionsStream ───────────────────────────────────────
@@ -1323,30 +1390,39 @@ func (s *AISvc) GenerateInteractionsStream(
 			continue
 		}
 
-		// Resolve effective per-kind counts for this chunk.
-		kindCounts := resolveKindCounts(chunk, lesson, reqKinds, reqCount, reqStrategy)
+		// Resolve effective generation plan for this chunk.
+		plan := resolveGenerationPlan(chunk, lesson, reqKinds, reqCount, reqStrategy)
 
 		var allItems []generatedItem
-		for _, kc := range kindCounts {
-			handler := svcinteractions.Get(kc.kind)
-			if handler == nil {
-				s.log.WarnContext(ctx, "ai: no handler for kind, skipping", "kind", kc.kind)
-				continue
-			}
-			geminiGen, ok := handler.(svcinteractions.GeminiGenerator)
-			if !ok {
-				s.log.WarnContext(ctx, "ai: kind has no Gemini generator, skipping", "kind", kc.kind)
-				continue
-			}
-			chunkCopy := chunk
-			chunkCopy.QuestionCountConfig = kc.count
-			kindStr := svcinteractions.KindToDBString(kc.kind)
-			items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr)
+		if plan.useAIChoose {
+			items, genErr := s.runGeminiGenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount)
 			if genErr != nil {
-				s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "err", genErr)
-				continue
+				s.log.WarnContext(ctx, "ai: AI_CHOOSE generation failed", "chunk_id", chunk.ID.String(), "err", genErr)
+			} else {
+				allItems = items
 			}
-			allItems = append(allItems, items...)
+		} else {
+			for _, kc := range plan.evenCounts {
+				handler := svcinteractions.Get(kc.kind)
+				if handler == nil {
+					s.log.WarnContext(ctx, "ai: no handler for kind, skipping", "kind", kc.kind)
+					continue
+				}
+				geminiGen, ok := handler.(svcinteractions.GeminiGenerator)
+				if !ok {
+					s.log.WarnContext(ctx, "ai: kind has no Gemini generator, skipping", "kind", kc.kind)
+					continue
+				}
+				chunkCopy := chunk
+				chunkCopy.QuestionCountConfig = kc.count
+				kindStr := svcinteractions.KindToDBString(kc.kind)
+				items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr)
+				if genErr != nil {
+					s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "err", genErr)
+					continue
+				}
+				allItems = append(allItems, items...)
+			}
 		}
 
 		if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
@@ -1788,6 +1864,109 @@ Trả về JSON object: {"items": [...]}`,
 			startSecs:   startSecs,
 			configJSON:  configJSON,
 			kindStr:     kindStr,
+		})
+	}
+	return items, nil
+}
+
+// runGeminiGenerateItemsAIChoose calls Gemini with a union prompt for AI_CHOOSE mode.
+// The model picks the most appropriate kind for each item from allowedKinds.
+// Items with disallowed or invalid kinds are skipped with a warning.
+func (s *AISvc) runGeminiGenerateItemsAIChoose(
+	ctx context.Context,
+	client *genai.Client,
+	chunk gen.LessonTranscriptChunk,
+	transcript string,
+	allowedKinds []richterv1.InteractionKind,
+	totalCount int32,
+) ([]generatedItem, error) {
+	// Build kind specs (skip kinds with no GeminiGenerator support).
+	specs := make([]aiChooseKindSpec, 0, len(allowedKinds))
+	for _, k := range allowedKinds {
+		h := svcinteractions.Get(k)
+		if h == nil {
+			s.log.WarnContext(ctx, "ai-choose: no handler for kind, skipping", "kind", k)
+			continue
+		}
+		g, ok := h.(svcinteractions.GeminiGenerator)
+		if !ok {
+			s.log.WarnContext(ctx, "ai-choose: kind has no Gemini generator, skipping", "kind", k)
+			continue
+		}
+		specs = append(specs, aiChooseKindSpec{kindStr: svcinteractions.KindToDBString(k), generator: g})
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("no supported kinds in allowedKinds")
+	}
+	// Fallback to even-distribution if only one kind (simpler, same result).
+	if len(specs) == 1 {
+		chunkCopy := chunk
+		chunkCopy.QuestionCountConfig = totalCount
+		return s.runGeminiGenerateItems(ctx, client, chunkCopy, transcript, specs[0].generator, specs[0].kindStr)
+	}
+
+	prompt := buildAIChoosePrompt(chunk, transcript, totalCount, specs)
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	model := client.GenerativeModel(s.geminiCfg.Model)
+	model.SetTemperature(0.3)
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(8192)
+
+	s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: calling GenerateContent",
+		"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+	}
+
+	raw, err := geminiResponseText(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("parse gemini response: %w", err)
+	}
+
+	// Build fast-lookup maps.
+	handlerByKind := make(map[string]svcinteractions.GeminiGenerator, len(specs))
+	kindAllowed := make(map[string]bool, len(specs))
+	for _, sp := range specs {
+		handlerByKind[sp.kindStr] = sp.generator
+		kindAllowed[sp.kindStr] = true
+	}
+
+	items := make([]generatedItem, 0, len(result.Items))
+	for i, rawItem := range result.Items {
+		var kindHolder struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(rawItem, &kindHolder); err != nil || kindHolder.Kind == "" {
+			s.log.WarnContext(ctx, "ai-choose: item missing kind field, skipping", "index", i)
+			continue
+		}
+		if !kindAllowed[kindHolder.Kind] {
+			s.log.WarnContext(ctx, "ai-choose: item has disallowed kind, skipping", "index", i, "kind", kindHolder.Kind)
+			continue
+		}
+		handler := handlerByKind[kindHolder.Kind]
+		prompt, explanation, startSecs, configJSON, parseErr := handler.ParseGeminiItem(rawItem)
+		if parseErr != nil {
+			s.log.WarnContext(ctx, "ai-choose: skipping item that failed validation", "index", i, "kind", kindHolder.Kind, "err", parseErr)
+			continue
+		}
+		items = append(items, generatedItem{
+			prompt:      prompt,
+			explanation: explanation,
+			startSecs:   startSecs,
+			configJSON:  configJSON,
+			kindStr:     kindHolder.Kind,
 		})
 	}
 	return items, nil
