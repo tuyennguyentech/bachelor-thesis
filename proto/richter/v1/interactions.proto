@@ -1,0 +1,266 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "example.com/buf/gen/richter/v1;richterv1";
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum FeedbackMode {
+  FEEDBACK_MODE_UNSPECIFIED = 0;
+  // Correct answers are never revealed to students.
+  FEEDBACK_MODE_HIDDEN = 1;
+  // Correct answers are revealed only after the student submits their attempt.
+  FEEDBACK_MODE_AFTER_SUBMIT = 2;
+  // Correct answers are revealed immediately after each interaction is answered.
+  FEEDBACK_MODE_AFTER_EACH = 3;
+}
+
+enum InteractionKind {
+  INTERACTION_KIND_UNSPECIFIED = 0;
+  INTERACTION_KIND_MCQ = 1;
+  INTERACTION_KIND_FILL_BLANK = 2;
+  INTERACTION_KIND_LISTENING = 3;
+  INTERACTION_KIND_READING = 4;
+}
+
+enum ListeningMode {
+  LISTENING_MODE_UNSPECIFIED = 0;
+  LISTENING_MODE_DICTATION = 1;
+  LISTENING_MODE_COMPREHENSION = 2;
+}
+
+// ── MCQ config ────────────────────────────────────────────────────────────────
+
+message McqOption {
+  string text = 1;
+}
+
+message McqConfig {
+  repeated McqOption options = 1;
+  // correct_answer is stripped (set to -1) for students before submission,
+  // unless feedback_mode == AFTER_EACH. Server enforces this as defense-in-depth.
+  int32 correct_answer = 2;
+}
+
+// ── Fill-blank config ─────────────────────────────────────────────────────────
+
+message Blank {
+  repeated string accepted = 1 [(buf.validate.field).repeated.min_items = 1];
+  bool case_sensitive = 2;
+  string hint = 3;
+}
+
+message FillBlankConfig {
+  // Template with {{i}} placeholders, e.g. "Năng lượng không thể {{0}} mà chỉ {{1}}."
+  string template = 1 [(buf.validate.field).string.min_len = 1];
+  repeated Blank blanks = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message FillBlankResponse {
+  // Index aligns with FillBlankConfig.blanks
+  repeated string answers = 1;
+}
+
+// ── Listening config ──────────────────────────────────────────────────────────
+
+message ListeningConfig {
+  // Storage object key — frontend fetches presigned download URL at render time
+  string audio_object_key = 1 [(buf.validate.field).string.min_len = 1];
+  int32 duration_seconds = 2;
+  ListeningMode mode = 3;
+  // DICTATION: expected verbatim text (used for grading)
+  string expected_text = 4;
+  // COMPREHENSION: nested MCQs about the audio
+  repeated McqConfig comprehension_questions = 5;
+}
+
+message ListeningResponse {
+  // DICTATION: student's transcription
+  string transcription = 1;
+  // COMPREHENSION: selected option index per comprehension_question (parallel array)
+  repeated int32 comprehension_answers = 2;
+}
+
+// ── Reading config ────────────────────────────────────────────────────────────
+
+message ReadingConfig {
+  string passage_markdown = 1 [(buf.validate.field).string.min_len = 1];
+  repeated McqConfig questions = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message ReadingResponse {
+  // Selected option index per question (parallel array)
+  repeated int32 answers = 1;
+}
+
+// ── LessonInteraction ─────────────────────────────────────────────────────────
+
+message LessonInteraction {
+  string id = 1;
+  string lesson_id = 2;
+  string chunk_id = 3;
+  float start_seconds = 4;
+  int32 order_index = 5;
+  InteractionKind kind = 6;
+  string prompt = 7;
+  // explanation is stripped for students before submission (unless AFTER_EACH).
+  string explanation = 8;
+  float max_score = 9;
+  string generated_by = 10;
+  google.protobuf.Timestamp created_at = 11;
+  oneof config {
+    McqConfig mcq = 20;
+    FillBlankConfig fill_blank = 21;
+    ListeningConfig listening = 22;
+    ReadingConfig reading = 23;
+  }
+}
+
+// ── Attempt ───────────────────────────────────────────────────────────────────
+
+message LessonAttempt {
+  string id = 1;
+  string lesson_id = 2;
+  string user_id = 3;
+  float total_score = 4;
+  float max_score = 5;
+  string status = 6;
+  google.protobuf.Timestamp submitted_at = 7;
+  repeated LessonAttemptResponse responses = 8;
+}
+
+message LessonAttemptResponse {
+  string interaction_id = 1;
+  float score = 2;
+  float max_score = 3;
+  string feedback = 4;
+  oneof response {
+    int32 mcq_selected = 20;
+    FillBlankResponse fill_blank = 21;
+    ListeningResponse listening = 22;
+    ReadingResponse reading = 23;
+  }
+}
+
+// ── InteractionService RPCs ───────────────────────────────────────────────────
+
+message ListLessonInteractionsRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 500}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListLessonInteractionsResponse {
+  repeated LessonInteraction interactions = 1;
+}
+
+message CreateManualInteractionRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  string prompt = 2 [(buf.validate.field).string.min_len = 1];
+  string explanation = 3;
+  float start_seconds = 4 [(buf.validate.field).float.gte = 0];
+  oneof config {
+    McqConfig mcq = 20;
+    FillBlankConfig fill_blank = 21;
+    ListeningConfig listening = 22;
+    ReadingConfig reading = 23;
+  }
+}
+
+message CreateManualInteractionResponse {
+  LessonInteraction interaction = 1;
+}
+
+message UpdateInteractionRequest {
+  string interaction_id = 1 [(buf.validate.field).string.uuid = true];
+  string prompt = 2 [(buf.validate.field).string.min_len = 1];
+  string explanation = 3;
+  float start_seconds = 4 [(buf.validate.field).float.gte = 0];
+  oneof config {
+    McqConfig mcq = 20;
+    FillBlankConfig fill_blank = 21;
+    ListeningConfig listening = 22;
+    ReadingConfig reading = 23;
+  }
+}
+
+message UpdateInteractionResponse {
+  LessonInteraction interaction = 1;
+}
+
+message DeleteInteractionRequest {
+  string interaction_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteInteractionResponse {}
+
+// ── Submit / Get attempt ─────────────────────────────────────────────────────
+
+message AttemptResponseInput {
+  string interaction_id = 1 [(buf.validate.field).string.uuid = true];
+  oneof response {
+    int32 mcq_selected = 20;
+    FillBlankResponse fill_blank = 21;
+    ListeningResponse listening = 22;
+    ReadingResponse reading = 23;
+  }
+}
+
+message SubmitAttemptRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  repeated AttemptResponseInput responses = 2 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message SubmitAttemptResponse {
+  LessonAttempt attempt = 1;
+}
+
+message GetMyAttemptRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetMyAttemptResponse {
+  LessonAttempt attempt = 1;
+}
+
+message StudentAttemptSummary {
+  string user_id = 1;
+  string display_name = 2;
+  string email = 3;
+  float total_score = 4;
+  float max_score = 5;
+  google.protobuf.Timestamp submitted_at = 6;
+}
+
+message ListAttemptsRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListAttemptsResponse {
+  repeated StudentAttemptSummary attempts = 1;
+  int32 total = 2;
+}
+
+service InteractionService {
+  // Teacher: list all interactions for a lesson.
+  rpc ListLessonInteractions(ListLessonInteractionsRequest) returns (ListLessonInteractionsResponse) {}
+  // Teacher: create a manually authored interaction.
+  rpc CreateManualInteraction(CreateManualInteractionRequest) returns (CreateManualInteractionResponse) {}
+  // Teacher: edit an existing interaction.
+  rpc UpdateInteraction(UpdateInteractionRequest) returns (UpdateInteractionResponse) {}
+  // Teacher: delete an interaction.
+  rpc DeleteInteraction(DeleteInteractionRequest) returns (DeleteInteractionResponse) {}
+  // Teacher: list student attempt summaries.
+  rpc ListAttempts(ListAttemptsRequest) returns (ListAttemptsResponse) {}
+
+  // Student: submit all interaction responses and receive a graded attempt.
+  rpc SubmitAttempt(SubmitAttemptRequest) returns (SubmitAttemptResponse) {}
+  // Student: retrieve a previously submitted attempt (may be nil if not yet submitted).
+  rpc GetMyAttempt(GetMyAttemptRequest) returns (GetMyAttemptResponse) {}
+}
