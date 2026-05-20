@@ -1,31 +1,27 @@
 import "server-only";
 import { cache } from "react";
-import { fromJson } from "@bufbuild/protobuf";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { UserRole } from "buf/gen/richter/v1/users_pb";
-import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import {
   MemberStatus,
   OrganizationMemberService,
   OrganizationRole,
   type OrganizationMember,
 } from "buf/gen/richter/v1/organization_members_pb";
-import { type JWTClaims, JWTClaimsSchema, TokenType } from "buf/gen/richter/jwt/v1/jwt_pb";
+import { type JWTClaims } from "buf/gen/richter/jwt/v1/jwt_pb";
 import { createRichterClient } from "./connect-client";
+import {
+  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS,
+  verifyAccessJwt,
+} from "./refresh";
 
 export type { JWTClaims };
 
-if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not configured");
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
-
-export const COOKIE_ACCESS = "dyadia_access";
-export const COOKIE_REFRESH = "dyadia_refresh";
-
-export const COOKIE_OPTS = { httpOnly: true, sameSite: "lax" as const, path: "/", secure: process.env.NODE_ENV === "production" };
-export const REFRESH_COOKIE_OPTS = { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 };
+// Re-export so actions/auth.ts (which imports from "@/lib/auth") still works.
+export { COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS };
+export const verifyJwt = verifyAccessJwt;
 
 const ALLOWED_NEXT_PREFIXES = ["/admin", "/dashboard"];
 export function safeNext(next: string | null | undefined): string | null {
@@ -38,58 +34,23 @@ export interface Session {
   token: string;
 }
 
-export async function verifyJwt(token: string): Promise<JWTClaims | null> {
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, {
-      algorithms: ["HS256"],
-      issuer: "dyadia",
-      audience: "dyadia-client",
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const claims = fromJson(JWTClaimsSchema, payload as any);
-    if (claims.tokenType !== TokenType.ACCESS) return null;
-    return claims;
-  } catch {
-    return null;
-  }
-}
-
+// Read-only — silent refresh is handled upstream by proxy.ts middleware.
 export const getSession = cache(async (): Promise<Session | null> => {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(COOKIE_ACCESS)?.value;
-
-  if (accessToken) {
-    const claims = await verifyJwt(accessToken);
-    if (claims) return { claims, token: accessToken };
-  }
-
-  // Silent refresh: access token missing or expired — try refresh token
-  const refreshToken = cookieStore.get(COOKIE_REFRESH)?.value;
-  if (!refreshToken) return null;
-
-  try {
-    const client = createRichterClient(AuthService);
-    const res = await client.refreshToken({ refreshToken });
-    const claims = await verifyJwt(res.accessToken);
-    if (!claims) {
-      // Server returned an unverifiable token — clear cookies so we don't loop
-      cookieStore.delete(COOKIE_ACCESS);
-      cookieStore.delete(COOKIE_REFRESH);
-      return null;
-    }
-    cookieStore.set(COOKIE_ACCESS, res.accessToken, COOKIE_OPTS);
-    cookieStore.set(COOKIE_REFRESH, res.refreshToken, REFRESH_COOKIE_OPTS);
-    return { claims, token: res.accessToken };
-  } catch {
-    return null;
-  }
+  if (!accessToken) return null;
+  const claims = await verifyAccessJwt(accessToken);
+  if (!claims) return null;
+  return { claims, token: accessToken };
 });
 
-// Tier 1 — chỉ cần đăng nhập
 export async function requireSession(): Promise<Session> {
   const session = await getSession();
-  if (!session) redirect("/login");
-  return session;
+  if (session) return session;
+
+  const hdrs = await headers();
+  const path = safeNext(hdrs.get("x-pathname"));
+  redirect(path ? `/login?next=${encodeURIComponent(path)}` : "/login");
 }
 
 // Tier 2 — cần global role cụ thể (từ JWT, không tốn RPC)
