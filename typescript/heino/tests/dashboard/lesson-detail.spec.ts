@@ -382,9 +382,8 @@ test.describe("Fill-blank interaction — teacher creates via editor", () => {
     const addBtn = page.getByTestId("add-interaction-btn").first();
     await expect(addBtn).toBeVisible({ timeout: 5000 });
 
-    // Open kind picker and select "Điền đáp án"
+    // Open inline add form and select "Điền đáp án" kind tab
     await addBtn.click();
-    await expect(page.getByText("Chọn loại bài tập:")).toBeVisible();
     await page.getByRole("button", { name: "Điền đáp án" }).click();
 
     // Fill in the prompt

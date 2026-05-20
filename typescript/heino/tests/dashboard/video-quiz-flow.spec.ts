@@ -275,7 +275,7 @@ test.describe("AI analysis streaming progress", () => {
     // Step 3: Generate questions
     await page.getByRole("button", { name: "Bài tập" }).click();
     await page.getByTestId("generate-all-btn").click();
-    // Confirm modal appears — click "Tạo tất cả" to proceed
+    // Inline generate form appears — click "Tạo tất cả" to proceed
     await page.getByRole("button", { name: "Tạo tất cả" }).click();
     await expect(page.getByRole("button", { name: "Đang tạo…" })).toBeVisible({ timeout: 5_000 });
     await expect(
@@ -612,7 +612,7 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     // Step 3: Generate questions
     await page.getByRole("button", { name: "Bài tập" }).click();
     await page.getByTestId("generate-all-btn").click();
-    // Confirm modal appears — click "Tạo tất cả" to proceed
+    // Inline generate form appears — click "Tạo tất cả" to proceed
     await page.getByRole("button", { name: "Tạo tất cả" }).click();
     await expect(page.getByRole("button", { name: "Đang tạo…" })).toBeVisible({ timeout: 5_000 });
     await expect(
@@ -839,7 +839,7 @@ test.describe("Teacher question editing (seeded data)", () => {
     await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
     await page.getByTestId("add-interaction-btn").first().click();
-    // Kind picker appears — select MCQ
+    // Inline form opens with MCQ selected by default — click "Trắc nghiệm" to confirm kind
     await page.getByRole("button", { name: "Trắc nghiệm" }).click();
 
     // Fill in the add form — after selecting kind, InteractionForm appears
@@ -852,6 +852,41 @@ test.describe("Teacher question editing (seeded data)", () => {
 
     await page.getByRole("button", { name: "Lưu" }).last().click();
     await expect(page.getByText("Câu hỏi thủ công mới").first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("bug 1.8: adding 3 questions consecutively keeps all of them visible", async ({ teacherPage: page }) => {
+    await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5_000 });
+
+    const stamp = Date.now();
+    const q = (n: number) => `Bug18-${n}-${stamp}`;
+
+    async function addMcq(question: string) {
+      await page.getByTestId("add-interaction-btn").first().click();
+      await page.getByPlaceholder("Nhập câu hỏi...").fill(question);
+      const opts = page.locator('input[type="text"]');
+      await opts.nth(0).fill("A");
+      await opts.nth(1).fill("B");
+      await opts.nth(2).fill("C");
+      await opts.nth(3).fill("D");
+      await page.getByRole("button", { name: "Lưu" }).last().click();
+      // Wait for form to close
+      await expect(page.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 5_000 });
+    }
+
+    await addMcq(q(1));
+    await expect(page.getByText(q(1))).toBeVisible({ timeout: 5_000 });
+
+    await addMcq(q(2));
+    // Both questions must be visible — regression: stale closure would drop q(1)
+    await expect(page.getByText(q(1))).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(2))).toBeVisible({ timeout: 5_000 });
+
+    await addMcq(q(3));
+    await expect(page.getByText(q(1))).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(2))).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(3))).toBeVisible({ timeout: 5_000 });
   });
 
   test("teacher can delete a question", async ({ teacherPage: page }) => {
