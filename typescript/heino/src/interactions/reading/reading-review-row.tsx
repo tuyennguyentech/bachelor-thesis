@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
+import { StorageService } from "buf/gen/richter/v1/storage_pb";
+import { useRichterWebClient } from "@/lib/connect-webclient";
 import type { ReviewRowProps, ReadingConfig, ReadingResponse } from "../types";
 
 export function ReadingReviewRow({
@@ -11,8 +14,19 @@ export function ReadingReviewRow({
   response,
   score,
   feedbackMode,
+  token = "",
 }: ReviewRowProps<ReadingConfig, ReadingResponse>) {
+  const storageClient = useRichterWebClient(StorageService, token);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const canReveal = feedbackMode !== FeedbackMode.HIDDEN;
+
+  useEffect(() => {
+    if (!response?.audioObjectKey) return;
+    storageClient.getDownloadUrl({ key: response.audioObjectKey, expiresInSeconds: 3600 })
+      .then((res) => setAudioUrl(res.downloadUrl))
+      .catch(() => setAudioUrl(null));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response?.audioObjectKey]);
 
   return (
     <div className="flex flex-col gap-2 py-3 border-b last:border-b-0">
@@ -43,8 +57,12 @@ export function ReadingReviewRow({
         {config.mode === "open_answer" && config.question && (
           <p className="text-xs font-medium">{config.question}</p>
         )}
-        {response?.audioObjectKey && (
-          <p className="text-xs text-muted-foreground">🎙 Bản ghi âm: {response.audioObjectKey}</p>
+        {audioUrl ? (
+          <audio src={audioUrl} controls className="w-full max-w-sm h-9" />
+        ) : response?.audioObjectKey ? (
+          <p className="text-xs text-muted-foreground italic">Đang tải bản ghi âm…</p>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">Chưa có bản ghi âm.</p>
         )}
       </div>
     </div>

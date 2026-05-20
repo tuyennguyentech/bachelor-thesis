@@ -32,6 +32,7 @@ var (
 			do.Lazy(NewGeminiCfgSvc),
 			do.Lazy(NewFdbCfgSvc),
 			do.Lazy(NewWhisperCfgSvc),
+			do.Lazy(NewTTSCfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -62,6 +63,7 @@ type RichterCfg struct {
 	GeminiCfg  `mapstructure:"gemini"`
 	FdbCfg     `mapstructure:"fdb"`
 	WhisperCfg `mapstructure:"whisper"`
+	TTSCfg     `mapstructure:"tts"`
 }
 
 func NewConfig() RichterCfg {
@@ -74,6 +76,7 @@ func NewConfig() RichterCfg {
 		GeminiCfg:  NewGeminiCfg(),
 		FdbCfg:     NewFdbCfg(),
 		WhisperCfg: NewWhisperCfg(),
+		TTSCfg:     NewTTSCfg(),
 	}
 }
 

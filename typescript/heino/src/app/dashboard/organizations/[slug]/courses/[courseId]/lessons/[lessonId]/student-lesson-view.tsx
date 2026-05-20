@@ -308,6 +308,7 @@ export function StudentLessonView({
                 onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
                 onContinue={() => handleContinue(activeInteraction.id)}
                 token={token}
+                lessonId={lessonId}
               />
             )}
 
@@ -336,6 +337,7 @@ export function StudentLessonView({
                 interactions={interactions}
                 feedbackMode={feedbackMode}
                 onRetake={handleRetake}
+                token={token}
               />
             )}
 

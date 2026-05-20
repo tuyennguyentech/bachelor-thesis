@@ -23,6 +23,7 @@ interface Props {
   interactions: LessonInteraction[];
   feedbackMode: FeedbackMode;
   onRetake: () => void;
+  token?: string;
 }
 
 function DonutScore({ score, total }: { score: number; total: number }) {
@@ -57,7 +58,7 @@ function DonutScore({ score, total }: { score: number; total: number }) {
   );
 }
 
-export function LessonResult({ result, interactions, feedbackMode, onRetake }: Props) {
+export function LessonResult({ result, interactions, feedbackMode, onRetake, token }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
@@ -95,6 +96,7 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake }: P
                   response={respItem?.response}
                   score={respItem?.score ?? 0}
                   feedbackMode={feedbackMode}
+                  token={token}
                 />
               </div>
             );

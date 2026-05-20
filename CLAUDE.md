@@ -30,7 +30,8 @@ sqlc generate                    # Regenerate SQL code from queries/migrations
 
 ### Local Infrastructure
 ```sh
-podman-compose up -d             # Start FoundationDB, Postgres, Caddy
+podman compose up -d             # Start FoundationDB, Postgres, Caddy (and other services)
+podman compose up -d <service>   # Start a specific service only
 ```
 
 ### Container DNS (Critical)

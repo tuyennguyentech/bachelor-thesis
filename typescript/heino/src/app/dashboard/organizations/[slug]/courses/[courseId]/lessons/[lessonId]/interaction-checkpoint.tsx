@@ -17,6 +17,7 @@ interface Props {
   onAnswer: (response: any) => void;
   onContinue: () => void;
   token?: string;
+  lessonId?: string;
 }
 
 function formatTime(seconds: number) {
@@ -35,6 +36,7 @@ export function InteractionCheckpoint({
   onAnswer,
   onContinue,
   token,
+  lessonId,
 }: Props) {
   let renderer;
   try {
@@ -83,6 +85,7 @@ export function InteractionCheckpoint({
         onAnswer={onAnswer}
         onContinue={onContinue}
         token={token}
+        lessonId={lessonId}
       />
     </div>
   );

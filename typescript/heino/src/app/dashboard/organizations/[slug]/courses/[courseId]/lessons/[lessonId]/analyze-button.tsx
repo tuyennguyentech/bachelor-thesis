@@ -478,6 +478,7 @@ interface Props {
   initialInteractions?: LessonInteraction[];
   initialFeedbackMode?: FeedbackMode;
   initialDefaultInteractionConfig?: ChunkInteractionConfig;
+  initialLanguage?: string;
   token: string;
 }
 
@@ -489,6 +490,7 @@ export function AnalyzeButton({
   initialInteractions = [],
   initialFeedbackMode = FeedbackMode.AFTER_SUBMIT,
   initialDefaultInteractionConfig,
+  initialLanguage = "vi",
   token,
 }: Props) {
   const router = useRouter();
@@ -496,6 +498,20 @@ export function AnalyzeButton({
   const lessonClient = useRichterWebClient(LessonService, token);
   const [feedbackMode, setFeedbackMode] = useState<FeedbackMode>(initialFeedbackMode);
   const [savingFeedback, startSaveFeedback] = useTransition();
+  const [language, setLanguage] = useState<string>(initialLanguage);
+  const [savingLanguage, startSaveLanguage] = useTransition();
+
+  function handleLanguageChange(lang: string) {
+    setLanguage(lang);
+    startSaveLanguage(async () => {
+      try {
+        await lessonClient.updateLesson({ id: lessonId, language: lang });
+        router.refresh();
+      } catch {
+        setLanguage(language);
+      }
+    });
+  }
   const abortRef = useRef<AbortController | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabKey>("phienAm");
@@ -904,7 +920,22 @@ export function AnalyzeButton({
   ];
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-3">
+      {/* Language picker */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground shrink-0">Ngôn ngữ bài giảng:</span>
+        <select
+          value={language}
+          onChange={(e) => handleLanguageChange(e.target.value)}
+          disabled={savingLanguage}
+          className="text-xs rounded border border-input bg-background px-2 py-1"
+        >
+          <option value="vi">🇻🇳 Tiếng Việt</option>
+          <option value="en">🇬🇧 English</option>
+        </select>
+        {savingLanguage && <span className="text-xs text-muted-foreground">Đang lưu…</span>}
+      </div>
+
       <TabBar active={activeTab} onChange={setActiveTab} tabs={tabDefs} />
 
       {/* ── Tab 1: Phiên âm ── */}

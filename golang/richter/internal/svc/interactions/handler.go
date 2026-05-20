@@ -1,6 +1,47 @@
 package interactions
 
-import richterv1 "example.com/buf/gen/richter/v1"
+import (
+	"context"
+
+	richterv1 "example.com/buf/gen/richter/v1"
+)
+
+// GradingDeps provides AI and storage dependencies needed by handlers (e.g. reading)
+// that require external services to grade their responses.
+type GradingDeps struct {
+	Language string
+	// GradeAudio calls the AI service to grade a spoken response.
+	// Returns (score, maxScore, feedback, err).
+	GradeAudio func(ctx context.Context, audioBytes []byte, passageMarkdown, question string) (float32, float32, string, error)
+	// GetAudioBytes downloads the raw audio bytes for the given S3 object key.
+	GetAudioBytes func(ctx context.Context, objectKey string) ([]byte, error)
+}
+
+// ContextualGrader may be optionally implemented by a Handler that needs
+// context (language, AI, storage) to grade its responses.
+// SubmitAttempt checks for this interface and invokes GradeWithContext when available.
+type ContextualGrader interface {
+	GradeWithContext(ctx context.Context, deps GradingDeps, configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error)
+}
+
+// AudioObjectCleaner may be optionally implemented by a Handler that stores
+// S3 object keys in its responseJSON (e.g. reading handler). SubmitAttempt uses
+// this to delete old recordings when the student retakes a lesson.
+type AudioObjectCleaner interface {
+	// AudioObjectKeyFromResponse returns the S3 object key stored in responseJSON.
+	// Returns "" if none or if responseJSON cannot be parsed.
+	AudioObjectKeyFromResponse(responseJSON []byte) string
+}
+
+// TTSProvider may be optionally implemented by a GeminiGenerator to request
+// audio synthesis during AI generation (e.g. listening handler needs TTS per item).
+type TTSProvider interface {
+	// AudioSourceText returns the text that should be synthesised via TTS.
+	// Returns "" if no synthesis is needed for this configJSON.
+	AudioSourceText(configJSON []byte) string
+	// SetAudioObjectKey returns new configJSON with the synthesised audio key embedded.
+	SetAudioObjectKey(configJSON []byte, key string) ([]byte, error)
+}
 
 // Handler grades a single interaction response and converts between proto and JSONB.
 // Register new interaction types by implementing this interface and calling registerHandler.

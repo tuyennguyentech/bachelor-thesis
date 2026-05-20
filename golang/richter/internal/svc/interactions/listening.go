@@ -16,11 +16,13 @@ func init() {
 }
 
 type listeningConfigJSON struct {
-	AudioObjectKey          string                `json:"audio_object_key"`
-	DurationSeconds         int32                 `json:"duration_seconds,omitempty"`
-	Mode                    string                `json:"mode"`
-	ExpectedText            string                `json:"expected_text,omitempty"`
-	ComprehensionQuestions  []nestedMcqConfigJSON `json:"comprehension_questions,omitempty"`
+	AudioObjectKey         string                `json:"audio_object_key"`
+	// AudioSourceText is the text used for TTS synthesis (set during AI generation).
+	AudioSourceText        string                `json:"audio_source_text,omitempty"`
+	DurationSeconds        int32                 `json:"duration_seconds,omitempty"`
+	Mode                   string                `json:"mode"`
+	ExpectedText           string                `json:"expected_text,omitempty"`
+	ComprehensionQuestions []nestedMcqConfigJSON `json:"comprehension_questions,omitempty"`
 }
 
 type listeningResponseJSON struct {
@@ -167,10 +169,11 @@ func (h *listeningHandler) protoToJSON(lc *richterv1.ListeningConfig) ([]byte, e
 // ── GeminiGenerator ───────────────────────────────────────────────────────────
 
 type listeningGeminiItem struct {
-	Prompt       string              `json:"prompt"`
-	Explanation  string              `json:"explanation"`
-	StartSeconds float32             `json:"start_seconds"`
-	Questions    []mcqGeminiItemNested `json:"questions"`
+	Prompt           string                `json:"prompt"`
+	Explanation      string                `json:"explanation"`
+	StartSeconds     float32               `json:"start_seconds"`
+	AudioSourceText  string                `json:"audio_source_text,omitempty"`
+	Questions        []mcqGeminiItemNested `json:"questions"`
 }
 
 type mcqGeminiItemNested struct {
@@ -181,11 +184,12 @@ type mcqGeminiItemNested struct {
 func (h *listeningHandler) GeminiSchema() string {
 	return `{
   "type": "object",
-  "required": ["prompt","questions","start_seconds"],
+  "required": ["prompt","audio_source_text","questions","start_seconds"],
   "properties": {
-    "prompt":        {"type": "string"},
-    "explanation":   {"type": "string"},
-    "start_seconds": {"type": "number"},
+    "prompt":            {"type": "string"},
+    "explanation":       {"type": "string"},
+    "start_seconds":     {"type": "number"},
+    "audio_source_text": {"type": "string", "minLength": 10},
     "questions": {
       "type": "array", "minItems": 1, "maxItems": 4,
       "items": {
@@ -202,13 +206,16 @@ func (h *listeningHandler) GeminiSchema() string {
 }
 
 func (h *listeningHandler) GeminiPromptHint() string {
-	return `Tạo bài nghe dạng comprehension (hiểu nội dung). Trả về 2-4 câu hỏi MCQ về nội dung đoạn transcript. Mode mặc định là comprehension, audio_object_key để trống (giáo viên upload sau).`
+	return `Tạo bài nghe dạng comprehension (hiểu nội dung). Trả về audio_source_text (đoạn văn ngắn ~50-100 từ tóm tắt nội dung để đọc to thành audio TTS) và 2-4 câu hỏi MCQ về nội dung đó.`
 }
 
 func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
 	var item listeningGeminiItem
 	if err = json.Unmarshal(raw, &item); err != nil {
 		return "", "", 0, nil, fmt.Errorf("listening: parse gemini item: %w", err)
+	}
+	if strings.TrimSpace(item.AudioSourceText) == "" {
+		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text empty")
 	}
 	questions := make([]nestedMcqConfigJSON, 0, len(item.Questions))
 	for i, q := range item.Questions {
@@ -217,8 +224,10 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 		}
 		questions = append(questions, nestedMcqConfigJSON{Options: q.Options, CorrectAnswer: q.CorrectAnswer})
 	}
+	// audio_object_key is empty here; AISvc will call TTS + upload and set it via TTSProvider.
 	configJSON, err = json.Marshal(listeningConfigJSON{
 		AudioObjectKey:         "",
+		AudioSourceText:        item.AudioSourceText,
 		Mode:                   "comprehension",
 		ComprehensionQuestions: questions,
 	})
@@ -226,6 +235,25 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 		return "", "", 0, nil, err
 	}
 	return item.Prompt, item.Explanation, item.StartSeconds, configJSON, nil
+}
+
+// ── TTSProvider ───────────────────────────────────────────────────────────────
+
+func (h *listeningHandler) AudioSourceText(configJSON []byte) string {
+	var cfg listeningConfigJSON
+	if err := json.Unmarshal(configJSON, &cfg); err != nil {
+		return ""
+	}
+	return cfg.AudioSourceText
+}
+
+func (h *listeningHandler) SetAudioObjectKey(configJSON []byte, key string) ([]byte, error) {
+	var cfg listeningConfigJSON
+	if err := json.Unmarshal(configJSON, &cfg); err != nil {
+		return nil, fmt.Errorf("listening TTSProvider: unmarshal config: %w", err)
+	}
+	cfg.AudioObjectKey = key
+	return json.Marshal(cfg)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

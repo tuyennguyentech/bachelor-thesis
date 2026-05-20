@@ -293,6 +293,7 @@ export default async function LessonDetailPage({
                       initialInteractions={analysis?.interactions ?? []}
                       initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
                       initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
+                      initialLanguage={lesson.language || "vi"}
                       token={token}
                     />
                     {analysis?.status === AnalysisStatus.ERROR && (

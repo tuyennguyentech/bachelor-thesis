@@ -27,6 +27,14 @@ import (
 // to regenerate a single interaction using Gemini without a direct import cycle.
 type AIRegenerateFunc func(ctx context.Context, interactionID pgtype.UUID, newKind richterv1.InteractionKind) (*gen.LessonInteraction, error)
 
+// GradingDepsProvider is provided by the AI service via DI to supply external
+// grading dependencies (audio AI, S3 download) for ContextualGrader handlers.
+type GradingDepsProvider func(ctx context.Context, lessonID pgtype.UUID) (GradingDeps, error)
+
+// AudioObjectDeleter is provided by the AI service via DI.
+// It deletes a student audio recording from S3 (best-effort; used after retake).
+type AudioObjectDeleter func(ctx context.Context, objectKey string) error
+
 var Package = do.Package(
 	do.Lazy(NewInteractionsSvc),
 )
@@ -36,9 +44,11 @@ func init() {
 }
 
 type InteractionsSvc struct {
-	pg      *db.PostgresSvc
-	authz   *authz.AuthzSvc
-	aiRegen AIRegenerateFunc // injected by AISvc; nil in test/unit contexts
+	pg           *db.PostgresSvc
+	authz        *authz.AuthzSvc
+	aiRegen      AIRegenerateFunc    // injected by AISvc; nil in test/unit contexts
+	gradingDeps  GradingDepsProvider // injected by AISvc; nil in test/unit contexts
+	deleteAudio  AudioObjectDeleter  // injected by AISvc; nil in test/unit contexts
 }
 
 var _ richterv1connect.InteractionServiceHandler = (*InteractionsSvc)(nil)
@@ -52,10 +62,11 @@ func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("AuthzSvc: %w", err)
 	}
-	// Optional: AI regeneration capability provided by AISvc. Nil-safe — falls
-	// back to CodeUnimplemented if not registered (e.g., in unit tests).
+	// Optional: AI regeneration + grading deps + audio deleter provided by AISvc. Nil-safe.
 	aiRegen, _ := do.Invoke[AIRegenerateFunc](i)
-	return &InteractionsSvc{pg: pg, authz: az, aiRegen: aiRegen}, nil
+	gradingDeps, _ := do.Invoke[GradingDepsProvider](i)
+	deleteAudio, _ := do.Invoke[AudioObjectDeleter](i)
+	return &InteractionsSvc{pg: pg, authz: az, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio}, nil
 }
 
 func (s *InteractionsSvc) Handler() (string, http.Handler) {
@@ -360,6 +371,10 @@ func (s *InteractionsSvc) SubmitAttempt(
 		feedback      string
 	}
 
+	// Lazily resolve grading deps once if any ContextualGrader is needed.
+	var depsResolved bool
+	var deps GradingDeps
+
 	var totalScore, totalMaxScore float32
 	var graded []gradedResponse
 
@@ -379,7 +394,22 @@ func (s *InteractionsSvc) SubmitAttempt(
 		if err != nil {
 			return nil, err
 		}
-		score, maxScore, feedback, err := h.Grade(interaction.Config, responseJSON)
+
+		var score, maxScore float32
+		var feedback string
+		if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
+			if !depsResolved {
+				d, derr := s.gradingDeps(ctx, lessonID)
+				if derr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolve grading deps: %w", derr))
+				}
+				deps = d
+				depsResolved = true
+			}
+			score, maxScore, feedback, err = cg.GradeWithContext(ctx, deps, interaction.Config, responseJSON)
+		} else {
+			score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
+		}
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("grade interaction %s: %w", respInput.GetInteractionId(), err))
 		}
@@ -397,6 +427,35 @@ func (s *InteractionsSvc) SubmitAttempt(
 		})
 		totalScore += score
 		totalMaxScore += maxScore
+	}
+
+	// Collect old audio keys to delete after upsert (best-effort cleanup on retake).
+	var oldAudioKeys []string
+	if s.deleteAudio != nil {
+		if prevAttempt, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
+			return q.GetMyLessonAttempt(ctx, gen.GetMyLessonAttemptParams{LessonID: lessonID, UserID: userID})
+		}); err == nil {
+			if prevResponses, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListAttemptResponsesRow, error) {
+				return q.ListAttemptResponses(ctx, prevAttempt.ID)
+			}); err == nil {
+				for _, pr := range prevResponses {
+					interactionRow, ok := interactionByID[pr.InteractionID.String()]
+					if !ok {
+						continue
+					}
+					kind := dbStringToKind(interactionRow.Kind)
+					h := Get(kind)
+					if h == nil {
+						continue
+					}
+					if ac, ok := h.(AudioObjectCleaner); ok {
+						if key := ac.AudioObjectKeyFromResponse(pr.Response); key != "" {
+							oldAudioKeys = append(oldAudioKeys, key)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Upsert attempt + responses in a transaction
@@ -448,6 +507,17 @@ func (s *InteractionsSvc) SubmitAttempt(
 	})
 	if txErr != nil {
 		return nil, svc.ConnectDBError(txErr)
+	}
+
+	// Best-effort async deletion of old student audio recordings.
+	if len(oldAudioKeys) > 0 && s.deleteAudio != nil {
+		deleter := s.deleteAudio
+		go func() {
+			bgCtx := context.Background()
+			for _, key := range oldAudioKeys {
+				_ = deleter(bgCtx, key)
+			}
+		}()
 	}
 
 	return &richterv1.SubmitAttemptResponse{

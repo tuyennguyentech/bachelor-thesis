@@ -216,7 +216,7 @@ message UpdateLessonRequest {
   string description = 3;
   int32 order_index = 4 [(buf.validate.field).int32.gte = 0];
   // Language of the lesson content: "vi" or "en".
-  string language = 5 [(buf.validate.field).string = {in: ["vi", "en"]}];
+  string language = 5 [(buf.validate.field).string = {in: ["vi", "en", ""]}];
 }
 
 message UpdateLessonResponse {

@@ -85,6 +85,16 @@ services:
       retries: 3
       start_period: 60s
 
+  vieneu-tts:
+    image: pnnbao/vieneu-tts:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://0.0.0.0:8200/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
   richter:
     image: busybox:musl
     command: ["sleep", "infinity"]

@@ -64,6 +64,8 @@ export interface StudentViewProps<Config, Response> {
   onContinue: () => void;
   /** Optional: auth token — used by renderers that call backend APIs (e.g. audio presign) */
   token?: string;
+  /** Optional: lesson UUID — used by renderers that upload student recordings */
+  lessonId?: string;
 }
 
 export interface EditorViewProps<Config> {
@@ -83,6 +85,8 @@ export interface ReviewRowProps<Config, Response> {
   response: Response | undefined;
   score: number;
   feedbackMode: FeedbackMode;
+  /** Optional: auth token — used by review rows that fetch presigned URLs (e.g. reading audio) */
+  token?: string;
 }
 
 export interface InteractionRenderer<Config, Response> {

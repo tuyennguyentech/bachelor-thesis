@@ -1,6 +1,7 @@
 package interactions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,9 +31,30 @@ func (h *readingHandler) Kind() richterv1.InteractionKind {
 }
 
 func (h *readingHandler) Grade(_, _ []byte) (score, maxScore float32, feedback string, err error) {
-	// Full Gemini audio grading is implemented via ContextualGrader in STEP 4.
-	// This stub awards full score so non-audio submissions don't block grading.
+	// Fallback when GradingDeps not available (unit tests, missing AI config).
 	return 1, 1, "", nil
+}
+
+// GradeWithContext implements ContextualGrader — used by SubmitAttempt when AISvc is wired.
+func (h *readingHandler) GradeWithContext(ctx context.Context, deps GradingDeps, configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
+	var cfg readingConfigJSON
+	if err = json.Unmarshal(configJSON, &cfg); err != nil {
+		return 0, 1, "", fmt.Errorf("reading: unmarshal config: %w", err)
+	}
+	var resp readingResponseJSON
+	if err = json.Unmarshal(responseJSON, &resp); err != nil {
+		return 0, 1, "", fmt.Errorf("reading: unmarshal response: %w", err)
+	}
+	if strings.TrimSpace(resp.AudioObjectKey) == "" {
+		return 0, 1, "Chưa có bản ghi âm.", nil
+	}
+
+	audioBytes, err := deps.GetAudioBytes(ctx, resp.AudioObjectKey)
+	if err != nil {
+		return 0, 1, "", fmt.Errorf("reading: download audio: %w", err)
+	}
+
+	return deps.GradeAudio(ctx, audioBytes, cfg.PassageMarkdown, cfg.Question)
 }
 
 func (h *readingHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
@@ -121,6 +143,14 @@ func readingModeFromString(s string) richterv1.ReadingMode {
 	default:
 		return richterv1.ReadingMode_READING_MODE_PRONUNCIATION
 	}
+}
+
+func (h *readingHandler) AudioObjectKeyFromResponse(responseJSON []byte) string {
+	var resp readingResponseJSON
+	if err := json.Unmarshal(responseJSON, &resp); err != nil {
+		return ""
+	}
+	return resp.AudioObjectKey
 }
 
 // ── GeminiGenerator ───────────────────────────────────────────────────────────

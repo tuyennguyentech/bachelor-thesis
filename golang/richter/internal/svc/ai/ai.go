@@ -51,6 +51,24 @@ var Package = do.Package(
 		}
 		return ai.doRegenerateInteraction, nil
 	}),
+	// Provide GradingDepsProvider so InteractionsSvc can grade audio-based responses.
+	do.Lazy[svcinteractions.GradingDepsProvider](func(i do.Injector) (svcinteractions.GradingDepsProvider, error) {
+		ai, err := do.Invoke[*AISvc](i)
+		if err != nil {
+			return nil, err
+		}
+		return ai.buildGradingDeps, nil
+	}),
+	// Provide AudioObjectDeleter so InteractionsSvc can clean up old student recordings.
+	do.Lazy[svcinteractions.AudioObjectDeleter](func(i do.Injector) (svcinteractions.AudioObjectDeleter, error) {
+		ai, err := do.Invoke[*AISvc](i)
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context, objectKey string) error {
+			return ai.s3client.RemoveObject(ctx, ai.s3cfg.Bucket, objectKey, minio.RemoveObjectOptions{})
+		}, nil
+	}),
 )
 
 func init() {
@@ -66,6 +84,8 @@ type AISvc struct {
 	s3cfg       *cfg.S3Cfg
 	geminiCfg   *cfg.GeminiCfg
 	whisperCfg  *cfg.WhisperCfg
+	ttsCfg      *cfg.TTSCfg
+	ttsClient   *VieNeuTTSClient
 }
 
 // FDB namespace constants.
@@ -106,6 +126,10 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("WhisperCfg: %w", err)
 	}
+	ttsCfg, err := do.Invoke[*cfg.TTSCfg](i)
+	if err != nil {
+		return nil, fmt.Errorf("TTSCfg: %w", err)
+	}
 
 	s3client, err := minio.New(s3cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(s3cfg.AccessKeyID, s3cfg.SecretAccessKey, ""),
@@ -118,6 +142,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	return &AISvc{
 		pg: pg, kv: kvSvc, log: l, authz: az,
 		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, whisperCfg: whisperCfg,
+		ttsCfg: ttsCfg, ttsClient: newVieNeuTTSClient(ttsCfg.Endpoint),
 	}, nil
 }
 
@@ -1395,7 +1420,7 @@ func (s *AISvc) GenerateInteractionsStream(
 
 		var allItems []generatedItem
 		if plan.useAIChoose {
-			items, genErr := s.runGeminiGenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount)
+			items, genErr := s.runGeminiGenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lesson.Language)
 			if genErr != nil {
 				s.log.WarnContext(ctx, "ai: AI_CHOOSE generation failed", "chunk_id", chunk.ID.String(), "err", genErr)
 			} else {
@@ -1416,7 +1441,7 @@ func (s *AISvc) GenerateInteractionsStream(
 				chunkCopy := chunk
 				chunkCopy.QuestionCountConfig = kc.count
 				kindStr := svcinteractions.KindToDBString(kc.kind)
-				items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr)
+				items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr, lesson.Language)
 				if genErr != nil {
 					s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "err", genErr)
 					continue
@@ -1797,6 +1822,7 @@ type generatedItem struct {
 
 // runGeminiGenerateItems calls Gemini using the provided GeminiGenerator interface
 // and returns a list of generatedItem parsed from the response.
+// lessonLanguage is used by TTSProvider handlers to synthesise audio.
 func (s *AISvc) runGeminiGenerateItems(
 	ctx context.Context,
 	client *genai.Client,
@@ -1804,6 +1830,7 @@ func (s *AISvc) runGeminiGenerateItems(
 	transcript string,
 	generator svcinteractions.GeminiGenerator,
 	kindStr string,
+	lessonLanguage string,
 ) ([]generatedItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -1858,6 +1885,15 @@ Trả về JSON object: {"items": [...]}`,
 			s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
 			continue
 		}
+		if ttsProv, ok := generator.(svcinteractions.TTSProvider); ok {
+			if text := ttsProv.AudioSourceText(configJSON); text != "" {
+				configJSON, err = s.synthesiseAndEmbed(ctx, ttsProv, configJSON, text, lessonLanguage)
+				if err != nil {
+					s.log.WarnContext(ctx, "ai: TTS synthesis failed, skipping item", "index", i, "err", err)
+					continue
+				}
+			}
+		}
 		items = append(items, generatedItem{
 			prompt:      prompt,
 			explanation: explanation,
@@ -1879,6 +1915,7 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 	transcript string,
 	allowedKinds []richterv1.InteractionKind,
 	totalCount int32,
+	lessonLanguage string,
 ) ([]generatedItem, error) {
 	// Build kind specs (skip kinds with no GeminiGenerator support).
 	specs := make([]aiChooseKindSpec, 0, len(allowedKinds))
@@ -1902,7 +1939,7 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 	if len(specs) == 1 {
 		chunkCopy := chunk
 		chunkCopy.QuestionCountConfig = totalCount
-		return s.runGeminiGenerateItems(ctx, client, chunkCopy, transcript, specs[0].generator, specs[0].kindStr)
+		return s.runGeminiGenerateItems(ctx, client, chunkCopy, transcript, specs[0].generator, specs[0].kindStr, lessonLanguage)
 	}
 
 	prompt := buildAIChoosePrompt(chunk, transcript, totalCount, specs)
@@ -2146,6 +2183,13 @@ func (s *AISvc) doRegenerateInteraction(
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("kind %v does not support AI generation", newKind))
 	}
 
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, existing.LessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
 	chunkTranscript := s.fetchChunkTranscript(chunk.ID.String())
 	if strings.TrimSpace(chunkTranscript) == "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("chunk has no transcript content"))
@@ -2161,7 +2205,7 @@ func (s *AISvc) doRegenerateInteraction(
 	chunkForRegen := chunk
 	chunkForRegen.QuestionCountConfig = 1
 	kindStr := svcinteractions.KindToDBString(newKind)
-	items, err := s.runGeminiGenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr)
+	items, err := s.runGeminiGenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI generation failed: %w", err))
 	}
