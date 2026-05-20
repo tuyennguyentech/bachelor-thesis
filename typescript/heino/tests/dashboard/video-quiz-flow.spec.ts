@@ -199,8 +199,9 @@ test.describe("AI analysis", () => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Questions are inside the AnalyzeButton "Bài tập" tab for teachers
     await page.getByRole("button", { name: "Bài tập" }).click();
-    // After redesign: chunk-based layout with per-chunk interaction cards
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
+    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
+    await page.getByTestId("chunk-title-bar").first().click();
     // Correct answer options have green border class
     const correctOptions = page.locator(".border-green-500");
     await expect(correctOptions.first()).toBeVisible();
@@ -802,8 +803,9 @@ test.describe("Teacher question editing (seeded data)", () => {
   test("teacher sees edit/delete buttons on each question", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Bài tập" }).click();
-    // After redesign: chunk-based layout with per-chunk interaction cards
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
+    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
+    await page.getByTestId("chunk-title-bar").first().click();
 
     // First question row should have edit and delete icons
     await expect(page.getByTitle("Chỉnh sửa").first()).toBeVisible();
@@ -813,8 +815,9 @@ test.describe("Teacher question editing (seeded data)", () => {
   test("teacher can edit a question inline", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Bài tập" }).click();
-    // After redesign: chunk-based layout with per-chunk interaction cards
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
+    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
+    await page.getByTestId("chunk-title-bar").first().click();
 
     // Open edit for first question
     await page.getByTitle("Chỉnh sửa").first().click();
@@ -893,8 +896,11 @@ test.describe("Teacher question editing (seeded data)", () => {
     // Navigate to the Big-O lesson to get the editable question list
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Bài tập" }).click();
-    // After redesign: chunk-based layout with per-chunk interaction cards
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
+    // After redesign v2: chunks collapse by default — expand all chunks to see all interactions
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
+    for (const titleBar of await page.getByTestId("chunk-title-bar").all()) {
+      await titleBar.click();
+    }
 
     // Count questions before deletion
     const questionsBefore = await page.getByTitle("Xóa").count();
@@ -927,8 +933,9 @@ test.describe("Teacher question editing (seeded data)", () => {
   test("cancel edit discards changes", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Bài tập" }).click();
-    // After redesign: chunk-based layout with per-chunk interaction cards
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
+    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
+    await page.getByTestId("chunk-title-bar").first().click();
 
     // Open edit first to read the original question text from the textarea
     await page.getByTitle("Chỉnh sửa").first().click();
