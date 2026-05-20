@@ -534,7 +534,6 @@ export function AnalyzeButton({
   const [mutatingError, setMutatingError] = useState<string | null>(null);
   const [confirmReExtract, setConfirmReExtract] = useState(false);
   const [interactions, setInteractions] = useState<LessonInteraction[]>(initialInteractions);
-  const [questionsGenKey, setQuestionsGenKey] = useState(0);
 
   useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
 
@@ -555,7 +554,7 @@ export function AnalyzeButton({
     setExtractTimings({});
     setChunkTimings({});
     setConfirmReExtract(false);
-  }, [initialStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialStatus]);
 
   useEffect(() => {
     const isRunning = extractState.phase === "running" || chunkState.phase === "running";
@@ -815,12 +814,9 @@ export function AnalyzeButton({
     const analysis = analysisResult?.analysis ?? null;
     if (analysis?.interactions) {
       setInteractions(analysis.interactions);
-      setQuestionsGenKey(k => k + 1);
     }
     if (analysis) setStatus(analysis.status);
     router.refresh();
-    // Auto-navigate to the questions tab to show the result.
-    setActiveTab("baiTap");
   }
 
   function handleGenerate(force?: boolean, chunkId?: string) {
@@ -1081,7 +1077,6 @@ export function AnalyzeButton({
       {/* ── Tab 3: Bài tập ── */}
       {activeTab === "baiTap" && (
         <TabExercises
-          key={questionsGenKey}
           lessonId={lessonId}
           chunks={chunks}
           segments={segments}

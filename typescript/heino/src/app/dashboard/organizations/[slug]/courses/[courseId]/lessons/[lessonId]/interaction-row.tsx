@@ -13,6 +13,22 @@ import { getRenderer, extractConfig } from "@/interactions/registry";
 import type { McqConfig, FillBlankConfig, ListeningConfig, ReadingConfig } from "@/interactions/types";
 import { RegenerateModal } from "./regenerate-modal";
 
+// ── Kind badge utilities ───────────────────────────────────────────────────────
+
+export const KIND_BADGE_CLS: Partial<Record<InteractionKind, string>> = {
+  [InteractionKind.MCQ]: "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400",
+  [InteractionKind.FILL_BLANK]: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+  [InteractionKind.LISTENING]: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
+  [InteractionKind.READING]: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400",
+};
+
+export const KIND_BORDER_L_CLS: Partial<Record<InteractionKind, string>> = {
+  [InteractionKind.MCQ]: "border-l-rose-400",
+  [InteractionKind.FILL_BLANK]: "border-l-emerald-400",
+  [InteractionKind.LISTENING]: "border-l-amber-400",
+  [InteractionKind.READING]: "border-l-sky-400",
+};
+
 // ── Form data ─────────────────────────────────────────────────────────────────
 
 export interface InteractionFormData {
@@ -299,11 +315,19 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
   const fb = it.config.case === "fillBlank" ? it.config.value : null;
 
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2 rounded-md border border-border">
+    <div className={[
+      "flex flex-col gap-1.5 px-3 py-2 rounded-md border border-border border-l-2",
+      KIND_BORDER_L_CLS[it.kind] ?? "border-l-border",
+    ].join(" ")}>
       <div className="flex items-start gap-2">
         <span className="text-xs text-muted-foreground font-medium shrink-0 pt-0.5">{index + 1}.</span>
         <div className="flex-1 flex flex-col gap-0.5 min-w-0">
-          <p className="text-xs text-muted-foreground">{renderer?.label ?? "Bài tập"}</p>
+          <span className={[
+            "inline-flex items-center self-start text-[10px] font-medium px-1.5 py-0.5 rounded",
+            KIND_BADGE_CLS[it.kind] ?? "bg-muted text-muted-foreground",
+          ].join(" ")}>
+            {renderer?.label ?? "Bài tập"}
+          </span>
           <p className="text-sm leading-snug">{it.prompt || (fb ? fb.template : "")}</p>
         </div>
         <span className="text-xs text-muted-foreground tabular-nums shrink-0">{formatTime(it.startSeconds)}</span>
