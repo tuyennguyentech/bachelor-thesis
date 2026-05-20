@@ -292,6 +292,7 @@ export default async function LessonDetailPage({
                       initialStatus={analysis?.status}
                       initialInteractions={analysis?.interactions ?? []}
                       initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
+                      initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
                       token={token}
                     />
                     {analysis?.status === AnalysisStatus.ERROR && (

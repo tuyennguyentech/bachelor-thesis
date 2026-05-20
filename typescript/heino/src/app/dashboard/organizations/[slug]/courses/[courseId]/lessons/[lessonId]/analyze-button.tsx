@@ -11,7 +11,7 @@ import {
 import {
   AnalysisProgressStep, AnalysisStatus, GenerateInteractionsStep, AIService,
 } from "buf/gen/richter/v1/ai_pb";
-import type { TranscriptChunk, TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
+import type { TranscriptChunk, TranscriptSegment, ChunkInteractionConfig } from "buf/gen/richter/v1/ai_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { LessonService } from "buf/gen/richter/v1/courses_pb";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -477,6 +477,7 @@ interface Props {
   initialStatus?: AnalysisStatus;
   initialInteractions?: LessonInteraction[];
   initialFeedbackMode?: FeedbackMode;
+  initialDefaultInteractionConfig?: ChunkInteractionConfig;
   token: string;
 }
 
@@ -487,6 +488,7 @@ export function AnalyzeButton({
   initialStatus,
   initialInteractions = [],
   initialFeedbackMode = FeedbackMode.AFTER_SUBMIT,
+  initialDefaultInteractionConfig,
   token,
 }: Props) {
   const router = useRouter();
@@ -1081,6 +1083,7 @@ export function AnalyzeButton({
           chunks={chunks}
           segments={segments}
           initialInteractions={interactions}
+          defaultInteractionConfig={initialDefaultInteractionConfig}
           token={token}
           disabled={isBusy}
           genState={genState}
