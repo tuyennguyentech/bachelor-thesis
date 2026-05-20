@@ -3,95 +3,99 @@ package interactions
 import (
 	"encoding/json"
 	"testing"
+
+	richterv1 "example.com/buf/gen/richter/v1"
 )
 
-func TestReadingGrade(t *testing.T) {
+func TestReadingGradeStub(t *testing.T) {
 	h := &readingHandler{}
-
-	cfg := readingConfigJSON{
-		PassageMarkdown: "The sky is blue.",
-		Questions: []nestedMcqConfigJSON{
-			{Options: []string{"red", "blue", "green", "yellow"}, CorrectAnswer: 1},
-			{Options: []string{"A", "B", "C", "D"}, CorrectAnswer: 3},
-			{Options: []string{"P", "Q", "R", "S"}, CorrectAnswer: 0},
-		},
+	score, max, _, err := h.Grade(nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	cfgJSON, _ := json.Marshal(cfg)
-
-	t.Run("all correct", func(t *testing.T) {
-		resp := readingResponseJSON{Answers: []int32{1, 3, 0}}
-		respJSON, _ := json.Marshal(resp)
-		score, max, _, err := h.Grade(cfgJSON, respJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if max != 3.0 {
-			t.Errorf("maxScore: want 3, got %v", max)
-		}
-		if score != 3.0 {
-			t.Errorf("score: want 3, got %v", score)
-		}
-	})
-
-	t.Run("none correct", func(t *testing.T) {
-		resp := readingResponseJSON{Answers: []int32{0, 0, 1}}
-		respJSON, _ := json.Marshal(resp)
-		score, max, _, err := h.Grade(cfgJSON, respJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if max != 3.0 || score != 0.0 {
-			t.Errorf("want 0/3, got %v/%v", score, max)
-		}
-	})
-
-	t.Run("partial correct", func(t *testing.T) {
-		// correct: [1,3,0]; answer: [1,1,1] → only first matches
-		resp := readingResponseJSON{Answers: []int32{1, 1, 1}}
-		respJSON, _ := json.Marshal(resp)
-		score, max, _, err := h.Grade(cfgJSON, respJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if max != 3.0 || score != 1.0 {
-			t.Errorf("want 1/3, got %v/%v", score, max)
-		}
-	})
-
-	t.Run("fewer answers than questions", func(t *testing.T) {
-		resp := readingResponseJSON{Answers: []int32{1}} // only first answered
-		respJSON, _ := json.Marshal(resp)
-		score, max, _, err := h.Grade(cfgJSON, respJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if max != 3.0 || score != 1.0 {
-			t.Errorf("want 1/3, got %v/%v", score, max)
-		}
-	})
+	if score != 1.0 || max != 1.0 {
+		t.Errorf("stub grade: want 1/1, got %v/%v", score, max)
+	}
 }
 
-func TestReadingValidatePassage(t *testing.T) {
+func TestReadingProtoToJSON(t *testing.T) {
 	h := &readingHandler{}
+
+	t.Run("pronunciation valid", func(t *testing.T) {
+		cfg := &richterv1.ReadingConfig{
+			Mode:            richterv1.ReadingMode_READING_MODE_PRONUNCIATION,
+			PassageMarkdown: "The sky is blue.",
+		}
+		b, err := h.protoToJSON(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out readingConfigJSON
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Mode != "pronunciation" || out.PassageMarkdown != "The sky is blue." {
+			t.Errorf("unexpected output: %+v", out)
+		}
+	})
+
+	t.Run("open_answer valid", func(t *testing.T) {
+		cfg := &richterv1.ReadingConfig{
+			Mode:            richterv1.ReadingMode_READING_MODE_OPEN_ANSWER,
+			PassageMarkdown: "Context passage here.",
+			Question:        "What is the main idea?",
+		}
+		b, err := h.protoToJSON(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out readingConfigJSON
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Mode != "open_answer" || out.Question != "What is the main idea?" {
+			t.Errorf("unexpected output: %+v", out)
+		}
+	})
 
 	t.Run("empty passage rejected", func(t *testing.T) {
-		cfgJSON, _ := json.Marshal(readingConfigJSON{
+		cfg := &richterv1.ReadingConfig{
+			Mode:            richterv1.ReadingMode_READING_MODE_PRONUNCIATION,
 			PassageMarkdown: "",
-			Questions:       []nestedMcqConfigJSON{{Options: []string{"A", "B", "C", "D"}, CorrectAnswer: 0}},
-		})
-		resp := readingResponseJSON{Answers: []int32{0}}
-		respJSON, _ := json.Marshal(resp)
-		// Grade with empty passage should not error (passage not used in grading)
-		_, _, _, err := h.Grade(cfgJSON, respJSON)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
+		}
+		_, err := h.protoToJSON(cfg)
+		if err == nil {
+			t.Error("expected error for empty passage")
+		}
+	})
+
+	t.Run("open_answer missing question rejected", func(t *testing.T) {
+		cfg := &richterv1.ReadingConfig{
+			Mode:            richterv1.ReadingMode_READING_MODE_OPEN_ANSWER,
+			PassageMarkdown: "Some passage.",
+			Question:        "",
+		}
+		_, err := h.protoToJSON(cfg)
+		if err == nil {
+			t.Error("expected error for missing question in open_answer")
 		}
 	})
 }
 
-func TestGradeMcqListEmpty(t *testing.T) {
-	correct, total, results := gradeMcqList(nil, nil)
-	if correct != 0 || total != 0 || len(results) != 0 {
-		t.Errorf("gradeMcqList(nil,nil): got %v %v %v", correct, total, results)
+func TestReadingModeConversions(t *testing.T) {
+	cases := []struct {
+		mode   richterv1.ReadingMode
+		str    string
+	}{
+		{richterv1.ReadingMode_READING_MODE_PRONUNCIATION, "pronunciation"},
+		{richterv1.ReadingMode_READING_MODE_OPEN_ANSWER, "open_answer"},
+	}
+	for _, c := range cases {
+		if got := readingModeToString(c.mode); got != c.str {
+			t.Errorf("toStr(%v): want %q, got %q", c.mode, c.str, got)
+		}
+		if got := readingModeFromString(c.str); got != c.mode {
+			t.Errorf("fromStr(%q): want %v, got %v", c.str, c.mode, got)
+		}
 	}
 }

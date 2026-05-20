@@ -14,12 +14,13 @@ func init() {
 }
 
 type readingConfigJSON struct {
-	PassageMarkdown string                `json:"passage_markdown"`
-	Questions       []nestedMcqConfigJSON `json:"questions"`
+	Mode            string `json:"mode"`
+	PassageMarkdown string `json:"passage_markdown"`
+	Question        string `json:"question,omitempty"`
 }
 
 type readingResponseJSON struct {
-	Answers []int32 `json:"answers"`
+	AudioObjectKey string `json:"audio_object_key"`
 }
 
 type readingHandler struct{}
@@ -28,29 +29,10 @@ func (h *readingHandler) Kind() richterv1.InteractionKind {
 	return richterv1.InteractionKind_INTERACTION_KIND_READING
 }
 
-func (h *readingHandler) Grade(configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
-	var cfg readingConfigJSON
-	if err = json.Unmarshal(configJSON, &cfg); err != nil {
-		return 0, 1, "", fmt.Errorf("reading: unmarshal config: %w", err)
-	}
-	var resp readingResponseJSON
-	if err = json.Unmarshal(responseJSON, &resp); err != nil {
-		return 0, 1, "", fmt.Errorf("reading: unmarshal response: %w", err)
-	}
-
-	configs := make([]*richterv1.McqConfig, 0, len(cfg.Questions))
-	for _, q := range cfg.Questions {
-		opts := make([]*richterv1.McqOption, 0, len(q.Options))
-		for _, o := range q.Options {
-			opts = append(opts, &richterv1.McqOption{Text: o})
-		}
-		configs = append(configs, &richterv1.McqConfig{
-			Options:       opts,
-			CorrectAnswer: int32(q.CorrectAnswer),
-		})
-	}
-	correct, total, _ := gradeMcqList(configs, resp.Answers)
-	return float32(correct), float32(total), "", nil
+func (h *readingHandler) Grade(_, _ []byte) (score, maxScore float32, feedback string, err error) {
+	// Full Gemini audio grading is implemented via ContextualGrader in STEP 4.
+	// This stub awards full score so non-audio submissions don't block grading.
+	return 1, 1, "", nil
 }
 
 func (h *readingHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
@@ -58,7 +40,7 @@ func (h *readingHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput
 	if !ok || rr == nil || rr.Reading == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("reading: missing reading response"))
 	}
-	return json.Marshal(readingResponseJSON{Answers: rr.Reading.Answers})
+	return json.Marshal(readingResponseJSON{AudioObjectKey: rr.Reading.AudioObjectKey})
 }
 
 func (h *readingHandler) BuildResponseProto(interactionID string, responseJSON []byte, score, maxScore float32, feedback string) *richterv1.LessonAttemptResponse {
@@ -71,21 +53,23 @@ func (h *readingHandler) BuildResponseProto(interactionID string, responseJSON [
 	var resp readingResponseJSON
 	if err := json.Unmarshal(responseJSON, &resp); err == nil {
 		r.Response = &richterv1.LessonAttemptResponse_Reading{
-			Reading: &richterv1.ReadingResponse{Answers: resp.Answers},
+			Reading: &richterv1.ReadingResponse{AudioObjectKey: resp.AudioObjectKey},
 		}
 	}
 	return r
 }
 
-func (h *readingHandler) ApplyConfig(p *richterv1.LessonInteraction, configJSON []byte, stripAnswers bool) bool {
+func (h *readingHandler) ApplyConfig(p *richterv1.LessonInteraction, configJSON []byte, _ bool) bool {
 	var cfg readingConfigJSON
 	if err := json.Unmarshal(configJSON, &cfg); err != nil {
 		return false
 	}
+	mode := readingModeFromString(cfg.Mode)
 	p.Config = &richterv1.LessonInteraction_Reading{
 		Reading: &richterv1.ReadingConfig{
+			Mode:            mode,
 			PassageMarkdown: cfg.PassageMarkdown,
-			Questions:       mcqConfigsFromJSON(cfg.Questions, stripAnswers),
+			Question:        cfg.Question,
 		},
 	}
 	return true
@@ -111,55 +95,62 @@ func (h *readingHandler) protoToJSON(rc *richterv1.ReadingConfig) ([]byte, error
 	if strings.TrimSpace(rc.PassageMarkdown) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("reading: passage_markdown required"))
 	}
-	if err := validateMcqList(rc.Questions); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("reading: %w", err))
-	}
-	questions, err := mcqConfigsToJSON(rc.Questions)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	if rc.Mode == richterv1.ReadingMode_READING_MODE_OPEN_ANSWER && strings.TrimSpace(rc.Question) == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("reading: question required for open_answer mode"))
 	}
 	return json.Marshal(readingConfigJSON{
+		Mode:            readingModeToString(rc.Mode),
 		PassageMarkdown: rc.PassageMarkdown,
-		Questions:       questions,
+		Question:        rc.Question,
 	})
+}
+
+func readingModeToString(m richterv1.ReadingMode) string {
+	switch m {
+	case richterv1.ReadingMode_READING_MODE_OPEN_ANSWER:
+		return "open_answer"
+	default:
+		return "pronunciation"
+	}
+}
+
+func readingModeFromString(s string) richterv1.ReadingMode {
+	switch s {
+	case "open_answer":
+		return richterv1.ReadingMode_READING_MODE_OPEN_ANSWER
+	default:
+		return richterv1.ReadingMode_READING_MODE_PRONUNCIATION
+	}
 }
 
 // ── GeminiGenerator ───────────────────────────────────────────────────────────
 
 type readingGeminiItem struct {
-	Prompt          string               `json:"prompt"`
-	Explanation     string               `json:"explanation"`
-	StartSeconds    float32              `json:"start_seconds"`
-	PassageMarkdown string               `json:"passage_markdown"`
-	Questions       []mcqGeminiItemNested `json:"questions"`
+	Prompt          string  `json:"prompt"`
+	Explanation     string  `json:"explanation"`
+	StartSeconds    float32 `json:"start_seconds"`
+	Mode            string  `json:"mode"`
+	PassageMarkdown string  `json:"passage_markdown"`
+	Question        string  `json:"question,omitempty"`
 }
 
 func (h *readingHandler) GeminiSchema() string {
 	return `{
   "type": "object",
-  "required": ["prompt","passage_markdown","questions","start_seconds"],
+  "required": ["prompt","mode","passage_markdown","start_seconds"],
   "properties": {
     "prompt":           {"type": "string"},
     "explanation":      {"type": "string"},
     "start_seconds":    {"type": "number"},
-    "passage_markdown": {"type": "string"},
-    "questions": {
-      "type": "array", "minItems": 2, "maxItems": 4,
-      "items": {
-        "type": "object",
-        "required": ["options","correct_answer"],
-        "properties": {
-          "options":        {"type": "array", "items": {"type": "string"}, "minItems": 4, "maxItems": 4},
-          "correct_answer": {"type": "integer"}
-        }
-      }
-    }
+    "mode":             {"type": "string", "enum": ["pronunciation", "open_answer"]},
+    "passage_markdown": {"type": "string", "minLength": 20},
+    "question":         {"type": "string"}
   }
 }`
 }
 
 func (h *readingHandler) GeminiPromptHint() string {
-	return `Tạo bài đọc hiểu. Viết đoạn văn ngắn (passage_markdown) tóm tắt nội dung từ transcript, sau đó tạo 2-4 câu hỏi MCQ về đoạn văn đó.`
+	return `Tạo bài đọc âm thanh. Với mode "pronunciation": viết đoạn văn ngắn (50-150 từ) tóm tắt nội dung transcript để học viên đọc to. Với mode "open_answer": viết câu hỏi mở và đoạn văn ngữ cảnh để học viên trả lời bằng lời nói.`
 }
 
 func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
@@ -170,16 +161,16 @@ func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanati
 	if strings.TrimSpace(item.PassageMarkdown) == "" {
 		return "", "", 0, nil, fmt.Errorf("reading: passage_markdown empty")
 	}
-	questions := make([]nestedMcqConfigJSON, 0, len(item.Questions))
-	for i, q := range item.Questions {
-		if q.CorrectAnswer < 0 || q.CorrectAnswer >= len(q.Options) {
-			return "", "", 0, nil, fmt.Errorf("reading: question %d: correct_answer out of range", i)
-		}
-		questions = append(questions, nestedMcqConfigJSON{Options: q.Options, CorrectAnswer: q.CorrectAnswer})
+	if item.Mode == "open_answer" && strings.TrimSpace(item.Question) == "" {
+		return "", "", 0, nil, fmt.Errorf("reading: question empty for open_answer mode")
+	}
+	if item.Mode != "pronunciation" && item.Mode != "open_answer" {
+		item.Mode = "pronunciation"
 	}
 	configJSON, err = json.Marshal(readingConfigJSON{
+		Mode:            item.Mode,
 		PassageMarkdown: item.PassageMarkdown,
-		Questions:       questions,
+		Question:        item.Question,
 	})
 	if err != nil {
 		return "", "", 0, nil, err

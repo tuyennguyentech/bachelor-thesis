@@ -44,12 +44,14 @@ export interface ListeningResponse {
 }
 
 export interface ReadingConfig {
+  mode: "pronunciation" | "open_answer";
   passageMarkdown: string;
-  questions: McqConfig[];
+  /** OPEN_ANSWER only: question the student must answer verbally */
+  question?: string;
 }
 
 export interface ReadingResponse {
-  answers: number[];
+  audioObjectKey: string;
 }
 
 export interface StudentViewProps<Config, Response> {

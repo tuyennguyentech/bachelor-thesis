@@ -1,4 +1,4 @@
-import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
+import { InteractionKind, ReadingMode } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction, LessonAttemptResponse } from "buf/gen/richter/v1/interactions_pb";
 import type {
   InteractionRenderer,
@@ -65,11 +65,9 @@ export function extractConfig(interaction: LessonInteraction): any | null {
   if (interaction.config.case === "reading") {
     const v = interaction.config.value;
     return {
+      mode: v.mode === ReadingMode.OPEN_ANSWER ? "open_answer" : "pronunciation",
       passageMarkdown: v.passageMarkdown,
-      questions: v.questions.map((q) => ({
-        options: q.options.map((o) => ({ text: o.text })),
-        correctAnswer: q.correctAnswer,
-      })),
+      question: v.question,
     } satisfies ReadingConfig;
   }
   return null;
@@ -91,7 +89,7 @@ export function extractLocalResponse(protoResp: LessonAttemptResponse): any | nu
     } satisfies ListeningResponse;
   }
   if (protoResp.response.case === "reading") {
-    return { answers: [...protoResp.response.value.answers] } satisfies ReadingResponse;
+    return { audioObjectKey: protoResp.response.value.audioObjectKey } satisfies ReadingResponse;
   }
   return null;
 }

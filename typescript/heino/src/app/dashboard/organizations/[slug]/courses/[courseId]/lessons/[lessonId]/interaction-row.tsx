@@ -58,7 +58,7 @@ export function emptyFormForKind(kind: InteractionKind): InteractionFormData {
   if (kind === InteractionKind.READING) {
     return {
       kind, prompt: "",
-      config: { passageMarkdown: "", questions: [] } satisfies ReadingConfig,
+      config: { mode: "pronunciation", passageMarkdown: "", question: "" } satisfies ReadingConfig,
       explanation: "", startSeconds: 0,
     };
   }
@@ -97,7 +97,7 @@ export function isSaveable(form: InteractionFormData): boolean {
   }
   if (form.kind === InteractionKind.READING) {
     const c = form.config as ReadingConfig;
-    return c.passageMarkdown.trim() !== "" && c.questions.length > 0;
+    return c.passageMarkdown.trim() !== "";
   }
   return false;
 }
@@ -124,7 +124,7 @@ export function buildProtoConfig(form: InteractionFormData) {
     const c = form.config as ReadingConfig;
     return {
       case: "reading" as const,
-      value: { passageMarkdown: c.passageMarkdown, questions: c.questions.map((q) => ({ options: q.options.map((o) => ({ text: o.text })), correctAnswer: q.correctAnswer })) },
+      value: { mode: c.mode === "open_answer" ? 2 : 1, passageMarkdown: c.passageMarkdown, question: c.question ?? "" },
     };
   }
   const c = form.config as McqConfig;

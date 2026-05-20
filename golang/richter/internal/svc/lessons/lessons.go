@@ -297,12 +297,17 @@ func (s *LessonsSvc) UpdateLesson(
 		return nil, err
 	}
 
+	lang := req.GetLanguage()
+	if lang == "" {
+		lang = existing.Language
+	}
 	l, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
 		return q.UpdateLesson(ctx, gen.UpdateLessonParams{
 			ID:          existing.ID,
 			Title:       req.GetTitle(),
 			Description: descToPgText(req.GetDescription()),
 			OrderIndex:  req.GetOrderIndex(),
+			Language:    lang,
 		})
 	})
 	if err != nil {

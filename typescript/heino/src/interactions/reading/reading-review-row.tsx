@@ -3,7 +3,6 @@
 import ReactMarkdown from "react-markdown";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { ReviewRowProps, ReadingConfig, ReadingResponse } from "../types";
-import { NestedMcqReview } from "../_shared/nested-mcq";
 
 export function ReadingReviewRow({
   index,
@@ -31,7 +30,9 @@ export function ReadingReviewRow({
         </span>
         <div className="flex-1 flex flex-col gap-1">
           <p className="text-sm">{prompt}</p>
-          <span className="text-xs text-muted-foreground">📖 Bài đọc</span>
+          <span className="text-xs text-muted-foreground">
+            {config.mode === "open_answer" ? "💬 Trả lời câu hỏi" : "🗣 Đọc to"}
+          </span>
         </div>
       </div>
 
@@ -39,15 +40,12 @@ export function ReadingReviewRow({
         <div className="prose prose-sm dark:prose-invert max-w-none rounded border border-border bg-muted/10 px-3 py-2 text-xs">
           <ReactMarkdown>{config.passageMarkdown}</ReactMarkdown>
         </div>
-        {config.questions.map((q, qi) => (
-          <NestedMcqReview
-            key={qi}
-            questionIndex={qi}
-            config={q}
-            selected={response?.answers?.[qi] ?? -1}
-            canReveal={canReveal}
-          />
-        ))}
+        {config.mode === "open_answer" && config.question && (
+          <p className="text-xs font-medium">{config.question}</p>
+        )}
+        {response?.audioObjectKey && (
+          <p className="text-xs text-muted-foreground">🎙 Bản ghi âm: {response.audioObjectKey}</p>
+        )}
       </div>
     </div>
   );

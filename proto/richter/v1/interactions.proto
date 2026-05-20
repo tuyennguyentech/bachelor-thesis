@@ -33,6 +33,14 @@ enum ListeningMode {
   LISTENING_MODE_COMPREHENSION = 2;
 }
 
+enum ReadingMode {
+  READING_MODE_UNSPECIFIED = 0;
+  // Student reads the passage aloud; AI grades pronunciation.
+  READING_MODE_PRONUNCIATION = 1;
+  // Student speaks an answer to a question; AI grades content + pronunciation.
+  READING_MODE_OPEN_ANSWER = 2;
+}
+
 // ── MCQ config ────────────────────────────────────────────────────────────────
 
 message McqOption {
@@ -88,13 +96,16 @@ message ListeningResponse {
 // ── Reading config ────────────────────────────────────────────────────────────
 
 message ReadingConfig {
-  string passage_markdown = 1 [(buf.validate.field).string.min_len = 1];
-  repeated McqConfig questions = 2 [(buf.validate.field).repeated.min_items = 1];
+  ReadingMode mode = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  // The passage to read aloud (used in both modes).
+  string passage_markdown = 2 [(buf.validate.field).string.min_len = 1];
+  // OPEN_ANSWER only: the question the student must answer verbally.
+  string question = 3;
 }
 
 message ReadingResponse {
-  // Selected option index per question (parallel array)
-  repeated int32 answers = 1;
+  // Storage object key of the student's recorded audio.
+  string audio_object_key = 1;
 }
 
 // ── LessonInteraction ─────────────────────────────────────────────────────────

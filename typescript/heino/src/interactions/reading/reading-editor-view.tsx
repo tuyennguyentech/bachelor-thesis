@@ -2,33 +2,26 @@
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { PlusIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import type { EditorViewProps, ReadingConfig, McqConfig } from "../types";
-import { NestedMcqEditor } from "../_shared/nested-mcq";
-
-const EMPTY_MCQ: McqConfig = {
-  options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }],
-  correctAnswer: 0,
-};
+import type { EditorViewProps, ReadingConfig } from "../types";
 
 export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingConfig>) {
   const [previewPassage, setPreviewPassage] = useState(false);
 
-  function addQuestion() {
-    onChange({ ...config, questions: [...config.questions, { ...EMPTY_MCQ, options: EMPTY_MCQ.options.map((o) => ({ ...o })) }] });
-  }
-
-  function updateQuestion(qi: number, q: McqConfig) {
-    onChange({ ...config, questions: config.questions.map((c, i) => (i === qi ? q : c)) });
-  }
-
-  function removeQuestion(qi: number) {
-    onChange({ ...config, questions: config.questions.filter((_, i) => i !== qi) });
-  }
-
   return (
     <div className="flex flex-col gap-3">
+      {/* Mode */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-muted-foreground">Chế độ</label>
+        <select
+          value={config.mode}
+          onChange={(e) => onChange({ ...config, mode: e.target.value as "pronunciation" | "open_answer" })}
+          className="text-sm rounded border border-input bg-background px-2 py-1.5"
+        >
+          <option value="pronunciation">🗣 Đọc to (Pronunciation)</option>
+          <option value="open_answer">💬 Trả lời câu hỏi (Open Answer)</option>
+        </select>
+      </div>
+
       {/* Passage */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
@@ -56,22 +49,19 @@ export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingC
         )}
       </div>
 
-      {/* Questions */}
-      <div className="flex flex-col gap-2">
-        <label className="text-xs text-muted-foreground">Câu hỏi ({config.questions.length})</label>
-        {config.questions.map((q, qi) => (
-          <NestedMcqEditor
-            key={qi}
-            questionIndex={qi}
-            config={q}
-            onChange={(updated) => updateQuestion(qi, updated)}
-            onRemove={() => removeQuestion(qi)}
+      {/* Question (open_answer only) */}
+      {config.mode === "open_answer" && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Câu hỏi</label>
+          <input
+            type="text"
+            value={config.question ?? ""}
+            onChange={(e) => onChange({ ...config, question: e.target.value })}
+            placeholder="Câu hỏi học sinh phải trả lời bằng lời nói…"
+            className="text-sm rounded border border-input bg-background px-2 py-1.5"
           />
-        ))}
-        <Button type="button" variant="outline" size="sm" className="gap-1.5 self-start" onClick={addQuestion}>
-          <PlusIcon className="size-3.5" /> Thêm câu hỏi
-        </Button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

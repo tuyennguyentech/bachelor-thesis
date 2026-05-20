@@ -167,6 +167,8 @@ message Lesson {
   string video_storage_key = 8;
   int32 duration_seconds = 9;
   FeedbackMode feedback_mode = 10;
+  // Language of the lesson content: "vi" or "en". Used by TTS and AI grading.
+  string language = 11;
 }
 
 message CreateLessonRequest {
@@ -213,6 +215,8 @@ message UpdateLessonRequest {
   string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
   string description = 3;
   int32 order_index = 4 [(buf.validate.field).int32.gte = 0];
+  // Language of the lesson content: "vi" or "en".
+  string language = 5 [(buf.validate.field).string = {in: ["vi", "en"]}];
 }
 
 message UpdateLessonResponse {

@@ -29,6 +29,7 @@ func LessonToProto(l gen.Lesson) *richterv1.Lesson {
 		VideoStorageKey: videoKey,
 		DurationSeconds: duration,
 		FeedbackMode:    interactions.FeedbackModeToProto(l.FeedbackMode),
+		Language:        l.Language,
 		CreatedAt:       svc.TimestampToProto(l.CreatedAt),
 		UpdatedAt:       svc.TimestampToProto(l.UpdatedAt),
 	}
