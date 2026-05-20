@@ -16,6 +16,13 @@
             "duration_secs": 1247,
             "analysis": {
               "transcript": "Trong bài học hôm nay, chúng ta sẽ tìm hiểu về ba ký hiệu quan trọng để đánh giá độ phức tạp thuật toán: Big-O, Omega và Theta.\n\nBig-O notation (ký hiệu O) dùng để mô tả giới hạn trên của thời gian chạy thuật toán. Nó cho chúng ta biết trong trường hợp xấu nhất, thuật toán sẽ chạy như thế nào. Ví dụ, thuật toán tìm kiếm tuyến tính có độ phức tạp O(n) vì trong trường hợp xấu nhất ta phải duyệt qua n phần tử.\n\nOmega notation (ký hiệu Ω) là giới hạn dưới — mô tả trường hợp tốt nhất của thuật toán. Ví dụ, tìm kiếm tuyến tính có Ω(1) vì phần tử cần tìm có thể nằm ngay ở đầu mảng.\n\nTheta notation (ký hiệu Θ) biểu diễn cả giới hạn trên lẫn giới hạn dưới, tức là độ phức tạp chính xác. Khi Big-O và Omega bằng nhau, ta dùng Theta. Ví dụ, vòng lặp đơn giản duyệt qua n phần tử luôn có Θ(n).\n\nKhi phân tích, ta bỏ qua hằng số và các số hạng bậc thấp. Ví dụ, 3n² + 5n + 10 được viết là O(n²). Các độ phức tạp phổ biến từ tốt đến xấu: O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ) < O(n!).",
+              "chunks": [
+                {"start_seconds": 0, "end_seconds": 416, "summary": "Giới thiệu về Big-O, Omega, Theta"},
+                {"start_seconds": 416, "end_seconds": 624, "summary": "Cách viết gọn biểu thức Big-O"},
+                {"start_seconds": 624, "end_seconds": 831, "summary": "Ký hiệu Theta (cận chặt)"},
+                {"start_seconds": 831, "end_seconds": 1039, "summary": "So sánh độ phức tạp các thuật toán"},
+                {"start_seconds": 1039, "end_seconds": 1247, "summary": "Ví dụ: Binary Search O(log n)"}
+              ],
               "questions": [
                 {
                   "question_text": "Big-O notation dùng để biểu diễn điều gì?",

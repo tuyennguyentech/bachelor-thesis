@@ -3,6 +3,7 @@ package lessons
 import (
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/svc"
+	"example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
 )
 
@@ -27,7 +28,12 @@ func LessonToProto(l gen.Lesson) *richterv1.Lesson {
 		OrderIndex:      l.OrderIndex,
 		VideoStorageKey: videoKey,
 		DurationSeconds: duration,
+		FeedbackMode:    interactions.FeedbackModeToProto(l.FeedbackMode),
 		CreatedAt:       svc.TimestampToProto(l.CreatedAt),
 		UpdatedAt:       svc.TimestampToProto(l.UpdatedAt),
 	}
+}
+
+func FeedbackModeFromProto(mode richterv1.FeedbackMode) string {
+	return interactions.FeedbackModeFromProto(mode)
 }

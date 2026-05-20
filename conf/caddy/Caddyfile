@@ -13,6 +13,10 @@
 
     reverse_proxy storage:9000 {
       header_up Host {upstream_hostport}
+      # SeaweedFS uses X-Forwarded-Host (if present) as the canonical host for
+      # AWS SigV4 verification — leaving Caddy's default "X-Forwarded-Host: caddy"
+      # breaks presigned URLs that were signed against host=storage:9000.
+      header_up -X-Forwarded-Host
       # Strip SeaweedFS's own CORS headers so Caddy's headers above are the only ones
       header_down -Access-Control-Allow-Origin
       header_down -Access-Control-Allow-Methods

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useTransition } from "react";
+import { useRef, useState, useCallback, useEffect, useTransition } from "react";
 import { SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -126,6 +126,32 @@ export function StudentLessonView({
     }
   }, [interactions]);
 
+  // While a checkpoint is active: prevent the student from playing the video.
+  useEffect(() => {
+    if (!activeId) return;
+    const video = videoRef.current;
+    if (!video) return;
+    const onPlay = () => video.pause();
+    video.addEventListener("play", onPlay);
+    return () => video.removeEventListener("play", onPlay);
+  }, [activeId]);
+
+  // While a checkpoint is active: prevent seeking past the checkpoint's start time.
+  useEffect(() => {
+    if (!activeId) return;
+    const video = videoRef.current;
+    if (!video) return;
+    const interaction = interactions.find((it) => it.id === activeId);
+    if (!interaction || interaction.startSeconds <= 0) return;
+    const cap = interaction.startSeconds + 5;
+    const onTimeUpdate = () => {
+      if (video.currentTime > cap) video.currentTime = interaction.startSeconds;
+    };
+    video.addEventListener("timeupdate", onTimeUpdate);
+    return () => video.removeEventListener("timeupdate", onTimeUpdate);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleAnswer(id: string, response: any) {
     setResponses((prev) => new Map(prev).set(id, response));
@@ -223,7 +249,7 @@ export function StudentLessonView({
   const hasSidebar = chunks.length > 0 || segments.length > 0 || !!transcript;
 
   return (
-    <div className={hasSidebar ? "grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4" : "flex flex-col gap-4"}>
+    <div className={hasSidebar ? "grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6" : "flex flex-col gap-6"}>
       {/* ── Left / main column ── */}
       <div className="flex flex-col gap-3">
         <VideoPlayer
@@ -255,10 +281,12 @@ export function StudentLessonView({
           <div className="rounded-lg border p-4 flex flex-col gap-3">
             {/* Not started — idle tip */}
             {!submitted && !activeInteraction && passedIds.size === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Video sẽ tạm dừng tại {interactions.length} mốc câu hỏi trong khi xem.
-                Trả lời từng câu để tiếp tục.
-              </p>
+              <div className="rounded-lg bg-muted/30 p-6 text-center">
+                <p className="text-base font-medium mb-1">💡 Bài học có {interactions.length} câu hỏi tương tác</p>
+                <p className="text-sm text-muted-foreground">
+                  Video sẽ tạm dừng tại mỗi mốc để bạn trả lời. Bấm ▶ để bắt đầu.
+                </p>
+              </div>
             )}
 
             {/* In progress */}
@@ -318,14 +346,14 @@ export function StudentLessonView({
 
       {/* ── Right sidebar ── */}
       {hasSidebar && (
-        <div className="lg:sticky lg:top-4 lg:self-start">
+        <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <LessonSidebar
             chunks={chunks}
             segments={segments}
             transcript={transcript}
             videoRef={videoRef}
           />
-        </div>
+        </aside>
       )}
     </div>
   );

@@ -1,13 +1,13 @@
-import type { StudentAttemptResult } from "buf/gen/richter/v1/quiz_pb";
+import type { StudentAttemptSummary } from "buf/gen/richter/v1/interactions_pb";
 
 interface Props {
-  attempts: StudentAttemptResult[];
+  attempts: StudentAttemptSummary[];
   total: number;
 }
 
-function scoreColor(score: number, total: number): string {
-  if (total === 0) return "";
-  const pct = score / total;
+function scoreColor(score: number, max: number): string {
+  if (max === 0) return "";
+  const pct = score / max;
   if (pct >= 0.8) return "text-green-600 dark:text-green-400";
   if (pct >= 0.5) return "text-yellow-600 dark:text-yellow-400";
   return "text-red-600 dark:text-red-400";
@@ -42,8 +42,8 @@ export function LessonAttempts({ attempts, total }: Props) {
                 <tr key={a.userId} className="border-b last:border-0">
                   <td className="py-2 pr-4">{a.displayName}</td>
                   <td className="py-2 pr-4 text-muted-foreground">{a.email}</td>
-                  <td className={`py-2 pr-4 text-right font-medium ${scoreColor(a.score, a.total)}`}>
-                    {a.score}/{a.total}
+                  <td className={`py-2 pr-4 text-right font-medium ${scoreColor(a.totalScore, a.maxScore)}`}>
+                    {a.totalScore}/{a.maxScore}
                   </td>
                   <td className="py-2 text-right text-muted-foreground text-xs">
                     {submittedDate

@@ -21,3 +21,7 @@ golang/richter/testdata/*.mp4
 
 # Compiled Go test binaries
 *.test
+
+# Implementation plans for autonomous agents (scratch input, not project artifacts)
+docs/plans/
+.deepseek/

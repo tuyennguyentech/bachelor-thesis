@@ -159,14 +159,16 @@ test.describe("Video player", () => {
 test.describe("Transcript display", () => {
   test("seeded lesson shows transcript section", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.getByText("Phiên âm nội dung")).toBeVisible();
+    // Transcript is in the LessonSidebar under the "Phiên âm" tab
+    await expect(page.getByRole("button", { name: "Phiên âm" })).toBeVisible();
     // Seeded transcript has Big-O content (may match multiple elements — use first)
     await expect(page.getByText(/Big-O notation/).first()).toBeVisible();
   });
 
   test("transcript section absent when no analysis", async ({ studentPage: page }) => {
     await goToSeededLesson(page, "Bài 3: Benchmark thực tế");
-    await expect(page.getByText("Phiên âm nội dung")).not.toBeVisible();
+    // Sidebar only appears when there are chunks/segments/transcript
+    await expect(page.getByRole("button", { name: "Phiên âm" })).not.toBeVisible();
   });
 });
 
@@ -195,9 +197,10 @@ test.describe("AI analysis", () => {
 
   test("teacher sees questions with correct answers highlighted", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    // Questions are inside the AnalyzeButton "Câu hỏi" tab for teachers
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    // Questions are inside the AnalyzeButton "Bài tập" tab for teachers
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    // After redesign: chunk-based layout with per-chunk interaction cards
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
     // Correct answer options have green border class
     const correctOptions = page.locator(".border-green-500");
     await expect(correctOptions.first()).toBeVisible();
@@ -270,94 +273,112 @@ test.describe("AI analysis streaming progress", () => {
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
 
     // Step 3: Generate questions
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await page.getByRole("button", { name: "Tạo câu hỏi" }).click();
-    await expect(page.getByRole("button", { name: "Đang tạo câu hỏi…" })).toBeVisible({ timeout: 5_000 });
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("generate-all-btn").click();
+    // Confirm modal appears — click "Tạo tất cả" to proceed
+    await page.getByRole("button", { name: "Tạo tất cả" }).click();
+    await expect(page.getByRole("button", { name: "Đang tạo…" })).toBeVisible({ timeout: 5_000 });
     await expect(
       page.locator('[data-testid="gen-done"], [data-testid="gen-error"]'),
     ).toBeVisible({ timeout: 180_000 });
     await expect(page.locator('[data-testid="gen-error"]')).not.toBeVisible();
 
-    // Questions heading visible in Câu hỏi tab (auto-switched after generate)
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible({ timeout: 10_000 });
+    // Chunk cards with interactions visible in Bài tập tab
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 10_000 });
   });
 });
 
 // ── 5. Student quiz form ───────────────────────────────────────────────────
 
+// Big-O seeded lesson checkpoint times (startSeconds per seed data)
+const CHECKPOINT_SECONDS = [208, 416, 624, 831, 1039];
+
+/** Answer all checkpoints via the video trigger hook, then return. */
+async function answerAllCheckpoints(page: Page, optionIndexPerQ?: number[]) {
+  for (let i = 0; i < CHECKPOINT_SECONDS.length; i++) {
+    await triggerCheckpoint(page, CHECKPOINT_SECONDS[i] + 2);
+    const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
+    await expect(checkpoint).toBeVisible({ timeout: 5_000 });
+    const optIdx = optionIndexPerQ?.[i] ?? 0;
+    await checkpoint.locator("button").nth(optIdx).click();
+    await page.getByRole("button", { name: "Tiếp tục xem" }).click();
+    await expect(checkpoint).not.toBeVisible({ timeout: 3_000 });
+  }
+}
+
 test.describe("Student quiz form", () => {
   test("student sees quiz form (not correct answers)", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
-    // Bob has a seeded attempt — click Làm lại to reset to fresh form state
+    // Bob has a seeded attempt → starts in result state
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible();
+    // Click Làm lại to reset to fresh state
     await page.getByRole("button", { name: "Làm lại" }).click();
-    // In fresh form state, correct answers (green borders) must NOT be visible
+    // In fresh state no checkpoint is active → no green borders visible
     await expect(page.locator(".border-green-500")).toHaveCount(0);
   });
 
   test("student sees previous attempt result (seeded)", async ({ studentPage: page }) => {
     // bob has a seeded attempt for Big-O lesson
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.getByText(/Kết quả:/)).toBeVisible();
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible();
     await expect(page.getByRole("button", { name: "Làm lại" })).toBeVisible();
   });
 
-  test("student can retake quiz: select all + submit → new score", async ({ studentPage: page }) => {
+  test("student can retake quiz: answer all checkpoints + submit → new score", async ({
+    studentPage: page,
+  }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
 
+    // "Nộp bài" should not appear until all checkpoints answered
+    await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
+
+    await answerAllCheckpoints(page);
+
     const submitBtn = page.getByRole("button", { name: "Nộp bài" });
-    await expect(submitBtn).toBeDisabled();
-
-    const quizBox = page.locator("div.rounded-lg.border").filter({ hasText: "Câu hỏi trắc nghiệm" }).first();
-    const optionDivs = quizBox.locator("div.cursor-pointer");
-    const optCount = await optionDivs.count();
-    expect(optCount).toBeGreaterThan(0);
-    const questionCount = optCount / 4;
-
-    for (let qi = 0; qi < questionCount; qi++) {
-      await optionDivs.nth(qi * 4).click();
-    }
-    await expect(submitBtn).toBeEnabled();
+    await expect(submitBtn).toBeEnabled({ timeout: 3_000 });
     await submitBtn.click();
 
-    await expect(page.getByText(/Kết quả:/)).toBeVisible();
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("button", { name: "Làm lại" })).toBeVisible();
   });
 
-  test("submit button disabled until all questions answered", async ({ studentPage: page }) => {
+  test("submit button not visible until all questions answered via checkpoints", async ({
+    studentPage: page,
+  }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
 
-    const submitBtn = page.getByRole("button", { name: "Nộp bài" });
-    await expect(submitBtn).toBeDisabled();
+    // Initially "Nộp bài" not visible
+    await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
 
-    // Answer all but the last question
-    const quizBox = page.locator("div.rounded-lg.border").filter({ hasText: "Câu hỏi trắc nghiệm" }).first();
-    const optionDivs = quizBox.locator("div.cursor-pointer");
-    const questionCount = (await optionDivs.count()) / 4;
-    for (let qi = 0; qi < questionCount - 1; qi++) {
-      await optionDivs.nth(qi * 4).click();
+    // Answer all but the last checkpoint
+    for (let i = 0; i < CHECKPOINT_SECONDS.length - 1; i++) {
+      await triggerCheckpoint(page, CHECKPOINT_SECONDS[i] + 2);
+      const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
+      await expect(checkpoint).toBeVisible({ timeout: 5_000 });
+      await checkpoint.locator("button").first().click();
+      await page.getByRole("button", { name: "Tiếp tục xem" }).click();
+      await expect(checkpoint).not.toBeVisible({ timeout: 3_000 });
     }
-    await expect(submitBtn).toBeDisabled();
+
+    // After N-1 answered: "Nộp bài" still not visible
+    await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
   });
 
-  test("after submit, correct answers revealed and Làm lại shown", async ({ studentPage: page }) => {
+  test("after submit, correct answers revealed and Làm lại shown", async ({
+    studentPage: page,
+  }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
 
-    const quizBox = page.locator("div.rounded-lg.border").filter({ hasText: "Câu hỏi trắc nghiệm" }).first();
-    const optionDivs = quizBox.locator("div.cursor-pointer");
-    const questionCount = (await optionDivs.count()) / 4;
-    // Pick the correct answer for question 1 (index 1 per seed data)
-    await optionDivs.nth(0 * 4 + 1).click(); // q1, option B (correct_answer=1)
-    for (let qi = 1; qi < questionCount; qi++) {
-      await optionDivs.nth(qi * 4).click();
-    }
+    // q1 correct_answer=1 per seed; others pick first option
+    await answerAllCheckpoints(page, [1, 0, 0, 0, 0]);
+
     await page.getByRole("button", { name: "Nộp bài" }).click();
 
-    // Correct answer for q1 is highlighted green
-    await expect(quizBox.locator(".border-green-500").first()).toBeVisible();
+    // Correct answers revealed in LessonResult breakdown
+    await expect(page.locator(".border-green-500").first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("button", { name: "Làm lại" })).toBeVisible();
   });
 });
@@ -369,19 +390,22 @@ test.describe("Video quiz checkpoint", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    // Bob has a seeded attempt → start in submitted state; reset first
+    await page.getByRole("button", { name: "Làm lại" }).click();
     await expect(page.locator("video")).toBeVisible();
 
     // Trigger via test hook (Object.defineProperty on currentTime is unreliable in Firefox)
     await triggerCheckpoint(page, 210);
 
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 3_000 });
-    await expect(page.getByRole("button", { name: "Tiếp tục xem" })).toBeVisible();
   });
 
   test("clicking option in checkpoint shows correct/wrong feedback", async ({
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    // Bob has a seeded attempt (server reveals correct answers) → reset to trigger checkpoints
+    await page.getByRole("button", { name: "Làm lại" }).click();
     await expect(page.locator("video")).toBeVisible();
 
     await triggerCheckpoint(page, 210);
@@ -389,13 +413,14 @@ test.describe("Video quiz checkpoint", () => {
     const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
     await expect(checkpoint).toBeVisible({ timeout: 3_000 });
 
-    // Click the correct answer (index 1 for Big-O question 1 per seed)
-    await checkpoint.locator("div.cursor-pointer").nth(1).click();
-    await expect(checkpoint.locator(".border-green-500")).toBeVisible();
+    // Click any option — AFTER_SUBMIT mode shows acknowledgment (not green/red reveal)
+    await checkpoint.locator("button").first().click();
+    await expect(checkpoint.getByText("✓ Đã ghi nhận đáp án")).toBeVisible();
   });
 
   test("Tiếp tục xem dismisses checkpoint", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("button", { name: "Làm lại" }).click();
     await expect(page.locator("video")).toBeVisible();
 
     await triggerCheckpoint(page, 210);
@@ -403,7 +428,7 @@ test.describe("Video quiz checkpoint", () => {
     const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
     await expect(checkpoint).toBeVisible({ timeout: 3_000 });
     // Must answer before "Tiếp tục xem" is enabled
-    await checkpoint.locator("div.cursor-pointer").first().click();
+    await checkpoint.locator("button").first().click();
     await page.getByRole("button", { name: "Tiếp tục xem" }).click();
     await expect(checkpoint).not.toBeVisible();
   });
@@ -412,14 +437,14 @@ test.describe("Video quiz checkpoint", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("button", { name: "Làm lại" }).click();
     await expect(page.locator("video")).toBeVisible();
 
     // Trigger checkpoint
     await triggerCheckpoint(page, 210);
     const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
     await expect(checkpoint).toBeVisible({ timeout: 3_000 });
-    // Must answer before "Tiếp tục xem" is enabled
-    await checkpoint.locator("div.cursor-pointer").first().click();
+    await checkpoint.locator("button").first().click();
     await page.getByRole("button", { name: "Tiếp tục xem" }).click();
     await expect(checkpoint).not.toBeVisible();
 
@@ -447,34 +472,43 @@ test.describe("Video quiz checkpoint", () => {
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 3_000 });
   });
 
-  test("student cannot bypass checkpoint by playing video while quiz shows", async ({ studentPage: page }) => {
+  test("student cannot bypass checkpoint by playing video while quiz shows", async ({
+    studentPage: page,
+  }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("button", { name: "Làm lại" }).click();
     await expect(page.locator("video")).toBeVisible();
 
-    // Seeded Big-O lesson has checkpoints starting at 208s — trigger at 210 hits the first one
     await triggerCheckpoint(page, 210);
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 3_000 });
 
     // Attempt to play via JS while quiz overlay is active
-    await page.evaluate(() => { void (document.querySelector("video") as HTMLVideoElement | null)?.play(); });
+    await page.evaluate(() => {
+      void (document.querySelector("video") as HTMLVideoElement | null)?.play();
+    });
     await page.waitForTimeout(300);
 
-    const paused = await page.evaluate(() => (document.querySelector("video") as HTMLVideoElement | null)?.paused ?? true);
+    const paused = await page.evaluate(
+      () => (document.querySelector("video") as HTMLVideoElement | null)?.paused ?? true,
+    );
     expect(paused).toBe(true);
   });
 
   test("student cannot bypass checkpoint by seeking past it", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("button", { name: "Làm lại" }).click();
     await expect(page.locator("video")).toBeVisible();
 
-    // Seeded Big-O lesson has checkpoints starting at 208s — trigger at 210 hits the first one
     await triggerCheckpoint(page, 210);
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 3_000 });
 
     // Seek to a time well past the checkpoint
-    await page.evaluate(() => { const v = document.querySelector("video") as HTMLVideoElement | null; if (v) v.currentTime = 9999; });
+    await page.evaluate(() => {
+      const v = document.querySelector("video") as HTMLVideoElement | null;
+      if (v) v.currentTime = 9999;
+    });
 
-    // Wait until seek protection resets currentTime (fires after video metadata loads) or video errors out
+    // Wait until seek protection resets currentTime
     await page.waitForFunction(
       () => {
         const v = document.querySelector("video") as HTMLVideoElement | null;
@@ -483,8 +517,9 @@ test.describe("Video quiz checkpoint", () => {
       { timeout: 5_000 },
     );
 
-    // currentTime should have been reset back to the checkpoint startSeconds (≤ 208s + a small delta)
-    const time = await page.evaluate(() => (document.querySelector("video") as HTMLVideoElement | null)?.currentTime ?? 0);
+    const time = await page.evaluate(
+      () => (document.querySelector("video") as HTMLVideoElement | null)?.currentTime ?? 0,
+    );
     expect(time).toBeLessThan(220);
   });
 });
@@ -527,7 +562,8 @@ test.describe("Interactive transcript (seeded segments)", () => {
   // This test covers the plain-text transcript path.
   test("plain transcript renders for seeded lesson", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.getByText("Phiên âm nội dung")).toBeVisible();
+    // Transcript is in the LessonSidebar — click the "Phiên âm" tab
+    await page.getByRole("button", { name: "Phiên âm" }).click();
     // Plain text transcript (no interactive segments for seeded data)
     await expect(page.getByText(/Big-O notation/).first()).toBeVisible();
   });
@@ -574,14 +610,16 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
 
     // Step 3: Generate questions
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await page.getByRole("button", { name: "Tạo câu hỏi" }).click();
-    await expect(page.getByRole("button", { name: "Đang tạo câu hỏi…" })).toBeVisible({ timeout: 5_000 });
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("generate-all-btn").click();
+    // Confirm modal appears — click "Tạo tất cả" to proceed
+    await page.getByRole("button", { name: "Tạo tất cả" }).click();
+    await expect(page.getByRole("button", { name: "Đang tạo…" })).toBeVisible({ timeout: 5_000 });
     await expect(
       page.locator('[data-testid="gen-done"], [data-testid="gen-error"]'),
     ).toBeVisible({ timeout: 180_000 });
     await expect(page.locator('[data-testid="gen-error"]')).not.toBeVisible();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 10_000 });
   });
 
   test("after pipeline: transcript segments visible with seek hint", async ({ teacherPage: page }) => {
@@ -636,30 +674,6 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await page.reload();
     // After pipeline, lesson has transcript segments → extract button shows "Trích xuất lại transcript"
     await expect(page.getByRole("button", { name: "Trích xuất lại transcript" })).toBeVisible({ timeout: 5_000 });
-  });
-
-  test("after pipeline: teacher can regenerate a question via AI", async ({ teacherPage: page }) => {
-    if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    test.setTimeout(120_000);
-    await page.goto(lessonUrl);
-    await page.reload();
-
-    // Questions are in the "Câu hỏi" tab of AnalyzeButton
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
-    await expect(page.getByTitle("Tạo lại bằng AI").first()).toBeVisible();
-
-    // Click "Tạo lại bằng AI" on the first question — triggers 1 RegenerateQuestion Gemini call
-    await page.getByTitle("Tạo lại bằng AI").first().click();
-
-    // Spinner appears while Gemini generates
-    await expect(page.locator(".animate-spin").first()).toBeVisible({ timeout: 5_000 });
-
-    // Wait for spinner to disappear (regen complete — success or error)
-    await expect(page.locator(".animate-spin").first()).not.toBeVisible({ timeout: 90_000 });
-
-    // No regen error should be visible
-    await expect(page.locator('[data-testid="regen-error"]').first()).not.toBeVisible();
   });
 
   test("editing transcript segment updates VideoPlayer transcript display", async ({ teacherPage: page }) => {
@@ -725,11 +739,13 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await page.goto(lessonUrl);
     await page.reload();
 
-    // The badge appears in two places under the "Phân đoạn video" tab:
-    //   • Step 2 "Chỉnh sửa đoạn" (collapsible, default closed)
-    //   • Step 3 "Cấu hình số câu hỏi" (always open — isLast)
-    // Step 3 is enough to verify per-chunk coherence is computed and rendered.
+    // After redesign: "Phân đoạn video" tab has 2 steps, both collapsible (default closed).
+    // Step 2 "Chỉnh sửa đoạn" contains the CoherenceBadge. Expand both.
     await page.getByRole("button", { name: "Phân đoạn video" }).click();
+    // Expand Step 2: the second "Mở rộng" button (Step 1 is also collapsible)
+    const expandButtons = page.getByLabel("Mở rộng");
+    await expect(expandButtons.nth(1)).toBeVisible({ timeout: 5_000 });
+    await expandButtons.nth(1).click();
 
     const badges = page.getByTestId("coherence-badge");
     await expect(badges.first()).toBeVisible({ timeout: 10_000 });
@@ -783,21 +799,22 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
 // ── 11. Teacher question editing ──────────────────────────────────────────────
 
 test.describe("Teacher question editing (seeded data)", () => {
-  test("teacher sees edit/delete/regenerate buttons on each question", async ({ teacherPage: page }) => {
+  test("teacher sees edit/delete buttons on each question", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    // After redesign: chunk-based layout with per-chunk interaction cards
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
     // First question row should have edit and delete icons
     await expect(page.getByTitle("Chỉnh sửa").first()).toBeVisible();
     await expect(page.getByTitle("Xóa").first()).toBeVisible();
-    await expect(page.getByTitle("Tạo lại bằng AI").first()).toBeVisible();
   });
 
   test("teacher can edit a question inline", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    // After redesign: chunk-based layout with per-chunk interaction cards
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
     // Open edit for first question
     await page.getByTitle("Chỉnh sửa").first().click();
@@ -817,29 +834,32 @@ test.describe("Teacher question editing (seeded data)", () => {
 
   test("teacher can add a manual question", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    // After redesign: chunk-based layout with per-chunk interaction cards
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
-    await page.getByTestId("add-question-btn").click();
+    await page.getByTestId("add-interaction-btn").first().click();
+    // Kind picker appears — select MCQ
+    await page.getByRole("button", { name: "Trắc nghiệm" }).click();
 
-    // Fill in the add form
-    const form = page.locator("div.bg-muted\\/30").last();
-    await form.locator("textarea").fill("Câu hỏi thủ công mới");
-    const optionInputs = form.locator('input[type="text"]');
+    // Fill in the add form — after selecting kind, InteractionForm appears
+    await page.getByPlaceholder("Nhập câu hỏi...").fill("Câu hỏi thủ công mới");
+    const optionInputs = page.locator('input[type="text"]');
     await optionInputs.nth(0).fill("Phương án A");
     await optionInputs.nth(1).fill("Phương án B");
     await optionInputs.nth(2).fill("Phương án C");
     await optionInputs.nth(3).fill("Phương án D");
 
     await page.getByRole("button", { name: "Lưu" }).last().click();
-    await expect(page.getByText("Câu hỏi thủ công mới")).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText("Câu hỏi thủ công mới").first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("teacher can delete a question", async ({ teacherPage: page }) => {
     // Navigate to the Big-O lesson to get the editable question list
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    // After redesign: chunk-based layout with per-chunk interaction cards
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
     // Count questions before deletion
     const questionsBefore = await page.getByTitle("Xóa").count();
@@ -854,7 +874,8 @@ test.describe("Teacher question editing (seeded data)", () => {
 
   test("student does not see edit/delete buttons", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    // Bob has a seeded attempt → sees result; no edit/delete controls in student view
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible();
     await expect(page.getByTitle("Chỉnh sửa")).not.toBeVisible();
     await expect(page.getByTitle("Xóa")).not.toBeVisible();
   });
@@ -862,21 +883,22 @@ test.describe("Teacher question editing (seeded data)", () => {
   test("teacher in preview mode does not see edit/delete buttons", async ({ teacherPage: page }) => {
     const href = await goToSeededLesson(page, SEEDED_LESSON);
     await page.goto(`${href}?preview=1`);
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    // In preview mode teacher sees StudentLessonView (no edit controls)
+    await expect(page.locator('[data-testid="video-player"]')).toBeVisible();
     await expect(page.getByTitle("Chỉnh sửa")).not.toBeVisible();
     await expect(page.getByTitle("Xóa")).not.toBeVisible();
   });
 
   test("cancel edit discards changes", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Câu hỏi" }).click();
-    await expect(page.getByText("Câu hỏi trắc nghiệm")).toBeVisible();
+    await page.getByRole("button", { name: "Bài tập" }).click();
+    // After redesign: chunk-based layout with per-chunk interaction cards
+    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
-    // Get original text of first question
-    const questionText = await page.locator("p.text-sm.flex-1").first().textContent();
-
+    // Open edit first to read the original question text from the textarea
     await page.getByTitle("Chỉnh sửa").first().click();
     const textarea = page.locator("textarea").first();
+    const questionText = await textarea.inputValue();
     await textarea.fill("Đây là thay đổi bị hủy");
     await page.getByRole("button", { name: "Hủy" }).first().click();
 

@@ -8,10 +8,10 @@ import (
 	"example.com/richter/internal/svc/auth"
 	"example.com/richter/internal/svc/coursemodules"
 	"example.com/richter/internal/svc/courses"
+	"example.com/richter/internal/svc/interactions"
 	"example.com/richter/internal/svc/lessons"
 	"example.com/richter/internal/svc/orgmembers"
 	"example.com/richter/internal/svc/organizations"
-	"example.com/richter/internal/svc/quiz"
 	"example.com/richter/internal/svc/storage"
 	"example.com/richter/internal/svc/users"
 	"github.com/samber/do/v2"
@@ -66,7 +66,7 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	if err != nil {
 		return
 	}
-	quizSvc, err := do.Invoke[*quiz.QuizSvc](i)
+	interactionsSvc, err := do.Invoke[*interactions.InteractionsSvc](i)
 	if err != nil {
 		return
 	}
@@ -90,7 +90,7 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	mux.Handle(path, handler)
 	path, handler = aiSvc.Handler()
 	mux.Handle(path, handler)
-	path, handler = quizSvc.Handler()
+	path, handler = interactionsSvc.Handler()
 	mux.Handle(path, handler)
 
 	v1 = &V1Svc{Mux: mux}

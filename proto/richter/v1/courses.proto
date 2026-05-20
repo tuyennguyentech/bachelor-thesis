@@ -4,6 +4,7 @@ package richter.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "richter/v1/interactions.proto";
 
 enum CourseStatus {
   COURSE_STATUS_UNSPECIFIED = 0;
@@ -165,6 +166,7 @@ message Lesson {
   google.protobuf.Timestamp updated_at = 7;
   string video_storage_key = 8;
   int32 duration_seconds = 9;
+  FeedbackMode feedback_mode = 10;
 }
 
 message CreateLessonRequest {
@@ -233,6 +235,15 @@ message UpdateLessonVideoResponse {
   Lesson lesson = 1;
 }
 
+message UpdateLessonFeedbackModeRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  FeedbackMode feedback_mode = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+}
+
+message UpdateLessonFeedbackModeResponse {
+  Lesson lesson = 1;
+}
+
 service LessonService {
   rpc CreateLesson(CreateLessonRequest) returns (CreateLessonResponse) {}
   rpc GetLessonById(GetLessonByIdRequest) returns (GetLessonByIdResponse) {}
@@ -240,5 +251,6 @@ service LessonService {
   rpc ListLessonsByCourse(ListLessonsByCourseRequest) returns (ListLessonsByCourseResponse) {}
   rpc UpdateLesson(UpdateLessonRequest) returns (UpdateLessonResponse) {}
   rpc UpdateLessonVideo(UpdateLessonVideoRequest) returns (UpdateLessonVideoResponse) {}
+  rpc UpdateLessonFeedbackMode(UpdateLessonFeedbackModeRequest) returns (UpdateLessonFeedbackModeResponse) {}
   rpc DeleteLesson(DeleteLessonRequest) returns (DeleteLessonResponse) {}
 }

@@ -116,7 +116,7 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 		{"dev.org_members", func(ctx context.Context) error { return s.seedDevOrgMembers(ctx, data.OrgMembers) }},
 		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses) }},
 		{"dev.lesson_video_keys", func(ctx context.Context) error { return s.seedDevLessonVideoKeys(ctx, data.Courses) }},
-		{"dev.quiz_attempts", func(ctx context.Context) error { return s.seedDevQuizAttempts(ctx, data.QuizAttempts) }},
+		{"dev.attempts", func(ctx context.Context) error { return s.seedDevAttempts(ctx, data.Attempts) }},
 		{"dev.videos", func(ctx context.Context) error { return s.seedDevVideos(ctx, data.Videos) }},
 	}
 	for _, st := range steps {
@@ -164,7 +164,7 @@ type devSeedData struct {
 	Organizations []devOrgSpec
 	OrgMembers    []devOrgMemberSpec
 	Courses       []devCourseSpec
-	QuizAttempts  []devQuizAttemptSpec
+	Attempts      []devAttemptSpec
 	Videos        []devVideoSpec
 }
 
@@ -212,8 +212,15 @@ type devLessonSpec struct {
 	DurationSecs int32            `json:"duration_secs,omitempty"`
 }
 
+type devChunkSpec struct {
+	StartSeconds float64 `json:"start_seconds"`
+	EndSeconds   float64 `json:"end_seconds"`
+	Summary      string  `json:"summary"`
+}
+
 type devAnalysisSpec struct {
 	Transcript string            `json:"transcript"`
+	Chunks     []devChunkSpec    `json:"chunks"`
 	Questions  []devQuestionSpec `json:"questions"`
 }
 
@@ -230,7 +237,7 @@ type devVideoSpec struct {
 	S3Key     string `json:"s3_key"`
 }
 
-type devQuizAttemptSpec struct {
+type devAttemptSpec struct {
 	UserEmail   string  `json:"user_email"`
 	OrgSlug     string  `json:"org_slug"`
 	CourseTitle string  `json:"course_title"`
@@ -275,7 +282,7 @@ func parseDevData() (devSeedData, error) {
 		}
 		data.Courses = append(data.Courses, courses...)
 	}
-	if err := readDevJSON("data/dev/quiz_attempts.json", &data.QuizAttempts); err != nil {
+	if err := readDevJSON("data/dev/quiz_attempts.json", &data.Attempts); err != nil {
 		return devSeedData{}, err
 	}
 	if err := readDevJSON("data/dev/videos.json", &data.Videos); err != nil {
@@ -614,38 +621,76 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 		return fmt.Errorf("upsert analysis: %w", err)
 	}
 
-	// Delete old questions, then insert fresh ones
+	// Delete old chunks, old interactions, then insert fresh chunks + interactions
 	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		return q.DeleteLessonQuestions(ctx, lessonID)
+		if err := q.DeleteLessonTranscriptChunks(ctx, lessonID); err != nil {
+			return err
+		}
+		return q.DeleteLessonInteractionsByLesson(ctx, lessonID)
 	}); err != nil {
-		return fmt.Errorf("delete old questions: %w", err)
+		return fmt.Errorf("delete old chunks/interactions: %w", err)
+	}
+
+	// Insert chunks and build a map: start_seconds → chunk.id
+	chunkMap := make(map[float64]pgtype.UUID)
+	for i, cs := range a.Chunks {
+		chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+			return q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
+				LessonID:            lessonID,
+				OrderIndex:          int32(i),
+				StartSeconds:        cs.StartSeconds,
+				EndSeconds:          cs.EndSeconds,
+				Summary:             cs.Summary,
+				QuestionCountConfig: 1,
+				CoherenceScore:      0.0,
+			})
+		})
+		if err != nil {
+			return fmt.Errorf("insert chunk %d: %w", i, err)
+		}
+		chunkMap[cs.StartSeconds] = chunk.ID
 	}
 
 	for i, qspec := range a.Questions {
-		optJSON, err := json.Marshal(qspec.Options)
+		configJSON, err := json.Marshal(struct {
+			Options       []string `json:"options"`
+			CorrectAnswer int32    `json:"correct_answer"`
+		}{Options: qspec.Options, CorrectAnswer: qspec.CorrectAnswer})
 		if err != nil {
-			return fmt.Errorf("marshal options for question %d: %w", i, err)
+			return fmt.Errorf("marshal config for interaction %d: %w", i, err)
 		}
-		if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonQuestion, error) {
-			return q.CreateLessonQuestion(ctx, gen.CreateLessonQuestionParams{
-				LessonID:      lessonID,
-				QuestionText:  qspec.QuestionText,
-				Options:       optJSON,
-				CorrectAnswer: qspec.CorrectAnswer,
-				Explanation:   pgtype.Text{String: qspec.Explanation, Valid: qspec.Explanation != ""},
-				OrderIndex:    int32(i),
-				StartSeconds:  qspec.StartSeconds,
+		// Find matching chunk by start_seconds range
+		chunkID := pgtype.UUID{}
+		for _, cs := range a.Chunks {
+			cid := chunkMap[cs.StartSeconds]
+			if qspec.StartSeconds >= cs.StartSeconds && qspec.StartSeconds < cs.EndSeconds {
+				chunkID = cid
+				break
+			}
+		}
+		if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
+			return q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
+				LessonID:     lessonID,
+				ChunkID:      chunkID,
+				Kind:         "mcq",
+				StartSeconds: float32(qspec.StartSeconds),
+				OrderIndex:   int32(i),
+				Prompt:       qspec.QuestionText,
+				Explanation:  qspec.Explanation,
+				Config:       configJSON,
+				MaxScore:     1.0,
+				GeneratedBy:  "seed",
 			})
 		}); err != nil {
-			return fmt.Errorf("create question %d: %w", i, err)
+			return fmt.Errorf("create interaction %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-// seedDevQuizAttempts seeds quiz attempt records for dev users.
+// seedDevAttempts seeds lesson attempt records for dev users.
 // It looks up lessons by path (org→course→module→lesson) to get the lesson ID.
-func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizAttemptSpec) error {
+func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSpec) error {
 	for _, a := range attempts {
 		user, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.User, error) {
 			return q.GetUserByEmail(ctx, a.UserEmail)
@@ -676,7 +721,7 @@ func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizA
 			}
 		}
 		if !courseID.Valid {
-			s.log.InfoContext(ctx, "seed: quiz attempt skipped — course not found", "course", a.CourseTitle)
+			s.log.InfoContext(ctx, "seed: attempt skipped — course not found", "course", a.CourseTitle)
 			continue
 		}
 
@@ -695,7 +740,7 @@ func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizA
 			}
 		}
 		if !moduleID.Valid {
-			s.log.InfoContext(ctx, "seed: quiz attempt skipped — module not found", "module", a.ModuleTitle)
+			s.log.InfoContext(ctx, "seed: attempt skipped — module not found", "module", a.ModuleTitle)
 			continue
 		}
 
@@ -714,48 +759,81 @@ func (s *SeederSvc) seedDevQuizAttempts(ctx context.Context, attempts []devQuizA
 			}
 		}
 		if !lessonID.Valid {
-			s.log.InfoContext(ctx, "seed: quiz attempt skipped — lesson not found", "lesson", a.LessonTitle)
+			s.log.InfoContext(ctx, "seed: attempt skipped — lesson not found", "lesson", a.LessonTitle)
 			continue
 		}
 
-		// Load questions to compute score
-		questions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonQuestion, error) {
-			return q.ListLessonQuestions(ctx, gen.ListLessonQuestionsParams{
+		// Load interactions to compute score
+		interactions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+			return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{
 				LessonID: lessonID,
 				Limit:    100,
 				Offset:   0,
 			})
 		})
-		if err != nil || len(questions) == 0 {
-			s.log.InfoContext(ctx, "seed: quiz attempt skipped — no questions for lesson", "lesson", a.LessonTitle)
+		if err != nil || len(interactions) == 0 {
+			s.log.InfoContext(ctx, "seed: attempt skipped — no interactions for lesson", "lesson", a.LessonTitle)
 			continue
 		}
 
-		score := int32(0)
-		total := int32(len(questions))
-		for i, q := range questions {
-			if i < len(a.Answers) && a.Answers[i] == q.CorrectAnswer {
-				score++
+		// Grade each answer against the MCQ config
+		var totalScore, maxScore float32
+		type gradedResp struct {
+			interactionID pgtype.UUID
+			responseJSON  []byte
+			score         float32
+		}
+		var graded []gradedResp
+		for i, interaction := range interactions {
+			maxScore += 1.0
+			var cfg struct {
+				CorrectAnswer int `json:"correct_answer"`
 			}
+			_ = json.Unmarshal(interaction.Config, &cfg)
+			selected := -1
+			if i < len(a.Answers) {
+				selected = int(a.Answers[i])
+			}
+			respJSON, _ := json.Marshal(struct {
+				Selected int `json:"selected"`
+			}{Selected: selected})
+			score := float32(0)
+			if selected == cfg.CorrectAnswer {
+				score = 1.0
+				totalScore++
+			}
+			graded = append(graded, gradedResp{interaction.ID, respJSON, score})
 		}
 
-		answersJSON, err := json.Marshal(a.Answers)
-		if err != nil {
-			return fmt.Errorf("marshal answers for attempt %s/%s: %w", a.UserEmail, a.LessonTitle, err)
-		}
-		_, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.QuizAttempt, error) {
-			return q.UpsertQuizAttempt(ctx, gen.UpsertQuizAttemptParams{
-				LessonID: lessonID,
-				UserID:   user.ID,
-				Answers:  answersJSON,
-				Score:    score,
-				Total:    total,
+		_, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
+			attempt, err := q.UpsertLessonAttempt(ctx, gen.UpsertLessonAttemptParams{
+				LessonID:   lessonID,
+				UserID:     user.ID,
+				TotalScore: totalScore,
+				MaxScore:   maxScore,
+				Status:     "submitted",
 			})
+			if err != nil {
+				return gen.LessonAttempt{}, err
+			}
+			for _, g := range graded {
+				if err := q.UpsertAttemptResponse(ctx, gen.UpsertAttemptResponseParams{
+					AttemptID:     attempt.ID,
+					InteractionID: g.interactionID,
+					Response:      g.responseJSON,
+					Score:         g.score,
+					MaxScore:      1.0,
+					Feedback:      "",
+				}); err != nil {
+					return gen.LessonAttempt{}, err
+				}
+			}
+			return attempt, nil
 		})
 		if err != nil {
-			return fmt.Errorf("upsert quiz attempt %s/%s: %w", a.UserEmail, a.LessonTitle, err)
+			return fmt.Errorf("upsert attempt %s/%s: %w", a.UserEmail, a.LessonTitle, err)
 		}
-		s.log.InfoContext(ctx, "seed: quiz attempt seeded", "user", a.UserEmail, "lesson", a.LessonTitle, "score", fmt.Sprintf("%d/%d", score, total))
+		s.log.InfoContext(ctx, "seed: attempt seeded", "user", a.UserEmail, "lesson", a.LessonTitle, "score", fmt.Sprintf("%.0f/%.0f", totalScore, maxScore))
 	}
 	return nil
 }

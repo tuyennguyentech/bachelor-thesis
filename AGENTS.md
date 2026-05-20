@@ -1,28 +1,144 @@
-# Repository Guidelines
+# Dyadia — Project Instructions
 
-## Project Structure & Module Organization
-This repository is a mixed-language workspace. `golang/richter` contains the Go backend and RPC entrypoints, `golang/arthur` is a separate Go CLI/service, and `golang/sql/gen` is generated from `sql/queries` and `sql/migrations` via `sqlc`. Frontend code lives in `typescript/heino` (`src/app`, `src/components`, `public`). Shared protobuf definitions are under `proto`, with generated clients in `golang/buf/gen` and `typescript/buf/gen`. Dev environment docs and shell helpers live in `docs/` and `scripts/setup/environment.dev/`. Thesis assets are in `typst/`.
+This file provides context for AI assistants working on this project (DeepSeek TUI / Claude Code).
 
-## Build, Test, and Development Commands
-Use the commands that match the package you are editing:
+## Project Overview
 
-- `make generate-protoc`: regenerate protobuf code for Go and TypeScript.
-- `pnpm --filter heino dev`: start the Next.js app locally.
-- `pnpm --filter heino build`: production build for the frontend.
-- `pnpm --filter heino lint`: run ESLint for `typescript/heino`.
-- `go test ./...`: run all Go tests in the workspace.
-- `docker compose up -d`: start local dependencies such as FoundationDB, Postgres, and Caddy.
+Dyadia is a multi-service monorepo for a Bachelor Thesis project (IT4995) involving AI agents and learning science. It comprises a Go backend (`richter`, `arthur`), a Next.js 16 frontend (`heino`), and shared infrastructure using Protocol Buffers, PostgreSQL, and FoundationDB.
 
-If you need container DNS from the host, use `./scripts/setup/environment.dev/dev-shell.sh`.
+## Build & Development Commands
 
-## Coding Style & Naming Conventions
-Follow `.editorconfig`: spaces with 2-space indentation, LF line endings, and tabs only in `Makefile`. Keep Go code `gofmt`-clean and use package-oriented lowercase names. In TypeScript, prefer PascalCase for React components (`LoginForm.tsx` style), camelCase for helpers, and colocate UI primitives under `src/components/ui`. Do not hand-edit generated files in `golang/buf/gen`, `typescript/buf/gen`, or `golang/sql/gen`.
+### Go Workspace
+- `go test ./...` — Run all Go tests
+- `go test -tags=integ ./...` — Run integration tests (requires running containers)
+- `go run ./golang/richter` — Start richter service
 
-## Testing Guidelines
-There are currently no committed frontend or Go test suites in this workspace, so contributors should add tests with new behavior where practical. Use Go’s standard `*_test.go` naming and place tests beside the code they cover. For frontend changes, at minimum run `pnpm --filter heino lint` and verify the affected flow locally.
+### TypeScript/Next.js
+- `pnpm --filter heino dev` — Start Next.js dev server
+- `pnpm --filter heino build` — Production build
+- `pnpm --filter heino lint` — Run ESLint
 
-## Commit & Pull Request Guidelines
-Recent history uses Conventional Commit style, often with scopes: `feat(heino): ...`, `fix(dev-shell): ...`, `refactor(heino): ...`. Keep commit messages imperative and scoped to the changed area. PRs should include a short summary, linked issue or task, commands run for verification, and screenshots for UI changes in `typescript/heino`.
+### Code Generation
+- `make generate-protoc` — Regenerate protobuf code (Go + TypeScript)
+- `sqlc generate` — Regenerate SQL code from queries/migrations
 
-## Configuration & Generated Artifacts
-Local configuration currently relies on `.env`, `fdb.cluster`, and service settings in `compose.yml`. Keep secrets out of Git. When changing SQL schemas, protobufs, or generated clients, commit both the source change and the regenerated artifacts in the same PR.
+### Local Infrastructure
+- `podman-compose up -d` — Start FoundationDB, Postgres, Caddy
+
+### Container DNS (Critical)
+For host-to-container connectivity, use the dev shell:
+```
+./scripts/setup/environment.dev/container-shell.sh -- go run ./golang/richter
+```
+This joins Podman's rootless network namespace and bind-mounts a private `/etc/resolv.conf`.
+
+### Integration Tests
+- `./scripts/test/golang/richter/test.sh`
+
+## Architecture
+
+### Dependency Injection
+The Go backend uses `samber/do/v2` for DI. Key pattern:
+- Each package defines a `Package` variable with `do.Lazy(Constructor)`
+- `init()` calls `Package(internal.Injector)` to register
+- Use `do.Invoke[Type](injector)` to retrieve dependencies
+- Scoped injectors: `internal.Injector.Scope("module-name")`
+
+### Service Structure (richter)
+- `cmd/root.go` — Cobra CLI with viper config
+- `cfg/cfg.go` — Configuration hierarchy
+- `internal/api/` — HTTP server and API handlers
+- `internal/svc/` — Business logic services
+- `internal/svc/errors.go` — `ConnectDBError` and shared error helpers
+- `internal/svc/mapper.go` — Proto ↔ SQL type conversions
+- `log/` — Structured logging with `slog`, injected via DI
+
+### API Layer
+- Connect RPC (gRPC-compatible) with HTTP/1.1 and HTTP/2 support
+- API v1 handlers registered in `internal/api/v1/v1.go`
+- Proto definitions in `proto/richter/v1/`
+- Validation interceptor via `connectrpc.com/validate` (Buf protovalidate)
+
+### Database
+- PostgreSQL with `sqlc` for type-safe queries (generated to `golang/sql/gen`)
+- Migrations in `sql/migrations/` (Goose format), queries in `sql/queries/`
+- FoundationDB for additional storage (configured via `fdb.cluster`)
+
+### Frontend (heino)
+- Next.js 16 with React 19, TypeScript 6
+- TailwindCSS 4 + Radix UI + Shadcn/UI + `jose` (JWT)
+- Two RPC transport clients:
+  - `src/lib/connect-client.ts` — server-side (Node, HTTP/2)
+  - `src/lib/connect-webclient.ts` — browser-side hook `useRichterWebClient()`
+- Auth: `src/proxy.ts` (Next.js 16 middleware), cookies `dyadia_access` + `dyadia_refresh`
+- Server-only auth helpers: `getSession()`, `requireAdmin()`, `displayName()`
+- Server actions in `src/app/actions/`
+
+### Service Communication
+```
+heino (Next.js) → Connect RPC (HTTP POST) → richter:8080 → PostgreSQL:5432
+                                                           ↕ (configured, optional)
+                                                       FoundationDB:4500
+```
+
+## Important Conventions
+
+### Generated Code — NEVER hand-edit
+- `golang/buf/gen/` — Generated protobuf Go code
+- `typescript/buf/gen/` — Generated protobuf TypeScript code
+- `golang/sql/gen/` — Generated SQL code from sqlc
+
+### Configuration
+- Viper with TOML config files: `richter.base.toml` → `richter.local.toml` / `richter.test.toml`
+- Environment variables prefixed with `RICHTER_` (e.g., `RICHTER_LOG_LEVEL`)
+- Frontend env vars: `RICHTER_BASE_URL` (server-side), `NEXT_PUBLIC_RICHTER_BASE_URL` (browser)
+
+### Commit Style
+Conventional Commits with scopes: `feat(heino):`, `fix(richter):`, `refactor(sql):`, etc.
+
+### Code Style
+- Go: `gofmt`, package-oriented lowercase names
+- TypeScript: PascalCase for React components, camelCase for helpers
+- 2-space indentation, LF line endings (see `.editorconfig`)
+- UI components colocated under `src/components/ui`
+
+## Runtime Rules (MUST follow)
+
+### NEVER use detached/shell background processes
+**Forbidden:** `nohup ... &`, shell `cmd &`, background shell tasks for servers (orphan leaks).
+
+**Allowed:** Session-managed processes only.
+
+### ALL operations must use container-shell
+Every command — servers, tests, migrations, seed — must run inside `container-shell.sh`:
+```
+./scripts/setup/environment.dev/container-shell.sh richter -- <command>
+./scripts/setup/environment.dev/container-shell.sh heino -- <command>
+```
+
+### Test vs Dev Config (Critical)
+- `richter.test.toml` = test DB (`dyadia_test`) + test bucket — for Playwright E2E and Go integration tests
+- `richter.local.toml` = dev DB (`dyadia`) — for development only
+
+### DB Reset for Tests
+```
+./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test reset
+./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test up
+```
+
+## Adding a New RPC Method
+1. Add message + service method to `proto/richter/v1/<entity>.proto` (include protovalidate annotations)
+2. Run `make generate-protoc`
+3. Implement handler in `golang/richter/internal/svc/<entity>/<entity>.go`
+4. Add SQL query to `sql/queries/<entity>.sql` and run `sqlc generate`
+5. Add proto ↔ SQL conversion to `internal/svc/mapper.go`
+6. Call from frontend via `connect-client.ts` or `useRichterWebClient()`
+
+## Version Control
+This project uses Git. See `.gitignore` for excluded files.
+
+## Guidelines
+- Follow existing code style and patterns
+- Write tests for new functionality
+- Keep changes focused and atomic
+- Document public APIs

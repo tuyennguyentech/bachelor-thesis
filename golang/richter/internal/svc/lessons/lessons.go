@@ -374,7 +374,7 @@ func (s *LessonsSvc) UpdateLessonVideo(
 			if err := q.DeleteLessonAttempts(ctx, existing.ID); err != nil {
 				return gen.Lesson{}, err
 			}
-			if err := q.DeleteLessonQuestions(ctx, existing.ID); err != nil {
+			if err := q.DeleteLessonInteractionsByLesson(ctx, existing.ID); err != nil {
 				return gen.Lesson{}, err
 			}
 			if err := q.DeleteLessonTranscriptChunks(ctx, existing.ID); err != nil {
@@ -491,4 +491,37 @@ func (s *LessonsSvc) DeleteLesson(
 	}
 
 	return &richterv1.DeleteLessonResponse{}, nil
+}
+
+func (s *LessonsSvc) UpdateLessonFeedbackMode(
+	ctx context.Context,
+	req *richterv1.UpdateLessonFeedbackModeRequest,
+) (*richterv1.UpdateLessonFeedbackModeResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetId())
+	if err != nil {
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner,
+		gen.OrganizationRoleAdmin,
+		gen.OrganizationRoleTeacher,
+	); err != nil {
+		return nil, err
+	}
+	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.UpdateLessonFeedbackMode(ctx, gen.UpdateLessonFeedbackModeParams{
+			ID:           lessonID,
+			FeedbackMode: FeedbackModeFromProto(req.GetFeedbackMode()),
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.UpdateLessonFeedbackModeResponse{Lesson: LessonToProto(updated)}, nil
 }

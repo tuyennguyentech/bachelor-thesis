@@ -6,7 +6,7 @@ import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, LessonService, CourseModuleService } from "buf/gen/richter/v1/courses_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { AIService, AnalysisStatus } from "buf/gen/richter/v1/ai_pb";
-import { QuizService } from "buf/gen/richter/v1/quiz_pb";
+import { InteractionService, FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,10 @@ import {
 } from "lucide-react";
 import { VideoUpload } from "./video-upload";
 import { AnalyzeButton } from "./analyze-button";
-import { type SafeQuestion } from "./quiz-form";
 import { LessonAttempts } from "./lesson-attempts";
 import { VideoPlayer } from "./video-player";
 import { StudentLessonView } from "./student-lesson-view";
+import { extractLocalResponse } from "@/interactions/registry";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 
@@ -97,11 +97,10 @@ export default async function LessonDetailPage({
   }
   if (!module_ || module_.courseId !== courseId) notFound();
 
-  const quizClient = createRichterClient(QuizService, token);
-
+  const interactionClient = createRichterClient(InteractionService, token);
   const aiClient = createRichterClient(AIService, token);
 
-  // Parallel fetches: video URL, AI analysis, quiz data, watch progress
+  // Parallel fetches: video URL, AI analysis, my attempt, teacher attempts list, watch progress
   const [videoUrl, analysisRes, myAttempt, attemptsData, initialPosition] = await Promise.all([
     lesson.videoStorageKey
       ? createRichterClient(StorageService, token)
@@ -115,17 +114,16 @@ export default async function LessonDetailPage({
       .catch(() => ({ analysis: null, chunks: [] })),
     effectiveCanManage
       ? Promise.resolve(null)
-      : quizClient
-          .getMyQuizAttempt({ lessonId })
+      : interactionClient
+          .getMyAttempt({ lessonId })
           .then((r) => r.attempt ?? null)
           .catch(() => null),
     effectiveCanManage
-      ? quizClient
-          .listLessonAttempts({ lessonId, limit: 50, offset: 0 })
+      ? interactionClient
+          .listAttempts({ lessonId, limit: 50, offset: 0 })
           .then((r) => ({ attempts: r.attempts, total: r.total }))
           .catch(() => ({ attempts: [], total: 0 }))
       : Promise.resolve(null),
-    // Watch progress — fetch for all authenticated users (teacher/student alike).
     lesson.videoStorageKey
       ? aiClient.getWatchProgress({ lessonId }).then((r) => r.positionSeconds ?? 0).catch(() => 0)
       : Promise.resolve(0),
@@ -134,42 +132,25 @@ export default async function LessonDetailPage({
   const { analysis, chunks: initialChunks } = analysisRes;
 
   const isDone = analysis?.status === AnalysisStatus.DONE;
-  const hasQuestions = isDone && analysis?.questions && analysis.questions.length > 0;
+  // Pass LessonInteraction[] directly — server already strips correctAnswer per feedbackMode.
+  const interactions = isDone ? (analysis?.interactions ?? []) : [];
 
-  // Strip correctAnswer before sending to the student's browser — only teachers see them directly.
-  // startSeconds is kept so the client can progressively reveal questions as
-  // the student passes each checkpoint on the video.
-  const safeQuestions: SafeQuestion[] = (analysis?.questions ?? []).map((q) => ({
-    id: q.id,
-    questionText: q.questionText,
-    options: q.options,
-    explanation: q.explanation,
-    startSeconds: q.startSeconds,
-  }));
-  // Only expose correct answers to clients allowed to see them. Server also strips
-  // correct_answer (sentinel -1) for unauthorized callers as defense-in-depth.
-  // - Teachers/admins (canManage) — including preview mode — get the real values.
-  // - Students get them only after submitting an attempt.
-  const canSeeAnswers = canManage || !!myAttempt;
-  const correctAnswers = canSeeAnswers
-    ? (analysis?.questions ?? []).map((q) => q.correctAnswer)
-    : [];
-
-  // For managers (teacher/admin), show correct answers in video checkpoints as a teaching aid.
-  // For students who have not yet submitted, omit correctAnswer so they can answer without bias.
-  const checkpoints = (analysis?.questions ?? [])
-    .filter((q) => q.startSeconds > 0)
-    .map((q) => ({
-      id: q.id,
-      questionText: q.questionText,
-      options: q.options,
-      correctAnswer: effectiveCanManage || !!myAttempt ? q.correctAnswer : undefined,
-      startSeconds: q.startSeconds,
-      explanation: effectiveCanManage || !!myAttempt ? q.explanation : undefined,
-    }));
+  // Build previous result from student's attempt (if any).
+  const previousResult = myAttempt
+    ? {
+        totalScore: myAttempt.totalScore,
+        maxScore: myAttempt.maxScore,
+        responses: myAttempt.responses.map((r) => ({
+          interactionId: r.interactionId,
+          response: extractLocalResponse(r),
+          score: r.score,
+          maxScore: r.maxScore,
+        })),
+      }
+    : null;
 
   return (
-    <div className="mx-auto max-w-3xl flex flex-col gap-6">
+    <div className="mx-auto w-full max-w-screen-2xl px-4 lg:px-6 flex flex-col gap-6">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
           <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
@@ -185,10 +166,25 @@ export default async function LessonDetailPage({
           <span>›</span>
           <span>Bài {lesson.orderIndex + 1}</span>
         </div>
-        <h1 className="text-xl font-semibold">{lesson.title}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{lesson.title}</h1>
         {lesson.description && (
           <p className="text-sm text-muted-foreground mt-1">{lesson.description}</p>
         )}
+        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+          {lesson.durationSeconds ? (
+            <span>⏱ ~{Math.ceil(lesson.durationSeconds / 60)} phút</span>
+          ) : null}
+          {lesson.durationSeconds && interactions.length > 0 ? <span>·</span> : null}
+          {interactions.length > 0 && (
+            <span>📝 {interactions.length} câu hỏi</span>
+          )}
+          {interactions.length > 0 && (
+            <>
+              <span>·</span>
+              <span>{previousResult ? "🎯 đã hoàn thành" : "🎯 chưa hoàn thành"}</span>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Preview banner */}
@@ -204,20 +200,21 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* Video player (+ progressive quiz reveal for students) */}
+      {/* Video player (+ checkpoint-driven quiz flow for students) */}
       {videoUrl ? (
         !effectiveCanManage || isPreview ? (
           <StudentLessonView
             videoUrl={videoUrl}
             segments={analysis?.transcriptSegments ?? []}
             transcript={analysis?.transcript ?? ""}
-            checkpoints={checkpoints}
+            chunks={initialChunks}
             lessonId={lessonId}
             initialPosition={initialPosition}
+            initialDuration={lesson.durationSeconds ?? 0}
             token={token}
-            questions={hasQuestions ? safeQuestions : []}
-            previousAttempt={isPreview ? null : myAttempt}
-            initialCorrectAnswers={correctAnswers.length > 0 ? correctAnswers : undefined}
+            interactions={interactions}
+            previousResult={isPreview ? null : previousResult}
+            feedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
             isPreview={isPreview}
           />
         ) : (
@@ -225,7 +222,6 @@ export default async function LessonDetailPage({
             videoUrl={videoUrl}
             segments={analysis?.transcriptSegments ?? []}
             transcript={analysis?.transcript ?? ""}
-            checkpoints={[]}
             lessonId={lessonId}
             initialPosition={initialPosition}
             token={token}
@@ -249,7 +245,7 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* Teacher/admin: upload + analyze controls — hidden in preview (student sees clean view) */}
+      {/* Teacher/admin: upload + analyze controls — hidden in preview */}
       {canManage && !isPreview && (
         <div className="rounded-lg border p-4 flex flex-col gap-4">
           <div className="flex items-center justify-between">
@@ -294,7 +290,8 @@ export default async function LessonDetailPage({
                       initialChunks={initialChunks}
                       initialSegments={analysis?.transcriptSegments ?? []}
                       initialStatus={analysis?.status}
-                      initialQuestions={analysis?.questions ?? []}
+                      initialInteractions={analysis?.interactions ?? []}
+                      initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
                       token={token}
                     />
                     {analysis?.status === AnalysisStatus.ERROR && (
@@ -307,10 +304,6 @@ export default async function LessonDetailPage({
           )}
         </div>
       )}
-
-      {/* (Student MCQ form is rendered inside StudentLessonView above so the
-          question list can be progressively revealed as the student passes
-          each checkpoint on the video.) */}
 
       {/* Teacher/admin: student progress */}
       {effectiveCanManage && attemptsData && (
