@@ -20,6 +20,7 @@ import { InteractionRow, type InteractionFormData, buildProtoConfig } from "./in
 import { ChunkSection } from "./chunk-section";
 import { type ChunkGenPhase } from "./chunk-generate-form";
 import { LessonWideGenForm } from "./lesson-wide-gen-form";
+import { KindQuantityGrid, fromConfig, toKindsList, totalQuantity, type KindQuantities } from "./kind-quantity-grid";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,13 +53,6 @@ interface Props {
   defaultInteractionConfig?: ChunkInteractionConfig;
 }
 
-const KIND_OPTIONS = [
-  { kind: InteractionKind.MCQ, label: "Trắc nghiệm" },
-  { kind: InteractionKind.FILL_BLANK, label: "Điền đáp án" },
-  { kind: InteractionKind.READING, label: "Bài đọc" },
-  { kind: InteractionKind.LISTENING, label: "Bài nghe" },
-] as const;
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function TabExercises({
@@ -80,12 +74,8 @@ export function TabExercises({
 
   // ── Default config state ────────────────────────────────────────────────────
   const [expandedConfig, setExpandedConfig] = useState(false);
-  const [defaultCount, setDefaultCount] = useState(initialDefaultCfg?.count ?? 2);
-  const [defaultKinds, setDefaultKinds] = useState<InteractionKind[]>(
-    initialDefaultCfg?.kinds?.length ? [...initialDefaultCfg.kinds] : [InteractionKind.MCQ],
-  );
-  const [defaultStrategy, setDefaultStrategy] = useState<GenerationStrategy>(
-    initialDefaultCfg?.strategy ?? GenerationStrategy.AI_CHOOSE,
+  const [defaultQuantities, setDefaultQuantities] = useState<KindQuantities>(
+    () => fromConfig(initialDefaultCfg),
   );
   const [savingDefaultCfg, startSaveDefaultCfg] = useTransition();
   const [defaultCfgError, setDefaultCfgError] = useState<string | null>(null);
@@ -151,14 +141,16 @@ export function TabExercises({
   // ── Default config ───────────────────────────────────────────────────────────
 
   function handleSaveDefaultCfg() {
-    if (defaultKinds.length === 0) { setDefaultCfgError("Chọn ít nhất một loại."); return; }
+    const total = totalQuantity(defaultQuantities);
+    if (total === 0) { setDefaultCfgError("Chọn ít nhất một câu."); return; }
     setDefaultCfgError(null);
     startSaveDefaultCfg(async () => {
       try {
+        const kinds = toKindsList(defaultQuantities);
         await aiClient.updateLessonDefaultInteractionConfig({
           lessonId,
           defaultInteractionConfig: create(ChunkInteractionConfigSchema, {
-            count: defaultCount, kinds: defaultKinds, strategy: defaultStrategy,
+            count: total, kinds, strategy: GenerationStrategy.EVEN_DISTRIBUTION,
           }),
         });
         setExpandedConfig(false);
@@ -348,59 +340,16 @@ export function TabExercises({
           <div className="rounded-md border border-border p-3 bg-background flex flex-col gap-3">
             <p className="text-xs font-medium">Cấu hình mặc định cho cả lesson</p>
             <p className="text-xs text-muted-foreground">Áp dụng cho các phân đoạn chưa có cấu hình riêng</p>
-            <div className="flex items-center gap-3">
-              <label className="text-xs text-muted-foreground shrink-0">Số lượng:</label>
-              <input
-                type="number" min={1} max={8} value={defaultCount}
-                onChange={(e) => setDefaultCount(Math.min(8, Math.max(1, parseInt(e.target.value) || 1)))}
-                disabled={savingDefaultCfg}
-                className="w-16 text-sm rounded border border-input bg-background px-2 py-1"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <p className="text-xs text-muted-foreground">Loại:</p>
-              <div className="flex flex-wrap gap-3">
-                {KIND_OPTIONS.map(({ kind, label }) => (
-                  <label key={kind} className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={defaultKinds.includes(kind)}
-                      onChange={() => setDefaultKinds(prev =>
-                        prev.includes(kind) ? prev.filter(k => k !== kind) : [...prev, kind]
-                      )}
-                      disabled={savingDefaultCfg}
-                    />
-                    <span className="text-xs">{label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <p className="text-xs text-muted-foreground">Chiến lược:</p>
-              <div className="flex flex-col gap-1">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" name="default-strategy"
-                    checked={defaultStrategy === GenerationStrategy.AI_CHOOSE}
-                    onChange={() => setDefaultStrategy(GenerationStrategy.AI_CHOOSE)}
-                    disabled={savingDefaultCfg}
-                  />
-                  <span className="text-xs">AI chọn loại phù hợp nhất theo nội dung</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" name="default-strategy"
-                    checked={defaultStrategy === GenerationStrategy.EVEN_DISTRIBUTION}
-                    onChange={() => setDefaultStrategy(GenerationStrategy.EVEN_DISTRIBUTION)}
-                    disabled={savingDefaultCfg}
-                  />
-                  <span className="text-xs">Phân bổ đều theo thứ tự đã chọn</span>
-                </label>
-              </div>
-            </div>
+            <KindQuantityGrid
+              value={defaultQuantities}
+              onChange={setDefaultQuantities}
+              disabled={savingDefaultCfg}
+            />
             {defaultCfgError && <p className="text-xs text-destructive">{defaultCfgError}</p>}
             <div className="flex gap-2 justify-end">
               <Button variant="ghost" size="sm" onClick={() => setExpandedConfig(false)} disabled={savingDefaultCfg}>Hủy</Button>
               <Button size="sm" onClick={handleSaveDefaultCfg}
-                disabled={savingDefaultCfg || defaultKinds.length === 0} className="gap-1">
+                disabled={savingDefaultCfg || totalQuantity(defaultQuantities) === 0} className="gap-1">
                 {savingDefaultCfg && <Loader2Icon className="size-3 animate-spin" />}
                 Lưu
               </Button>
@@ -413,8 +362,7 @@ export function TabExercises({
           <LessonWideGenForm
             chunks={localChunks}
             interactionsCount={interactions.length}
-            defaultCount={defaultCount}
-            defaultKinds={defaultKinds}
+            defaultQuantities={defaultQuantities}
             disabled={disabled}
             force={lessonGenForce}
             onForceChange={setLessonGenForce}

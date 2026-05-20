@@ -3,25 +3,26 @@
 import { Button } from "@/components/ui/button";
 import { SparklesIcon } from "lucide-react";
 import type { TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
-import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
-
-const KIND_OPTIONS = [
-  { kind: InteractionKind.MCQ, label: "Trắc nghiệm" },
-  { kind: InteractionKind.FILL_BLANK, label: "Điền đáp án" },
-  { kind: InteractionKind.READING, label: "Bài đọc" },
-  { kind: InteractionKind.LISTENING, label: "Bài nghe" },
-] as const;
+import { KIND_OPTIONS, fromConfig, totalQuantity, type KindQuantities } from "./kind-quantity-grid";
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
   return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
+function describeQuantities(quantities: KindQuantities): string {
+  const parts: string[] = [];
+  for (const { kind, label } of KIND_OPTIONS) {
+    if (quantities[kind] > 0) parts.push(`${quantities[kind]} ${label}`);
+  }
+  const total = totalQuantity(quantities);
+  return `${parts.join(" + ")} = ${total} câu`;
+}
+
 interface LessonWideGenFormProps {
   chunks: TranscriptChunk[];
   interactionsCount: number;
-  defaultCount: number;
-  defaultKinds: InteractionKind[];
+  defaultQuantities: KindQuantities;
   disabled: boolean;
   force: boolean;
   onForceChange: (v: boolean) => void;
@@ -32,7 +33,7 @@ interface LessonWideGenFormProps {
 }
 
 export function LessonWideGenForm({
-  chunks, interactionsCount, defaultCount, defaultKinds, disabled,
+  chunks, interactionsCount, defaultQuantities, disabled,
   force, onForceChange, onGenerate, onCancel,
   hasDefaultConfig, onOpenDefaultConfig,
 }: LessonWideGenFormProps) {
@@ -63,26 +64,25 @@ export function LessonWideGenForm({
           <p className="text-xs text-muted-foreground">Sẽ áp dụng cấu hình của từng phân đoạn:</p>
           <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5">
             {chunks.map((chunk, i) => {
-              const cfg = chunk.interactionConfig;
-              const count = cfg ? cfg.count : defaultCount;
-              const kindLabels = (cfg?.kinds?.length ? cfg.kinds : defaultKinds)
-                .map(k => KIND_OPTIONS.find(o => o.kind === k)?.label ?? "")
-                .filter(Boolean)
-                .join(", ");
+              const quantities = fromConfig(chunk.interactionConfig) ?? defaultQuantities;
+              const desc = describeQuantities(quantities);
               return (
                 <p key={chunk.id} className="text-xs">
                   <span className="text-muted-foreground">
                     Đoạn {i + 1} ({formatTime(chunk.startSeconds)}–{formatTime(chunk.endSeconds)}):
                   </span>
-                  {" "}{count} bài · {kindLabels}
-                  {!cfg && <span className="text-muted-foreground"> ← mặc định</span>}
+                  {" "}{desc}
+                  {!chunk.interactionConfig && <span className="text-muted-foreground"> ← mặc định</span>}
                 </p>
               );
             })}
           </div>
           <p className="text-xs font-medium">
             Tổng:{" "}
-            {chunks.reduce((s, c) => s + (c.interactionConfig ? c.interactionConfig.count : defaultCount), 0)}{" "}
+            {chunks.reduce((s, c) => {
+              const q = fromConfig(c.interactionConfig) ?? defaultQuantities;
+              return s + totalQuantity(q);
+            }, 0)}{" "}
             bài tập sẽ được tạo
           </p>
         </>
