@@ -64,7 +64,9 @@ export function LessonWideGenForm({
           <p className="text-xs text-muted-foreground">Sẽ áp dụng cấu hình của từng phân đoạn:</p>
           <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5">
             {chunks.map((chunk, i) => {
-              const quantities = fromConfig(chunk.interactionConfig) ?? defaultQuantities;
+              const quantities = chunk.interactionConfig
+                ? fromConfig(chunk.interactionConfig)
+                : defaultQuantities;
               const desc = describeQuantities(quantities);
               return (
                 <p key={chunk.id} className="text-xs">
@@ -80,7 +82,7 @@ export function LessonWideGenForm({
           <p className="text-xs font-medium">
             Tổng:{" "}
             {chunks.reduce((s, c) => {
-              const q = fromConfig(c.interactionConfig) ?? defaultQuantities;
+              const q = c.interactionConfig ? fromConfig(c.interactionConfig) : defaultQuantities;
               return s + totalQuantity(q);
             }, 0)}{" "}
             bài tập sẽ được tạo
