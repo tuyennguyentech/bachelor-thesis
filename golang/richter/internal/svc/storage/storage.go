@@ -90,6 +90,15 @@ func validateLessonKey(key string) (lessonID string, err error) {
 	return parts[1], nil
 }
 
+// isStudentRecordingKey reports whether the key is a student's own audio
+// upload — `lessons/<lessonID>/student-recordings/<filename>`. These uploads
+// are writable by any active member of the lesson's organization, not just
+// teachers, so students can submit reading-interaction recordings.
+func isStudentRecordingKey(key string) bool {
+	parts := strings.SplitN(key, "/", 4)
+	return len(parts) == 4 && parts[0] == "lessons" && parts[2] == "student-recordings"
+}
+
 // validateSeedKey ensures key is in the form seed/<org-slug>/... and returns
 // the org slug. Used for seeded demo content that doesn't follow the lessons/ path.
 func validateSeedKey(key string) (orgSlug string, err error) {
@@ -145,13 +154,26 @@ func (s *StorageSvc) GetUploadUrl(
 	if err != nil {
 		return nil, err
 	}
-	// Uploading requires teacher-level access (or higher).
-	if _, err := s.authz.RequireOrgRole(ctx, orgID,
-		gen.OrganizationRoleOwner,
-		gen.OrganizationRoleAdmin,
-		gen.OrganizationRoleTeacher,
-	); err != nil {
-		return nil, err
+	// Student recordings (audio responses for reading interactions) are uploaded
+	// by the learner themselves under `lessons/<id>/student-recordings/...`.
+	// Other keys (lesson assets, seeded content) require teacher-level access.
+	if isStudentRecordingKey(req.GetKey()) {
+		if _, err := s.authz.RequireOrgRole(ctx, orgID,
+			gen.OrganizationRoleOwner,
+			gen.OrganizationRoleAdmin,
+			gen.OrganizationRoleTeacher,
+			gen.OrganizationRoleStudent,
+		); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := s.authz.RequireOrgRole(ctx, orgID,
+			gen.OrganizationRoleOwner,
+			gen.OrganizationRoleAdmin,
+			gen.OrganizationRoleTeacher,
+		); err != nil {
+			return nil, err
+		}
 	}
 
 	expires := time.Duration(req.GetExpiresInSeconds()) * time.Second

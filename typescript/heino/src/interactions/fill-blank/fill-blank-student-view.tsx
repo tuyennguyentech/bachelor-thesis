@@ -38,6 +38,7 @@ export function FillBlankStudentView({
   locked,
   onAnswer,
   onContinue,
+  hasNextInCheckpoint,
 }: StudentViewProps<FillBlankConfig, FillBlankResponse>) {
   const [answers, setAnswers] = useState<string[]>(
     initialResponse?.answers ?? config.blanks.map(() => "")
@@ -97,6 +98,22 @@ export function FillBlankStudentView({
         })}
       </p>
 
+      {revealNow && config.blanks.some((b, i) => !isCorrectAnswer(b, answers[i] ?? "")) && (
+        <div className="rounded border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2 text-xs">
+          <p className="font-medium text-amber-700 dark:text-amber-400 mb-1">Đáp án đúng:</p>
+          <ul className="space-y-0.5">
+            {config.blanks.map((b, i) => {
+              if (isCorrectAnswer(b, answers[i] ?? "")) return null;
+              return (
+                <li key={i} className="text-amber-700 dark:text-amber-400">
+                  <span className="font-medium">({i + 1})</span> {b.accepted.join(" / ")}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       {revealNow && explanation && (
         <p className="text-xs text-muted-foreground px-1">💡 {explanation}</p>
       )}
@@ -120,7 +137,7 @@ export function FillBlankStudentView({
 
       {submitted && (
         <Button ref={continueRef} size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          ▶ Tiếp tục xem
+          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
         </Button>
       )}
     </div>

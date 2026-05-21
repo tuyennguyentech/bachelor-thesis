@@ -14,6 +14,7 @@ export function McqStudentView({
   locked,
   onAnswer,
   onContinue,
+  hasNextInCheckpoint,
 }: StudentViewProps<McqConfig, McqResponse>) {
   const [selected, setSelected] = useState<number>(initialResponse?.selected ?? -1);
   const continueRef = useRef<HTMLButtonElement>(null);
@@ -115,7 +116,7 @@ export function McqStudentView({
 
       {hasAnswered && (
         <Button ref={continueRef} size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          ▶ Tiếp tục xem
+          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
         </Button>
       )}
     </div>

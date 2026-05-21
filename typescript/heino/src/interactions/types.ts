@@ -64,6 +64,9 @@ export interface StudentViewProps<Config, Response> {
   locked: boolean;
   onAnswer: (r: Response) => void;
   onContinue: () => void;
+  /** True when there is another interaction queued at the same/earlier timestamp.
+   * Used by views to label the continue button "Câu tiếp theo" instead of "Tiếp tục xem". */
+  hasNextInCheckpoint?: boolean;
   /** Optional: auth token — used by renderers that call backend APIs (e.g. audio presign) */
   token?: string;
   /** Optional: lesson UUID — used by renderers that upload student recordings */

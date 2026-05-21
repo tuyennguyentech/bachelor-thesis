@@ -95,12 +95,13 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
     setErrorMsg("");
     try {
       const ext = blobRef.current.type.includes("ogg") ? "ogg" : "webm";
-      const key = `student-recordings/${lessonId}/${crypto.randomUUID()}.${ext}`;
-      const { uploadUrl } = await storageClient.getUploadUrl({ key, expiresInSeconds: 300 });
+      const key = `lessons/${lessonId}/student-recordings/${crypto.randomUUID()}.${ext}`;
+      const contentType = blobRef.current.type || "audio/webm";
+      const { uploadUrl } = await storageClient.getUploadUrl({ key, contentType, expiresInSeconds: 300 });
       const res = await fetch(uploadUrl, {
         method: "PUT",
         body: blobRef.current,
-        headers: { "Content-Type": blobRef.current.type || "audio/webm" },
+        headers: { "Content-Type": contentType },
       });
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
       setAudioKey(key);

@@ -1,18 +1,17 @@
 "use client";
 
 import ReactMarkdown from "react-markdown";
-import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { StudentViewProps, ReadingConfig, ReadingResponse } from "../types";
 import { AudioRecorder } from "../_shared/audio-recorder";
 import { Button } from "@/components/ui/button";
 
 export function ReadingStudentView({
   config,
-  feedbackMode,
   locked,
   initialResponse,
   onAnswer,
   onContinue,
+  hasNextInCheckpoint,
   token = "",
   lessonId = "",
 }: StudentViewProps<ReadingConfig, ReadingResponse>) {
@@ -57,7 +56,7 @@ export function ReadingStudentView({
       {/* Continue button */}
       {hasRecording && (
         <Button size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          {feedbackMode === FeedbackMode.AFTER_EACH ? "▶ Xem kết quả" : "▶ Tiếp tục xem"}
+          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
         </Button>
       )}
     </div>

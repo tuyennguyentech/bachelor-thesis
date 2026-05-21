@@ -16,6 +16,7 @@ interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onAnswer: (response: any) => void;
   onContinue: () => void;
+  hasNextInCheckpoint?: boolean;
   token?: string;
   lessonId?: string;
 }
@@ -35,6 +36,7 @@ export function InteractionCheckpoint({
   locked,
   onAnswer,
   onContinue,
+  hasNextInCheckpoint,
   token,
   lessonId,
 }: Props) {
@@ -84,6 +86,7 @@ export function InteractionCheckpoint({
         locked={locked}
         onAnswer={onAnswer}
         onContinue={onContinue}
+        hasNextInCheckpoint={hasNextInCheckpoint}
         token={token}
         lessonId={lessonId}
       />

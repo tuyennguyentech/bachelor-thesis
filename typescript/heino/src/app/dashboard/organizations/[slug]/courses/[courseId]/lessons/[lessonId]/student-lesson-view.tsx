@@ -158,9 +158,28 @@ export function StudentLessonView({
   }
 
   function handleContinue(id: string) {
+    // Find the next pending timed interaction at the SAME timestamp (or an earlier one
+    // missed somehow). Untimed (startSeconds <= 0) interactions are skipped — those are
+    // auto-passed on first play and never part of a checkpoint cluster.
+    const current = interactions.find((it) => it.id === id);
+    const nextInCheckpoint = current
+      ? interactions
+          .filter(
+            (it) =>
+              it.id !== id &&
+              !passedIds.has(it.id) &&
+              it.startSeconds > 0 &&
+              it.startSeconds <= current.startSeconds,
+          )
+          .sort((a, b) => a.startSeconds - b.startSeconds)[0]
+      : undefined;
     setPassedIds((prev) => new Set([...prev, id]));
-    setActiveId(null);
-    videoRef.current?.play();
+    if (nextInCheckpoint) {
+      setActiveId(nextInCheckpoint.id);
+    } else {
+      setActiveId(null);
+      videoRef.current?.play();
+    }
   }
 
   function handleSeek(seconds: number) {
@@ -330,6 +349,13 @@ export function StudentLessonView({
                 locked={false}
                 onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
                 onContinue={() => handleContinue(activeInteraction.id)}
+                hasNextInCheckpoint={interactions.some(
+                  (it) =>
+                    it.id !== activeInteraction.id &&
+                    !passedIds.has(it.id) &&
+                    it.startSeconds > 0 &&
+                    it.startSeconds <= activeInteraction.startSeconds,
+                )}
                 token={token}
                 lessonId={lessonId}
               />

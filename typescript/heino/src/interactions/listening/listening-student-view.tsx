@@ -16,6 +16,7 @@ export function ListeningStudentView({
   initialResponse,
   onAnswer,
   onContinue,
+  hasNextInCheckpoint,
   token = "",
 }: StudentViewProps<ListeningConfig, ListeningResponse>) {
   const storageClient = useRichterWebClient(StorageService, token);
@@ -139,7 +140,7 @@ export function ListeningStudentView({
 
       {hasAnswered && (
         <Button size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          ▶ Tiếp tục xem
+          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
         </Button>
       )}
     </div>
