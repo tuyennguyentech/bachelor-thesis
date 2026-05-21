@@ -51,6 +51,7 @@ export const test = base.extend<{
 export const SEED_HUST_CS_SLUG = "hust-cs";
 export const SEED_DSA_COURSE_TITLE = "Cấu trúc dữ liệu và Giải thuật";
 export const SEED_DSA_LESSON_BIG_O = "Bài 1: Big-O, Omega, Theta notation";
+export const SEED_DSA_LESSON_RECURRENCE = "Bài 2: Phân tích đệ quy với Master Theorem";
 
 /**
  * Navigate to a lesson inside the seeded DSA course (in hust-cs org) using ?q= search.

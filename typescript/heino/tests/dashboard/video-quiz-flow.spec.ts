@@ -893,24 +893,24 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("teacher can delete a question", async ({ teacherPage: page }) => {
-    // Navigate to the Big-O lesson to get the editable question list
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Bài tập" }).click();
-    // After redesign v2: chunks collapse by default — expand all chunks to see all interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
-    for (const titleBar of await page.getByTestId("chunk-title-bar").all()) {
-      await titleBar.click();
-    }
 
-    // Count questions before deletion
-    const questionsBefore = await page.getByTitle("Xóa").count();
-    expect(questionsBefore).toBeGreaterThan(0);
+    // Add a unique question so the delete is self-contained (seeded timed interactions untouched)
+    const deleteTarget = `Câu hỏi tạm xóa ${Date.now()}`;
+    await page.getByTestId("add-interaction-btn").first().click();
+    await page.getByPlaceholder("Nhập câu hỏi...").fill(deleteTarget);
+    const opts = page.locator('input[type="text"]');
+    await opts.nth(0).fill("A"); await opts.nth(1).fill("B");
+    await opts.nth(2).fill("C"); await opts.nth(3).fill("D");
+    await page.getByRole("button", { name: "Lưu" }).last().click();
+    await expect(page.getByText(deleteTarget)).toBeVisible({ timeout: 5_000 });
 
-    // Delete the last question
-    await page.getByTitle("Xóa").last().click();
-
-    // Question count decreases
-    await expect(page.getByTitle("Xóa")).toHaveCount(questionsBefore - 1, { timeout: 5_000 });
+    // Delete the row we just created — scoped by unique text so no seeded interaction is affected
+    const row = page.getByTestId("interaction-row").filter({ hasText: deleteTarget });
+    await row.getByTitle("Xóa").click();
+    await expect(page.getByText(deleteTarget)).not.toBeVisible({ timeout: 5_000 });
   });
 
   test("student does not see edit/delete buttons", async ({ studentPage: page }) => {

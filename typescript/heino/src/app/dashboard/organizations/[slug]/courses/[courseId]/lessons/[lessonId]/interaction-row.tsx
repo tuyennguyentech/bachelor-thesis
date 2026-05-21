@@ -315,7 +315,7 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
   const fb = it.config.case === "fillBlank" ? it.config.value : null;
 
   return (
-    <div className={[
+    <div data-testid="interaction-row" className={[
       "flex flex-col gap-1.5 px-3 py-2 rounded-md border border-border border-l-2",
       KIND_BORDER_L_CLS[it.kind] ?? "border-l-border",
     ].join(" ")}>
