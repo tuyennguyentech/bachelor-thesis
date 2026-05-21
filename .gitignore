@@ -12,6 +12,7 @@ golang/richter/richter.test.toml
 
 # Compiled binaries accidentally placed in wrong dirs
 typescript/heino/richter
+/richter
 
 # Large seed asset files (video, etc.) — download manually via scripts/seed-assets.sh
 seed-assets/

@@ -772,18 +772,15 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonID := lessonRes.Lesson.Id
 
-	// Create READING with 3 nested MCQs
+	// Create READING (pronunciation mode) — new schema: passage_markdown, no nested MCQs
 	createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
 		LessonId:     lessonID,
-		Prompt:       "Đọc đoạn văn và trả lời câu hỏi",
+		Prompt:       "Đọc đoạn văn sau to và rõ ràng",
 		StartSeconds: 0,
 		Config: &richterv1.CreateManualInteractionRequest_Reading{
 			Reading: &richterv1.ReadingConfig{
-				PassageMarkdown: "**Newton** phát biểu ba định luật chuyển động.",
-				Questions: []*richterv1.McqConfig{
-					{Options: []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}}, CorrectAnswer: 2},
-					{Options: []*richterv1.McqOption{{Text: "X"}, {Text: "Y"}, {Text: "Z"}, {Text: "W"}}, CorrectAnswer: 0},
-				},
+				Mode:            richterv1.ReadingMode_READING_MODE_PRONUNCIATION,
+				PassageMarkdown: "**Newton** phát biểu ba định luật chuyển động cơ học.",
 			},
 		},
 	})
@@ -794,8 +791,17 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	if createRes.Interaction.Kind != richterv1.InteractionKind_INTERACTION_KIND_READING {
 		t.Errorf("kind: want READING, got %v", createRes.Interaction.Kind)
 	}
+	rc := createRes.Interaction.GetReading()
+	if rc == nil {
+		t.Fatal("expected ReadingConfig on created interaction")
+	}
+	if rc.Mode != richterv1.ReadingMode_READING_MODE_PRONUNCIATION {
+		t.Errorf("mode: want PRONUNCIATION, got %v", rc.Mode)
+	}
 
-	// Student submits: both correct
+	// Student submits with no audio recorded (empty audio_object_key).
+	// GradeWithContext short-circuits with score 0/1 when audio_object_key is empty,
+	// so no S3 download is attempted — safe for tests without real audio objects.
 	studentToken := getUserToken(t, url, studentEmail, studentPassword)
 	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
 
@@ -804,18 +810,18 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 		Responses: []*richterv1.AttemptResponseInput{{
 			InteractionId: interactionID,
 			Response: &richterv1.AttemptResponseInput_Reading{
-				Reading: &richterv1.ReadingResponse{Answers: []int32{2, 0}},
+				Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
 			},
 		}},
 	})
 	if err != nil {
 		t.Fatalf("submit attempt: %v", err)
 	}
-	if submitRes.Attempt.TotalScore != 2.0 || submitRes.Attempt.MaxScore != 2.0 {
-		t.Errorf("scores: want 2/2, got %v/%v", submitRes.Attempt.TotalScore, submitRes.Attempt.MaxScore)
+	if submitRes.Attempt.MaxScore != 1.0 {
+		t.Errorf("maxScore: want 1, got %v", submitRes.Attempt.MaxScore)
 	}
 
-	// Verify round-trip
+	// Verify round-trip: response type is ReadingResponse
 	getRes, err := studentIA.GetMyAttempt(ctx, &richterv1.GetMyAttemptRequest{LessonId: lessonID})
 	if err != nil {
 		t.Fatalf("GetMyAttempt: %v", err)
@@ -823,12 +829,9 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	if len(getRes.Attempt.Responses) != 1 {
 		t.Fatalf("expected 1 response, got %d", len(getRes.Attempt.Responses))
 	}
-	rr, ok := getRes.Attempt.Responses[0].Response.(*richterv1.LessonAttemptResponse_Reading)
+	_, ok := getRes.Attempt.Responses[0].Response.(*richterv1.LessonAttemptResponse_Reading)
 	if !ok {
 		t.Fatalf("expected ReadingResponse, got %T", getRes.Attempt.Responses[0].Response)
-	}
-	if len(rr.Reading.Answers) != 2 {
-		t.Errorf("expected 2 answers, got %d", len(rr.Reading.Answers))
 	}
 }
 
