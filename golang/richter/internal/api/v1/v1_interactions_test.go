@@ -833,6 +833,49 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ReadingResponse, got %T", getRes.Attempt.Responses[0].Response)
 	}
+
+	// ── OPEN_ANSWER mode: expected_answer round-trips for teacher, hides for student ──
+	openCreateRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+		LessonId:     lessonID,
+		Prompt:       "Trả lời câu hỏi sau bằng lời nói",
+		StartSeconds: 10,
+		Config: &richterv1.CreateManualInteractionRequest_Reading{
+			Reading: &richterv1.ReadingConfig{
+				Mode:            richterv1.ReadingMode_READING_MODE_OPEN_ANSWER,
+				PassageMarkdown: "Newton phát biểu ba định luật chuyển động.",
+				Question:        "Ai phát biểu ba định luật chuyển động?",
+				ExpectedAnswer:  "Newton phát biểu ba định luật chuyển động.",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create open_answer reading: %v", err)
+	}
+	if openCreateRes.Interaction.GetReading().GetExpectedAnswer() != "Newton phát biểu ba định luật chuyển động." {
+		t.Errorf("teacher create did not return expected_answer (response is teacher-side, should expose): got %q",
+			openCreateRes.Interaction.GetReading().GetExpectedAnswer())
+	}
+
+	// Student lists interactions — expected_answer must be stripped.
+	studentList, err := studentIA.ListLessonInteractions(ctx, &richterv1.ListLessonInteractionsRequest{
+		LessonId: lessonID, Limit: 50, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("student ListLessonInteractions: %v", err)
+	}
+	var openForStudent *richterv1.LessonInteraction
+	for _, it := range studentList.Interactions {
+		if it.Id == openCreateRes.Interaction.Id {
+			openForStudent = it
+			break
+		}
+	}
+	if openForStudent == nil {
+		t.Fatal("open_answer interaction not visible to student")
+	}
+	if openForStudent.GetReading().GetExpectedAnswer() != "" {
+		t.Errorf("expected_answer leaked to student: %q", openForStudent.GetReading().GetExpectedAnswer())
+	}
 }
 
 // ── TestCreateManualInteractionChunkAssociation ───────────────────────────────

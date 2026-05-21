@@ -68,6 +68,7 @@ export function extractConfig(interaction: LessonInteraction): any | null {
       mode: v.mode === ReadingMode.OPEN_ANSWER ? "open_answer" : "pronunciation",
       passageMarkdown: v.passageMarkdown,
       question: v.question,
+      expectedAnswer: v.expectedAnswer,
     } satisfies ReadingConfig;
   }
   return null;

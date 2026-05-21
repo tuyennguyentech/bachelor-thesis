@@ -49,18 +49,32 @@ export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingC
         )}
       </div>
 
-      {/* Question (open_answer only) */}
+      {/* Question + expected answer (open_answer only) */}
       {config.mode === "open_answer" && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground">Câu hỏi</label>
-          <input
-            type="text"
-            value={config.question ?? ""}
-            onChange={(e) => onChange({ ...config, question: e.target.value })}
-            placeholder="Câu hỏi học sinh phải trả lời bằng lời nói…"
-            className="text-sm rounded border border-input bg-background px-2 py-1.5"
-          />
-        </div>
+        <>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">Câu hỏi</label>
+            <input
+              type="text"
+              value={config.question ?? ""}
+              onChange={(e) => onChange({ ...config, question: e.target.value })}
+              placeholder="Câu hỏi học sinh phải trả lời bằng lời nói…"
+              className="text-sm rounded border border-input bg-background px-2 py-1.5"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">
+              Đáp án mẫu <span className="text-muted-foreground/70">(tham chiếu để AI chấm, hiện cho học sinh sau khi nộp)</span>
+            </label>
+            <textarea
+              rows={2}
+              value={config.expectedAnswer ?? ""}
+              onChange={(e) => onChange({ ...config, expectedAnswer: e.target.value })}
+              placeholder="Đáp án mẫu ngắn gọn…"
+              className="text-sm rounded border border-input bg-background px-2 py-1.5 resize-none"
+            />
+          </div>
+        </>
       )}
     </div>
   );

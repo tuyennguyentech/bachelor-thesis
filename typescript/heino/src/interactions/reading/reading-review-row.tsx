@@ -58,6 +58,12 @@ export function ReadingReviewRow({
         {config.mode === "open_answer" && config.question && (
           <p className="text-xs font-medium">{config.question}</p>
         )}
+        {canReveal && config.mode === "open_answer" && config.expectedAnswer && (
+          <p className="text-xs">
+            <span className="text-muted-foreground">Đáp án mẫu: </span>
+            <span>{config.expectedAnswer}</span>
+          </p>
+        )}
         {audioUrl ? (
           <audio src={audioUrl} controls className="w-full max-w-sm h-9" />
         ) : response?.audioObjectKey ? (

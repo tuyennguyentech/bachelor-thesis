@@ -24,11 +24,12 @@ type AudioGradingResult struct {
 // GradeAudio sends the student's audio to Gemini and returns a structured grading result.
 //
 // Parameters:
-//   - audioMP3: raw MP3 bytes of the student's recording
+//   - audioMP3: raw audio bytes of the student's recording (any container Gemini accepts)
 //   - language: "vi" or "en", used to localise the grading prompt
 //   - passageMarkdown: the passage the student was asked to read/answer
 //   - question: non-empty only for OPEN_ANSWER mode
-func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question string) (*AudioGradingResult, error) {
+//   - expectedAnswer: gold answer for OPEN_ANSWER mode (empty for PRONUNCIATION mode)
+func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question, expectedAnswer string) (*AudioGradingResult, error) {
 	client, err := s.newGeminiClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("gemini audio grade: %w", err)
@@ -51,7 +52,7 @@ func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passa
 }`
 	model.ResponseSchema = mustParseSchema(schema)
 
-	prompt := buildAudioGradingPrompt(language, passageMarkdown, question)
+	prompt := buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer)
 
 	audioPart := genai.Blob{
 		MIMEType: detectAudioMIME(audioMP3),
@@ -76,7 +77,7 @@ func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passa
 	return &result, nil
 }
 
-func buildAudioGradingPrompt(language, passageMarkdown, question string) string {
+func buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer string) string {
 	var sb strings.Builder
 
 	isOpenAnswer := strings.TrimSpace(question) != ""
@@ -88,10 +89,14 @@ func buildAudioGradingPrompt(language, passageMarkdown, question string) string 
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nQuestion: ")
 			sb.WriteString(question)
+			if strings.TrimSpace(expectedAnswer) != "" {
+				sb.WriteString("\n\nExpected answer (gold reference): ")
+				sb.WriteString(expectedAnswer)
+			}
 			sb.WriteString("\n\nListen to the student's audio and:\n")
 			sb.WriteString("1. Transcribe what the student said (transcript)\n")
 			sb.WriteString("2. Rate pronunciation quality: 0.0 = very poor, 1.0 = excellent (pronunciation_score)\n")
-			sb.WriteString("3. Rate content relevance/correctness: 0.0 = wrong/irrelevant, 1.0 = fully correct (content_score)\n")
+			sb.WriteString("3. Rate content correctness against the expected answer if provided, otherwise against the passage: 0.0 = wrong/irrelevant, 1.0 = fully correct (content_score)\n")
 			sb.WriteString("4. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
 		} else {
 			sb.WriteString("You are an English language teacher. Grade this student's reading aloud exercise.\n\n")
@@ -111,10 +116,14 @@ func buildAudioGradingPrompt(language, passageMarkdown, question string) string 
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nCâu hỏi: ")
 			sb.WriteString(question)
+			if strings.TrimSpace(expectedAnswer) != "" {
+				sb.WriteString("\n\nĐáp án mẫu (tham chiếu): ")
+				sb.WriteString(expectedAnswer)
+			}
 			sb.WriteString("\n\nNghe audio của học sinh và:\n")
 			sb.WriteString("1. Chép lại những gì học sinh nói (transcript)\n")
 			sb.WriteString("2. Đánh giá chất lượng phát âm: 0.0 = rất kém, 1.0 = xuất sắc (pronunciation_score)\n")
-			sb.WriteString("3. Đánh giá mức độ đúng/phù hợp của nội dung: 0.0 = sai/không liên quan, 1.0 = hoàn toàn đúng (content_score)\n")
+			sb.WriteString("3. Đánh giá mức độ đúng của nội dung so với đáp án mẫu (nếu có), nếu không thì so với đoạn văn: 0.0 = sai/không liên quan, 1.0 = hoàn toàn đúng (content_score)\n")
 			sb.WriteString("4. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
 		} else {
 			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm bài đọc to của học sinh.\n\n")

@@ -18,6 +18,7 @@ type readingConfigJSON struct {
 	Mode            string `json:"mode"`
 	PassageMarkdown string `json:"passage_markdown"`
 	Question        string `json:"question,omitempty"`
+	ExpectedAnswer  string `json:"expected_answer,omitempty"`
 }
 
 type readingResponseJSON struct {
@@ -54,7 +55,7 @@ func (h *readingHandler) GradeWithContext(ctx context.Context, deps GradingDeps,
 		return 0, 1, "", fmt.Errorf("reading: download audio: %w", err)
 	}
 
-	return deps.GradeAudio(ctx, audioBytes, cfg.PassageMarkdown, cfg.Question)
+	return deps.GradeAudio(ctx, audioBytes, cfg.PassageMarkdown, cfg.Question, cfg.ExpectedAnswer)
 }
 
 func (h *readingHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
@@ -81,19 +82,20 @@ func (h *readingHandler) BuildResponseProto(interactionID string, responseJSON [
 	return r
 }
 
-func (h *readingHandler) ApplyConfig(p *richterv1.LessonInteraction, configJSON []byte, _ bool) bool {
+func (h *readingHandler) ApplyConfig(p *richterv1.LessonInteraction, configJSON []byte, stripAnswers bool) bool {
 	var cfg readingConfigJSON
 	if err := json.Unmarshal(configJSON, &cfg); err != nil {
 		return false
 	}
-	mode := readingModeFromString(cfg.Mode)
-	p.Config = &richterv1.LessonInteraction_Reading{
-		Reading: &richterv1.ReadingConfig{
-			Mode:            mode,
-			PassageMarkdown: cfg.PassageMarkdown,
-			Question:        cfg.Question,
-		},
+	rc := &richterv1.ReadingConfig{
+		Mode:            readingModeFromString(cfg.Mode),
+		PassageMarkdown: cfg.PassageMarkdown,
+		Question:        cfg.Question,
 	}
+	if !stripAnswers {
+		rc.ExpectedAnswer = cfg.ExpectedAnswer
+	}
+	p.Config = &richterv1.LessonInteraction_Reading{Reading: rc}
 	return true
 }
 
@@ -120,11 +122,15 @@ func (h *readingHandler) protoToJSON(rc *richterv1.ReadingConfig) ([]byte, error
 	if rc.Mode == richterv1.ReadingMode_READING_MODE_OPEN_ANSWER && strings.TrimSpace(rc.Question) == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("reading: question required for open_answer mode"))
 	}
-	return json.Marshal(readingConfigJSON{
+	cfg := readingConfigJSON{
 		Mode:            readingModeToString(rc.Mode),
 		PassageMarkdown: rc.PassageMarkdown,
 		Question:        rc.Question,
-	})
+	}
+	if rc.Mode == richterv1.ReadingMode_READING_MODE_OPEN_ANSWER {
+		cfg.ExpectedAnswer = rc.ExpectedAnswer
+	}
+	return json.Marshal(cfg)
 }
 
 func readingModeToString(m richterv1.ReadingMode) string {
@@ -162,6 +168,7 @@ type readingGeminiItem struct {
 	Mode            string  `json:"mode"`
 	PassageMarkdown string  `json:"passage_markdown"`
 	Question        string  `json:"question,omitempty"`
+	ExpectedAnswer  string  `json:"expected_answer,omitempty"`
 }
 
 func (h *readingHandler) GeminiSchema() string {
@@ -174,13 +181,14 @@ func (h *readingHandler) GeminiSchema() string {
     "start_seconds":    {"type": "number"},
     "mode":             {"type": "string", "enum": ["pronunciation", "open_answer"]},
     "passage_markdown": {"type": "string", "minLength": 20},
-    "question":         {"type": "string"}
+    "question":         {"type": "string"},
+    "expected_answer":  {"type": "string"}
   }
 }`
 }
 
 func (h *readingHandler) GeminiPromptHint() string {
-	return `Tạo bài đọc âm thanh. Với mode "pronunciation": viết đoạn văn ngắn (50-150 từ) tóm tắt nội dung transcript để học viên đọc to. Với mode "open_answer": viết câu hỏi mở và đoạn văn ngữ cảnh để học viên trả lời bằng lời nói.`
+	return `Tạo bài đọc âm thanh. Với mode "pronunciation": viết đoạn văn ngắn (50-150 từ) tóm tắt nội dung transcript để học viên đọc to. Với mode "open_answer": viết câu hỏi mở, đoạn văn ngữ cảnh, VÀ expected_answer (câu trả lời mẫu ngắn gọn dùng để chấm điểm content).`
 }
 
 func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
@@ -201,6 +209,7 @@ func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanati
 		Mode:            item.Mode,
 		PassageMarkdown: item.PassageMarkdown,
 		Question:        item.Question,
+		ExpectedAnswer:  item.ExpectedAnswer,
 	})
 	if err != nil {
 		return "", "", 0, nil, err

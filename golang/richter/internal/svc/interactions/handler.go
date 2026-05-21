@@ -12,7 +12,7 @@ type GradingDeps struct {
 	Language string
 	// GradeAudio calls the AI service to grade a spoken response.
 	// Returns (score, maxScore, feedback, err).
-	GradeAudio func(ctx context.Context, audioBytes []byte, passageMarkdown, question string) (float32, float32, string, error)
+	GradeAudio func(ctx context.Context, audioBytes []byte, passageMarkdown, question, expectedAnswer string) (float32, float32, string, error)
 	// GetAudioBytes downloads the raw audio bytes for the given S3 object key.
 	GetAudioBytes func(ctx context.Context, objectKey string) ([]byte, error)
 }

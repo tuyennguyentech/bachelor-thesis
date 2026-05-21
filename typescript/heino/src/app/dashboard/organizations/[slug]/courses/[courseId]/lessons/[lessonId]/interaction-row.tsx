@@ -124,7 +124,12 @@ export function buildProtoConfig(form: InteractionFormData) {
     const c = form.config as ReadingConfig;
     return {
       case: "reading" as const,
-      value: { mode: c.mode === "open_answer" ? 2 : 1, passageMarkdown: c.passageMarkdown, question: c.question ?? "" },
+      value: {
+        mode: c.mode === "open_answer" ? 2 : 1,
+        passageMarkdown: c.passageMarkdown,
+        question: c.question ?? "",
+        expectedAnswer: c.expectedAnswer ?? "",
+      },
     };
   }
   const c = form.config as McqConfig;

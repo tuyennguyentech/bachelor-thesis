@@ -101,6 +101,9 @@ message ReadingConfig {
   string passage_markdown = 2 [(buf.validate.field).string.min_len = 1];
   // OPEN_ANSWER only: the question the student must answer verbally.
   string question = 3;
+  // OPEN_ANSWER only: gold answer used by Gemini for content grading and
+  // shown to the student after submit. Stripped from student-facing config.
+  string expected_answer = 4;
 }
 
 message ReadingResponse {

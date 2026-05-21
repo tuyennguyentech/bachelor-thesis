@@ -28,8 +28,8 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 
 	return svcinteractions.GradingDeps{
 		Language: lang,
-		GradeAudio: func(ctx context.Context, audioBytes []byte, passageMarkdown, question string) (float32, float32, string, error) {
-			result, err := s.GradeAudio(ctx, audioBytes, lang, passageMarkdown, question)
+		GradeAudio: func(ctx context.Context, audioBytes []byte, passageMarkdown, question, expectedAnswer string) (float32, float32, string, error) {
+			result, err := s.GradeAudio(ctx, audioBytes, lang, passageMarkdown, question, expectedAnswer)
 			if err != nil {
 				// Don't fail the whole submit on AI grading error (Gemini rejection of
 				// audio format, transient API failure, etc.). Give pending credit and

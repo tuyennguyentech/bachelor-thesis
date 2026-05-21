@@ -48,6 +48,8 @@ export interface ReadingConfig {
   passageMarkdown: string;
   /** OPEN_ANSWER only: question the student must answer verbally */
   question?: string;
+  /** OPEN_ANSWER only: gold answer used for grading and revealed to student after submit */
+  expectedAnswer?: string;
 }
 
 export interface ReadingResponse {
