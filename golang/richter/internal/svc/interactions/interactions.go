@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/validate"
@@ -596,18 +597,34 @@ func (s *InteractionsSvc) PreviewGrade(
 		return nil, err
 	}
 
+	// Cap PreviewGrade at 25 s so the proxy (Caddy default 30 s) never times out
+	// the request itself — if Gemini is slow, we'd rather return a graceful
+	// "pending" result than let the FE see Code.Unavailable from a 502/504.
+	gradeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
 	var score, maxScore float32
 	var feedback string
 	if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
-		deps, derr := s.gradingDeps(ctx, lessonID)
+		deps, derr := s.gradingDeps(gradeCtx, lessonID)
 		if derr != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolve grading deps: %w", derr))
 		}
-		score, maxScore, feedback, err = cg.GradeWithContext(ctx, deps, interaction.Config, responseJSON)
+		score, maxScore, feedback, err = cg.GradeWithContext(gradeCtx, deps, interaction.Config, responseJSON)
 	} else {
 		score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
 	}
 	if err != nil {
+		// Includes context.DeadlineExceeded from the timeout above. Return a
+		// graceful result instead of CodeInternal so the FE renders feedback
+		// rather than a hard error banner. SubmitAttempt later persists the
+		// actual response and the teacher can re-grade if needed.
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return &richterv1.PreviewGradeResponse{
+				Score: 0.5, MaxScore: 1.0,
+				Feedback: "Đang chấm điểm — kết quả tạm thời sẽ được cập nhật khi bạn nộp bài.",
+			}, nil
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("grade interaction: %w", err))
 	}
 

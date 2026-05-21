@@ -1036,6 +1036,36 @@ func TestPreviewGrade(t *testing.T) {
 			t.Errorf("code: want Unauthenticated, got %v", cerr.Code())
 		}
 	})
+
+	// Regression: when the student submits a bogus audio key (e.g. an S3 object
+	// that doesn't exist or the storage container hiccups), GradeWithContext
+	// returns a graceful pending result via the S3-download fallback. The
+	// PreviewGrade RPC must surface that as HTTP 200 with score=0.5, NOT a 500
+	// that the FE renders as Code.Unavailable.
+	t.Run("graceful pending on broken audio key (no Code.Internal leak)", func(t *testing.T) {
+		res, err := studentIA.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					// Well-formed lesson-scoped key but the object does not exist
+					// in S3 — exercise the GetAudioBytes failure branch.
+					Reading: &richterv1.ReadingResponse{
+						AudioObjectKey: "lessons/" + lessonID + "/student-recordings/does-not-exist.webm",
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("expected graceful pending response, got error: %v", err)
+		}
+		if res.MaxScore != 1.0 {
+			t.Errorf("maxScore: want 1, got %v", res.MaxScore)
+		}
+		if res.Feedback == "" {
+			t.Errorf("feedback should explain the pending state, got empty")
+		}
+	})
 }
 
 // ── TestCreateManualInteractionChunkAssociation ───────────────────────────────

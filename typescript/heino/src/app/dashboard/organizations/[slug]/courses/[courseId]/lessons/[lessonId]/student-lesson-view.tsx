@@ -339,28 +339,38 @@ export function StudentLessonView({
             )}
 
             {/* Active checkpoint */}
-            {!submitted && activeInteraction && (
-              <InteractionCheckpoint
-                interaction={activeInteraction}
-                index={interactions.indexOf(activeInteraction) + 1}
-                total={interactions.length}
-                feedbackMode={feedbackMode}
-                initialResponse={responses.get(activeInteraction.id) ?? null}
-                locked={false}
-                onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
-                onContinue={() => handleContinue(activeInteraction.id)}
-                hasNextInCheckpoint={interactions.some(
-                  (it) =>
-                    it.id !== activeInteraction.id &&
-                    !passedIds.has(it.id) &&
-                    it.startSeconds > 0 &&
-                    it.startSeconds <= activeInteraction.startSeconds,
-                )}
-                token={token}
-                lessonId={lessonId}
-                isPreview={isPreview}
-              />
-            )}
+            {!submitted && activeInteraction && (() => {
+              // A "cluster" is all interactions sharing the same start_seconds as
+              // the active one (the video paused for a batch at one timestamp).
+              // We label questions by their position within this cluster — that's
+              // the unit students perceive, vs a confusing "Câu 6/9" global index.
+              const cluster = interactions
+                .filter((it) => it.startSeconds === activeInteraction.startSeconds)
+                .sort((a, b) => a.orderIndex - b.orderIndex);
+              const clusterIndex = cluster.findIndex((it) => it.id === activeInteraction.id) + 1;
+              return (
+                <InteractionCheckpoint
+                  interaction={activeInteraction}
+                  index={clusterIndex}
+                  total={cluster.length}
+                  feedbackMode={feedbackMode}
+                  initialResponse={responses.get(activeInteraction.id) ?? null}
+                  locked={false}
+                  onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
+                  onContinue={() => handleContinue(activeInteraction.id)}
+                  hasNextInCheckpoint={interactions.some(
+                    (it) =>
+                      it.id !== activeInteraction.id &&
+                      !passedIds.has(it.id) &&
+                      it.startSeconds > 0 &&
+                      it.startSeconds <= activeInteraction.startSeconds,
+                  )}
+                  token={token}
+                  lessonId={lessonId}
+                  isPreview={isPreview}
+                />
+              );
+            })()}
 
             {/* Ready to submit */}
             {readyToSubmit && !activeInteraction && (

@@ -27,7 +27,16 @@
   }
 
   handle_path /api/richter/* {
-    reverse_proxy richter:8080
+    # Some richter RPCs make blocking calls to Gemini (~10–25s for reading audio
+    # grading). Default Caddy read timeouts can cut off slow responses; set an
+    # explicit ceiling that comfortably exceeds the in-process 25s timeout
+    # PreviewGrade enforces, so the timeout always surfaces as a graceful
+    # in-band response (HTTP 200) rather than a 502 proxy error.
+    reverse_proxy richter:8080 {
+      transport http {
+        read_timeout 60s
+      }
+    }
   }
 
   reverse_proxy heino:3000

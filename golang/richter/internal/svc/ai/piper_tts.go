@@ -65,14 +65,22 @@ func (c *PiperTTSClient) Synthesise(ctx context.Context, text, language string) 
 	return wav, nil
 }
 
-// synthesiseAndEmbed synthesises audio from text via Piper TTS, uploads to S3, and
-// returns updated configJSON with the new audio_object_key embedded.
+// synthesiseAndEmbed synthesises audio from text via Piper TTS, uploads to S3
+// under `lessons/<lessonID>/ai-audio/<uuid>.wav`, and returns updated configJSON
+// with the new audio_object_key embedded.
+//
+// The lesson-scoped key prefix is required so that StorageSvc.orgIDForKey can
+// resolve the owning org for authorization; non-scoped prefixes like
+// `ai-generated/…` were rejected by the storage authz layer.
 func (s *AISvc) synthesiseAndEmbed(
 	ctx context.Context,
 	prov svcinteractions.TTSProvider,
 	configJSON []byte,
-	text, language string,
+	text, language, lessonID string,
 ) ([]byte, error) {
+	if lessonID == "" {
+		return nil, fmt.Errorf("TTS: lessonID required for lesson-scoped audio key")
+	}
 	ttsCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
@@ -81,7 +89,7 @@ func (s *AISvc) synthesiseAndEmbed(
 		return nil, fmt.Errorf("TTS synthesise: %w", err)
 	}
 
-	key := "ai-generated/audio/" + uuid.New().String() + ".wav"
+	key := "lessons/" + lessonID + "/ai-audio/" + uuid.New().String() + ".wav"
 	_, err = s.s3client.PutObject(ctx, s.s3cfg.Bucket, key, bytes.NewReader(wav), int64(len(wav)), minio.PutObjectOptions{
 		ContentType: "audio/wav",
 	})

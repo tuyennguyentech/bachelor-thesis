@@ -1887,7 +1887,7 @@ Trả về JSON object: {"items": [...]}`,
 		}
 		if ttsProv, ok := generator.(svcinteractions.TTSProvider); ok {
 			if text := ttsProv.AudioSourceText(configJSON); text != "" {
-				configJSON, err = s.synthesiseAndEmbed(ctx, ttsProv, configJSON, text, lessonLanguage)
+				configJSON, err = s.synthesiseAndEmbed(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
 				if err != nil {
 					s.log.WarnContext(ctx, "ai: TTS synthesis failed, skipping item", "index", i, "err", err)
 					continue

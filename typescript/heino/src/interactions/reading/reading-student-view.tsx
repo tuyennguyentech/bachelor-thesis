@@ -63,22 +63,36 @@ export function ReadingStudentView({
     }
     let cancelled = false;
     setGradeState({ phase: "grading" });
-    interactionClient
-      .previewGrade({
-        lessonId,
-        response: {
-          interactionId,
-          response: { case: "reading", value: { audioObjectKey } },
-        },
-      })
-      .then((res) => {
+
+    // Retry once on Code.Unavailable / DeadlineExceeded — these usually mean the
+    // proxy briefly couldn't reach richter (dev rebuild) or Gemini was slow.
+    // After the retry, surface the friendly error message.
+    async function gradeWithRetry(attempt = 0): Promise<void> {
+      try {
+        const res = await interactionClient.previewGrade({
+          lessonId,
+          response: {
+            interactionId,
+            response: { case: "reading", value: { audioObjectKey } },
+          },
+        });
         if (cancelled) return;
         setGradeState({ phase: "done", score: res.score, maxScore: res.maxScore, feedback: res.feedback });
-      })
-      .catch((err) => {
+      } catch (err) {
         if (cancelled) return;
+        const isTransient =
+          err instanceof ConnectError &&
+          (err.code === Code.Unavailable || err.code === Code.DeadlineExceeded);
+        if (isTransient && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (cancelled) return;
+          return gradeWithRetry(1);
+        }
         setGradeState({ phase: "error", message: previewGradeErrorMessage(err) });
-      });
+      }
+    }
+    void gradeWithRetry();
+
     return () => {
       cancelled = true;
     };

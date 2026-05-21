@@ -52,7 +52,11 @@ func (h *readingHandler) GradeWithContext(ctx context.Context, deps GradingDeps,
 
 	audioBytes, err := deps.GetAudioBytes(ctx, resp.AudioObjectKey)
 	if err != nil {
-		return 0, 1, "", fmt.Errorf("reading: download audio: %w", err)
+		// Symmetric with the Gemini fallback in grading_deps.go: an S3 hiccup must
+		// not 500 the whole grade request, otherwise the student sees a hard error
+		// for what is really a transient infra issue. Pending credit + teacher
+		// review keeps the lesson flow alive.
+		return 0.5, 1.0, "Hệ thống chưa tải được bản ghi âm để chấm. Giáo viên sẽ xem lại.", nil
 	}
 
 	return deps.GradeAudio(ctx, audioBytes, cfg.PassageMarkdown, cfg.Question, cfg.ExpectedAnswer)

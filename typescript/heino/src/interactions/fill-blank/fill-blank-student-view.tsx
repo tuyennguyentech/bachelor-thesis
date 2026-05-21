@@ -65,7 +65,7 @@ export function FillBlankStudentView({
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm leading-relaxed">
+      <p className="text-sm leading-relaxed flex flex-wrap items-baseline gap-y-1.5">
         {parts.map((part, pi) => {
           if (part.type === "text") return <span key={pi}>{part.value}</span>;
           const idx = part.index;
@@ -73,7 +73,10 @@ export function FillBlankStudentView({
           const correct = revealNow ? isCorrectAnswer(config.blanks[idx], val) : null;
           const hint = config.blanks[idx]?.hint;
           const placeholder = hint || `(${idx + 1})`;
-          const minCh = Math.max(6, Math.min(28, placeholder.length + 1));
+          // Width = exact hint length so the placeholder is always fully visible.
+          // No cap: prefer the input wrapping to the next line (parent flex-wrap)
+          // over truncating the hint, which leaves the student guessing.
+          const widthCh = Math.max(6, placeholder.length + 2);
           return (
             <span key={pi} className="inline-flex items-center gap-0.5 mx-0.5 align-baseline">
               <input
@@ -83,7 +86,8 @@ export function FillBlankStudentView({
                 onChange={(e) => handleChange(idx, e.target.value)}
                 disabled={submitted || locked}
                 placeholder={placeholder}
-                style={{ minWidth: `${minCh}ch` }}
+                title={placeholder}
+                style={{ width: `${widthCh}ch` }}
                 className={`rounded border px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring
                   ${correct === true ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
                   : correct === false ? "border-red-400 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
