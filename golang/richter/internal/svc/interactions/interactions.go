@@ -541,16 +541,6 @@ func (s *InteractionsSvc) PreviewGrade(
 	if err != nil {
 		return nil, err
 	}
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
-		return nil, err
-	}
-
 	respInput := req.GetResponse()
 	if respInput == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("response required"))
@@ -559,15 +549,41 @@ func (s *InteractionsSvc) PreviewGrade(
 	if err != nil {
 		return nil, err
 	}
-	interaction, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
-		return q.GetLessonInteractionByID(ctx, interactionID)
+
+	type lookup struct {
+		orgID       pgtype.UUID
+		lesson      gen.Lesson
+		interaction gen.LessonInteraction
+	}
+	got, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (lookup, error) {
+		orgID, err := q.GetOrgIDByLessonID(ctx, lessonID)
+		if err != nil {
+			return lookup{}, err
+		}
+		lesson, err := q.GetLessonByID(ctx, lessonID)
+		if err != nil {
+			return lookup{}, err
+		}
+		interaction, err := q.GetLessonInteractionByID(ctx, interactionID)
+		if err != nil {
+			return lookup{}, err
+		}
+		return lookup{orgID: orgID, lesson: lesson, interaction: interaction}, nil
 	})
 	if err != nil {
 		return nil, svc.ConnectDBError(err)
 	}
-	if interaction.LessonID.String() != lessonID.String() {
+	if _, err := s.authz.RequireOrgMember(ctx, got.orgID); err != nil {
+		return nil, err
+	}
+	if got.lesson.FeedbackMode != "after_each" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("preview grading only allowed when feedback_mode is after_each"))
+	}
+	if got.interaction.LessonID.String() != lessonID.String() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("interaction does not belong to lesson"))
 	}
+	interaction := got.interaction
 
 	kind := dbStringToKind(interaction.Kind)
 	h := Get(kind)

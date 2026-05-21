@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 type GradeState =
   | { phase: "idle" }
   | { phase: "grading" }
-  | { phase: "done"; score: number; feedback: string }
+  | { phase: "done"; score: number; maxScore: number; feedback: string }
   | { phase: "error"; message: string };
 
 export function ReadingStudentView({
@@ -55,7 +55,7 @@ export function ReadingStudentView({
       })
       .then((res) => {
         if (cancelled) return;
-        setGradeState({ phase: "done", score: res.score, feedback: res.feedback });
+        setGradeState({ phase: "done", score: res.score, maxScore: res.maxScore, feedback: res.feedback });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -112,7 +112,9 @@ export function ReadingStudentView({
         <div className="flex flex-col gap-2">
           <p className="text-xs">
             <span className="text-muted-foreground">Điểm: </span>
-            <span className="font-medium">{Math.round(gradeState.score * 100)}%</span>
+            <span className="font-medium">
+              {gradeState.maxScore > 0 ? Math.round((gradeState.score / gradeState.maxScore) * 100) : 0}%
+            </span>
           </p>
           {gradeState.feedback && (
             <div className="rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 flex gap-2">

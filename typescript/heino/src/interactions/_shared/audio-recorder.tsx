@@ -121,6 +121,7 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
     setDuration(0);
     setErrorMsg("");
     setState("idle");
+    onComplete("");
   }
 
   const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
