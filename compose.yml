@@ -85,15 +85,19 @@ services:
       retries: 3
       start_period: 60s
 
-  vieneu-tts:
-    image: pnnbao/vieneu-tts:latest
+  piper-tts:
+    build: infra/piper
+    environment:
+      PIPER_MODELS_DIR: /models
+    volumes:
+      - piper_models:/models
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://0.0.0.0:8200/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 300s
 
   richter:
     image: busybox:musl
@@ -108,3 +112,4 @@ volumes:
   caddy_config:
   storage_data:
   hf_hub_cache:
+  piper_models:

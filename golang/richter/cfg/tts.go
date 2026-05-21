@@ -7,13 +7,13 @@ import (
 )
 
 type TTSCfg struct {
-	// Endpoint is the base URL of the VieNeu-TTS-v2 service.
-	// Defaults to http://vieneu-tts:8200.
+	// Endpoint is the base URL of the Piper TTS service.
+	// Defaults to http://piper-tts:5000.
 	Endpoint string `mapstructure:"endpoint"`
 }
 
 func NewTTSCfg() TTSCfg {
-	return TTSCfg{Endpoint: "http://vieneu-tts:8200"}
+	return TTSCfg{Endpoint: "http://piper-tts:5000"}
 }
 
 func NewTTSCfgSvc(i do.Injector) (*TTSCfg, error) {

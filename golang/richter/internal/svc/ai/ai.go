@@ -85,7 +85,7 @@ type AISvc struct {
 	geminiCfg   *cfg.GeminiCfg
 	whisperCfg  *cfg.WhisperCfg
 	ttsCfg      *cfg.TTSCfg
-	ttsClient   *VieNeuTTSClient
+	ttsClient   *PiperTTSClient
 }
 
 // FDB namespace constants.
@@ -142,7 +142,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	return &AISvc{
 		pg: pg, kv: kvSvc, log: l, authz: az,
 		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, whisperCfg: whisperCfg,
-		ttsCfg: ttsCfg, ttsClient: newVieNeuTTSClient(ttsCfg.Endpoint),
+		ttsCfg: ttsCfg, ttsClient: newPiperTTSClient(ttsCfg.Endpoint),
 	}, nil
 }
 
