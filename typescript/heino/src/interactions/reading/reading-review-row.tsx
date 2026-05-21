@@ -13,6 +13,7 @@ export function ReadingReviewRow({
   config,
   response,
   score,
+  feedback,
   feedbackMode,
   token = "",
 }: ReviewRowProps<ReadingConfig, ReadingResponse>) {
@@ -63,6 +64,18 @@ export function ReadingReviewRow({
           <p className="text-xs text-muted-foreground italic">Đang tải bản ghi âm…</p>
         ) : (
           <p className="text-xs text-muted-foreground italic">Chưa có bản ghi âm.</p>
+        )}
+        {canReveal && response?.audioObjectKey && (
+          <p className="text-xs">
+            <span className="text-muted-foreground">Điểm: </span>
+            <span className="font-medium">{Math.round(score * 100)}%</span>
+          </p>
+        )}
+        {canReveal && feedback && (
+          <div className="rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 flex gap-2">
+            <span className="shrink-0 text-sm">💬</span>
+            <p className="text-xs text-blue-700 dark:text-blue-300 whitespace-pre-line">{feedback}</p>
+          </div>
         )}
       </div>
     </div>

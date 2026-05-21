@@ -15,6 +15,7 @@ export interface QuizResult {
     response: any; // McqResponse | FillBlankResponse | null
     score: number;
     maxScore: number;
+    feedback?: string;
   }[];
 }
 
@@ -95,6 +96,7 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
                   config={config}
                   response={respItem?.response}
                   score={respItem?.score ?? 0}
+                  feedback={respItem?.feedback}
                   feedbackMode={feedbackMode}
                   token={token}
                 />

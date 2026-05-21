@@ -16,7 +16,7 @@ import type { QuizResult } from "./lesson-result";
 import { InteractionCheckpoint } from "./interaction-checkpoint";
 import { CheckpointMarkerStrip } from "./checkpoint-marker-strip";
 import { getRenderer, extractConfig, extractLocalResponse } from "@/interactions/registry";
-import type { FillBlankResponse, McqResponse } from "@/interactions/types";
+import type { FillBlankResponse, ListeningResponse, McqResponse, ReadingResponse } from "@/interactions/types";
 
 interface Props {
   videoUrl: string;
@@ -206,23 +206,45 @@ export function StudentLessonView({
         } else {
           const protoResponses = interactions.map((it) => {
             const localResp = responses.get(it.id);
-            if (it.config.case === "fillBlank") {
-              return {
-                interactionId: it.id,
-                response: {
-                  case: "fillBlank" as const,
-                  value: { answers: (localResp as FillBlankResponse | undefined)?.answers ?? [] },
-                },
-              };
+            switch (it.config.case) {
+              case "fillBlank":
+                return {
+                  interactionId: it.id,
+                  response: {
+                    case: "fillBlank" as const,
+                    value: { answers: (localResp as FillBlankResponse | undefined)?.answers ?? [] },
+                  },
+                };
+              case "reading":
+                return {
+                  interactionId: it.id,
+                  response: {
+                    case: "reading" as const,
+                    value: { audioObjectKey: (localResp as ReadingResponse | undefined)?.audioObjectKey ?? "" },
+                  },
+                };
+              case "listening": {
+                const r = localResp as ListeningResponse | undefined;
+                return {
+                  interactionId: it.id,
+                  response: {
+                    case: "listening" as const,
+                    value: {
+                      transcription: r?.transcription ?? "",
+                      comprehensionAnswers: r?.comprehensionAnswers ?? [],
+                    },
+                  },
+                };
+              }
+              default:
+                return {
+                  interactionId: it.id,
+                  response: {
+                    case: "mcqSelected" as const,
+                    value: (localResp as McqResponse | undefined)?.selected ?? 0,
+                  },
+                };
             }
-            // default: MCQ
-            return {
-              interactionId: it.id,
-              response: {
-                case: "mcqSelected" as const,
-                value: (localResp as McqResponse | undefined)?.selected ?? 0,
-              },
-            };
           });
           const res = await interactionClient.submitAttempt({ lessonId, responses: protoResponses });
           const attempt = res.attempt;
@@ -235,6 +257,7 @@ export function StudentLessonView({
                 response: extractLocalResponse(r),
                 score: r.score,
                 maxScore: r.maxScore,
+                feedback: r.feedback,
               })),
             });
           }

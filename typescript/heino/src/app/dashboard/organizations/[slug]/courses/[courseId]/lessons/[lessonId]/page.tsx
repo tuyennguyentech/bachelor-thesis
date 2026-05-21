@@ -145,6 +145,7 @@ export default async function LessonDetailPage({
           response: extractLocalResponse(r),
           score: r.score,
           maxScore: r.maxScore,
+          feedback: r.feedback,
         })),
       }
     : null;

@@ -84,6 +84,8 @@ export interface ReviewRowProps<Config, Response> {
   config: Config;
   response: Response | undefined;
   score: number;
+  /** Server-generated feedback text (e.g. AI grading remarks for reading). Empty for kinds without AI grading. */
+  feedback?: string;
   feedbackMode: FeedbackMode;
   /** Optional: auth token — used by review rows that fetch presigned URLs (e.g. reading audio) */
   token?: string;
