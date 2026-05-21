@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Loader2Icon } from "lucide-react";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { FeedbackMode, InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import type { StudentViewProps, ReadingConfig, ReadingResponse } from "../types";
@@ -15,6 +16,21 @@ type GradeState =
   | { phase: "done"; score: number; maxScore: number; feedback: string }
   | { phase: "error"; message: string };
 
+function previewGradeErrorMessage(err: unknown): string {
+  if (err instanceof ConnectError) {
+    switch (err.code) {
+      case Code.Unavailable:
+      case Code.DeadlineExceeded:
+        return "Hệ thống AI tạm thời quá tải, hãy thử ghi âm lại.";
+      case Code.FailedPrecondition:
+        return "Chưa thể chấm điểm ngay — lớp học chưa bật chế độ phản hồi tức thì.";
+      default:
+        return "Chưa chấm được phần ghi âm này. Giáo viên sẽ xem lại khi bạn nộp bài.";
+    }
+  }
+  return "Chưa chấm được phần ghi âm này. Giáo viên sẽ xem lại khi bạn nộp bài.";
+}
+
 export function ReadingStudentView({
   config,
   feedbackMode,
@@ -26,11 +42,13 @@ export function ReadingStudentView({
   token = "",
   lessonId = "",
   interactionId = "",
+  isPreview = false,
 }: StudentViewProps<ReadingConfig, ReadingResponse>) {
   const interactionClient = useRichterWebClient(InteractionService, token);
   const audioObjectKey = initialResponse?.audioObjectKey ?? "";
   const hasRecording = audioObjectKey !== "";
-  const wantsInlineGrade = feedbackMode === FeedbackMode.AFTER_EACH && lessonId !== "" && interactionId !== "";
+  const wantsInlineGrade =
+    feedbackMode === FeedbackMode.AFTER_EACH && lessonId !== "" && interactionId !== "" && !isPreview;
 
   const [gradeState, setGradeState] = useState<GradeState>({ phase: "idle" });
 
@@ -59,7 +77,7 @@ export function ReadingStudentView({
       })
       .catch((err) => {
         if (cancelled) return;
-        setGradeState({ phase: "error", message: err instanceof Error ? err.message : "Chấm điểm thất bại" });
+        setGradeState({ phase: "error", message: previewGradeErrorMessage(err) });
       });
     return () => {
       cancelled = true;
@@ -104,22 +122,22 @@ export function ReadingStudentView({
 
       {/* AFTER_EACH inline grade */}
       {wantsInlineGrade && gradeState.phase === "grading" && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div data-testid="reading-grading" className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2Icon className="size-3.5 animate-spin" /> Đang chấm điểm…
         </div>
       )}
       {wantsInlineGrade && gradeState.phase === "done" && (
-        <div className="flex flex-col gap-2">
+        <div data-testid="reading-grade-done" className="flex flex-col gap-2">
           <p className="text-xs">
             <span className="text-muted-foreground">Điểm: </span>
-            <span className="font-medium">
+            <span data-testid="reading-grade-score" className="font-medium">
               {gradeState.maxScore > 0 ? Math.round((gradeState.score / gradeState.maxScore) * 100) : 0}%
             </span>
           </p>
           {gradeState.feedback && (
             <div className="rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 flex gap-2">
               <span className="shrink-0 text-sm">💬</span>
-              <p className="text-xs text-blue-700 dark:text-blue-300 whitespace-pre-line">{gradeState.feedback}</p>
+              <p data-testid="reading-grade-feedback" className="text-xs text-blue-700 dark:text-blue-300 whitespace-pre-line">{gradeState.feedback}</p>
             </div>
           )}
           {config.mode === "open_answer" && config.expectedAnswer && (
@@ -131,7 +149,7 @@ export function ReadingStudentView({
         </div>
       )}
       {wantsInlineGrade && gradeState.phase === "error" && (
-        <p className="text-xs text-destructive">⚠ {gradeState.message}</p>
+        <p data-testid="reading-grade-error" className="text-xs text-destructive">⚠ {gradeState.message}</p>
       )}
 
       {/* Continue button */}

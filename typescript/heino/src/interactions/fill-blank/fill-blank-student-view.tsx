@@ -72,6 +72,8 @@ export function FillBlankStudentView({
           const val = answers[idx] ?? "";
           const correct = revealNow ? isCorrectAnswer(config.blanks[idx], val) : null;
           const hint = config.blanks[idx]?.hint;
+          const placeholder = hint || `(${idx + 1})`;
+          const minCh = Math.max(6, Math.min(28, placeholder.length + 1));
           return (
             <span key={pi} className="inline-flex items-center gap-0.5 mx-0.5 align-baseline">
               <input
@@ -80,8 +82,9 @@ export function FillBlankStudentView({
                 value={val}
                 onChange={(e) => handleChange(idx, e.target.value)}
                 disabled={submitted || locked}
-                placeholder={hint || `(${idx + 1})`}
-                className={`rounded border px-1.5 py-0.5 text-sm w-28 focus:outline-none focus:ring-1 focus:ring-ring
+                placeholder={placeholder}
+                style={{ minWidth: `${minCh}ch` }}
+                className={`rounded border px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring
                   ${correct === true ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
                   : correct === false ? "border-red-400 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
                   : submitted ? "border-border bg-muted text-foreground"

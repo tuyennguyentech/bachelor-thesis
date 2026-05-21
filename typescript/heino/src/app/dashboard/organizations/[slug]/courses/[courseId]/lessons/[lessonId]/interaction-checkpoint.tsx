@@ -19,6 +19,7 @@ interface Props {
   hasNextInCheckpoint?: boolean;
   token?: string;
   lessonId?: string;
+  isPreview?: boolean;
 }
 
 function formatTime(seconds: number) {
@@ -39,6 +40,7 @@ export function InteractionCheckpoint({
   hasNextInCheckpoint,
   token,
   lessonId,
+  isPreview,
 }: Props) {
   let renderer;
   try {
@@ -90,6 +92,7 @@ export function InteractionCheckpoint({
         token={token}
         lessonId={lessonId}
         interactionId={interaction.id}
+        isPreview={isPreview}
       />
     </div>
   );

@@ -74,6 +74,9 @@ export interface StudentViewProps<Config, Response> {
   /** Optional: interaction UUID — used by renderers that need to call back to the server
    * for this specific interaction (e.g. reading AFTER_EACH inline grading). */
   interactionId?: string;
+  /** Optional: true when the teacher is previewing the lesson. Renderers that would
+   * otherwise burn AI quota (e.g. reading PreviewGrade) should skip server calls. */
+  isPreview?: boolean;
 }
 
 export interface EditorViewProps<Config> {

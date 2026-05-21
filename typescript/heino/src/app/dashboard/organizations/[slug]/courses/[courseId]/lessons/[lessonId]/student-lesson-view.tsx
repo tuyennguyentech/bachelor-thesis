@@ -358,6 +358,7 @@ export function StudentLessonView({
                 )}
                 token={token}
                 lessonId={lessonId}
+                isPreview={isPreview}
               />
             )}
 

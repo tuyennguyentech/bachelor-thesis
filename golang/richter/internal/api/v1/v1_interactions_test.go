@@ -5,6 +5,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -876,6 +877,165 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	if openForStudent.GetReading().GetExpectedAnswer() != "" {
 		t.Errorf("expected_answer leaked to student: %q", openForStudent.GetReading().GetExpectedAnswer())
 	}
+}
+
+// ── TestPreviewGrade ──────────────────────────────────────────────────────────
+
+// TestPreviewGrade verifies the PreviewGrade RPC used by AFTER_EACH feedback mode:
+//   - succeeds when lesson.feedback_mode = AFTER_EACH (returns score/feedback)
+//   - rejects with FailedPrecondition when feedback_mode != AFTER_EACH
+//   - rejects when the interaction does not belong to the requested lesson
+//   - rejects unauthenticated callers
+func TestPreviewGrade(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
+	if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgID, UserId: studentID,
+		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	}); err != nil {
+		t.Fatalf("add student: %v", err)
+	}
+	courseRes, _ := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{OrganizationId: orgID, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle()})
+	moduleRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
+	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
+	lessonID := lessonRes.Lesson.Id
+
+	createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+		LessonId:     lessonID,
+		Prompt:       "Read aloud",
+		StartSeconds: 0,
+		Config: &richterv1.CreateManualInteractionRequest_Reading{
+			Reading: &richterv1.ReadingConfig{
+				Mode:            richterv1.ReadingMode_READING_MODE_PRONUNCIATION,
+				PassageMarkdown: "Hello world.",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create reading interaction: %v", err)
+	}
+	interactionID := createRes.Interaction.Id
+
+	studentToken := getUserToken(t, url, studentEmail, studentPassword)
+	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
+
+	// Default lessons created without feedback_mode = after_each → PreviewGrade
+	// must reject with FailedPrecondition so students can't bypass HIDDEN /
+	// AFTER_SUBMIT modes via devtools.
+	t.Run("rejects when feedback_mode is not after_each", func(t *testing.T) {
+		_, err := studentIA.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		var cerr *connect.Error
+		if !errors.As(err, &cerr) {
+			t.Fatalf("expected connect error, got %v", err)
+		}
+		if cerr.Code() != connect.CodeFailedPrecondition {
+			t.Errorf("code: want FailedPrecondition, got %v", cerr.Code())
+		}
+	})
+
+	// Switch lesson to AFTER_EACH and retry.
+	if _, err := c.lessons.UpdateLessonFeedbackMode(ctx, &richterv1.UpdateLessonFeedbackModeRequest{
+		Id: lessonID, FeedbackMode: richterv1.FeedbackMode_FEEDBACK_MODE_AFTER_EACH,
+	}); err != nil {
+		t.Fatalf("update feedback_mode: %v", err)
+	}
+
+	t.Run("succeeds when feedback_mode is after_each", func(t *testing.T) {
+		// Empty audio key — grading_deps short-circuits with score 0/1 and the
+		// "Chưa có bản ghi âm." message, so no real S3 / Gemini call happens.
+		res, err := studentIA.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PreviewGrade: %v", err)
+		}
+		if res.MaxScore != 1.0 {
+			t.Errorf("maxScore: want 1, got %v", res.MaxScore)
+		}
+		if res.Feedback == "" {
+			t.Errorf("feedback should be populated for empty-audio fallback path, got empty")
+		}
+	})
+
+	t.Run("rejects when interaction belongs to a different lesson", func(t *testing.T) {
+		otherLesson, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+			ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 1,
+		})
+		if _, err := c.lessons.UpdateLessonFeedbackMode(ctx, &richterv1.UpdateLessonFeedbackModeRequest{
+			Id: otherLesson.Lesson.Id, FeedbackMode: richterv1.FeedbackMode_FEEDBACK_MODE_AFTER_EACH,
+		}); err != nil {
+			t.Fatalf("update other lesson feedback_mode: %v", err)
+		}
+		_, err := studentIA.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
+			LessonId: otherLesson.Lesson.Id, // wrong lesson for this interaction
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		var cerr *connect.Error
+		if !errors.As(err, &cerr) {
+			t.Fatalf("expected connect error, got %v", err)
+		}
+		if cerr.Code() != connect.CodeInvalidArgument {
+			t.Errorf("code: want InvalidArgument, got %v", cerr.Code())
+		}
+	})
+
+	t.Run("rejects unauthenticated callers", func(t *testing.T) {
+		anon := richterv1connect.NewInteractionServiceClient(http.DefaultClient, url)
+		_, err := anon.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		var cerr *connect.Error
+		if !errors.As(err, &cerr) {
+			t.Fatalf("expected connect error, got %v", err)
+		}
+		if cerr.Code() != connect.CodeUnauthenticated {
+			t.Errorf("code: want Unauthenticated, got %v", cerr.Code())
+		}
+	})
 }
 
 // ── TestCreateManualInteractionChunkAssociation ───────────────────────────────
