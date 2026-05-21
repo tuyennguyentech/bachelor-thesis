@@ -89,6 +89,7 @@ export function InteractionCheckpoint({
         hasNextInCheckpoint={hasNextInCheckpoint}
         token={token}
         lessonId={lessonId}
+        interactionId={interaction.id}
       />
     </div>
   );

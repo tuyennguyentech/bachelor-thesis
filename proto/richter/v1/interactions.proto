@@ -274,6 +274,20 @@ message ListAttemptsResponse {
   int32 total = 2;
 }
 
+// Used by AFTER_EACH feedback for interactions where grading requires a server
+// roundtrip (e.g. reading audio → Gemini). The result is computed but not
+// persisted — final scores still come from SubmitAttempt.
+message PreviewGradeRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  AttemptResponseInput response = 2;
+}
+
+message PreviewGradeResponse {
+  float score = 1;
+  float max_score = 2;
+  string feedback = 3;
+}
+
 service InteractionService {
   // Teacher: list all interactions for a lesson.
   rpc ListLessonInteractions(ListLessonInteractionsRequest) returns (ListLessonInteractionsResponse) {}
@@ -292,4 +306,8 @@ service InteractionService {
   rpc SubmitAttempt(SubmitAttemptRequest) returns (SubmitAttemptResponse) {}
   // Student: retrieve a previously submitted attempt (may be nil if not yet submitted).
   rpc GetMyAttempt(GetMyAttemptRequest) returns (GetMyAttemptResponse) {}
+  // Student: preview the grade for a single response without persisting. Used
+  // by AFTER_EACH feedback mode when grading needs a server roundtrip (e.g.
+  // reading audio). Final attempt scores still come from SubmitAttempt.
+  rpc PreviewGrade(PreviewGradeRequest) returns (PreviewGradeResponse) {}
 }

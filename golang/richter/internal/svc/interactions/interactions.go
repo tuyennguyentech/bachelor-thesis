@@ -525,6 +525,79 @@ func (s *InteractionsSvc) SubmitAttempt(
 	}, nil
 }
 
+// ── PreviewGrade ──────────────────────────────────────────────────────────────
+
+// PreviewGrade grades a single response without persisting it. Used by the
+// AFTER_EACH feedback flow on the student side for interactions whose grading
+// requires a server roundtrip (e.g. reading audio → Gemini).
+func (s *InteractionsSvc) PreviewGrade(
+	ctx context.Context,
+	req *richterv1.PreviewGradeRequest,
+) (*richterv1.PreviewGradeResponse, error) {
+	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		return q.GetOrgIDByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+		return nil, err
+	}
+
+	respInput := req.GetResponse()
+	if respInput == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("response required"))
+	}
+	interactionID, err := svc.ParseUUID(respInput.GetInteractionId())
+	if err != nil {
+		return nil, err
+	}
+	interaction, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
+		return q.GetLessonInteractionByID(ctx, interactionID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if interaction.LessonID.String() != lessonID.String() {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("interaction does not belong to lesson"))
+	}
+
+	kind := dbStringToKind(interaction.Kind)
+	h := Get(kind)
+	if h == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for interaction kind %q", interaction.Kind))
+	}
+
+	responseJSON, err := h.ResponseProtoToJSON(respInput)
+	if err != nil {
+		return nil, err
+	}
+
+	var score, maxScore float32
+	var feedback string
+	if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
+		deps, derr := s.gradingDeps(ctx, lessonID)
+		if derr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolve grading deps: %w", derr))
+		}
+		score, maxScore, feedback, err = cg.GradeWithContext(ctx, deps, interaction.Config, responseJSON)
+	} else {
+		score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("grade interaction: %w", err))
+	}
+
+	return &richterv1.PreviewGradeResponse{Score: score, MaxScore: maxScore, Feedback: feedback}, nil
+}
+
 // ── GetMyAttempt ──────────────────────────────────────────────────────────────
 
 func (s *InteractionsSvc) GetMyAttempt(

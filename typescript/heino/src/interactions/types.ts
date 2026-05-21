@@ -71,6 +71,9 @@ export interface StudentViewProps<Config, Response> {
   token?: string;
   /** Optional: lesson UUID — used by renderers that upload student recordings */
   lessonId?: string;
+  /** Optional: interaction UUID — used by renderers that need to call back to the server
+   * for this specific interaction (e.g. reading AFTER_EACH inline grading). */
+  interactionId?: string;
 }
 
 export interface EditorViewProps<Config> {
