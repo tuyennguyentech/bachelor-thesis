@@ -31,7 +31,12 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 		GradeAudio: func(ctx context.Context, audioBytes []byte, passageMarkdown, question string) (float32, float32, string, error) {
 			result, err := s.GradeAudio(ctx, audioBytes, lang, passageMarkdown, question)
 			if err != nil {
-				return 0, 1, "", fmt.Errorf("AI audio grade: %w", err)
+				// Don't fail the whole submit on AI grading error (Gemini rejection of
+				// audio format, transient API failure, etc.). Give pending credit and
+				// leave a fallback message so the teacher can manually review.
+				s.log.WarnContext(ctx, "AI audio grading failed, falling back to pending credit", "err", err)
+				const fallback = "Hệ thống AI tạm thời chưa chấm được phần ghi âm này. Giáo viên sẽ xem lại."
+				return 0.5, 1.0, fallback, nil
 			}
 			// Compute final score:
 			// - PRONUNCIATION mode (question empty): score = pronunciation only
@@ -42,7 +47,11 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 			} else {
 				score = (result.PronunciationScore + result.ContentScore) / 2
 			}
-			return score, 1.0, result.Feedback, nil
+			feedback := result.Feedback
+			if result.Transcript != "" {
+				feedback = "Bạn đã nói: \"" + result.Transcript + "\"\n\n" + feedback
+			}
+			return score, 1.0, feedback, nil
 		},
 		GetAudioBytes: func(ctx context.Context, objectKey string) ([]byte, error) {
 			return s.downloadAudio(ctx, objectKey)
