@@ -877,6 +877,44 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	if openForStudent.GetReading().GetExpectedAnswer() != "" {
 		t.Errorf("expected_answer leaked to student: %q", openForStudent.GetReading().GetExpectedAnswer())
 	}
+
+	// Regression: an audio key whose S3 object doesn't exist must not abort the
+	// whole SubmitAttempt (we lost an entire student attempt on every reading
+	// recording until this point). The per-interaction grader now falls back
+	// to pending credit + a teacher-review feedback string.
+	t.Run("SubmitAttempt is resilient to a broken reading audio key", func(t *testing.T) {
+		studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: studentID,
+			Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+			Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add second student: %v", err)
+		}
+		brokenStudentToken := getUserToken(t, url, studentEmail, studentPassword)
+		brokenStudentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(brokenStudentToken), url)
+
+		res, err := brokenStudentIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId: lessonID,
+			Responses: []*richterv1.AttemptResponseInput{{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{
+						AudioObjectKey: "lessons/" + lessonID + "/student-recordings/does-not-exist.webm",
+					},
+				},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("SubmitAttempt should not fail when grading falls back; got %v", err)
+		}
+		if res.Attempt == nil || len(res.Attempt.Responses) != 1 {
+			t.Fatalf("expected 1 graded response, got %+v", res.Attempt)
+		}
+		if res.Attempt.Responses[0].Feedback == "" {
+			t.Errorf("expected fallback feedback to be populated, got empty")
+		}
+	})
 }
 
 // ── TestPreviewGrade ──────────────────────────────────────────────────────────

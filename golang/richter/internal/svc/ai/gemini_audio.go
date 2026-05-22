@@ -39,18 +39,14 @@ func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passa
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.ResponseMIMEType = "application/json"
 
-	// Build the grading schema
-	schema := `{
-  "type": "object",
-  "required": ["transcript", "pronunciation_score", "feedback"],
-  "properties": {
-    "transcript":          {"type": "string"},
-    "pronunciation_score": {"type": "number", "minimum": 0, "maximum": 1},
-    "content_score":       {"type": "number", "minimum": 0, "maximum": 1},
-    "feedback":            {"type": "string"}
-  }
-}`
-	model.ResponseSchema = mustParseSchema(schema)
+	// Build the response schema with the SDK's typed struct. Earlier we tried
+	// json.Unmarshal-ing a JSON-Schema-style string into genai.Schema, but
+	// genai.Schema.Type is an int enum (not a string), and the schema had no
+	// minimum/maximum fields — the unmarshal failed and mustParseSchema's
+	// panic() killed the request mid-flight (net/http returned 500/empty,
+	// Caddy surfaced 502, the FE rendered "[unavailable]"). Building the
+	// schema as Go literals removes the entire failure mode.
+	model.ResponseSchema = audioGradingResponseSchema()
 
 	prompt := buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer)
 
@@ -177,10 +173,20 @@ func clamp01(v float32) float32 {
 	return v
 }
 
-func mustParseSchema(raw string) *genai.Schema {
-	var s genai.Schema
-	if err := json.Unmarshal([]byte(raw), &s); err != nil {
-		panic(fmt.Sprintf("mustParseSchema: %v", err))
+// audioGradingResponseSchema describes the JSON shape Gemini must return for
+// reading audio grading. Built with the SDK's typed Schema struct so we can't
+// hit the JSON-unmarshal panic that previously killed every grading request.
+// Note: genai.Schema doesn't expose `minimum`/`maximum`; we clamp the values
+// to [0,1] in Go after parsing the response instead.
+func audioGradingResponseSchema() *genai.Schema {
+	return &genai.Schema{
+		Type:     genai.TypeObject,
+		Required: []string{"transcript", "pronunciation_score", "feedback"},
+		Properties: map[string]*genai.Schema{
+			"transcript":          {Type: genai.TypeString},
+			"pronunciation_score": {Type: genai.TypeNumber},
+			"content_score":       {Type: genai.TypeNumber},
+			"feedback":            {Type: genai.TypeString},
+		},
 	}
-	return &s
 }

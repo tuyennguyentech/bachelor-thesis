@@ -7,7 +7,7 @@ import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import type { TranscriptSegment, TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
-import { ConnectError } from "@connectrpc/connect";
+import { submitAttemptErrorMessage } from "@/interactions/_shared/connect-error-message";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { VideoPlayer } from "./video-player";
 import { LessonSidebar } from "./lesson-sidebar";
@@ -87,14 +87,29 @@ export function StudentLessonView({
   const allAnswered = interactions.length > 0 && passedIds.size >= interactions.length;
   const readyToSubmit = allAnswered && !submitted;
 
-  // Build checkpoint markers for the strip (only interactions with a real timestamp)
-  const timedInteractions = interactions.filter((it) => it.startSeconds > 0);
-  const markers: Marker[] = timedInteractions.map((it, i) => ({
-    id: it.id,
-    index: i + 1,
-    startSeconds: it.startSeconds,
-    status: passedIds.has(it.id) ? "passed" : it.id === activeId ? "active" : "pending",
-  }));
+  // Build checkpoint markers for the strip — one marker per unique
+  // start_seconds (a "cluster"), not one per interaction. Multiple
+  // interactions sharing a timestamp would otherwise pile up as overlapping
+  // dots and the count would mislead students about how many checkpoints
+  // exist along the timeline.
+  const clustersByTime = new Map<number, typeof interactions>();
+  for (const it of interactions) {
+    if (it.startSeconds <= 0) continue;
+    const arr = clustersByTime.get(it.startSeconds) ?? [];
+    arr.push(it);
+    clustersByTime.set(it.startSeconds, arr);
+  }
+  const sortedClusters = [...clustersByTime.entries()].sort(([a], [b]) => a - b);
+  const markers: Marker[] = sortedClusters.map(([startSeconds, group], i) => {
+    const isActive = group.some((it) => it.id === activeId);
+    const allPassed = group.every((it) => passedIds.has(it.id));
+    return {
+      id: `cluster-${startSeconds}`,
+      index: i + 1,
+      startSeconds,
+      status: isActive ? "active" : allPassed ? "passed" : "pending",
+    };
+  });
 
   // The current active interaction object
   const activeInteraction = activeId
@@ -283,7 +298,7 @@ export function StudentLessonView({
         }
         setSubmitted(true);
       } catch (err) {
-        setError(err instanceof ConnectError ? err.message : "Nộp bài thất bại. Vui lòng thử lại.");
+        setError(submitAttemptErrorMessage(err));
       }
     });
   }

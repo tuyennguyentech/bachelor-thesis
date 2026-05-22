@@ -16,6 +16,7 @@ import (
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
+	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -46,6 +47,7 @@ func init() {
 
 type InteractionsSvc struct {
 	pg           *db.PostgresSvc
+	log          *log.LogSvc
 	authz        *authz.AuthzSvc
 	aiRegen      AIRegenerateFunc    // injected by AISvc; nil in test/unit contexts
 	gradingDeps  GradingDepsProvider // injected by AISvc; nil in test/unit contexts
@@ -54,10 +56,19 @@ type InteractionsSvc struct {
 
 var _ richterv1connect.InteractionServiceHandler = (*InteractionsSvc)(nil)
 
+// errPreviewGradePanicked is returned (in-band) by the PreviewGrade recover()
+// branch so the surrounding error-handling code path can convert it into a
+// graceful "pending" response.
+var errPreviewGradePanicked = errors.New("PreviewGrade panicked")
+
 func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	pg, err := do.Invoke[*db.PostgresSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc: %w", err)
+	}
+	lg, err := do.Invoke[*log.LogSvc](i)
+	if err != nil {
+		return nil, fmt.Errorf("LogSvc: %w", err)
 	}
 	az, err := do.Invoke[*authz.AuthzSvc](i)
 	if err != nil {
@@ -67,7 +78,7 @@ func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	aiRegen, _ := do.Invoke[AIRegenerateFunc](i)
 	gradingDeps, _ := do.Invoke[GradingDepsProvider](i)
 	deleteAudio, _ := do.Invoke[AudioObjectDeleter](i)
-	return &InteractionsSvc{pg: pg, authz: az, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio}, nil
+	return &InteractionsSvc{pg: pg, log: lg, authz: az, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio}, nil
 }
 
 func (s *InteractionsSvc) Handler() (string, http.Handler) {
@@ -398,22 +409,44 @@ func (s *InteractionsSvc) SubmitAttempt(
 
 		var score, maxScore float32
 		var feedback string
-		if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
-			if !depsResolved {
-				d, derr := s.gradingDeps(ctx, lessonID)
-				if derr != nil {
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolve grading deps: %w", derr))
+		// Per-interaction grade in its own recover() + timeout block. Earlier a
+		// panic inside Gemini schema parsing aborted the whole SubmitAttempt
+		// (lost an entire student attempt over one bad question); now a single
+		// interaction failing falls back to score=0/max=1 + a teacher-review
+		// note and the rest of the submit keeps going.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.log.ErrorContext(ctx, "interactions: panic in per-interaction grade",
+						"interaction_id", respInput.GetInteractionId(), "recover", r)
+					score, maxScore, feedback = 0, 1, "Hệ thống gặp lỗi khi chấm câu này. Giáo viên sẽ xem lại."
 				}
-				deps = d
-				depsResolved = true
+			}()
+			gradeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+			defer cancel()
+			var gerr error
+			if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
+				if !depsResolved {
+					d, derr := s.gradingDeps(gradeCtx, lessonID)
+					if derr != nil {
+						s.log.ErrorContext(ctx, "interactions: resolve grading deps failed",
+							"interaction_id", respInput.GetInteractionId(), "err", derr)
+						score, maxScore, feedback = 0, 1, "Hệ thống chưa thể chấm câu này. Giáo viên sẽ xem lại."
+						return
+					}
+					deps = d
+					depsResolved = true
+				}
+				score, maxScore, feedback, gerr = cg.GradeWithContext(gradeCtx, deps, interaction.Config, responseJSON)
+			} else {
+				score, maxScore, feedback, gerr = h.Grade(interaction.Config, responseJSON)
 			}
-			score, maxScore, feedback, err = cg.GradeWithContext(ctx, deps, interaction.Config, responseJSON)
-		} else {
-			score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
-		}
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("grade interaction %s: %w", respInput.GetInteractionId(), err))
-		}
+			if gerr != nil {
+				s.log.WarnContext(ctx, "interactions: grade returned error, falling back to pending credit",
+					"interaction_id", respInput.GetInteractionId(), "err", gerr)
+				score, maxScore, feedback = 0, 1, "Hệ thống chưa chấm được câu này. Giáo viên sẽ xem lại."
+			}
+		}()
 
 		iid, err := svc.ParseUUID(respInput.GetInteractionId())
 		if err != nil {
@@ -605,27 +638,39 @@ func (s *InteractionsSvc) PreviewGrade(
 
 	var score, maxScore float32
 	var feedback string
-	if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
-		deps, derr := s.gradingDeps(gradeCtx, lessonID)
-		if derr != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolve grading deps: %w", derr))
+	// Recover from any panic deep inside the grading stack — historically
+	// json.Unmarshal-into-genai.Schema panicked here, killing the connection
+	// mid-response. The FE saw "[unavailable]" / HTTP 502. Now we log and
+	// return a graceful pending result.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.ErrorContext(ctx, "interactions: panic in PreviewGrade",
+					"interaction_id", respInput.GetInteractionId(), "recover", r)
+				err = errPreviewGradePanicked
+			}
+		}()
+		if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
+			deps, derr := s.gradingDeps(gradeCtx, lessonID)
+			if derr != nil {
+				err = fmt.Errorf("resolve grading deps: %w", derr)
+				return
+			}
+			score, maxScore, feedback, err = cg.GradeWithContext(gradeCtx, deps, interaction.Config, responseJSON)
+		} else {
+			score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
 		}
-		score, maxScore, feedback, err = cg.GradeWithContext(gradeCtx, deps, interaction.Config, responseJSON)
-	} else {
-		score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
-	}
+	}()
 	if err != nil {
-		// Includes context.DeadlineExceeded from the timeout above. Return a
-		// graceful result instead of CodeInternal so the FE renders feedback
-		// rather than a hard error banner. SubmitAttempt later persists the
-		// actual response and the teacher can re-grade if needed.
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return &richterv1.PreviewGradeResponse{
-				Score: 0.5, MaxScore: 1.0,
-				Feedback: "Đang chấm điểm — kết quả tạm thời sẽ được cập nhật khi bạn nộp bài.",
-			}, nil
-		}
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("grade interaction: %w", err))
+		// Includes context.DeadlineExceeded from the timeout above AND any
+		// panic recovered just above. Always return a graceful pending
+		// response so the FE never renders a hard error during inline grading.
+		s.log.WarnContext(ctx, "interactions: PreviewGrade fell through to graceful pending response",
+			"interaction_id", respInput.GetInteractionId(), "err", err)
+		return &richterv1.PreviewGradeResponse{
+			Score: 0.5, MaxScore: 1.0,
+			Feedback: "Đang chấm điểm — kết quả tạm thời sẽ được cập nhật khi bạn nộp bài.",
+		}, nil
 	}
 
 	return &richterv1.PreviewGradeResponse{Score: score, MaxScore: maxScore, Feedback: feedback}, nil

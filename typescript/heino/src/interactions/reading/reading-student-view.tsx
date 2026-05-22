@@ -8,6 +8,7 @@ import { FeedbackMode, InteractionService } from "buf/gen/richter/v1/interaction
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import type { StudentViewProps, ReadingConfig, ReadingResponse } from "../types";
 import { AudioRecorder } from "../_shared/audio-recorder";
+import { previewGradeErrorMessage } from "../_shared/connect-error-message";
 import { Button } from "@/components/ui/button";
 
 type GradeState =
@@ -15,21 +16,6 @@ type GradeState =
   | { phase: "grading" }
   | { phase: "done"; score: number; maxScore: number; feedback: string }
   | { phase: "error"; message: string };
-
-function previewGradeErrorMessage(err: unknown): string {
-  if (err instanceof ConnectError) {
-    switch (err.code) {
-      case Code.Unavailable:
-      case Code.DeadlineExceeded:
-        return "Hệ thống AI tạm thời quá tải, hãy thử ghi âm lại.";
-      case Code.FailedPrecondition:
-        return "Chưa thể chấm điểm ngay — lớp học chưa bật chế độ phản hồi tức thì.";
-      default:
-        return "Chưa chấm được phần ghi âm này. Giáo viên sẽ xem lại khi bạn nộp bài.";
-    }
-  }
-  return "Chưa chấm được phần ghi âm này. Giáo viên sẽ xem lại khi bạn nộp bài.";
-}
 
 export function ReadingStudentView({
   config,
@@ -42,13 +28,16 @@ export function ReadingStudentView({
   token = "",
   lessonId = "",
   interactionId = "",
-  isPreview = false,
 }: StudentViewProps<ReadingConfig, ReadingResponse>) {
   const interactionClient = useRichterWebClient(InteractionService, token);
   const audioObjectKey = initialResponse?.audioObjectKey ?? "";
   const hasRecording = audioObjectKey !== "";
+  // Inline grading also runs in teacher preview mode so previewing isn't a
+  // dead-end ("ghi âm xong không thấy gì"). Backend already gates the RPC on
+  // lesson.feedback_mode == after_each, so we won't fire it where it
+  // shouldn't run.
   const wantsInlineGrade =
-    feedbackMode === FeedbackMode.AFTER_EACH && lessonId !== "" && interactionId !== "" && !isPreview;
+    feedbackMode === FeedbackMode.AFTER_EACH && lessonId !== "" && interactionId !== "";
 
   const [gradeState, setGradeState] = useState<GradeState>({ phase: "idle" });
 
