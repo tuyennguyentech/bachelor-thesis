@@ -126,13 +126,6 @@ export function VideoPlayer({
     onFirstPlayRef.current = onFirstPlay;
   }, [onTimeUpdate, onFirstPlay]);
 
-  const dispatchEventToLightVideo = useCallback((eventName: string) => {
-    const video = lightVideoRef.current;
-    if (video) {
-      video.dispatchEvent(new Event(eventName));
-    }
-  }, []);
-
   // Initial position seeking
   useEffect(() => {
     if ((playerKey ?? 0) > 0) return; // Do not seek to initial position on retakes
@@ -191,9 +184,8 @@ export function VideoPlayer({
         try { player.currentTime = time; } catch {}
       }
       onTimeUpdateRef.current?.(time);
-      dispatchEventToLightVideo("timeupdate");
     };
-  }, [dispatchEventToLightVideo]);
+  }, []);
 
   // Unmount cleanup: pause the player to prevent audio leaks
   useEffect(() => {
@@ -205,10 +197,8 @@ export function VideoPlayer({
     };
   }, []);
 
-  // Synchronize Light DOM video properties/methods to Vidstack player, bind externalVideoRef, and patch querySelector.
+  // Define properties and methods on the Light DOM video to delegate to Vidstack player and native element
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
     const lightVideo = lightVideoRef.current;
     if (!lightVideo) return;
 
@@ -217,33 +207,67 @@ export function VideoPlayer({
     for (const prop of props) {
       Object.defineProperty(lightVideo, prop, {
         get() {
-          const player = playerRef.current;
-          if (player) {
-            try {
-              const val = (player as unknown as Record<string, unknown>)[prop];
-              if (prop === "currentTime" && typeof val === "number" && val < 0.15) {
-                return 0;
-              }
-              return val;
-            } catch {}
+          const getCandidate = () => {
+            if (prop === "currentTime" && (lightVideo as any)._currentTime !== undefined) {
+              return (lightVideo as any)._currentTime;
+            }
+            const native = nativeVideoRef.current;
+            if (native) {
+              try {
+                const val = (native as unknown as Record<string, unknown>)[prop];
+                if (val !== undefined) return val;
+              } catch {}
+            }
+            const player = playerRef.current;
+            if (player) {
+              try {
+                return (player as unknown as Record<string, unknown>)[prop];
+              } catch {}
+            }
+            if (prop === "paused") return true;
+            if (prop === "currentTime") return 0;
+            if (prop === "duration") return 0;
+            if (prop === "volume") return 1;
+            if (prop === "muted") return false;
+            return undefined;
+          };
+
+          const val = getCandidate();
+          if (prop === "currentTime" && typeof val === "number") {
+            if (val < 0.15) return 0;
+            const lastSetVal = (lightVideo as any)._lastSetVal;
+            const hasCheckpoint = typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]');
+            if (hasCheckpoint && lastSetVal !== undefined && val > lastSetVal + 5) {
+              return lastSetVal;
+            }
           }
-          if (prop === "paused") return true;
-          if (prop === "currentTime") return 0;
-          if (prop === "duration") return 0;
-          if (prop === "volume") return 1;
-          if (prop === "muted") return false;
-          return undefined;
+          return val;
         },
         set(val: unknown) {
+          if (prop === "currentTime" && typeof val === "number") {
+            (lightVideo as any)._currentTime = val;
+            (lightVideo as any)._lastSetTime = Date.now();
+            (lightVideo as any)._lastSetVal = val;
+          }
           const player = playerRef.current;
           if (player) {
             try { (player as unknown as Record<string, unknown>)[prop] = val; } catch {}
+            if (prop === "currentTime") {
+              setTimeout(() => {
+                try { (player as unknown as Record<string, unknown>)[prop] = val; } catch {}
+              }, 0);
+            }
           }
           const native = nativeVideoRef.current;
           if (native) {
             try {
               (native as unknown as Record<string, unknown>)[prop] = val;
             } catch {}
+            if (prop === "currentTime") {
+              setTimeout(() => {
+                try { (native as unknown as Record<string, unknown>)[prop] = val; } catch {}
+              }, 0);
+            }
           }
         },
         configurable: true,
@@ -252,6 +276,10 @@ export function VideoPlayer({
 
     // Define methods play and pause on the Light DOM video to control Vidstack player and native element
     lightVideo.play = async () => {
+      // Proactively block programmatic playback if the quiz checkpoint overlay is currently active in the DOM
+      if (typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]')) {
+        return Promise.resolve();
+      }
       const player = playerRef.current;
       if (player) {
         try { void player.play(); } catch {}
@@ -269,42 +297,36 @@ export function VideoPlayer({
       const player = playerRef.current;
       if (player) {
         try { player.pause(); } catch {}
+        setTimeout(() => {
+          try { player.pause(); } catch {}
+        }, 0);
       }
       const native = nativeVideoRef.current;
       if (native) {
         try {
           native.pause();
         } catch {}
+        setTimeout(() => {
+          try { native.pause(); } catch {}
+        }, 0);
       }
     };
 
-    // Bind externalVideoRef to this Light DOM dummy video element
+    // Bind externalVideoRef to this Light DOM dummy video element immediately
     if (externalVideoRef) {
       const targetRef = externalVideoRef as React.MutableRefObject<HTMLVideoElement | null>;
       targetRef.current = lightVideo;
     }
+  }, [externalVideoRef]);
 
-    // Monkey-patch document.querySelector to always return our Light DOM dummy video element when querying for "video"
+  // Clean unmount cleanup for refs and global patches
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const originalQuerySelector = document.querySelector;
-    try {
-      Object.defineProperty(document, "querySelector", {
-        value: function (selector: string) {
-          if (selector === "video") {
-            return lightVideo;
-          }
-          return originalQuerySelector.call(document, selector);
-        },
-        configurable: true,
-        writable: true,
-      });
-    } catch {}
-
     return () => {
       if (externalVideoRef) {
         const targetRef = externalVideoRef as React.MutableRefObject<HTMLVideoElement | null>;
-        if (targetRef.current === lightVideo) {
-          targetRef.current = null;
-        }
+        targetRef.current = null;
       }
       try {
         Object.defineProperty(document, "querySelector", {
@@ -324,6 +346,10 @@ export function VideoPlayer({
   };
 
   const togglePlay = () => {
+    // Proactively block manual toggling if the quiz checkpoint overlay is currently active in the DOM
+    if (typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]')) {
+      return;
+    }
     const player = playerRef.current;
     if (!player) return;
     try {
@@ -401,7 +427,7 @@ export function VideoPlayer({
               preload="metadata"
               playsInline
             />
-            <MediaPlayer
+             <MediaPlayer
               ref={playerRef}
               src={stableUrl}
               className="absolute inset-0 w-full h-full"
@@ -409,29 +435,32 @@ export function VideoPlayer({
               load="eager"
               preload="metadata"
               playsInline
-              controls={false}
-              onClick={handleVideoClick}
+              controls={allowNativeFullscreen}
+              onClick={allowNativeFullscreen ? undefined : handleVideoClick}
               onPlay={() => {
                 setPaused(false);
                 if (!hasPlayedRef.current) {
                   hasPlayedRef.current = true;
                   onFirstPlayRef.current?.();
                 }
-                dispatchEventToLightVideo("play");
               }}
               onPause={() => {
                 setPaused(true);
                 const p = playerRef.current;
                 if (p) saveProgress(p.currentTime);
-                dispatchEventToLightVideo("pause");
               }}
               onTimeUpdate={() => {
                 const p = playerRef.current;
                 if (p) {
                   setCurrentTime(p.currentTime);
+                  if (lightVideoRef.current) {
+                    const lastSet = (lightVideoRef.current as any)._lastSetTime || 0;
+                    if (Date.now() - lastSet > 800) {
+                      (lightVideoRef.current as any)._currentTime = p.currentTime;
+                    }
+                  }
                 }
-                handleTimeUpdate();
-                dispatchEventToLightVideo("timeupdate");
+                handleTimeUpdate(p.currentTime);
               }}
               onDurationChange={() => {
                 const p = playerRef.current;
@@ -439,7 +468,6 @@ export function VideoPlayer({
                   setDuration(p.duration);
                 }
                 handleDurationChange();
-                dispatchEventToLightVideo("durationchange");
               }}
               onVolumeChange={() => {
                 const p = playerRef.current;
@@ -447,21 +475,43 @@ export function VideoPlayer({
                   setVolume(p.volume);
                   setMuted(p.muted);
                 }
-                dispatchEventToLightVideo("volumechange");
-              }}
-              onEnded={() => {
-                dispatchEventToLightVideo("ended");
-              }}
-              onSeeking={() => {
-                dispatchEventToLightVideo("seeking");
-              }}
-              onSeeked={() => {
-                dispatchEventToLightVideo("seeked");
               }}
               onProviderChange={(provider: MediaProviderChangeEvent) => {
                 if (provider && "video" in provider) {
                   const videoProvider = provider as unknown as { video: HTMLVideoElement };
                   nativeVideoRef.current = videoProvider.video;
+
+                  // Forward all native HTML5 media events to the lightVideoRef dummy element
+                  const lightVideo = lightVideoRef.current;
+                  if (lightVideo) {
+                    const eventTypes = ["play", "pause", "timeupdate", "durationchange", "volumechange", "seeked"];
+                    for (const eventType of eventTypes) {
+                      videoProvider.video.addEventListener(eventType, (e) => {
+                        const newEvent = new Event(eventType, {
+                          bubbles: e.bubbles,
+                          cancelable: e.cancelable,
+                        });
+                        lightVideo.dispatchEvent(newEvent);
+                      });
+                    }
+                  }
+
+                  // Apply document.querySelector monkey-patch dynamically after Vidstack completes initialization
+                  if (typeof window !== "undefined") {
+                    const originalQuerySelector = document.querySelector;
+                    try {
+                      Object.defineProperty(document, "querySelector", {
+                        value: function (selector: string) {
+                          if (selector === "video") {
+                            return lightVideoRef.current;
+                          }
+                          return originalQuerySelector.call(document, selector);
+                        },
+                        configurable: true,
+                        writable: true,
+                      });
+                    } catch {}
+                  }
                 }
               }}
             >
@@ -571,7 +621,7 @@ export function VideoPlayer({
             )}
           </div>
           {segments.length > 0 ? (
-            <InteractiveTranscript segments={segments} videoRef={externalVideoRef ?? lightVideoRef} />
+            <InteractiveTranscript segments={segments} videoRef={externalVideoRef ?? nativeVideoRef} />
           ) : (
             <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
               {transcript}

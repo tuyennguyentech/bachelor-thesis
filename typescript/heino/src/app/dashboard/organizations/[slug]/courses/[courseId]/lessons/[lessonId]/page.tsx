@@ -39,6 +39,26 @@ function statusLabel(s: AnalysisStatus): string {
   }
 }
 
+const videoUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
+async function getCachedVideoUrl(key: string, token: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = videoUrlCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.url;
+  }
+
+  try {
+    const client = createRichterClient(StorageService, token);
+    const res = await client.getDownloadUrl({ key, expiresInSeconds: 3600 });
+    const url = res.downloadUrl;
+    videoUrlCache.set(key, { url, expiresAt: now + 600000 }); // Cache for 10 minutes
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 export default async function LessonDetailPage({
   params,
   searchParams,
@@ -66,6 +86,7 @@ export default async function LessonDetailPage({
   const sp = await searchParams;
   const isPreview = sp.preview === "1" && canManage;
   const effectiveCanManage = canManage && !isPreview;
+  const activeTab = (sp.tab as string) || "content";
 
   const courseClient = createRichterClient(CourseService, token);
   let course;
@@ -103,10 +124,7 @@ export default async function LessonDetailPage({
   // Parallel fetches: video URL, AI analysis, my attempt, teacher attempts list, watch progress
   const [videoUrl, analysisRes, myAttempt, attemptsData, initialPosition] = await Promise.all([
     lesson.videoStorageKey
-      ? createRichterClient(StorageService, token)
-          .getDownloadUrl({ key: lesson.videoStorageKey, expiresInSeconds: 3600 })
-          .then((r) => r.downloadUrl)
-          .catch(() => null)
+      ? getCachedVideoUrl(lesson.videoStorageKey, token)
       : Promise.resolve(null),
     aiClient
       .getLessonAnalysis({ lessonId })
@@ -140,6 +158,7 @@ export default async function LessonDetailPage({
     ? {
         totalScore: myAttempt.totalScore,
         maxScore: myAttempt.maxScore,
+        attemptCount: myAttempt.attemptCount,
         responses: myAttempt.responses.map((r) => ({
           interactionId: r.interactionId,
           response: extractLocalResponse(r),
@@ -201,67 +220,100 @@ export default async function LessonDetailPage({
         </div>
       )}
 
-      {/* Video player (+ checkpoint-driven quiz flow for students) */}
-      {videoUrl ? (
-        !effectiveCanManage || isPreview ? (
+      {/* Teacher/Admin navigation tabs */}
+      {canManage && !isPreview && (
+        <div className="flex border-b border-muted">
+          <Link
+            href="?tab=content"
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors ${
+              activeTab === "content"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            📚 Nội dung & Cấu hình
+          </Link>
+          <Link
+            href="?tab=progress"
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-2 ${
+              activeTab === "progress"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            👥 Tiến độ học viên
+            {attemptsData && attemptsData.total > 0 && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary font-semibold">
+                {attemptsData.total}
+              </span>
+            )}
+          </Link>
+        </div>
+      )}
+
+      {/* Main content areas based on user role and selected tab */}
+      {!effectiveCanManage || isPreview ? (
+        // STUDENT or PREVIEW VIEW:
+        videoUrl ? (
           <StudentLessonView
+            key={isPreview ? "preview" : "student"}
             videoUrl={videoUrl}
             segments={analysis?.transcriptSegments ?? []}
             transcript={analysis?.transcript ?? ""}
             chunks={initialChunks}
             lessonId={lessonId}
-            initialPosition={initialPosition}
-            initialDuration={lesson.durationSeconds ?? 0}
+            initialPosition={isPreview ? 0 : initialPosition}
             token={token}
             interactions={interactions}
             previousResult={isPreview ? null : previousResult}
             feedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
             isPreview={isPreview}
+            maxAttempts={lesson.maxAttempts}
           />
         ) : (
-          <VideoPlayer
-            videoUrl={videoUrl}
-            segments={analysis?.transcriptSegments ?? []}
-            transcript={analysis?.transcript ?? ""}
-            lessonId={lessonId}
-            initialPosition={initialPosition}
-            token={token}
-          />
+          <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
+              <PlayCircleIcon className="size-10 opacity-30" />
+              <p className="text-sm">Nội dung chưa được cung cấp.</p>
+            </div>
+          </div>
         )
       ) : (
-        <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
-          <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
-            {effectiveCanManage ? (
-              <>
-                <VideoIcon className="size-10 opacity-30" />
-                <p className="text-sm">Chưa có video. Tải video lên bên dưới.</p>
-              </>
+        // TEACHER or ADMIN VIEW:
+        activeTab === "content" ? (
+          <div className="flex flex-col gap-6">
+            {/* Video Player */}
+            {videoUrl ? (
+              <VideoPlayer
+                videoUrl={videoUrl}
+                segments={analysis?.transcriptSegments ?? []}
+                transcript={analysis?.transcript ?? ""}
+                lessonId={lessonId}
+                initialPosition={initialPosition}
+                token={token}
+                videoStorageKey={lesson.videoStorageKey}
+                allowNativeFullscreen={true}
+              />
             ) : (
-              <>
-                <PlayCircleIcon className="size-10 opacity-30" />
-                <p className="text-sm">Nội dung chưa được cung cấp.</p>
-              </>
+              <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
+                  <VideoIcon className="size-10 opacity-30" />
+                  <p className="text-sm">Chưa có video. Tải video lên bên dưới.</p>
+                </div>
+              </div>
             )}
-          </div>
-        </div>
-      )}
 
-      {/* Teacher/admin: upload + analyze controls — hidden in preview */}
-      {canManage && !isPreview && (
-        <div className="rounded-lg border p-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-medium text-sm">Quản lý video</h2>
-            {!isPreview && (
-              <Link href="?preview=1">
-                <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
-                  <EyeIcon className="size-3.5" />
-                  Xem thử
-                </Button>
-              </Link>
-            )}
-          </div>
-          {effectiveCanManage && (
-            <>
+            {/* Video Management & Analysis controls */}
+            <div className="rounded-lg border p-4 flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-medium text-sm">Quản lý video</h2>
+                <Link href="?preview=1">
+                  <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
+                    <EyeIcon className="size-3.5" />
+                    Xem thử
+                  </Button>
+                </Link>
+              </div>
               <VideoUpload
                 lessonId={lesson.id}
                 moduleId={lesson.moduleId}
@@ -295,6 +347,10 @@ export default async function LessonDetailPage({
                       initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
                       initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
                       initialLanguage={lesson.language || "vi"}
+                      initialMaxAttempts={lesson.maxAttempts}
+                      title={lesson.title}
+                      description={lesson.description}
+                      orderIndex={lesson.orderIndex}
                       token={token}
                     />
                     {analysis?.status === AnalysisStatus.ERROR && (
@@ -303,20 +359,20 @@ export default async function LessonDetailPage({
                   </div>
                 </>
               )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Teacher/admin: student progress */}
-      {effectiveCanManage && attemptsData && (
-        <div className="rounded-lg border p-4 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <UsersIcon className="size-4 text-muted-foreground" />
-            <h2 className="font-medium text-sm">Tiến độ học viên</h2>
+            </div>
           </div>
-          <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} />
-        </div>
+        ) : (
+          /* Student progress tab content */
+          attemptsData && (
+            <div className="rounded-lg border p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <UsersIcon className="size-4 text-muted-foreground" />
+                <h2 className="font-medium text-sm">Tiến độ học viên</h2>
+              </div>
+              <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} maxAttempts={lesson.maxAttempts} />
+            </div>
+          )
+        )
       )}
     </div>
   );
