@@ -7,12 +7,18 @@ import { InteractiveTranscript } from "./interactive-transcript";
 import { FileTextIcon, Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { useState } from "react";
-import { MediaPlayer, MediaOutlet, useMediaStore } from "@vidstack/react";
+import { MediaPlayer, MediaOutlet, MediaCommunitySkin, useMediaStore } from "@vidstack/react";
 import type { MediaPlayerElement, MediaProviderChangeEvent } from "vidstack";
+
+// Import Vidstack player styles
+import "vidstack/styles/base.css";
+import "vidstack/styles/defaults.css";
+import "vidstack/styles/community-skin/video.css";
 
 type PlayerInstance = MediaPlayerElement & {
   currentTime: number;
   muted: boolean;
+  volume: number;
   canPlay: boolean;
   play(): Promise<void>;
   pause(): void;
@@ -373,7 +379,7 @@ export function VideoPlayer({
               load="eager"
               preload="metadata"
               playsInline
-              controls={allowNativeFullscreen}
+              controls={false}
               onClick={allowNativeFullscreen ? undefined : handleVideoClick}
               onPlay={() => {
                 if (!hasPlayedRef.current) {
@@ -415,6 +421,7 @@ export function VideoPlayer({
               }}
             >
               <MediaOutlet />
+              {allowNativeFullscreen && <MediaCommunitySkin />}
             </MediaPlayer>
 
             {/* Only show custom controls when allowNativeFullscreen is false (student/preview view) */}
@@ -458,13 +465,33 @@ export function VideoPlayer({
                         {!paused ? <Pause className="size-5 fill-white" /> : <Play className="size-5 fill-white" />}
                       </button>
 
-                      {/* Volume Button */}
-                      <button 
-                        onClick={toggleMute} 
-                        className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
-                      >
-                        {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
-                      </button>
+                      {/* Volume Button & Slider */}
+                      <div className="flex items-center gap-1 group/volume">
+                        <button 
+                          onClick={toggleMute} 
+                          className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
+                        >
+                          {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+                        </button>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={muted ? 0 : volume}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            const player = playerRef.current;
+                            if (player) {
+                              try { player.volume = val; } catch {}
+                              if (val > 0) {
+                                try { player.muted = false; } catch {}
+                              }
+                            }
+                          }}
+                          className="w-0 opacity-0 group-hover/volume:w-16 group-hover/volume:opacity-100 transition-all duration-300 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:bg-white/40"
+                        />
+                      </div>
 
                       {/* Time Display */}
                       <span className="text-xs text-zinc-300 font-mono">
