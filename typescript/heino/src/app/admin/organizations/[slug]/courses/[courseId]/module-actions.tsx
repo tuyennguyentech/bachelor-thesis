@@ -43,7 +43,7 @@ interface EditModuleFormProps {
   onClose: () => void;
 }
 
-function EditModuleForm({ id, courseId: _courseId, slug: _slug, currentTitle, orderIndex, token, onClose }: EditModuleFormProps) {
+function EditModuleForm({ id, currentTitle, orderIndex, token, onClose }: EditModuleFormProps) {
   const router = useRouter();
   const moduleClient = useRichterWebClient(CourseModuleService, token);
   const [error, setError] = useState<string | null>(null);

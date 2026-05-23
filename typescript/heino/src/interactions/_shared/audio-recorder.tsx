@@ -154,6 +154,7 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
             variant="destructive"
             onClick={stopRecording}
             className="gap-1.5"
+            disabled={disabled}
           >
             <SquareIcon className="size-3.5" /> Dừng ({fmtDuration(duration)})
           </Button>
@@ -161,10 +162,10 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
 
         {state === "recorded" && (
           <>
-            <Button size="sm" onClick={upload} className="gap-1.5">
+            <Button size="sm" onClick={upload} className="gap-1.5" disabled={disabled}>
               <PlayIcon className="size-3.5" /> Nộp bản ghi âm
             </Button>
-            <Button size="sm" variant="ghost" onClick={reset} className="gap-1.5">
+            <Button size="sm" variant="ghost" onClick={reset} className="gap-1.5" disabled={disabled}>
               <RefreshCwIcon className="size-3.5" /> Ghi lại
             </Button>
           </>
@@ -173,12 +174,6 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
         {state === "uploading" && (
           <Button size="sm" disabled className="gap-1.5">
             <Loader2Icon className="size-3.5 animate-spin" /> Đang tải lên…
-          </Button>
-        )}
-
-        {state === "done" && !disabled && (
-          <Button size="sm" variant="ghost" onClick={reset} className="gap-1.5 text-xs">
-            <RefreshCwIcon className="size-3.5" /> Ghi lại
           </Button>
         )}
       </div>

@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 // Tests for the four student-checkpoint bugs filed 2026-05-21:
 //   A. Fill-blank long-hint placeholder truncation
 //   B. Reading PreviewGrade transient errors
@@ -256,53 +257,6 @@ test.describe("Bug D — Cluster-local question numbering", () => {
   });
 });
 
-test.describe("Bug B — Reading PreviewGrade transient errors", () => {
-  test("Unavailable response retries once then shows friendly Vietnamese message", async ({
-    teacherPage,
-    recurrenceLesson,
-  }) => {
-    await ensureVideoAttached(teacherPage, recurrenceLesson.lessonId);
-    await setFeedbackMode(teacherPage, recurrenceLesson.lessonId, "FEEDBACK_MODE_AFTER_EACH");
-    const createdIds: string[] = [];
-    try {
-      const rdId = await addInteraction(teacherPage, recurrenceLesson.lessonId, {
-        prompt: "Đọc đoạn văn sau.",
-        explanation: "",
-        startSeconds: 5,
-        reading: {
-          mode: "READING_MODE_PRONUNCIATION",
-          passageMarkdown: "Hello world.",
-        },
-      });
-      createdIds.push(rdId);
-
-      // Force ALL PreviewGrade calls to fail with HTTP 503 to verify both the
-      // retry behaviour AND the friendly error wording.
-      let calls = 0;
-      await teacherPage.route("**/richter.v1.InteractionService/PreviewGrade", (route) => {
-        calls++;
-        route.fulfill({
-          status: 503,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: "unavailable", message: "upstream timeout" }),
-        });
-      });
-
-      // We can't easily drive the AudioRecorder UI here (no MediaRecorder in
-      // headless Firefox without a stub), but we can simulate the audio key
-      // arriving by persisting a fake response via SubmitAttempt — except
-      // SubmitAttempt is end-of-lesson. So instead just validate the friendly
-      // message helper is wired: open the lesson and inject the audio key
-      // via React state through the previewGrade hook trigger.
-      //
-      // Pragmatic: trigger the recorder programmatically by setting cookies
-      // and using page.evaluate to dispatch onComplete on the AudioRecorder.
-      // Out of scope for this iteration — the Go integ test already verifies
-      // the backend graceful fallback. Skip the FE retry assertion here.
-      test.skip(true, "FE retry assertion requires MediaRecorder stub — covered by manual test");
-      expect(calls).toBeGreaterThanOrEqual(0);
-    } finally {
-      await deleteInteractions(teacherPage, createdIds);
-    }
-  });
-});
+// Bug B — Reading PreviewGrade transient errors
+// MediaRecorder không khả dụng trong headless Firefox nên không thể driver
+// AudioRecorder UI để test. Backend graceful fallback đã được Go integ test cover.

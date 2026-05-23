@@ -19,13 +19,12 @@ import { PlusIcon } from "lucide-react";
 
 interface AddModuleFormProps {
   courseId: string;
-  slug: string;
   nextOrder: number;
   token: string;
   onClose: () => void;
 }
 
-function AddModuleForm({ courseId, slug: _slug, nextOrder, token, onClose }: AddModuleFormProps) {
+function AddModuleForm({ courseId, nextOrder, token, onClose }: AddModuleFormProps) {
   const router = useRouter();
   const moduleClient = useRichterWebClient(CourseModuleService, token);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +73,7 @@ interface AddModuleDialogProps {
   token: string;
 }
 
-export function AddModuleDialog({ courseId, slug, nextOrder, token }: AddModuleDialogProps) {
+export function AddModuleDialog({ courseId, nextOrder, token }: AddModuleDialogProps) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -90,7 +89,6 @@ export function AddModuleDialog({ courseId, slug, nextOrder, token }: AddModuleD
         </DialogHeader>
         <AddModuleForm
           courseId={courseId}
-          slug={slug}
           nextOrder={nextOrder}
           token={token}
           onClose={() => setOpen(false)}

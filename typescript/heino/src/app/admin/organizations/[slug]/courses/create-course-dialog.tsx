@@ -25,7 +25,7 @@ interface CreateCourseFormProps {
   onClose: () => void;
 }
 
-function CreateCourseForm({ organizationId, slug: _slug, token, userId, onClose }: CreateCourseFormProps) {
+function CreateCourseForm({ organizationId, token, userId, onClose }: CreateCourseFormProps) {
   const router = useRouter();
   const courseClient = useRichterWebClient(CourseService, token);
   const [error, setError] = useState<string | null>(null);

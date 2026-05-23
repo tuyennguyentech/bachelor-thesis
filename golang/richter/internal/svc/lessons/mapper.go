@@ -30,6 +30,7 @@ func LessonToProto(l gen.Lesson) *richterv1.Lesson {
 		DurationSeconds: duration,
 		FeedbackMode:    interactions.FeedbackModeToProto(l.FeedbackMode),
 		Language:        l.Language,
+		MaxAttempts:     l.MaxAttempts,
 		CreatedAt:       svc.TimestampToProto(l.CreatedAt),
 		UpdatedAt:       svc.TimestampToProto(l.UpdatedAt),
 	}

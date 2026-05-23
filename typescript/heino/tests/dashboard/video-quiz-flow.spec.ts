@@ -126,7 +126,7 @@ test.describe("Video player", () => {
   test("seeded lesson shows video element", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Requires seed videos uploaded to storage (run: richter seed --dev)
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
   });
 
   test("lesson without video shows placeholder for student", async ({ studentPage: page }) => {
@@ -148,7 +148,7 @@ test.describe("Video player", () => {
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
     // Reload so the server fetches the presigned download URL and renders the video player
     await page.reload();
-    await expect(page.locator("video")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("video").first()).toBeVisible({ timeout: 10_000 });
     // The onError placeholder text must NOT be visible when the video loads fine
     await expect(page.getByText("Video không thể tải")).not.toBeVisible();
   });
@@ -393,7 +393,7 @@ test.describe("Video quiz checkpoint", () => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Bob has a seeded attempt → start in submitted state; reset first
     await page.getByRole("button", { name: "Làm lại" }).click();
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     // Trigger via test hook (Object.defineProperty on currentTime is unreliable in Firefox)
     await triggerCheckpoint(page, 210);
@@ -407,7 +407,7 @@ test.describe("Video quiz checkpoint", () => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Bob has a seeded attempt (server reveals correct answers) → reset to trigger checkpoints
     await page.getByRole("button", { name: "Làm lại" }).click();
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
 
@@ -422,7 +422,7 @@ test.describe("Video quiz checkpoint", () => {
   test("Tiếp tục xem dismisses checkpoint", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
 
@@ -439,7 +439,7 @@ test.describe("Video quiz checkpoint", () => {
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     // Trigger checkpoint
     await triggerCheckpoint(page, 210);
@@ -456,7 +456,7 @@ test.describe("Video quiz checkpoint", () => {
 
   test("teacher in editing mode does not see checkpoint", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
     // Teacher in editing mode (effectiveCanManage=true) should NOT see quiz checkpoint
@@ -466,7 +466,7 @@ test.describe("Video quiz checkpoint", () => {
   test("teacher in preview mode sees checkpoint", async ({ teacherPage: page }) => {
     const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     await page.goto(`${lessonHref}?preview=1`);
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
     // Teacher in preview mode (isPreview=true) behaves like a student — checkpoint is visible
@@ -478,7 +478,7 @@ test.describe("Video quiz checkpoint", () => {
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 3_000 });
@@ -498,7 +498,7 @@ test.describe("Video quiz checkpoint", () => {
   test("student cannot bypass checkpoint by seeking past it", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("button", { name: "Làm lại" }).click();
-    await expect(page.locator("video")).toBeVisible();
+    await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 3_000 });
@@ -530,6 +530,7 @@ test.describe("Video quiz checkpoint", () => {
 test.describe("Student progress (teacher view)", () => {
   test("teacher sees progress table with seeded attempts", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
     await expect(page.getByText("Tiến độ học viên")).toBeVisible();
 
     // bob and dave both have seeded attempts for Big-O lesson
@@ -541,6 +542,7 @@ test.describe("Student progress (teacher view)", () => {
 
   test("progress table shows score with color coding", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
+    await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
     const attemptsSection = page.locator("div.rounded-lg.border").filter({ hasText: "Tiến độ học viên" }).first();
     // Score column should be visible
     await expect(attemptsSection.getByText(/\d+\/\d+/).first()).toBeVisible();
@@ -551,6 +553,7 @@ test.describe("Student progress (teacher view)", () => {
       page, uid("Khóa học Empty Progress"), uid("Chương Empty"), uid("Bài Empty"),
     );
     await page.goto(url);
+    await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
     await expect(page.getByText("Tiến độ học viên")).toBeVisible();
     await expect(page.getByText("Chưa có học viên nào nộp bài.")).toBeVisible();
   });

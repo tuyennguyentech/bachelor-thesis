@@ -17,7 +17,7 @@ interface Props {
   token: string;
 }
 
-export function EditCourseForm({ courseId, slug: _slug, title, description, token }: Props) {
+export function EditCourseForm({ courseId, title, description, token }: Props) {
   const router = useRouter();
   const courseClient = useRichterWebClient(CourseService, token);
   const [error, setError] = useState<string | null>(null);

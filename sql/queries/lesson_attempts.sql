@@ -1,10 +1,11 @@
 -- name: UpsertLessonAttempt :one
-INSERT INTO lesson_attempts (lesson_id, user_id, total_score, max_score, status)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO lesson_attempts (lesson_id, user_id, total_score, max_score, status, attempt_count)
+VALUES ($1, $2, $3, $4, $5, 1)
 ON CONFLICT (user_id, lesson_id) DO UPDATE SET
   total_score = EXCLUDED.total_score,
   max_score = EXCLUDED.max_score,
   status = EXCLUDED.status,
+  attempt_count = COALESCE(lesson_attempts.attempt_count, 0) + 1,
   submitted_at = now()
 RETURNING *;
 
@@ -40,6 +41,7 @@ SELECT
   la.max_score,
   la.status,
   la.submitted_at,
+  la.attempt_count,
   u.first_name,
   u.middle_name,
   u.last_name,

@@ -26,7 +26,7 @@ interface AddLessonFormProps {
   onClose: () => void;
 }
 
-function AddLessonForm({ moduleId, courseId: _courseId, slug: _slug, nextOrder, token, onClose }: AddLessonFormProps) {
+function AddLessonForm({ moduleId, nextOrder, token, onClose }: AddLessonFormProps) {
   const router = useRouter();
   const lessonClient = useRichterWebClient(LessonService, token);
   const [error, setError] = useState<string | null>(null);

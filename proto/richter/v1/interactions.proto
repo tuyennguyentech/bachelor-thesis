@@ -145,6 +145,7 @@ message LessonAttempt {
   string status = 6;
   google.protobuf.Timestamp submitted_at = 7;
   repeated LessonAttemptResponse responses = 8;
+  int32 attempt_count = 9;
 }
 
 message LessonAttemptResponse {
@@ -261,6 +262,7 @@ message StudentAttemptSummary {
   float total_score = 4;
   float max_score = 5;
   google.protobuf.Timestamp submitted_at = 6;
+  int32 attempt_count = 7;
 }
 
 message ListAttemptsRequest {

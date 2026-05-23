@@ -175,8 +175,6 @@ export function StudentLessonView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-
-
   const isNativeVideoFullscreen = () => {
     const video = videoRef.current;
     if (!video) return false;

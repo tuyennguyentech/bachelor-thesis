@@ -479,6 +479,10 @@ interface Props {
   initialFeedbackMode?: FeedbackMode;
   initialDefaultInteractionConfig?: ChunkInteractionConfig;
   initialLanguage?: string;
+  initialMaxAttempts?: number;
+  title: string;
+  description: string;
+  orderIndex: number;
   token: string;
 }
 
@@ -491,6 +495,10 @@ export function AnalyzeButton({
   initialFeedbackMode = FeedbackMode.AFTER_SUBMIT,
   initialDefaultInteractionConfig,
   initialLanguage = "vi",
+  initialMaxAttempts = 0,
+  title,
+  description,
+  orderIndex,
   token,
 }: Props) {
   const router = useRouter();
@@ -500,15 +508,41 @@ export function AnalyzeButton({
   const [savingFeedback, startSaveFeedback] = useTransition();
   const [language, setLanguage] = useState<string>(initialLanguage);
   const [savingLanguage, startSaveLanguage] = useTransition();
+  const [maxAttempts, setMaxAttempts] = useState<number>(initialMaxAttempts);
+  const [savingMaxAttempts, startSaveMaxAttempts] = useTransition();
 
   function handleLanguageChange(lang: string) {
     setLanguage(lang);
     startSaveLanguage(async () => {
       try {
-        await lessonClient.updateLesson({ id: lessonId, language: lang });
-        router.refresh();
+        await lessonClient.updateLesson({
+          id: lessonId,
+          title,
+          description,
+          orderIndex,
+          language: lang,
+          maxAttempts,
+        });
       } catch {
         setLanguage(language);
+      }
+    });
+  }
+
+  function handleMaxAttemptsChange(val: number) {
+    setMaxAttempts(val);
+    startSaveMaxAttempts(async () => {
+      try {
+        await lessonClient.updateLesson({
+          id: lessonId,
+          title,
+          description,
+          orderIndex,
+          language,
+          maxAttempts: val,
+        });
+      } catch {
+        setMaxAttempts(maxAttempts);
       }
     });
   }
@@ -521,7 +555,6 @@ export function AnalyzeButton({
     startSaveFeedback(async () => {
       try {
         await lessonClient.updateLessonFeedbackMode({ id: lessonId, feedbackMode: mode });
-        router.refresh();
       } catch {
         // revert on failure
         setFeedbackMode(feedbackMode);
@@ -921,19 +954,38 @@ export function AnalyzeButton({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Language picker */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground shrink-0">Ngôn ngữ bài giảng:</span>
-        <select
-          value={language}
-          onChange={(e) => handleLanguageChange(e.target.value)}
-          disabled={savingLanguage}
-          className="text-xs rounded border border-input bg-background px-2 py-1"
-        >
-          <option value="vi">🇻🇳 Tiếng Việt</option>
-          <option value="en">🇬🇧 English</option>
-        </select>
-        {savingLanguage && <span className="text-xs text-muted-foreground">Đang lưu…</span>}
+      {/* Settings section */}
+      <div className="flex flex-wrap items-center gap-4 border-b pb-3 mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0 font-medium">Ngôn ngữ bài giảng:</span>
+          <select
+            value={language}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+            disabled={savingLanguage}
+            className="text-xs rounded border border-input bg-background px-2 py-1 focus:ring-1 focus:ring-primary focus:outline-none"
+          >
+            <option value="vi">🇻🇳 Tiếng Việt</option>
+            <option value="en">🇬🇧 English</option>
+          </select>
+          {savingLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu…</span>}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0 font-medium">Số lượt nộp tối đa:</span>
+          <input
+            type="number"
+            min="0"
+            value={maxAttempts}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              handleMaxAttemptsChange(isNaN(val) ? 0 : val);
+            }}
+            disabled={savingMaxAttempts}
+            className="text-xs w-16 rounded border border-input bg-background px-2 py-1 text-center focus:ring-1 focus:ring-primary focus:outline-none"
+          />
+          <span className="text-[10px] text-muted-foreground">(0 = không giới hạn)</span>
+          {savingMaxAttempts && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu…</span>}
+        </div>
       </div>
 
       <TabBar active={activeTab} onChange={setActiveTab} tabs={tabDefs} />

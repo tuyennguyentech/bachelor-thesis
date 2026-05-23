@@ -26,3 +26,7 @@ golang/richter/testdata/*.mp4
 # Implementation plans for autonomous agents (scratch input, not project artifacts)
 docs/plans/
 .deepseek/
+.gemini
+.antigravitycli
+.kiro
+.codex

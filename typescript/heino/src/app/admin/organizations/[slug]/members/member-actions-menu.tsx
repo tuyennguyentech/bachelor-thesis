@@ -43,7 +43,6 @@ export function MemberActionsMenu({
   userId,
   currentRole,
   currentStatus,
-  slug: _slug,
   token,
 }: MemberActionsMenuProps) {
   const router = useRouter();

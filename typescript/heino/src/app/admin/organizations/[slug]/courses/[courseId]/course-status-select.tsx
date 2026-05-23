@@ -26,7 +26,7 @@ interface Props {
   token: string;
 }
 
-export function CourseStatusSelect({ courseId, slug: _slug, currentStatus, token }: Props) {
+export function CourseStatusSelect({ courseId, currentStatus, token }: Props) {
   const router = useRouter();
   const courseClient = useRichterWebClient(CourseService, token);
   const [isPending, startTransition] = useTransition();

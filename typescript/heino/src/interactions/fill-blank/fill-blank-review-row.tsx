@@ -30,7 +30,6 @@ function isCorrectAnswer(blank: FillBlankConfig["blanks"][number], got: string):
 
 export function FillBlankReviewRow({
   index,
-  prompt: _prompt,
   explanation,
   config,
   response,

@@ -115,7 +115,7 @@ export function ReadingStudentView({
         <AudioRecorder
           lessonId={lessonId}
           token={token}
-          disabled={locked}
+          disabled={locked || hasRecording}
           initialAudioKey={audioObjectKey || undefined}
           onComplete={handleRecordingComplete}
         />

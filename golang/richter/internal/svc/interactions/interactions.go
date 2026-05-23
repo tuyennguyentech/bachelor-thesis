@@ -1,11 +1,14 @@
 package interactions
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -15,9 +18,11 @@ import (
 	"example.com/richter/internal"
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/kv"
 	"example.com/richter/internal/svc"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,8 +50,16 @@ func init() {
 	Package(internal.Injector)
 }
 
+type tempGradeCache struct {
+	ResponseJSON []byte  `json:"response_json"`
+	Score        float32 `json:"score"`
+	MaxScore     float32 `json:"max_score"`
+	Feedback     string  `json:"feedback"`
+}
+
 type InteractionsSvc struct {
 	pg           *db.PostgresSvc
+	kv           *kv.KVSvc
 	log          *log.LogSvc
 	authz        *authz.AuthzSvc
 	aiRegen      AIRegenerateFunc    // injected by AISvc; nil in test/unit contexts
@@ -66,6 +79,7 @@ func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc: %w", err)
 	}
+	kvSvc, _ := do.Invoke[*kv.KVSvc](i)
 	lg, err := do.Invoke[*log.LogSvc](i)
 	if err != nil {
 		return nil, fmt.Errorf("LogSvc: %w", err)
@@ -78,7 +92,7 @@ func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	aiRegen, _ := do.Invoke[AIRegenerateFunc](i)
 	gradingDeps, _ := do.Invoke[GradingDepsProvider](i)
 	deleteAudio, _ := do.Invoke[AudioObjectDeleter](i)
-	return &InteractionsSvc{pg: pg, log: lg, authz: az, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio}, nil
+	return &InteractionsSvc{pg: pg, kv: kvSvc, log: lg, authz: az, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio}, nil
 }
 
 func (s *InteractionsSvc) Handler() (string, http.Handler) {
@@ -356,6 +370,25 @@ func (s *InteractionsSvc) SubmitAttempt(
 		return nil, err
 	}
 
+	// Load the lesson to check max_attempts
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	if lesson.MaxAttempts > 0 {
+		prevAttempt, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
+			return q.GetMyLessonAttempt(ctx, gen.GetMyLessonAttemptParams{LessonID: lessonID, UserID: userID})
+		})
+		if err == nil {
+			if prevAttempt.AttemptCount >= lesson.MaxAttempts {
+				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("bạn đã hết số lần làm bài cho phép (tối đa %d lần)", lesson.MaxAttempts))
+			}
+		}
+	}
+
 	// Load all interactions for this lesson to grade responses
 	interactions, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
 		return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{
@@ -383,14 +416,22 @@ func (s *InteractionsSvc) SubmitAttempt(
 		feedback      string
 	}
 
-	// Lazily resolve grading deps once if any ContextualGrader is needed.
-	var depsResolved bool
+	graded := make([]gradedResponse, len(req.GetResponses()))
+	var wg sync.WaitGroup
+	var resolveOnce sync.Once
 	var deps GradingDeps
+	var resolveErr error
 
-	var totalScore, totalMaxScore float32
-	var graded []gradedResponse
+	getDeps := func(gradeCtx context.Context) (GradingDeps, error) {
+		resolveOnce.Do(func() {
+			if s.gradingDeps != nil {
+				deps, resolveErr = s.gradingDeps(gradeCtx, lessonID)
+			}
+		})
+		return deps, resolveErr
+	}
 
-	for _, respInput := range req.GetResponses() {
+	for idx, respInput := range req.GetResponses() {
 		interaction, ok := interactionByID[respInput.GetInteractionId()]
 		if !ok {
 			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("interaction %s not found", respInput.GetInteractionId()))
@@ -407,60 +448,87 @@ func (s *InteractionsSvc) SubmitAttempt(
 			return nil, err
 		}
 
-		var score, maxScore float32
-		var feedback string
-		// Per-interaction grade in its own recover() + timeout block. Earlier a
-		// panic inside Gemini schema parsing aborted the whole SubmitAttempt
-		// (lost an entire student attempt over one bad question); now a single
-		// interaction failing falls back to score=0/max=1 + a teacher-review
-		// note and the rest of the submit keeps going.
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					s.log.ErrorContext(ctx, "interactions: panic in per-interaction grade",
-						"interaction_id", respInput.GetInteractionId(), "recover", r)
-					score, maxScore, feedback = 0, 1, "Hệ thống gặp lỗi khi chấm câu này. Giáo viên sẽ xem lại."
-				}
-			}()
-			gradeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-			defer cancel()
-			var gerr error
-			if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
-				if !depsResolved {
-					d, derr := s.gradingDeps(gradeCtx, lessonID)
-					if derr != nil {
-						s.log.ErrorContext(ctx, "interactions: resolve grading deps failed",
-							"interaction_id", respInput.GetInteractionId(), "err", derr)
-						score, maxScore, feedback = 0, 1, "Hệ thống chưa thể chấm câu này. Giáo viên sẽ xem lại."
-						return
-					}
-					deps = d
-					depsResolved = true
-				}
-				score, maxScore, feedback, gerr = cg.GradeWithContext(gradeCtx, deps, interaction.Config, responseJSON)
-			} else {
-				score, maxScore, feedback, gerr = h.Grade(interaction.Config, responseJSON)
-			}
-			if gerr != nil {
-				s.log.WarnContext(ctx, "interactions: grade returned error, falling back to pending credit",
-					"interaction_id", respInput.GetInteractionId(), "err", gerr)
-				score, maxScore, feedback = 0, 1, "Hệ thống chưa chấm được câu này. Giáo viên sẽ xem lại."
-			}
-		}()
-
 		iid, err := svc.ParseUUID(respInput.GetInteractionId())
 		if err != nil {
 			return nil, err
 		}
-		graded = append(graded, gradedResponse{
+
+		graded[idx] = gradedResponse{
 			interactionID: iid,
 			responseJSON:  responseJSON,
-			score:         score,
-			maxScore:      maxScore,
-			feedback:      feedback,
-		})
-		totalScore += score
-		totalMaxScore += maxScore
+		}
+
+		var useCache bool
+		if s.kv != nil {
+			cachedBytes, cerr := s.kv.Get("temp_grade", tuple.Tuple{claims.Sub, lessonID.String(), respInput.GetInteractionId()})
+			if cerr == nil && cachedBytes != nil {
+				var cached tempGradeCache
+				if json.Unmarshal(cachedBytes, &cached) == nil {
+					if bytes.Equal(cached.ResponseJSON, responseJSON) {
+						graded[idx].score = cached.Score
+						graded[idx].maxScore = cached.MaxScore
+						graded[idx].feedback = cached.Feedback
+						useCache = true
+					}
+				}
+			}
+		}
+
+		if useCache {
+			continue
+		}
+
+		wg.Add(1)
+		go func(i int, resp *richterv1.AttemptResponseInput, inter gen.LessonInteraction, handler Handler) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					s.log.ErrorContext(ctx, "interactions: panic in per-interaction grade",
+						"interaction_id", resp.GetInteractionId(), "recover", r)
+					graded[i].score = 0
+					graded[i].maxScore = 1
+					graded[i].feedback = "Hệ thống gặp lỗi khi chấm câu này. Giáo viên sẽ xem lại."
+				}
+			}()
+
+			gradeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+			defer cancel()
+
+			var score, maxScore float32
+			var feedback string
+			var gerr error
+
+			if cg, ok := handler.(ContextualGrader); ok && s.gradingDeps != nil {
+				d, derr := getDeps(gradeCtx)
+				if derr != nil {
+					s.log.ErrorContext(ctx, "interactions: resolve grading deps failed",
+						"interaction_id", resp.GetInteractionId(), "err", derr)
+					score, maxScore, feedback = 0, 1, "Hệ thống chưa thể chấm câu này. Giáo viên sẽ xem lại."
+				} else {
+					score, maxScore, feedback, gerr = cg.GradeWithContext(gradeCtx, d, inter.Config, graded[i].responseJSON)
+				}
+			} else {
+				score, maxScore, feedback, gerr = handler.Grade(inter.Config, graded[i].responseJSON)
+			}
+
+			if gerr != nil {
+				s.log.WarnContext(ctx, "interactions: grade returned error, falling back to pending credit",
+					"interaction_id", resp.GetInteractionId(), "err", gerr)
+				score, maxScore, feedback = 0, 1, "Hệ thống chưa chấm được câu này. Giáo viên sẽ xem lại."
+			}
+
+			graded[i].score = score
+			graded[i].maxScore = maxScore
+			graded[i].feedback = feedback
+		}(idx, respInput, interaction, h)
+	}
+
+	wg.Wait()
+
+	var totalScore, totalMaxScore float32
+	for _, g := range graded {
+		totalScore += g.score
+		totalMaxScore += g.maxScore
 	}
 
 	// Collect old audio keys to delete after upsert (best-effort cleanup on retake).
@@ -541,6 +609,14 @@ func (s *InteractionsSvc) SubmitAttempt(
 	})
 	if txErr != nil {
 		return nil, svc.ConnectDBError(txErr)
+	}
+
+	if s.kv != nil {
+		go func() {
+			for _, respInput := range req.GetResponses() {
+				_ = s.kv.Delete("temp_grade", tuple.Tuple{claims.Sub, lessonID.String(), respInput.GetInteractionId()})
+			}
+		}()
 	}
 
 	// Best-effort async deletion of old student audio recordings.
@@ -671,6 +747,21 @@ func (s *InteractionsSvc) PreviewGrade(
 			Score: 0.5, MaxScore: 1.0,
 			Feedback: "Đang chấm điểm — kết quả tạm thời sẽ được cập nhật khi bạn nộp bài.",
 		}, nil
+	}
+
+	if s.kv != nil {
+		claims, cerr := s.authz.RequireAuthenticated(ctx)
+		if cerr == nil {
+			cacheData := tempGradeCache{
+				ResponseJSON: responseJSON,
+				Score:        score,
+				MaxScore:     maxScore,
+				Feedback:     feedback,
+			}
+			if cacheBytes, jerr := json.Marshal(cacheData); jerr == nil {
+				_ = s.kv.Set("temp_grade", tuple.Tuple{claims.Sub, lessonID.String(), respInput.GetInteractionId()}, cacheBytes)
+			}
+		}
 	}
 
 	return &richterv1.PreviewGradeResponse{Score: score, MaxScore: maxScore, Feedback: feedback}, nil
@@ -828,12 +919,13 @@ func (s *InteractionsSvc) ListAttempts(
 			ts = timestamppb.New(r.SubmittedAt.Time)
 		}
 		summaries = append(summaries, &richterv1.StudentAttemptSummary{
-			UserId:      r.UserID.String(),
-			DisplayName: name,
-			Email:       r.Email,
-			TotalScore:  r.TotalScore,
-			MaxScore:    r.MaxScore,
-			SubmittedAt: ts,
+			UserId:       r.UserID.String(),
+			DisplayName:  name,
+			Email:        r.Email,
+			TotalScore:   r.TotalScore,
+			MaxScore:     r.MaxScore,
+			SubmittedAt:  ts,
+			AttemptCount: r.AttemptCount,
 		})
 	}
 

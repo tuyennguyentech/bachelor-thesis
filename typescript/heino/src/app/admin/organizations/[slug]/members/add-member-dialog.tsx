@@ -39,7 +39,7 @@ interface AddMemberFormProps {
   onClose: () => void;
 }
 
-function AddMemberForm({ organizationId, slug: _slug, token, onClose }: AddMemberFormProps) {
+function AddMemberForm({ organizationId, token, onClose }: AddMemberFormProps) {
   const router = useRouter();
   const memberClient = useRichterWebClient(OrganizationMemberService, token);
   const userClient = useRichterWebClient(UserService, token);

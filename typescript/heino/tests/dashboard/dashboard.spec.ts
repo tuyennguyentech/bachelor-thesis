@@ -1,4 +1,4 @@
-import { test, expect, USER_EMAIL } from "../fixtures";
+import { test, expect } from "../fixtures";
 
 test.describe("Dashboard home", () => {
   test("shows personalized greeting", async ({ userPage: page }) => {

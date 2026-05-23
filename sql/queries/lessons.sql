@@ -1,6 +1,6 @@
 -- name: CreateLesson :one
-INSERT INTO lessons (module_id, title, description, order_index)
-VALUES ($1, $2, $3, $4)
+INSERT INTO lessons (module_id, title, description, order_index, max_attempts)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetLessonByID :one
@@ -21,7 +21,7 @@ LIMIT $2 OFFSET $3;
 
 -- name: UpdateLesson :one
 UPDATE lessons
-SET title = $2, description = $3, order_index = $4, language = $5
+SET title = $2, description = $3, order_index = $4, language = $5, max_attempts = $6
 WHERE id = $1
 RETURNING *;
 

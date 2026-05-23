@@ -26,7 +26,7 @@ interface Props {
   token: string;
 }
 
-export function OrgStatusSelect({ orgId, orgSlug: _orgSlug, currentStatus, token }: Props) {
+export function OrgStatusSelect({ orgId, currentStatus, token }: Props) {
   const router = useRouter();
   const orgClient = useRichterWebClient(OrganizationService, token);
   const [isPending, startTransition] = useTransition();

@@ -1,4 +1,4 @@
-import { test, expect, ADMIN_EMAIL, ADMIN_PASSWORD } from "./fixtures";
+import { test, expect, ADMIN_EMAIL } from "./fixtures";
 import { test as base } from "@playwright/test";
 
 base.describe("Home page (unauthenticated)", () => {

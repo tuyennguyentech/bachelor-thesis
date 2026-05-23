@@ -154,6 +154,7 @@ func (s *LessonsSvc) CreateLesson(
 			Title:       req.GetTitle(),
 			Description: descToPgText(req.GetDescription()),
 			OrderIndex:  req.GetOrderIndex(),
+			MaxAttempts: req.GetMaxAttempts(),
 		})
 	})
 	if err != nil {
@@ -301,6 +302,10 @@ func (s *LessonsSvc) UpdateLesson(
 	if lang == "" {
 		lang = existing.Language
 	}
+	maxAtt := req.GetMaxAttempts()
+	if req.MaxAttempts == nil {
+		maxAtt = existing.MaxAttempts
+	}
 	l, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
 		return q.UpdateLesson(ctx, gen.UpdateLessonParams{
 			ID:          existing.ID,
@@ -308,6 +313,7 @@ func (s *LessonsSvc) UpdateLesson(
 			Description: descToPgText(req.GetDescription()),
 			OrderIndex:  req.GetOrderIndex(),
 			Language:    lang,
+			MaxAttempts: maxAtt,
 		})
 	})
 	if err != nil {

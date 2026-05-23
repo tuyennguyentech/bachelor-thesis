@@ -21,15 +21,22 @@ type AudioGradingResult struct {
 	Feedback string `json:"feedback"`
 }
 
-// GradeAudio sends the student's audio to Gemini and returns a structured grading result.
-//
-// Parameters:
-//   - audioMP3: raw audio bytes of the student's recording (any container Gemini accepts)
-//   - language: "vi" or "en", used to localise the grading prompt
-//   - passageMarkdown: the passage the student was asked to read/answer
-//   - question: non-empty only for OPEN_ANSWER mode
-//   - expectedAnswer: gold answer for OPEN_ANSWER mode (empty for PRONUNCIATION mode)
 func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question, expectedAnswer string) (*AudioGradingResult, error) {
+	// 1. Call Whisper to transcribe the audio.
+	transcript, _, werr := s.whisperTranscribe(ctx, audioMP3)
+	if werr != nil {
+		return nil, fmt.Errorf("gemini audio grade: whisper transcription: %w", werr)
+	}
+
+	if strings.TrimSpace(transcript) == "" || isWhisperHallucination(transcript, language) {
+		return &AudioGradingResult{
+			Transcript:         "",
+			PronunciationScore: 0.0,
+			ContentScore:       0.0,
+			Feedback:           "Không phát hiện thấy tiếng nói hoặc âm thanh không rõ ràng. Vui lòng ghi âm lại.",
+		}, nil
+	}
+
 	client, err := s.newGeminiClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("gemini audio grade: %w", err)
@@ -39,23 +46,12 @@ func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passa
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.ResponseMIMEType = "application/json"
 
-	// Build the response schema with the SDK's typed struct. Earlier we tried
-	// json.Unmarshal-ing a JSON-Schema-style string into genai.Schema, but
-	// genai.Schema.Type is an int enum (not a string), and the schema had no
-	// minimum/maximum fields — the unmarshal failed and mustParseSchema's
-	// panic() killed the request mid-flight (net/http returned 500/empty,
-	// Caddy surfaced 502, the FE rendered "[unavailable]"). Building the
-	// schema as Go literals removes the entire failure mode.
+	// Build the response schema with the SDK's typed struct.
 	model.ResponseSchema = audioGradingResponseSchema()
 
-	prompt := buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer)
+	prompt := buildTextGradingPrompt(language, passageMarkdown, question, expectedAnswer, transcript)
 
-	audioPart := genai.Blob{
-		MIMEType: detectAudioMIME(audioMP3),
-		Data:     audioMP3,
-	}
-
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt), audioPart)
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		return nil, fmt.Errorf("gemini audio grade: generate: %w", err)
 	}
@@ -68,19 +64,20 @@ func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passa
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return nil, fmt.Errorf("gemini audio grade: parse response: %w", err)
 	}
+	result.Transcript = transcript
 	result.PronunciationScore = clamp01(result.PronunciationScore)
 	result.ContentScore = clamp01(result.ContentScore)
 	return &result, nil
 }
 
-func buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer string) string {
+func buildTextGradingPrompt(language, passageMarkdown, question, expectedAnswer, transcript string) string {
 	var sb strings.Builder
 
 	isOpenAnswer := strings.TrimSpace(question) != ""
 
 	if language == "en" {
 		if isOpenAnswer {
-			sb.WriteString("You are an English language teacher. Grade this student's spoken answer.\n\n")
+			sb.WriteString("You are an English language teacher. Grade this student's spoken answer based on the provided transcription of their audio.\n\n")
 			sb.WriteString("Context passage:\n")
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nQuestion: ")
@@ -89,25 +86,27 @@ func buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer
 				sb.WriteString("\n\nExpected answer (gold reference): ")
 				sb.WriteString(expectedAnswer)
 			}
-			sb.WriteString("\n\nListen to the student's audio and:\n")
-			sb.WriteString("1. Transcribe what the student said (transcript)\n")
-			sb.WriteString("2. Rate pronunciation quality: 0.0 = very poor, 1.0 = excellent (pronunciation_score)\n")
-			sb.WriteString("3. Rate content correctness against the expected answer if provided, otherwise against the passage: 0.0 = wrong/irrelevant, 1.0 = fully correct (content_score)\n")
-			sb.WriteString("4. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
+			sb.WriteString("\n\nStudent's transcribed answer: ")
+			sb.WriteString(transcript)
+			sb.WriteString("\n\nEvaluate the student's response:\n")
+			sb.WriteString("1. Rate pronunciation/clarity quality: 0.0 = very poor/unclear, 1.0 = excellent/clear (pronunciation_score). Note: since you are reading a transcript, base this on how coherent and clear the transcription is compared to natural spoken English.\n")
+			sb.WriteString("2. Rate content correctness against the expected answer if provided, otherwise against the passage: 0.0 = wrong/irrelevant, 1.0 = fully correct (content_score)\n")
+			sb.WriteString("3. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
 		} else {
-			sb.WriteString("You are an English language teacher. Grade this student's reading aloud exercise.\n\n")
+			sb.WriteString("You are an English language teacher. Grade this student's reading aloud exercise based on the provided transcription of their audio.\n\n")
 			sb.WriteString("The student was asked to read this passage aloud:\n")
 			sb.WriteString(passageMarkdown)
-			sb.WriteString("\n\nListen to the student's audio and:\n")
-			sb.WriteString("1. Transcribe what the student said (transcript)\n")
-			sb.WriteString("2. Rate pronunciation quality: 0.0 = very poor, 1.0 = excellent (pronunciation_score)\n")
-			sb.WriteString("3. Set content_score to 0 (not applicable for reading aloud)\n")
-			sb.WriteString("4. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
+			sb.WriteString("\n\nStudent's transcribed reading: ")
+			sb.WriteString(transcript)
+			sb.WriteString("\n\nEvaluate the student's reading:\n")
+			sb.WriteString("1. Rate pronunciation/accuracy quality: 0.0 = very poor/does not match the passage, 1.0 = excellent/matches the passage perfectly (pronunciation_score). Base this on how well the transcription matches the target passage (missing words, extra words, or replaced words should lower the score).\n")
+			sb.WriteString("2. Set content_score to 0 (not applicable for reading aloud)\n")
+			sb.WriteString("3. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
 		}
 	} else {
 		// Vietnamese
 		if isOpenAnswer {
-			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm câu trả lời nói của học sinh.\n\n")
+			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm câu trả lời nói của học sinh dựa trên bản ghi phiên âm từ giọng nói của học sinh.\n\n")
 			sb.WriteString("Đoạn văn ngữ cảnh:\n")
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nCâu hỏi: ")
@@ -116,20 +115,22 @@ func buildAudioGradingPrompt(language, passageMarkdown, question, expectedAnswer
 				sb.WriteString("\n\nĐáp án mẫu (tham chiếu): ")
 				sb.WriteString(expectedAnswer)
 			}
-			sb.WriteString("\n\nNghe audio của học sinh và:\n")
-			sb.WriteString("1. Chép lại những gì học sinh nói (transcript)\n")
-			sb.WriteString("2. Đánh giá chất lượng phát âm: 0.0 = rất kém, 1.0 = xuất sắc (pronunciation_score)\n")
-			sb.WriteString("3. Đánh giá mức độ đúng của nội dung so với đáp án mẫu (nếu có), nếu không thì so với đoạn văn: 0.0 = sai/không liên quan, 1.0 = hoàn toàn đúng (content_score)\n")
-			sb.WriteString("4. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
+			sb.WriteString("\n\nBản ghi phiên âm câu trả lời của học sinh: ")
+			sb.WriteString(transcript)
+			sb.WriteString("\n\nĐánh giá câu trả lời của học sinh:\n")
+			sb.WriteString("1. Đánh giá chất lượng phát âm/độ rõ ràng: 0.0 = rất kém/không rõ ràng, 1.0 = xuất sắc/rõ ràng (pronunciation_score). Chấm điểm dựa trên độ mạch lạc và chuẩn xác của văn bản phiên âm.\n")
+			sb.WriteString("2. Đánh giá mức độ đúng của nội dung so với đáp án mẫu (nếu có), nếu không thì so với đoạn văn: 0.0 = sai/không liên quan, 1.0 = hoàn toàn đúng (content_score)\n")
+			sb.WriteString("3. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
 		} else {
-			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm bài đọc to của học sinh.\n\n")
+			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm bài đọc to của học sinh dựa trên bản ghi phiên âm từ giọng nói của học sinh.\n\n")
 			sb.WriteString("Học sinh được yêu cầu đọc to đoạn văn sau:\n")
 			sb.WriteString(passageMarkdown)
-			sb.WriteString("\n\nNghe audio của học sinh và:\n")
-			sb.WriteString("1. Chép lại những gì học sinh nói (transcript)\n")
-			sb.WriteString("2. Đánh giá chất lượng phát âm: 0.0 = rất kém, 1.0 = xuất sắc (pronunciation_score)\n")
-			sb.WriteString("3. Đặt content_score = 0 (không áp dụng cho bài đọc to)\n")
-			sb.WriteString("4. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
+			sb.WriteString("\n\nBản ghi phiên âm bài đọc của học sinh: ")
+			sb.WriteString(transcript)
+			sb.WriteString("\n\nĐánh giá bài đọc của học sinh:\n")
+			sb.WriteString("1. Đánh giá chất lượng phát âm/độ chính xác: 0.0 = rất kém/không khớp với đoạn văn, 1.0 = xuất sắc/khớp hoàn toàn với đoạn văn (pronunciation_score). Điểm số dựa trên việc so sánh bản ghi phiên âm với đoạn văn mẫu (các từ bị thiếu, từ thừa hoặc từ bị đọc sai khiến phiên âm khác đi sẽ làm giảm điểm).\n")
+			sb.WriteString("2. Đặt content_score = 0 (không áp dụng cho bài đọc to)\n")
+			sb.WriteString("3. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
 		}
 	}
 	return sb.String()
@@ -189,4 +190,68 @@ func audioGradingResponseSchema() *genai.Schema {
 			"feedback":            {Type: genai.TypeString},
 		},
 	}
+}
+
+func isWhisperHallucination(transcript string, language string) bool {
+	t := strings.ToLower(strings.TrimSpace(transcript))
+
+	// Globally remove any punctuation/special characters and collapse spaces
+	var sb strings.Builder
+	for _, r := range t {
+		if r == '.' || r == ',' || r == '!' || r == '?' || r == '"' || r == '\'' || r == '-' || r == ';' || r == ':' || r == '_' || r == '(' || r == ')' {
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	cleaned := strings.Join(strings.Fields(sb.String()), " ")
+	
+	// Common hallucinations list (fully stripped of punctuation and collapsed)
+	hallucinations := map[string]bool{
+		"thank you": true,
+		"thank you thank you": true,
+		"thank you so much": true,
+		"thank you very much": true,
+		"thanks": true,
+		"thanks for watching": true,
+		"thank you for watching": true,
+		"you": true,
+		"go": true,
+		"bye": true,
+		"bye bye": true,
+		"oh": true,
+		"yeah": true,
+		"yes": true,
+		"no": true,
+		"uh": true,
+		"um": true,
+		"shh": true,
+		"hãy đăng ký kênh": true,
+		"cảm ơn các bạn đã xem": true,
+		"cảm ơn": true,
+		"cảm ơn bạn": true,
+		"cám ơn": true,
+		"谢谢": true,
+		"谢谢大家": true,
+		"谢谢大家观看": true,
+		"谢谢观看": true,
+	}
+
+	if hallucinations[cleaned] {
+		return true
+	}
+
+	// If language is English or Vietnamese and transcript contains CJK (Chinese, Japanese, Korean) characters, it's a hallucination
+	if language == "en" || language == "vi" {
+		cjkCount := 0
+		for _, r := range t {
+			if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3040 && r <= 0x30FF) || (r >= 0x31F0 && r <= 0x31FF) || (r >= 0x1100 && r <= 0x11FF) || (r >= 0xAC00 && r <= 0xD7AF) {
+				cjkCount++
+			}
+		}
+		if cjkCount > 0 {
+			return true
+		}
+	}
+	
+	return false
 }

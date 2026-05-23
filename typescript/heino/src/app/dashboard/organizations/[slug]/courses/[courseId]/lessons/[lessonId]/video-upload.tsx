@@ -26,7 +26,7 @@ interface Props {
   token: string;
 }
 
-export function VideoUpload({ lessonId, moduleId, courseId, slug, hasVideo, token }: Props) {
+export function VideoUpload({ lessonId, hasVideo, token }: Props) {
   const router = useRouter();
   const storageClient = useRichterWebClient(StorageService, token);
   const lessonClient = useRichterWebClient(LessonService, token);

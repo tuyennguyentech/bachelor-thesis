@@ -45,7 +45,7 @@ interface EditLessonFormProps {
   onClose: () => void;
 }
 
-function EditLessonForm({ id, moduleId: _moduleId, courseId: _courseId, slug: _slug, currentTitle, currentDescription, orderIndex, token, onClose }: EditLessonFormProps) {
+function EditLessonForm({ id, currentTitle, currentDescription, orderIndex, token, onClose }: EditLessonFormProps) {
   const router = useRouter();
   const lessonClient = useRichterWebClient(LessonService, token);
   const [error, setError] = useState<string | null>(null);

@@ -40,7 +40,7 @@ This project is a multi-service application (monorepo) comprising a Go backend (
 ### 1. Local Infrastructure
 The project uses Podman/Docker Compose for local services (Postgres, FDB, Caddy).
 ```sh
-podman-compose up -d
+podman compose up -d
 ```
 
 ### 2. DNS & Networking (Crucial)

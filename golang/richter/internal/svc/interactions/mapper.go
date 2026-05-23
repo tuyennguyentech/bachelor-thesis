@@ -74,14 +74,15 @@ func AttemptToProto(a gen.LessonAttempt, responses []gen.ListAttemptResponsesRow
 	}
 
 	return &richterv1.LessonAttempt{
-		Id:          a.ID.String(),
-		LessonId:    a.LessonID.String(),
-		UserId:      a.UserID.String(),
-		TotalScore:  a.TotalScore,
-		MaxScore:    a.MaxScore,
-		Status:      a.Status,
-		SubmittedAt: submittedAt,
-		Responses:   protoResps,
+		Id:           a.ID.String(),
+		LessonId:     a.LessonID.String(),
+		UserId:       a.UserID.String(),
+		TotalScore:   a.TotalScore,
+		MaxScore:     a.MaxScore,
+		Status:       a.Status,
+		SubmittedAt:  submittedAt,
+		Responses:    protoResps,
+		AttemptCount: a.AttemptCount,
 	}
 }
 

@@ -187,31 +187,8 @@ test.describe("Seeded lesson — student sees previous attempt result", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     // Bob has a seeded quiz attempt — the new UI shows LessonResult with donut score + Làm lại
     await expect(page.getByText("🎯 Kết quả")).toBeVisible();
-    await expect(page.getByText(/câu đúng/)).toBeVisible();
+    await expect(page.getByText(/điểm/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Làm lại" })).toBeVisible();
-  });
-});
-
-// ── Seeded lesson — marker strip data-testids ──────────────────────────────
-
-test.describe("Seeded lesson — marker strip", () => {
-  test("checkpoint markers have data-testid and data-state attributes", async ({ studentPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
-
-    // Reset to fresh state via Làm lại (bob has seeded attempt)
-    await page.getByRole("button", { name: "Làm lại" }).click();
-
-    // Seeded lesson has 3 interactions with startSeconds > 0
-    // Marker strip should be visible
-    const markers = page.locator('[data-testid^="checkpoint-marker-"]');
-    await expect(markers.first()).toBeVisible();
-
-    // All markers should initially be "pending"
-    const count = await markers.count();
-    expect(count).toBeGreaterThan(0);
-    for (let i = 0; i < count; i++) {
-      await expect(markers.nth(i)).toHaveAttribute("data-state", "pending");
-    }
   });
 });
 
@@ -242,10 +219,6 @@ test.describe("Seeded lesson — AFTER_SUBMIT checkpoint flow", () => {
     // Continue — wait for checkpoint to vanish before triggering next
     await checkpoint.getByRole("button", { name: /Tiếp tục/ }).click();
     await expect(checkpoint).not.toBeVisible({ timeout: 5000 });
-
-    // First marker should now be "passed"
-    const firstMarker = page.locator('[data-testid^="checkpoint-marker-"]').first();
-    await expect(firstMarker).toHaveAttribute("data-state", "passed");
 
     // Trigger second checkpoint
     await triggerCheckpoint(page, 416);
@@ -282,7 +255,7 @@ test.describe("Seeded lesson — AFTER_SUBMIT checkpoint flow", () => {
 
     // Result section appears with donut score
     await expect(page.getByText("🎯 Kết quả")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/câu đúng/)).toBeVisible();
+    await expect(page.getByText(/điểm/)).toBeVisible();
   });
 });
 

@@ -9,6 +9,7 @@ import { getRenderer, extractConfig } from "@/interactions/registry";
 export interface QuizResult {
   totalScore: number;
   maxScore: number;
+  attemptCount?: number;
   responses: {
     interactionId: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,9 +26,14 @@ interface Props {
   feedbackMode: FeedbackMode;
   onRetake: () => void;
   token?: string;
+  maxAttempts?: number;
 }
 
-function DonutScore({ score, total }: { score: number; total: number }) {
+function formatScore(n: number): string {
+  return Number(n.toFixed(2)).toString();
+}
+
+function DonutScore({ score, total, attemptCount, maxAttempts }: { score: number; total: number; attemptCount?: number; maxAttempts?: number }) {
   const pct = total > 0 ? Math.round((score / total) * 100) : 0;
   const r = 26;
   const circ = 2 * Math.PI * r;
@@ -50,27 +56,36 @@ function DonutScore({ score, total }: { score: number; total: number }) {
         </text>
       </svg>
       <div className="flex flex-col">
-        <span className="text-sm font-semibold">{score}/{total} câu đúng</span>
-        <span className="text-xs text-muted-foreground">
-          {pct >= 80 ? "Xuất sắc! 🎉" : pct >= 50 ? "Làm tốt lắm!" : "Cố gắng hơn nhé!"}
+        <span className="text-sm font-semibold">{formatScore(score)}/{formatScore(total)} điểm</span>
+        <span className="text-xs text-muted-foreground flex flex-col gap-0.5">
+          <span>{pct >= 80 ? "Xuất sắc! 🎉" : pct >= 50 ? "Làm tốt lắm!" : "Cố gắng hơn nhé!"}</span>
+          {maxAttempts !== undefined && maxAttempts > 0 && (
+            <span className="text-[10px] text-muted-foreground font-semibold">
+              Số lượt đã nộp: {attemptCount ?? 0}/{maxAttempts}
+            </span>
+          )}
         </span>
       </div>
     </div>
   );
 }
 
-export function LessonResult({ result, interactions, feedbackMode, onRetake, token }: Props) {
+export function LessonResult({ result, interactions, feedbackMode, onRetake, token, maxAttempts }: Props) {
+  const canRetake = !maxAttempts || maxAttempts <= 0 || (result.attemptCount ?? 0) < maxAttempts;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">🎯 Kết quả</span>
-          <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={onRetake}>
-            <RotateCcwIcon className="size-3.5" />
-            Làm lại
-          </Button>
+          {canRetake ? (
+            <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={onRetake}>
+              <RotateCcwIcon className="size-3.5" />
+              Làm lại
+            </Button>
+          ) : null}
         </div>
-        <DonutScore score={result.totalScore} total={result.maxScore} />
+        <DonutScore score={result.totalScore} total={result.maxScore} attemptCount={result.attemptCount} maxAttempts={maxAttempts} />
       </div>
 
       {feedbackMode !== FeedbackMode.HIDDEN && interactions.length > 0 && (
