@@ -37,10 +37,21 @@ export function ListeningStudentView({
   const hasAnswered = config.mode === "dictation" ? dictationSubmitted : allComprehensionAnswered;
 
   useEffect(() => {
-    if (!config.audioObjectKey) { setLoadingUrl(false); return; }
+    if (!config.audioObjectKey) {
+      console.warn("ListeningStudentView: config.audioObjectKey is empty or missing!");
+      setLoadingUrl(false);
+      return;
+    }
+    console.log("ListeningStudentView: fetching download URL for key:", config.audioObjectKey);
     storageClient.getDownloadUrl({ key: config.audioObjectKey, expiresInSeconds: 3600 })
-      .then((res) => setAudioUrl(res.downloadUrl))
-      .catch(() => setAudioUrl(null))
+      .then((res) => {
+        console.log("ListeningStudentView: download URL fetched successfully:", res.downloadUrl);
+        setAudioUrl(res.downloadUrl);
+      })
+      .catch((err) => {
+        console.error("ListeningStudentView: failed to fetch download URL for key:", config.audioObjectKey, err);
+        setAudioUrl(null);
+      })
       .finally(() => setLoadingUrl(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.audioObjectKey]);
@@ -82,7 +93,9 @@ export function ListeningStudentView({
           />
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground italic">Audio chưa được tải lên.</p>
+        <p className="text-sm text-muted-foreground italic">
+          Audio chưa được tải lên. (Key: {config.audioObjectKey || "trống"})
+        </p>
       )}
 
       {/* Dictation */}

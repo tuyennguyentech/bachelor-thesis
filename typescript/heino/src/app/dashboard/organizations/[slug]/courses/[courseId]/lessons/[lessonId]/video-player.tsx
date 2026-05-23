@@ -17,6 +17,8 @@ import "vidstack/styles/community-skin/video.css";
 
 type PlayerInstance = MediaPlayerElement & {
   currentTime: number;
+  duration: number;
+  paused: boolean;
   muted: boolean;
   volume: number;
   canPlay: boolean;
@@ -78,10 +80,17 @@ export function VideoPlayer({
   const hasPlayedRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  const { currentTime, duration, paused, muted, volume } = useMediaStore(playerRef);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [paused, setPaused] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
 
   useEffect(() => {
     hasPlayedRef.current = false;
+    setCurrentTime(0);
+    setDuration(0);
+    setPaused(true);
     const player = playerRef.current;
     if (player) {
       try {
@@ -351,6 +360,27 @@ export function VideoPlayer({
 
   return (
     <>
+      <style dangerouslySetInnerHTML={{__html: `
+        media-player {
+          display: block !important;
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+        }
+        media-outlet, media-player::part(outlet) {
+          display: block !important;
+          width: 100% !important;
+          height: 100% !important;
+        }
+        media-player video, media-player::part(video) {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: contain !important;
+          background-color: black !important;
+        }
+      `}} />
       <div
         data-testid="video-player"
         className="relative w-full rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center border group"
@@ -374,14 +404,15 @@ export function VideoPlayer({
             <MediaPlayer
               ref={playerRef}
               src={stableUrl}
-              className="w-full h-full"
+              className="absolute inset-0 w-full h-full"
               aspectRatio={16/9}
               load="eager"
               preload="metadata"
               playsInline
               controls={false}
-              onClick={allowNativeFullscreen ? undefined : handleVideoClick}
+              onClick={handleVideoClick}
               onPlay={() => {
+                setPaused(false);
                 if (!hasPlayedRef.current) {
                   hasPlayedRef.current = true;
                   onFirstPlayRef.current?.();
@@ -389,19 +420,33 @@ export function VideoPlayer({
                 dispatchEventToLightVideo("play");
               }}
               onPause={() => {
+                setPaused(true);
                 const p = playerRef.current;
                 if (p) saveProgress(p.currentTime);
                 dispatchEventToLightVideo("pause");
               }}
               onTimeUpdate={() => {
+                const p = playerRef.current;
+                if (p) {
+                  setCurrentTime(p.currentTime);
+                }
                 handleTimeUpdate();
                 dispatchEventToLightVideo("timeupdate");
               }}
               onDurationChange={() => {
+                const p = playerRef.current;
+                if (p) {
+                  setDuration(p.duration);
+                }
                 handleDurationChange();
                 dispatchEventToLightVideo("durationchange");
               }}
               onVolumeChange={() => {
+                const p = playerRef.current;
+                if (p) {
+                  setVolume(p.volume);
+                  setMuted(p.muted);
+                }
                 dispatchEventToLightVideo("volumechange");
               }}
               onEnded={() => {
@@ -421,11 +466,10 @@ export function VideoPlayer({
               }}
             >
               <MediaOutlet />
-              {allowNativeFullscreen && <MediaCommunitySkin />}
             </MediaPlayer>
 
-            {/* Only show custom controls when allowNativeFullscreen is false (student/preview view) */}
-            {!allowNativeFullscreen && (
+            {/* Custom controls overlay for all views */}
+            {true && (
               <>
                 {/* Big central Play/Pause overlay button */}
                 <div 
@@ -466,7 +510,7 @@ export function VideoPlayer({
                       </button>
 
                       {/* Volume Button & Slider */}
-                      <div className="flex items-center gap-1 group/volume">
+                      <div className="flex items-center gap-1.5">
                         <button 
                           onClick={toggleMute} 
                           className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
@@ -489,7 +533,7 @@ export function VideoPlayer({
                               }
                             }
                           }}
-                          className="w-0 opacity-0 group-hover/volume:w-16 group-hover/volume:opacity-100 transition-all duration-300 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:bg-white/40"
+                          className="w-16 opacity-100 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:bg-white/40 transition-all duration-150"
                         />
                       </div>
 
