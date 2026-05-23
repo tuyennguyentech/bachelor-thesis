@@ -460,7 +460,7 @@ export function VideoPlayer({
                     }
                   }
                 }
-                handleTimeUpdate(p.currentTime);
+                handleTimeUpdate();
               }}
               onDurationChange={() => {
                 const p = playerRef.current;
