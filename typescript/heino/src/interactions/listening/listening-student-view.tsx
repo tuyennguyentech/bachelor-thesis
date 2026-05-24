@@ -33,23 +33,20 @@ export function ListeningStudentView({
     initialResponse?.comprehensionAnswers ?? config.comprehensionQuestions.map(() => -1)
   );
   const allComprehensionAnswered =
-    config.mode === "comprehension" && answers.every((a) => a >= 0);
+    config.mode === "comprehension" && config.comprehensionQuestions.length > 0 && answers.every((a) => a >= 0);
   const hasAnswered = config.mode === "dictation" ? dictationSubmitted : allComprehensionAnswered;
+  const audioReady = !!audioUrl;
 
   useEffect(() => {
     if (!config.audioObjectKey) {
-      console.warn("ListeningStudentView: config.audioObjectKey is empty or missing!");
       setLoadingUrl(false);
       return;
     }
-    console.log("ListeningStudentView: fetching download URL for key:", config.audioObjectKey);
     storageClient.getDownloadUrl({ key: config.audioObjectKey, expiresInSeconds: 3600 })
       .then((res) => {
-        console.log("ListeningStudentView: download URL fetched successfully:", res.downloadUrl);
         setAudioUrl(res.downloadUrl);
       })
-      .catch((err) => {
-        console.error("ListeningStudentView: failed to fetch download URL for key:", config.audioObjectKey, err);
+      .catch(() => {
         setAudioUrl(null);
       })
       .finally(() => setLoadingUrl(false));
@@ -57,13 +54,14 @@ export function ListeningStudentView({
   }, [config.audioObjectKey]);
 
   function handleComprehensionSelect(qi: number, selected: number) {
+    if (!audioReady || locked) return;
     const next = answers.map((a, i) => (i === qi ? selected : a));
     setAnswers(next);
     onAnswer({ transcription: "", comprehensionAnswers: next });
   }
 
   function handleDictationSubmit() {
-    if (!transcription.trim()) return;
+    if (!audioReady || locked || !transcription.trim()) return;
     setDictationSubmitted(true);
     onAnswer({ transcription, comprehensionAnswers: [] });
   }
@@ -93,9 +91,9 @@ export function ListeningStudentView({
           />
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground italic">
-          Audio chưa được tải lên. (Key: {config.audioObjectKey || "trống"})
-        </p>
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          Không tải được audio cho bài nghe. Vui lòng báo giáo viên tạo lại hoặc tải audio khác.
+        </div>
       )}
 
       {/* Dictation */}
@@ -106,7 +104,7 @@ export function ListeningStudentView({
             rows={3}
             value={transcription}
             onChange={(e) => setTranscription(e.target.value)}
-            disabled={locked || dictationSubmitted}
+            disabled={!audioReady || locked || dictationSubmitted}
             placeholder="Nhập nội dung bạn nghe được…"
             className="text-sm rounded border border-input bg-background px-2 py-1.5 resize-none"
           />
@@ -114,7 +112,7 @@ export function ListeningStudentView({
             <Button
               size="sm"
               className="self-start"
-              disabled={locked || !transcription.trim()}
+              disabled={!audioReady || locked || !transcription.trim()}
               onClick={handleDictationSubmit}
             >
               Trả lời
@@ -135,6 +133,11 @@ export function ListeningStudentView({
       {/* Comprehension */}
       {config.mode === "comprehension" && (
         <div className="flex flex-col gap-4">
+          {config.comprehensionQuestions.length === 0 && (
+            <p className="text-sm text-muted-foreground italic">
+              Bài nghe chưa có câu hỏi nghe hiểu.
+            </p>
+          )}
           {config.comprehensionQuestions.map((q, qi) => (
             <div key={qi} className="flex flex-col gap-2">
               <p className="text-sm font-medium">Câu {qi + 1}</p>
@@ -142,7 +145,7 @@ export function ListeningStudentView({
                 questionIndex={qi}
                 config={q}
                 selected={answers[qi] ?? -1}
-                locked={locked}
+                locked={!audioReady || locked}
                 revealAnswer={feedbackMode === FeedbackMode.AFTER_EACH && (answers[qi] ?? -1) >= 0}
                 onSelect={(idx) => handleComprehensionSelect(qi, idx)}
               />
@@ -151,7 +154,7 @@ export function ListeningStudentView({
         </div>
       )}
 
-      {hasAnswered && (
+      {audioReady && hasAnswered && (
         <Button size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
           {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
         </Button>

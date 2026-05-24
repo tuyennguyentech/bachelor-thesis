@@ -1,4 +1,4 @@
-import { InteractionKind, ReadingMode } from "buf/gen/richter/v1/interactions_pb";
+import { InteractionKind, ListeningMode, ReadingMode } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction, LessonAttemptResponse } from "buf/gen/richter/v1/interactions_pb";
 import type {
   InteractionRenderer,
@@ -54,7 +54,7 @@ export function extractConfig(interaction: LessonInteraction): any | null {
     return {
       audioObjectKey: v.audioObjectKey,
       durationSeconds: v.durationSeconds,
-      mode: v.mode === 1 ? "dictation" : "comprehension",
+      mode: v.mode === ListeningMode.DICTATION ? "dictation" : "comprehension",
       expectedText: v.expectedText,
       comprehensionQuestions: v.comprehensionQuestions.map((q) => ({
         options: q.options.map((o) => ({ text: o.text })),

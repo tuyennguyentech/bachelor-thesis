@@ -16,7 +16,7 @@ func init() {
 }
 
 type listeningConfigJSON struct {
-	AudioObjectKey         string                `json:"audio_object_key"`
+	AudioObjectKey string `json:"audio_object_key"`
 	// AudioSourceText is the text used for TTS synthesis (set during AI generation).
 	AudioSourceText        string                `json:"audio_source_text,omitempty"`
 	DurationSeconds        int32                 `json:"duration_seconds,omitempty"`
@@ -26,8 +26,8 @@ type listeningConfigJSON struct {
 }
 
 type listeningResponseJSON struct {
-	Transcription          string  `json:"transcription,omitempty"`
-	ComprehensionAnswers   []int32 `json:"comprehension_answers,omitempty"`
+	Transcription        string  `json:"transcription,omitempty"`
+	ComprehensionAnswers []int32 `json:"comprehension_answers,omitempty"`
 }
 
 type listeningHandler struct{}
@@ -169,11 +169,11 @@ func (h *listeningHandler) protoToJSON(lc *richterv1.ListeningConfig) ([]byte, e
 // ── GeminiGenerator ───────────────────────────────────────────────────────────
 
 type listeningGeminiItem struct {
-	Prompt           string                `json:"prompt"`
-	Explanation      string                `json:"explanation"`
-	StartSeconds     float32               `json:"start_seconds"`
-	AudioSourceText  string                `json:"audio_source_text,omitempty"`
-	Questions        []mcqGeminiItemNested `json:"questions"`
+	Prompt          string                `json:"prompt"`
+	Explanation     string                `json:"explanation"`
+	StartSeconds    float32               `json:"start_seconds"`
+	AudioSourceText string                `json:"audio_source_text,omitempty"`
+	Questions       []mcqGeminiItemNested `json:"questions"`
 }
 
 type mcqGeminiItemNested struct {
@@ -217,8 +217,14 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 	if strings.TrimSpace(item.AudioSourceText) == "" {
 		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text empty")
 	}
+	if len(item.Questions) == 0 {
+		return "", "", 0, nil, fmt.Errorf("listening: questions empty")
+	}
 	questions := make([]nestedMcqConfigJSON, 0, len(item.Questions))
 	for i, q := range item.Questions {
+		if len(q.Options) != 4 {
+			return "", "", 0, nil, fmt.Errorf("listening: question %d: exactly 4 options required", i)
+		}
 		if q.CorrectAnswer < 0 || q.CorrectAnswer >= len(q.Options) {
 			return "", "", 0, nil, fmt.Errorf("listening: question %d: correct_answer out of range", i)
 		}

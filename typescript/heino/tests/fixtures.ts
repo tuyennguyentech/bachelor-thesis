@@ -73,3 +73,4 @@ export async function goToSeededLesson(page: Page, lessonTitle: string): Promise
 }
 
 export { expect };
+export type { Page };

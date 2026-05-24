@@ -97,14 +97,16 @@ export function LessonWideGenForm({
             checked={force}
             onChange={(e) => onForceChange(e.target.checked)}
           />
-          <span className="text-xs">Thay thế bài tập hiện có ({interactionsCount} bài)</span>
+          <span className="text-xs">
+            Tạo thêm cả ở phân đoạn đã có bài tập ({interactionsCount} bài hiện có vẫn được giữ)
+          </span>
         </label>
       )}
 
       <div className="flex gap-2">
         <Button size="sm" className="gap-1" disabled={disabled} onClick={onGenerate}>
           <SparklesIcon className="size-3" />
-          Tạo tất cả
+          {interactionsCount > 0 ? "Tạo thêm" : "Tạo tất cả"}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>Hủy</Button>
       </div>

@@ -76,16 +76,16 @@ func init() {
 }
 
 type AISvc struct {
-	pg          *db.PostgresSvc
-	kv          *kv.KVSvc
-	log         *log.LogSvc
-	authz       *authz.AuthzSvc
-	s3client    *minio.Client
-	s3cfg       *cfg.S3Cfg
-	geminiCfg   *cfg.GeminiCfg
-	whisperCfg  *cfg.WhisperCfg
-	ttsCfg      *cfg.TTSCfg
-	ttsClient   *PiperTTSClient
+	pg         *db.PostgresSvc
+	kv         *kv.KVSvc
+	log        *log.LogSvc
+	authz      *authz.AuthzSvc
+	s3client   *minio.Client
+	s3cfg      *cfg.S3Cfg
+	geminiCfg  *cfg.GeminiCfg
+	whisperCfg *cfg.WhisperCfg
+	ttsCfg     *cfg.TTSCfg
+	ttsClient  *PiperTTSClient
 }
 
 // FDB namespace constants.
@@ -308,6 +308,33 @@ func (s *AISvc) requireTeacherRole(ctx context.Context, lessonID pgtype.UUID) er
 	return err
 }
 
+func (s *AISvc) persistExtractError(ctx context.Context, lessonID pgtype.UUID, msg string) bool {
+	write := func(writeCtx context.Context) error {
+		return db.WithConnectionExec(s.pg, writeCtx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			_, err := q.UpsertLessonAnalysisStatus(writeCtx, gen.UpsertLessonAnalysisStatusParams{
+				LessonID: lessonID,
+				Status:   gen.LessonAnalysisStatusError,
+				ErrorMsg: pgtype.Text{String: msg, Valid: true},
+			})
+			return err
+		})
+	}
+
+	if err := write(ctx); err != nil {
+		if ctx.Err() == nil {
+			s.log.ErrorContext(ctx, "ai: failed to persist transcript extraction error", "err", err)
+			return false
+		}
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if bgErr := write(bgCtx); bgErr != nil {
+			s.log.ErrorContext(bgCtx, "ai: failed to persist transcript extraction error after request cancellation", "err", bgErr)
+			return false
+		}
+	}
+	return true
+}
+
 func (s *AISvc) ExtractTranscriptStream(
 	ctx context.Context,
 	req *richterv1.ExtractTranscriptRequest,
@@ -363,14 +390,7 @@ func (s *AISvc) ExtractTranscriptStream(
 
 	transcript, segments, extractErr := s.runWhisperAnalyze(ctx, videoKey, progress)
 	if extractErr != nil {
-		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: lessonID, Status: gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: extractErr.Error(), Valid: true},
-			})
-			return err
-		})
-		statusFinalized = true
+		statusFinalized = s.persistExtractError(ctx, lessonID, extractErr.Error())
 		_ = stream.Send(&richterv1.AnalysisProgressEvent{
 			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
 			Message: extractErr.Error(),
@@ -379,7 +399,7 @@ func (s *AISvc) ExtractTranscriptStream(
 	}
 
 	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_SAVING, "Đang lưu kết quả..."); err != nil {
-		return nil
+		s.log.WarnContext(ctx, "ai: failed to send saving progress after transcript extraction", "err", err)
 	}
 
 	// Save transcript + segments to FDB.
@@ -1880,6 +1900,9 @@ Trả về JSON object: {"items": [...]}`,
 
 	items := make([]generatedItem, 0, len(result.Items))
 	for i, rawItem := range result.Items {
+		if chunk.QuestionCountConfig > 0 && len(items) >= int(chunk.QuestionCountConfig) {
+			break
+		}
 		prompt, explanation, startSecs, configJSON, err := generator.ParseGeminiItem(rawItem)
 		if err != nil {
 			s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
@@ -1981,6 +2004,9 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 
 	items := make([]generatedItem, 0, len(result.Items))
 	for i, rawItem := range result.Items {
+		if totalCount > 0 && len(items) >= int(totalCount) {
+			break
+		}
 		var kindHolder struct {
 			Kind string `json:"kind"`
 		}
@@ -1998,6 +2024,15 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 			s.log.WarnContext(ctx, "ai-choose: skipping item that failed validation", "index", i, "kind", kindHolder.Kind, "err", parseErr)
 			continue
 		}
+		if ttsProv, ok := handler.(svcinteractions.TTSProvider); ok {
+			if text := ttsProv.AudioSourceText(configJSON); text != "" {
+				configJSON, parseErr = s.synthesiseAndEmbed(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
+				if parseErr != nil {
+					s.log.WarnContext(ctx, "ai-choose: TTS synthesis failed, skipping item", "index", i, "kind", kindHolder.Kind, "err", parseErr)
+					continue
+				}
+			}
+		}
 		items = append(items, generatedItem{
 			prompt:      prompt,
 			explanation: explanation,
@@ -2011,13 +2046,17 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 
 func (s *AISvc) insertInteractionsInTx(ctx context.Context, q *gen.Queries, lessonID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
 	saved := make([]gen.LessonInteraction, 0, len(items))
+	nextIdx, err := q.GetLessonInteractionNextOrderIndex(ctx, lessonID)
+	if err != nil {
+		return saved, fmt.Errorf("compute order_index: %w", err)
+	}
 	for i, item := range items {
 		li, err := q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
 			LessonID:     lessonID,
 			ChunkID:      chunkID,
 			Kind:         item.kindStr,
 			StartSeconds: item.startSecs,
-			OrderIndex:   int32(i),
+			OrderIndex:   nextIdx + int32(i),
 			Prompt:       item.prompt,
 			Explanation:  item.explanation,
 			Config:       item.configJSON,
@@ -2034,9 +2073,6 @@ func (s *AISvc) insertInteractionsInTx(ctx context.Context, q *gen.Queries, less
 
 func (s *AISvc) saveInteractionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
 	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonInteraction, error) {
-		if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
-			return nil, err
-		}
 		return s.insertInteractionsInTx(ctx, q, lessonID, chunkID, items)
 	})
 }
@@ -2376,7 +2412,40 @@ func (s *AISvc) runWhisperAnalyze(ctx context.Context, storageKey string, progre
 	}
 	whisperCtx, whisperCancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer whisperCancel()
-	transcript, segments, whisperErr := s.whisperTranscribe(whisperCtx, audioBytes)
+
+	type whisperResult struct {
+		transcript string
+		segments   []transcriptSegment
+		err        error
+	}
+	resultCh := make(chan whisperResult, 1)
+	go func() {
+		transcript, segments, err := s.whisperTranscribe(whisperCtx, audioBytes)
+		resultCh <- whisperResult{transcript: transcript, segments: segments, err: err}
+	}()
+
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+
+	var result whisperResult
+	for {
+		select {
+		case result = <-resultCh:
+			goto whisperDone
+		case <-ticker.C:
+			if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING,
+				"Đang phiên âm bằng Whisper..."); err != nil {
+				whisperCancel()
+				return "", nil, err
+			}
+		case <-ctx.Done():
+			whisperCancel()
+			return "", nil, ctx.Err()
+		}
+	}
+
+whisperDone:
+	transcript, segments, whisperErr := result.transcript, result.segments, result.err
 	if whisperErr != nil {
 		return "", nil, fmt.Errorf("whisper transcription: %w", whisperErr)
 	}

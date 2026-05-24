@@ -68,9 +68,13 @@ export function TabExercises({
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [interactions, setInteractions] = useState<LessonInteraction[]>(initialInteractions);
+  const interactionsRef = useRef<LessonInteraction[]>(initialInteractions);
   const [localChunks, setLocalChunks] = useState<TranscriptChunk[]>(chunks);
 
-  useEffect(() => { setInteractions(initialInteractions); }, [initialInteractions]);
+  useEffect(() => {
+    interactionsRef.current = initialInteractions;
+    setInteractions(initialInteractions);
+  }, [initialInteractions]);
 
   // ── Default config state ────────────────────────────────────────────────────
   const [expandedConfig, setExpandedConfig] = useState(false);
@@ -134,8 +138,13 @@ export function TabExercises({
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   function updateInteractions(updated: LessonInteraction[]) {
+    interactionsRef.current = updated;
     setInteractions(updated);
     onInteractionsChange(updated);
+  }
+
+  function updateInteractionsFromCurrent(updater: (current: LessonInteraction[]) => LessonInteraction[]) {
+    updateInteractions(updater(interactionsRef.current));
   }
 
   // ── Default config ───────────────────────────────────────────────────────────
@@ -176,11 +185,7 @@ export function TabExercises({
         });
         if (res.interaction) {
           const it = res.interaction;
-          setInteractions(prev => {
-            const updated = [...prev, it];
-            onInteractionsChange(updated);
-            return updated;
-          });
+          updateInteractionsFromCurrent(prev => [...prev, it]);
           setAddingChunkId(null);
         }
       } catch (err) {
@@ -313,7 +318,7 @@ export function TabExercises({
               : questionsGenerated
                 ? <RefreshCwIcon className="size-4" />
                 : <SparklesIcon className="size-4" />}
-            {isGenerating ? "Đang tạo…" : questionsGenerated ? "Tạo lại toàn lesson" : "Tạo AI toàn lesson"}
+            {isGenerating ? "Đang tạo…" : questionsGenerated ? "Tạo thêm toàn lesson" : "Tạo AI toàn lesson"}
           </Button>
 
           <Button
@@ -460,16 +465,12 @@ export function TabExercises({
               onOpenAdd={() => handleOpenAdd(chunk.id)}
               onCloseAdd={() => { setAddingChunkId(null); setAddError(null); }}
               onSaveAdd={(data) => handleAdd(chunk.id, data)}
-              onUpdate={(updated) => setInteractions(prev => {
-                const next = prev.map(x => x.id === updated.id ? updated : x);
-                onInteractionsChange(next);
-                return next;
-              })}
-              onDelete={(id) => setInteractions(prev => {
-                const next = prev.filter(x => x.id !== id);
-                onInteractionsChange(next);
-                return next;
-              })}
+              onUpdate={(updated) => updateInteractionsFromCurrent(prev =>
+                prev.map(x => x.id === updated.id ? updated : x),
+              )}
+              onDelete={(id) => updateInteractionsFromCurrent(prev =>
+                prev.filter(x => x.id !== id),
+              )}
             />
           ))}
 
@@ -499,16 +500,12 @@ export function TabExercises({
                       lessonId={lessonId}
                       token={token}
                       disabled={disabled}
-                      onUpdate={(updated) => setInteractions(prev => {
-                        const next = prev.map(x => x.id === updated.id ? updated : x);
-                        onInteractionsChange(next);
-                        return next;
-                      })}
-                      onDelete={(id) => setInteractions(prev => {
-                        const next = prev.filter(x => x.id !== id);
-                        onInteractionsChange(next);
-                        return next;
-                      })}
+                      onUpdate={(updated) => updateInteractionsFromCurrent(prev =>
+                        prev.map(x => x.id === updated.id ? updated : x),
+                      )}
+                      onDelete={(id) => updateInteractionsFromCurrent(prev =>
+                        prev.filter(x => x.id !== id),
+                      )}
                     />
                   ))}
                 </div>

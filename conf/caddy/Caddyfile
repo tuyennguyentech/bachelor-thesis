@@ -1,43 +1,41 @@
 :80 {
-  handle_path /api/storage/* {
-    # Allow cross-origin PUT/GET for presigned S3 URLs from browser
-    header Access-Control-Allow-Origin "*"
-    header Access-Control-Allow-Methods "GET, PUT, HEAD, OPTIONS"
-    header Access-Control-Allow-Headers "*"
-    header Access-Control-Max-Age "86400"
+	handle_path /api/storage/* {
+		# Allow cross-origin PUT/GET for presigned S3 URLs from browser
+		header Access-Control-Allow-Origin "*"
+		header Access-Control-Allow-Methods "GET, PUT, HEAD, OPTIONS"
+		header Access-Control-Allow-Headers "*"
+		header Access-Control-Max-Age "86400"
 
-    @preflight {
-      method OPTIONS
-    }
-    respond @preflight 204
+		@preflight {
+			method OPTIONS
+		}
+		respond @preflight 204
 
-    reverse_proxy storage:9000 {
-      header_up Host {upstream_hostport}
-      # SeaweedFS uses X-Forwarded-Host (if present) as the canonical host for
-      # AWS SigV4 verification — leaving Caddy's default "X-Forwarded-Host: caddy"
-      # breaks presigned URLs that were signed against host=storage:9000.
-      header_up -X-Forwarded-Host
-      # Strip SeaweedFS's own CORS headers so Caddy's headers above are the only ones
-      header_down -Access-Control-Allow-Origin
-      header_down -Access-Control-Allow-Methods
-      header_down -Access-Control-Allow-Headers
-      header_down -Access-Control-Max-Age
-      header_down -Access-Control-Allow-Credentials
-    }
-  }
+		reverse_proxy storage:9000 {
+			header_up Host {upstream_hostport}
+			# SeaweedFS uses X-Forwarded-Host (if present) as the canonical host for
+			# AWS SigV4 verification — leaving Caddy's default "X-Forwarded-Host: caddy"
+			# breaks presigned URLs that were signed against host=storage:9000.
+			header_up -X-Forwarded-Host
+			# Strip SeaweedFS's own CORS headers so Caddy's headers above are the only ones
+			header_down -Access-Control-Allow-Origin
+			header_down -Access-Control-Allow-Methods
+			header_down -Access-Control-Allow-Headers
+			header_down -Access-Control-Max-Age
+			header_down -Access-Control-Allow-Credentials
+		}
+	}
 
-  handle_path /api/richter/* {
-    # Some richter RPCs make blocking calls to Gemini (~10–25s for reading audio
-    # grading). Default Caddy read timeouts can cut off slow responses; set an
-    # explicit ceiling that comfortably exceeds the in-process 25s timeout
-    # PreviewGrade enforces, so the timeout always surfaces as a graceful
-    # in-band response (HTTP 200) rather than a 502 proxy error.
-    reverse_proxy richter:8080 {
-      transport http {
-        read_timeout 60s
-      }
-    }
-  }
+	handle_path /api/richter/* {
+		# Some richter streaming RPCs are quiet while backend workers call Whisper or
+		# Gemini. Transcript extraction can spend several minutes in Whisper, so this
+		# timeout must exceed the backend's 10m transcription deadline.
+		reverse_proxy richter:8080 {
+			transport http {
+				read_timeout 15m
+			}
+		}
+	}
 
-  reverse_proxy heino:3000
+	reverse_proxy heino:3000
 }

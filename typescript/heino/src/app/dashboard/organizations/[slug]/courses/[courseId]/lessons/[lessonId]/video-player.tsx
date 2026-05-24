@@ -1,32 +1,12 @@
 "use client";
 
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
+import type { MutableRefObject, RefObject } from "react";
 import type { TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
 import { AIService } from "buf/gen/richter/v1/ai_pb";
 import { InteractiveTranscript } from "./interactive-transcript";
 import { FileTextIcon, Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
 import { useRichterWebClient } from "@/lib/connect-webclient";
-import { useState } from "react";
-import { MediaPlayer, MediaOutlet, MediaCommunitySkin, useMediaStore } from "@vidstack/react";
-import type { MediaPlayerElement, MediaProviderChangeEvent } from "vidstack";
-
-// Import Vidstack player styles
-import "vidstack/styles/base.css";
-import "vidstack/styles/defaults.css";
-import "vidstack/styles/community-skin/video.css";
-
-type PlayerInstance = MediaPlayerElement & {
-  currentTime: number;
-  duration: number;
-  paused: boolean;
-  muted: boolean;
-  volume: number;
-  canPlay: boolean;
-  play(): Promise<void>;
-  pause(): void;
-  addEventListener: HTMLElement["addEventListener"];
-  removeEventListener: HTMLElement["removeEventListener"];
-};
 
 interface Props {
   videoUrl: string;
@@ -35,7 +15,7 @@ interface Props {
   lessonId?: string;
   initialPosition?: number;
   token: string;
-  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  videoRef?: RefObject<HTMLVideoElement | null>;
   /** Called on every timeupdate event with the current position in seconds. */
   onTimeUpdate?: (currentTime: number) => void;
   /** Called once on the first Play event. */
@@ -51,6 +31,21 @@ interface Props {
   isFullscreen?: boolean;
   onFullscreenToggle?: () => void;
 }
+
+declare global {
+  interface Window {
+    __triggerVideoCheckpoint?: (time: number) => void;
+  }
+}
+
+type FullscreenTarget = HTMLElement & {
+  webkitRequestFullscreen?: () => void;
+};
+
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => void;
+};
 
 const SAVE_INTERVAL_S = 10;
 
@@ -73,12 +68,11 @@ export function VideoPlayer({
   onFullscreenToggle,
 }: Props) {
   const aiClient = useRichterWebClient(AIService, token);
-  const playerRef = useRef<PlayerInstance>(null);
-  const lightVideoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastSavedPos = useRef<number>(-1);
   const hasPlayedRef = useRef(false);
-  const timelineRef = useRef<HTMLDivElement>(null);
+  const durationRef = useRef(0);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -86,38 +80,24 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
 
-  useEffect(() => {
-    hasPlayedRef.current = false;
-    setCurrentTime(0);
-    setDuration(0);
-    setPaused(true);
-    const player = playerRef.current;
-    if (player) {
-      try {
-        player.currentTime = 0;
-        player.pause();
-      } catch {}
-    }
-    const native = nativeVideoRef.current;
-    if (native) {
-      try {
-        native.currentTime = 0;
-        native.pause();
-      } catch {}
-    }
-  }, [playerKey]);
-
-  // Stabilize the video URL: only update when the storage key changes (not on every
-  // RSC refresh which generates a new presigned URL for the same file).
-  const [prevStorageKey, setPrevStorageKey] = useState(videoStorageKey);
+  // Stabilize the video URL: only update when the storage key changes, not on
+  // every RSC refresh that creates a new presigned URL for the same object.
+  const stableIdentity = videoStorageKey ?? videoUrl;
+  const stableIdentityRef = useRef(stableIdentity);
   const [stableUrl, setStableUrl] = useState(videoUrl);
 
-  if (videoStorageKey !== prevStorageKey) {
-    setPrevStorageKey(videoStorageKey);
-    setStableUrl(videoUrl);
-  }
+  useEffect(() => {
+    if (stableIdentityRef.current === stableIdentity) return;
+    stableIdentityRef.current = stableIdentity;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setStableUrl(videoUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [stableIdentity, videoUrl]);
 
-  // Keep stable refs to callbacks so the window hook below doesn't go stale.
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const onFirstPlayRef = useRef(onFirstPlay);
 
@@ -126,26 +106,77 @@ export function VideoPlayer({
     onFirstPlayRef.current = onFirstPlay;
   }, [onTimeUpdate, onFirstPlay]);
 
-  // Initial position seeking
-  useEffect(() => {
-    if ((playerKey ?? 0) > 0) return; // Do not seek to initial position on retakes
-    if (!lessonId || initialPosition <= 5) return;
-    const player = playerRef.current;
-    if (!player) return;
+  const attachVideoRef = useCallback(
+    (node: HTMLVideoElement | null) => {
+      nativeVideoRef.current = node;
+      if (externalVideoRef) {
+        const targetRef = externalVideoRef as MutableRefObject<HTMLVideoElement | null>;
+        targetRef.current = node;
+      }
+    },
+    [externalVideoRef],
+  );
 
-    const seekInitial = () => {
-      try { player.currentTime = initialPosition; } catch {}
+  useEffect(() => {
+    return () => {
+      const video = nativeVideoRef.current;
+      if (video) {
+        try { video.pause(); } catch {}
+      }
+      if (externalVideoRef) {
+        const targetRef = externalVideoRef as MutableRefObject<HTMLVideoElement | null>;
+        targetRef.current = null;
+      }
+    };
+  }, [externalVideoRef]);
+
+  useEffect(() => {
+    hasPlayedRef.current = false;
+    durationRef.current = 0;
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    try {
+      video.pause();
+      video.currentTime = 0;
+    } catch {}
+  }, [playerKey]);
+
+  useEffect(() => {
+    if ((playerKey ?? 0) > 0) return;
+    if (!lessonId || initialPosition <= 5) return;
+    const video = nativeVideoRef.current;
+    if (!video) return;
+
+    const syncDuration = (video: HTMLVideoElement) => {
+      const mediaDuration = video.duration;
+      if (Number.isFinite(mediaDuration) && mediaDuration > 0) {
+        durationRef.current = mediaDuration;
+        setDuration(mediaDuration);
+        onDurationChange?.(mediaDuration);
+      }
     };
 
-    try {
-      if (player.canPlay) {
-        seekInitial();
-      } else {
-        player.addEventListener("can-play", seekInitial, { once: true });
-        return () => player.removeEventListener("can-play", seekInitial);
-      }
-    } catch {}
-  }, [lessonId, initialPosition, playerKey]);
+    const seekInitial = () => {
+      try {
+        syncDuration(video);
+        const mediaDuration = video.duration;
+        const seekTime =
+          Number.isFinite(mediaDuration) && mediaDuration > 0 && initialPosition >= mediaDuration - 1
+            ? 0
+            : initialPosition;
+        video.currentTime = seekTime;
+        setCurrentTime(seekTime);
+      } catch {}
+    };
+
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      seekInitial();
+      return;
+    }
+
+    video.addEventListener("loadedmetadata", seekInitial, { once: true });
+    return () => video.removeEventListener("loadedmetadata", seekInitial);
+  }, [lessonId, initialPosition, playerKey, stableUrl, onDurationChange]);
 
   const saveProgress = useCallback(
     (pos: number) => {
@@ -157,458 +188,270 @@ export function VideoPlayer({
     [lessonId, aiClient],
   );
 
-  const handleTimeUpdate = () => {
-    const player = playerRef.current;
-    if (!player) return;
-    const t = player.currentTime;
-    if (t - lastSavedPos.current >= SAVE_INTERVAL_S) saveProgress(t);
-    onTimeUpdateRef.current?.(t);
-  };
-
-  const handleDurationChange = () => {
-    onDurationChange?.(duration);
-  };
-
-  // E2E test hook: fires a synthetic timeupdate so StudentLessonView.handleTimeUpdate
-  // detects checkpoint hits. Best-effort currentTime update (may be skipped if video errored).
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const w = window as unknown as Record<string, unknown>;
-    w.__triggerVideoCheckpoint = (time: number) => {
-      // Always fire onFirstPlay before timeupdate so StudentLessonView's hasPlayedRef
-      // gate is cleared. handleFirstPlay is idempotent (safe to call multiple times).
+    window.__triggerVideoCheckpoint = (time: number) => {
       onFirstPlayRef.current?.();
       if (!hasPlayedRef.current) hasPlayedRef.current = true;
-      const player = playerRef.current;
-      if (player) {
-        try { player.currentTime = time; } catch {}
+      const video = nativeVideoRef.current;
+      if (video) {
+        try {
+          video.currentTime = time;
+          setCurrentTime(time);
+        } catch {}
       }
       onTimeUpdateRef.current?.(time);
     };
-  }, []);
 
-  // Unmount cleanup: pause the player to prevent audio leaks
-  useEffect(() => {
-    const el = playerRef.current;
     return () => {
-      if (el) {
-        try { el.pause(); } catch {}
-      }
+      delete window.__triggerVideoCheckpoint;
     };
   }, []);
-
-  // Define properties and methods on the Light DOM video to delegate to Vidstack player and native element
-  useEffect(() => {
-    const lightVideo = lightVideoRef.current;
-    if (!lightVideo) return;
-
-    // Define properties on the Light DOM video to delegate directly to the Vidstack player instance and native element
-    const props = ["currentTime", "paused", "duration", "volume", "muted"];
-    for (const prop of props) {
-      Object.defineProperty(lightVideo, prop, {
-        get() {
-          const getCandidate = () => {
-            if (prop === "currentTime" && (lightVideo as any)._currentTime !== undefined) {
-              return (lightVideo as any)._currentTime;
-            }
-            const native = nativeVideoRef.current;
-            if (native) {
-              try {
-                const val = (native as unknown as Record<string, unknown>)[prop];
-                if (val !== undefined) return val;
-              } catch {}
-            }
-            const player = playerRef.current;
-            if (player) {
-              try {
-                return (player as unknown as Record<string, unknown>)[prop];
-              } catch {}
-            }
-            if (prop === "paused") return true;
-            if (prop === "currentTime") return 0;
-            if (prop === "duration") return 0;
-            if (prop === "volume") return 1;
-            if (prop === "muted") return false;
-            return undefined;
-          };
-
-          const val = getCandidate();
-          if (prop === "currentTime" && typeof val === "number") {
-            if (val < 0.15) return 0;
-            const lastSetVal = (lightVideo as any)._lastSetVal;
-            const hasCheckpoint = typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]');
-            if (hasCheckpoint && lastSetVal !== undefined && val > lastSetVal + 5) {
-              return lastSetVal;
-            }
-          }
-          return val;
-        },
-        set(val: unknown) {
-          if (prop === "currentTime" && typeof val === "number") {
-            (lightVideo as any)._currentTime = val;
-            (lightVideo as any)._lastSetTime = Date.now();
-            (lightVideo as any)._lastSetVal = val;
-          }
-          const player = playerRef.current;
-          if (player) {
-            try { (player as unknown as Record<string, unknown>)[prop] = val; } catch {}
-            if (prop === "currentTime") {
-              setTimeout(() => {
-                try { (player as unknown as Record<string, unknown>)[prop] = val; } catch {}
-              }, 0);
-            }
-          }
-          const native = nativeVideoRef.current;
-          if (native) {
-            try {
-              (native as unknown as Record<string, unknown>)[prop] = val;
-            } catch {}
-            if (prop === "currentTime") {
-              setTimeout(() => {
-                try { (native as unknown as Record<string, unknown>)[prop] = val; } catch {}
-              }, 0);
-            }
-          }
-        },
-        configurable: true,
-      });
-    }
-
-    // Define methods play and pause on the Light DOM video to control Vidstack player and native element
-    lightVideo.play = async () => {
-      // Proactively block programmatic playback if the quiz checkpoint overlay is currently active in the DOM
-      if (typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]')) {
-        return Promise.resolve();
-      }
-      const player = playerRef.current;
-      if (player) {
-        try { void player.play(); } catch {}
-      }
-      const native = nativeVideoRef.current;
-      if (native) {
-        try {
-          return native.play();
-        } catch {}
-      }
-      return Promise.resolve();
-    };
-
-    lightVideo.pause = () => {
-      const player = playerRef.current;
-      if (player) {
-        try { player.pause(); } catch {}
-        setTimeout(() => {
-          try { player.pause(); } catch {}
-        }, 0);
-      }
-      const native = nativeVideoRef.current;
-      if (native) {
-        try {
-          native.pause();
-        } catch {}
-        setTimeout(() => {
-          try { native.pause(); } catch {}
-        }, 0);
-      }
-    };
-
-    // Bind externalVideoRef to this Light DOM dummy video element immediately
-    if (externalVideoRef) {
-      const targetRef = externalVideoRef as React.MutableRefObject<HTMLVideoElement | null>;
-      targetRef.current = lightVideo;
-    }
-  }, [externalVideoRef]);
-
-  // Clean unmount cleanup for refs and global patches
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const originalQuerySelector = document.querySelector;
-    return () => {
-      if (externalVideoRef) {
-        const targetRef = externalVideoRef as React.MutableRefObject<HTMLVideoElement | null>;
-        targetRef.current = null;
-      }
-      try {
-        Object.defineProperty(document, "querySelector", {
-          value: originalQuerySelector,
-          configurable: true,
-          writable: true,
-        });
-      } catch {}
-    };
-  }, [externalVideoRef]);
 
   const formatTime = (seconds: number) => {
-    if (isNaN(seconds)) return "0:00";
+    if (!Number.isFinite(seconds)) return "0:00";
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
+  const syncMediaDuration = useCallback(
+    (video: HTMLVideoElement) => {
+      const mediaDuration = video.duration;
+      if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return;
+      if (Math.abs(mediaDuration - durationRef.current) < 0.25) return;
+      durationRef.current = mediaDuration;
+      setDuration(mediaDuration);
+      onDurationChange?.(mediaDuration);
+    },
+    [onDurationChange],
+  );
+
+  const blockPlaybackForCheckpoint = () =>
+    typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]');
+
   const togglePlay = () => {
-    // Proactively block manual toggling if the quiz checkpoint overlay is currently active in the DOM
-    if (typeof document !== "undefined" && document.querySelector('[data-testid="quiz-checkpoint"]')) {
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    if (blockPlaybackForCheckpoint()) {
+      video.pause();
       return;
     }
-    const player = playerRef.current;
-    if (!player) return;
+
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  };
+
+  const handleNativePlay = () => {
+    const video = nativeVideoRef.current;
+    if (video && blockPlaybackForCheckpoint()) {
+      video.pause();
+      setPaused(true);
+      return;
+    }
+
+    if (video) syncMediaDuration(video);
+    setPaused(false);
+    if (!hasPlayedRef.current) {
+      hasPlayedRef.current = true;
+      onFirstPlayRef.current?.();
+    }
+  };
+
+  const handleNativePause = () => {
+    setPaused(true);
+    const video = nativeVideoRef.current;
+    if (video) saveProgress(video.currentTime);
+  };
+
+  const handleNativeTimeUpdate = () => {
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    syncMediaDuration(video);
+    const t = video.currentTime;
+    setCurrentTime(t);
+    if (t - lastSavedPos.current >= SAVE_INTERVAL_S) saveProgress(t);
+    onTimeUpdateRef.current?.(t);
+  };
+
+  const handleLoadedMetadata = () => {
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    syncMediaDuration(video);
+  };
+
+  const handleVolumeChange = () => {
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    setVolume(video.volume);
+    setMuted(video.muted);
+  };
+
+  const handleSeekChange = (value: number) => {
+    const video = nativeVideoRef.current;
+    if (!video || !Number.isFinite(value)) return;
     try {
-      if (paused) {
-        player.play().catch(() => {});
-      } else {
-        player.pause();
-      }
+      video.currentTime = value;
+      setCurrentTime(value);
     } catch {}
   };
 
-  const handleVideoClick = () => {
-    togglePlay();
-  };
-
-  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const timeline = timelineRef.current;
-    const player = playerRef.current;
-    if (!timeline || !player || duration === 0) return;
-    
-    const rect = timeline.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const width = rect.width;
-    const pct = Math.max(0, Math.min(1, clickX / width));
-    
-    try { player.currentTime = pct * duration; } catch {}
-  };
-
   const toggleMute = () => {
-    const player = playerRef.current;
-    if (!player) return;
-    try { player.muted = !player.muted; } catch {}
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
   };
+
+  const toggleFullscreen = () => {
+    if (onFullscreenToggle) {
+      onFullscreenToggle();
+      return;
+    }
+    if (!allowNativeFullscreen) return;
+
+    const docExt = document as FullscreenDocument;
+    const target = (containerRef.current ?? nativeVideoRef.current) as FullscreenTarget | null;
+    if (!target) return;
+
+    if (document.fullscreenElement || docExt.webkitFullscreenElement) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (docExt.webkitExitFullscreen) {
+        docExt.webkitExitFullscreen();
+      }
+      return;
+    }
+
+    if (target.requestFullscreen) {
+      target.requestFullscreen().catch(() => {});
+    } else if (target.webkitRequestFullscreen) {
+      target.webkitRequestFullscreen();
+    }
+  };
+
+  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+  const seekMax = duration > 0 ? duration : 0;
+  const seekValue = Math.min(currentTime, seekMax);
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{__html: `
-        media-player {
-          display: block !important;
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          width: 100% !important;
-          height: 100% !important;
-        }
-        media-outlet, media-player::part(outlet) {
-          display: block !important;
-          width: 100% !important;
-          height: 100% !important;
-        }
-        media-player video, media-player::part(video) {
-          width: 100% !important;
-          height: 100% !important;
-          object-fit: contain !important;
-          background-color: black !important;
-        }
-      `}} />
       <div
+        ref={containerRef}
         data-testid="video-player"
         className="relative w-full rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center border group"
       >
-          <>
-            <video
-              ref={lightVideoRef}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "1px",
-                height: "1px",
-                opacity: 0.01,
-                pointerEvents: "none",
-                zIndex: -1,
-              }}
-              preload="metadata"
-              playsInline
-            />
-             <MediaPlayer
-              ref={playerRef}
-              src={stableUrl}
-              className="absolute inset-0 w-full h-full"
-              aspectRatio={16/9}
-              load="eager"
-              preload="metadata"
-              playsInline
-              controls={allowNativeFullscreen}
-              onClick={allowNativeFullscreen ? undefined : handleVideoClick}
-              onPlay={() => {
-                setPaused(false);
-                if (!hasPlayedRef.current) {
-                  hasPlayedRef.current = true;
-                  onFirstPlayRef.current?.();
-                }
-              }}
-              onPause={() => {
-                setPaused(true);
-                const p = playerRef.current;
-                if (p) saveProgress(p.currentTime);
-              }}
-              onTimeUpdate={() => {
-                const p = playerRef.current;
-                if (p) {
-                  setCurrentTime(p.currentTime);
-                  if (lightVideoRef.current) {
-                    const lastSet = (lightVideoRef.current as any)._lastSetTime || 0;
-                    if (Date.now() - lastSet > 800) {
-                      (lightVideoRef.current as any)._currentTime = p.currentTime;
-                    }
-                  }
-                }
-                handleTimeUpdate();
-              }}
-              onDurationChange={() => {
-                const p = playerRef.current;
-                if (p) {
-                  setDuration(p.duration);
-                }
-                handleDurationChange();
-              }}
-              onVolumeChange={() => {
-                const p = playerRef.current;
-                if (p) {
-                  setVolume(p.volume);
-                  setMuted(p.muted);
-                }
-              }}
-              onProviderChange={(provider: MediaProviderChangeEvent) => {
-                if (provider && "video" in provider) {
-                  const videoProvider = provider as unknown as { video: HTMLVideoElement };
-                  nativeVideoRef.current = videoProvider.video;
+        <video
+          key={stableIdentity}
+          ref={attachVideoRef}
+          src={stableUrl}
+          className="absolute inset-0 h-full w-full bg-black object-contain"
+          preload="metadata"
+          playsInline
+          controls={false}
+          onClick={togglePlay}
+          onPlay={handleNativePlay}
+          onPause={handleNativePause}
+          onTimeUpdate={handleNativeTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedData={handleLoadedMetadata}
+          onCanPlay={handleLoadedMetadata}
+          onDurationChange={handleLoadedMetadata}
+          onVolumeChange={handleVolumeChange}
+          onEnded={() => setPaused(true)}
+        />
 
-                  // Forward all native HTML5 media events to the lightVideoRef dummy element
-                  const lightVideo = lightVideoRef.current;
-                  if (lightVideo) {
-                    const eventTypes = ["play", "pause", "timeupdate", "durationchange", "volumechange", "seeked"];
-                    for (const eventType of eventTypes) {
-                      videoProvider.video.addEventListener(eventType, (e) => {
-                        const newEvent = new Event(eventType, {
-                          bubbles: e.bubbles,
-                          cancelable: e.cancelable,
-                        });
-                        lightVideo.dispatchEvent(newEvent);
-                      });
-                    }
-                  }
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePlay();
+          }}
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/10 pointer-events-none"
+        >
+          <button
+            type="button"
+            aria-label={paused ? "Phát video" : "Tạm dừng video"}
+            className="size-14 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity duration-300 pointer-events-auto hover:scale-105 transform active:scale-95"
+          >
+            {!paused ? <Pause className="size-6 fill-white" /> : <Play className="size-6 fill-white ml-1" />}
+          </button>
+        </div>
 
-                  // Apply document.querySelector monkey-patch dynamically after Vidstack completes initialization
-                  if (typeof window !== "undefined") {
-                    const originalQuerySelector = document.querySelector;
-                    try {
-                      Object.defineProperty(document, "querySelector", {
-                        value: function (selector: string) {
-                          if (selector === "video") {
-                            return lightVideoRef.current;
-                          }
-                          return originalQuerySelector.call(document, selector);
-                        },
-                        configurable: true,
-                        writable: true,
-                      });
-                    } catch {}
-                  }
-                }
-              }}
-            >
-              <MediaOutlet />
-            </MediaPlayer>
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-4 pt-12 flex flex-col gap-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-300 pointer-events-auto"
+        >
+          <input
+            type="range"
+            min={0}
+            max={seekMax}
+            step={0.1}
+            value={seekValue}
+            aria-label="Tua video"
+            disabled={duration <= 0}
+            onChange={(e) => handleSeekChange(Number(e.target.value))}
+            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-white disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              background: `linear-gradient(to right, white ${progressPct}%, rgba(255,255,255,0.2) ${progressPct}%)`,
+            }}
+          />
 
-            {/* Custom controls overlay for all views */}
-            {true && (
-              <>
-                {/* Big central Play/Pause overlay button */}
-                <div 
-                  onClick={togglePlay}
-                  className="absolute inset-0 flex items-center justify-center bg-black/10 cursor-pointer pointer-events-none z-30"
+          <div className="flex items-center justify-between text-white text-sm font-medium select-none">
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                aria-label={paused ? "Phát video" : "Tạm dừng video"}
+                onClick={togglePlay}
+                className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
+              >
+                {!paused ? <Pause className="size-5 fill-white" /> : <Play className="size-5 fill-white" />}
+              </button>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-label={muted || volume === 0 ? "Bật âm thanh" : "Tắt âm thanh"}
+                  onClick={toggleMute}
+                  className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
                 >
-                  <div className="size-14 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-auto hover:scale-105 transform active:scale-95">
-                    {!paused ? <Pause className="size-6 fill-white" /> : <Play className="size-6 fill-white ml-1" />}
-                  </div>
-                </div>
+                  {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={muted ? 0 : volume}
+                  aria-label="Âm lượng"
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    const video = nativeVideoRef.current;
+                    if (!video) return;
+                    video.volume = val;
+                    if (val > 0) video.muted = false;
+                  }}
+                  className="w-16 opacity-100 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:bg-white/40 transition-all duration-150"
+                />
+              </div>
 
-                {/* Gorgeous custom controls bar */}
-                <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-4 pt-12 flex flex-col gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-auto">
-                  {/* Timeline slider wrapper */}
-                  <div 
-                    ref={timelineRef}
-                    onClick={handleTimelineClick}
-                    className="relative group/timeline h-1.5 w-full bg-white/20 rounded-full cursor-pointer transition-all duration-150 hover:h-2.5"
-                  >
-                    <div 
-                      className="h-full bg-white rounded-full relative"
-                      style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
-                    >
-                      {/* Floating grabber handle */}
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 size-3 bg-white rounded-full border border-black/30 shadow-md scale-0 group-hover/timeline:scale-100 transition-transform duration-100" />
-                    </div>
-                  </div>
+              <span className="text-xs text-zinc-300 font-mono">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+            </div>
 
-                  {/* Controls Row */}
-                  <div className="flex items-center justify-between text-white text-sm font-medium select-none">
-                    <div className="flex items-center gap-4">
-                      {/* Play/Pause */}
-                      <button 
-                        onClick={togglePlay} 
-                        className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
-                      >
-                        {!paused ? <Pause className="size-5 fill-white" /> : <Play className="size-5 fill-white" />}
-                      </button>
-
-                      {/* Volume Button & Slider */}
-                      <div className="flex items-center gap-1.5">
-                        <button 
-                          onClick={toggleMute} 
-                          className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
-                        >
-                          {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
-                        </button>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          value={muted ? 0 : volume}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            const player = playerRef.current;
-                            if (player) {
-                              try { player.volume = val; } catch {}
-                              if (val > 0) {
-                                try { player.muted = false; } catch {}
-                              }
-                            }
-                          }}
-                          className="w-16 opacity-100 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:bg-white/40 transition-all duration-150"
-                        />
-                      </div>
-
-                      {/* Time Display */}
-                      <span className="text-xs text-zinc-300 font-mono">
-                        {formatTime(currentTime)} / {formatTime(duration)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-4">
-                      {/* Fullscreen Button */}
-                      {onFullscreenToggle && (
-                        <button 
-                          onClick={onFullscreenToggle} 
-                          className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
-                        >
-                          {isFullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </>
+            {(onFullscreenToggle || allowNativeFullscreen) && (
+              <button
+                type="button"
+                aria-label={isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
+                onClick={toggleFullscreen}
+                className="hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
+              >
+                {isFullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+              </button>
             )}
-          </>
+          </div>
+        </div>
       </div>
 
       {showTranscript && (segments.length > 0 || transcript) && (

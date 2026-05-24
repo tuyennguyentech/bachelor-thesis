@@ -167,11 +167,23 @@ export function StudentLessonView({
     const interaction = interactions.find((it) => it.id === activeId);
     if (!interaction || interaction.startSeconds <= 0) return;
     const cap = interaction.startSeconds + 5;
-    const onTimeUpdate = () => {
-      if (video.currentTime > cap) video.currentTime = interaction.startSeconds;
+    const clampSeek = () => {
+      if (video.currentTime <= cap) return;
+      video.currentTime = interaction.startSeconds;
+      prevTimeRef.current = interaction.startSeconds;
+      video.pause();
     };
-    video.addEventListener("timeupdate", onTimeUpdate);
-    return () => video.removeEventListener("timeupdate", onTimeUpdate);
+    clampSeek();
+    video.addEventListener("timeupdate", clampSeek);
+    video.addEventListener("seeking", clampSeek);
+    video.addEventListener("seeked", clampSeek);
+    const clampInterval = window.setInterval(clampSeek, 250);
+    return () => {
+      video.removeEventListener("timeupdate", clampSeek);
+      video.removeEventListener("seeking", clampSeek);
+      video.removeEventListener("seeked", clampSeek);
+      window.clearInterval(clampInterval);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 

@@ -63,7 +63,7 @@ export function ChunkGenerateForm({
 
           {chunkInteractionsCount > 0 && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              ⚠ {chunkInteractionsCount} bài hiện có sẽ bị thay thế
+              {chunkInteractionsCount} bài hiện có sẽ được giữ lại; câu mới sẽ được thêm vào cuối.
             </p>
           )}
 
@@ -75,7 +75,7 @@ export function ChunkGenerateForm({
               onClick={handleGenerate}
             >
               <SparklesIcon className="size-3" />
-              Tạo {total} câu
+              Tạo thêm {total} câu
             </Button>
             <Button size="sm" variant="ghost" onClick={onClose}>Hủy</Button>
           </div>

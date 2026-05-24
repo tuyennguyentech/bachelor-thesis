@@ -34,6 +34,14 @@ go vet ./golang/richter/...
 pnpm --filter heino exec tsc --noEmit
 ```
 
+## User Feedback Rules
+
+- Stay within the requested task. If another file or broader refactor is needed, explain why before expanding scope.
+- If the user asks for "huong dan" or "hướng dẫn", answer with explanation only; do not edit files unless they explicitly say to implement.
+- For risky or broad multi-file work, show the concrete plan/diff shape and checkpoint before continuing.
+- Don't change pre-existing working code just to satisfy a new test; first verify whether the test assertion/setup is wrong.
+- Prefer fixing the smallest coherent unit. Leave unrelated cleanup for a separate request.
+
 ## Starting Richter (config flags required)
 
 ```
@@ -86,6 +94,15 @@ Each package exports `var Package = do.Package(do.Lazy(Constructor))`. `init()` 
 ### Connect RPC
 gRPC-compatible, HTTP/1.1 + HTTP/2. Proto definitions in `proto/richter/v1/`. Validation via `connectrpc.com/validate` (Buf protovalidate).
 
+### Search pattern
+For admin list/search APIs, dispatch in the Go service layer:
+
+- UUID input -> `GetById` by primary key
+- Email input containing `@` -> `GetByEmail`
+- Text input -> `GetBySlug` where applicable, otherwise empty result
+
+Avoid `ILIKE '%...%'` leading-wildcard scans unless a proper trigram index is added.
+
 ### Frontend (heino)
 - **Critical Next.js 16 breaking changes**: see `typescript/heino/AGENTS.md` — this is NOT the Next.js you know
 - Middleware: `src/proxy.ts` exporting `proxy()` (not `middleware.ts`)
@@ -99,6 +116,16 @@ SeaweedFS via compose service `storage:9000`. Public endpoint differs between de
 ### AI audio key path
 Must be `lessons/<lessonID>/ai-audio/<uuid>.wav` (not `ai-generated/audio/`).
 
+### Piper TTS
+Piper TTS is the primary self-hosted TTS provider; VieNeu was rejected because it requires CUDA.
+
+- Compose service: `piper-tts`
+- Endpoint: `http://piper-tts:5000/tts?text=...&language=vi` -> WAV bytes
+- Health: `http://piper-tts:5000/health`
+- Languages: `vi` (vi-VN-vivos) and `en` (en-US-lessac)
+- Go client: `golang/richter/internal/svc/ai/piper_tts.go`
+- Output must be `audio/wav` with `.wav` object keys.
+
 ## Interaction System — Phase Progress
 
 | Phase | Feature | Status |
@@ -111,6 +138,14 @@ Must be `lessons/<lessonID>/ai-audio/<uuid>.wav` (not `ai-generated/audio/`).
 
 Phase 3 introduces async grading pipeline (`LessonAttempt.status='pending_review'`). Phase 4 reuses it.
 Multi-attempt support: Phase 0 single-attempt; Phases 1+ may differ — scope per interaction type.
+
+## Current Project State
+
+- Audio reading/listening pipeline is implemented in backend and frontend.
+- Piper TTS replaced VieNeu and is expected to run on CPU-only dev/demo machines.
+- Student Learning UI Phase 0 backend is done; frontend registry/new layout is pending unless code has changed since this note.
+- Historical active plan: heino auth silent refresh should live in `src/proxy.ts`, with `src/lib/auth.ts` read-only during Server Component rendering. Do not set cookies from Server Components.
+- Historical video-player plan: remove any dummy `<video>` or global `document.querySelector("video")` monkey-patch; expose Vidstack's real video element via a React callback/state path.
 
 ## Generated Code — NEVER hand-edit
 
@@ -138,9 +173,11 @@ Rules:
 
 ## Background Processes
 
-Never use `nohup ... &`, `cmd &`, or detached processes (orphan leaks). Use session-managed processes only. Before starting servers, check `ps aux` for orphan `richter`/`heino` processes from prior sessions.
+Never use `nohup ... &`, `cmd &`, or detached processes (orphan leaks). Before starting servers, check `ps aux` for orphan `richter`/`heino` processes from prior sessions.
 
 When killing orphans: kill by command name (`go run ./golang/richter`, `pnpm --filter heino dev`, `next-server`), NOT by the shell that launched them. Never kill interactive `container-shell.sh bash` sessions — those belong to the user.
+
+Project preference from prior sessions: Codex/agents should not start long-running `richter` or `heino` servers unless the current user explicitly asks. For Playwright, ask the user to start `richter` with `richter.test.toml` and `heino`; then run foreground tests. Go integration script `./scripts/test/golang/richter/test.sh` manages its own server.
 
 ## Frontend Conventions (from past sessions)
 
@@ -179,12 +216,17 @@ const hasNext = res.users.length === LIMIT  // no total field
 ### Don't change working code to fix new tests
 Fix the test assertion, not the pre-existing passing code.
 
+### Test helper placement
+Do not create standalone helper-only test files like `helpers_test.go` or `testmain_test.go`. Put shared helpers at the top of the most relevant existing test file unless the new file contains real test cases.
+
 ### DB seed: runs once, no upsert
 INSERT + skip-on-duplicate only (NOT `ON CONFLICT DO UPDATE`). Tests must not create conflicting data with seed.
 
 ## Package & Dependency Rules
 
 - Don't run `pnpm add`/`pnpm install` without asking user
+- For shadcn/ui components, check/use the shadcn CLI from `typescript/heino/` first; installed components include button, input, label, badge, dialog, alert-dialog, select, table, avatar, skeleton, dropdown-menu, card, separator, field.
 - Use `podman compose` (not `podman-compose`, not `docker compose`)
 - No hardcoded env-specific values (URIs, hostnames) in source code
 - All :many SQL queries must have `LIMIT $n OFFSET $m`
+- Keep the established `auth` -> `users` package dependency for shared mappers; don't move it into a generic `svc` package without a clear reason.
