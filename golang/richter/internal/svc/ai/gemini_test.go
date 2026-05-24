@@ -191,6 +191,35 @@ func TestGeneratedInteractionCheckpointSecondsUsesChunkEnd(t *testing.T) {
 	}
 }
 
+func TestNormalizeGeneratedInteractionStartSecondsBackfillsLegacyAIItems(t *testing.T) {
+	var chunkID pgtype.UUID
+	_ = chunkID.Scan("00000000-0000-0000-0000-000000000004")
+	var manualChunkID pgtype.UUID
+	_ = manualChunkID.Scan("00000000-0000-0000-0000-000000000005")
+
+	interactions := []gen.LessonInteraction{
+		{ChunkID: chunkID, GeneratedBy: "ai", StartSeconds: 0},
+		{ChunkID: manualChunkID, GeneratedBy: "manual", StartSeconds: 0},
+		{ChunkID: chunkID, GeneratedBy: "ai", StartSeconds: 12},
+	}
+	chunks := []gen.LessonTranscriptChunk{
+		{ID: chunkID, StartSeconds: 0, EndSeconds: 45},
+		{ID: manualChunkID, StartSeconds: 0, EndSeconds: 90},
+	}
+
+	normalizeGeneratedInteractionStartSeconds(interactions, chunks)
+
+	if interactions[0].StartSeconds != 45 {
+		t.Fatalf("legacy AI interaction start: want chunk end 45, got %v", interactions[0].StartSeconds)
+	}
+	if interactions[1].StartSeconds != 0 {
+		t.Fatalf("manual untimed interaction should stay at 0, got %v", interactions[1].StartSeconds)
+	}
+	if interactions[2].StartSeconds != 12 {
+		t.Fatalf("AI interaction with explicit positive start should stay at 12, got %v", interactions[2].StartSeconds)
+	}
+}
+
 // ── geminiResponseText tests ──────────────────────────────────────────────────
 
 // makeResp constructs a GenerateContentResponse with a single candidate.

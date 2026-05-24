@@ -201,6 +201,7 @@ func (s *AISvc) GetLessonAnalysis(
 	if err != nil {
 		s.log.ErrorContext(ctx, "ai: failed to list lesson chunks", svc.LogAttrs("ListLessonTranscriptChunks", err)...)
 	}
+	normalizeGeneratedInteractionStartSeconds(ints, chunks)
 
 	lessonIDStr := lessonID.String()
 	// Don't return stale FDB data when video has been replaced (status reset to pending).
@@ -1838,6 +1839,26 @@ type generatedItem struct {
 	startSecs   float32
 	configJSON  []byte
 	kindStr     string
+}
+
+func normalizeGeneratedInteractionStartSeconds(ints []gen.LessonInteraction, chunks []gen.LessonTranscriptChunk) {
+	if len(ints) == 0 || len(chunks) == 0 {
+		return
+	}
+	chunkEndByID := make(map[string]float32, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.EndSeconds > 0 {
+			chunkEndByID[chunk.ID.String()] = float32(chunk.EndSeconds)
+		}
+	}
+	for i := range ints {
+		if ints[i].GeneratedBy != "ai" || ints[i].StartSeconds > 0 || !ints[i].ChunkID.Valid {
+			continue
+		}
+		if endSeconds, ok := chunkEndByID[ints[i].ChunkID.String()]; ok {
+			ints[i].StartSeconds = endSeconds
+		}
+	}
 }
 
 func generatedInteractionCheckpointSeconds(chunk gen.LessonTranscriptChunk) float32 {

@@ -149,9 +149,10 @@ export default async function LessonDetailPage({
 
   const { analysis, chunks: initialChunks } = analysisRes;
 
-  const isDone = analysis?.status === AnalysisStatus.DONE;
-  // Pass LessonInteraction[] directly — server already strips correctAnswer per feedbackMode.
-  const interactions = isDone ? (analysis?.interactions ?? []) : [];
+  // Pass LessonInteraction[] directly. Per-chunk/manual generation can create
+  // valid interactions while the pipeline status is still CHUNKS_READY.
+  // The backend clears stale interactions when a video is replaced.
+  const interactions = analysis?.interactions ?? [];
 
   // Build previous result from student's attempt (if any).
   const previousResult = myAttempt

@@ -17,6 +17,8 @@ import { InteractionCheckpoint } from "./interaction-checkpoint";
 import { getRenderer, extractConfig, extractLocalResponse } from "@/interactions/registry";
 import type { FillBlankResponse, ListeningResponse, McqResponse, ReadingResponse } from "@/interactions/types";
 
+const CHECKPOINT_EPSILON_SECONDS = 0.35;
+
 interface FullscreenExtensions {
   webkitFullscreenElement?: Element;
   mozFullScreenElement?: Element;
@@ -129,7 +131,9 @@ export function StudentLessonView({
       const prev = prevTimeRef.current;
       prevTimeRef.current = t;
 
-      const hit = pendingCheckpoints.find((c) => prev < c.startSeconds && t >= c.startSeconds);
+      const hit = pendingCheckpoints.find(
+        (c) => prev < c.startSeconds && t + CHECKPOINT_EPSILON_SECONDS >= c.startSeconds,
+      );
       if (hit) {
         const video = videoRef.current;
         if (video) video.pause();
