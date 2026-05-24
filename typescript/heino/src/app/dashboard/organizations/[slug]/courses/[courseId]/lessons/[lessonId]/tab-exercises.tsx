@@ -64,7 +64,7 @@ export function TabExercises({
 }: Props) {
   const aiClient = useRichterWebClient(AIService, token);
   const interactionClient = useRichterWebClient(InteractionService, token);
-  const abortRef = useRef<AbortController | null>(null);
+  const chunkAbortRefs = useRef<Record<string, AbortController>>({});
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [interactions, setInteractions] = useState<LessonInteraction[]>(initialInteractions);
@@ -130,10 +130,15 @@ export function TabExercises({
   const [addError, setAddError] = useState<string | null>(null);
 
   // ── Per-chunk generate state ────────────────────────────────────────────────
-  const [generatingChunkId, setGeneratingChunkId] = useState<string | null>(null);
+  const [openGenerateChunkIds, setOpenGenerateChunkIds] = useState<Set<string>>(new Set());
   const [chunkGenState, setChunkGenState] = useState<Record<string, ChunkGenPhase>>({});
 
-  useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
+  useEffect(() => {
+    const chunkAbortControllers = chunkAbortRefs.current;
+    return () => {
+      Object.values(chunkAbortControllers).forEach((ctrl) => ctrl.abort());
+    };
+  }, []);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -200,15 +205,32 @@ export function TabExercises({
     setExpandedChunks(prev => new Set(prev).add(chunkId));
     setAddingChunkId(null);
     setAddError(null);
-    setGeneratingChunkId(chunkId);
-    setChunkGenState(prev => ({ ...prev, [chunkId]: { phase: "idle" } }));
+    setOpenGenerateChunkIds(prev => new Set(prev).add(chunkId));
+    setChunkGenState(prev => (
+      prev[chunkId]?.phase === "running" ? prev : { ...prev, [chunkId]: { phase: "idle" } }
+    ));
   }
 
   function handleOpenAdd(chunkId: string) {
     setExpandedChunks(prev => new Set(prev).add(chunkId));
-    setGeneratingChunkId(null);
+    setOpenGenerateChunkIds(prev => {
+      const next = new Set(prev);
+      next.delete(chunkId);
+      return next;
+    });
     setAddingChunkId(chunkId);
     setAddError(null);
+  }
+
+  function handleCloseGenerate(chunkId: string) {
+    setOpenGenerateChunkIds(prev => {
+      const next = new Set(prev);
+      next.delete(chunkId);
+      return next;
+    });
+    setChunkGenState(prev => (
+      prev[chunkId]?.phase === "running" ? prev : { ...prev, [chunkId]: { phase: "idle" } }
+    ));
   }
 
   // ── Per-chunk generate ───────────────────────────────────────────────────────
@@ -216,9 +238,11 @@ export function TabExercises({
   function handleChunkGenerate(chunkId: string, count: number, kinds: InteractionKind[], strategy: GenerationStrategy) {
     if (kinds.length === 0) return;
     const chunkSummary = localChunks.find(c => c.id === chunkId)?.summary ?? "phân đoạn này";
-    abortRef.current?.abort();
+    if (chunkGenState[chunkId]?.phase === "running") return;
+    chunkAbortRefs.current[chunkId]?.abort();
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    chunkAbortRefs.current[chunkId] = ctrl;
+    setOpenGenerateChunkIds(prev => new Set(prev).add(chunkId));
     setChunkGenState(prev => ({ ...prev, [chunkId]: { phase: "running", message: "Đang lưu cấu hình..." } }));
 
     (async () => {
@@ -252,7 +276,11 @@ export function TabExercises({
             }
             setChunkGenState(prev => ({ ...prev, [chunkId]: { phase: "done" } }));
             setTimeout(() => {
-              setGeneratingChunkId(null);
+              setOpenGenerateChunkIds(prev => {
+                const next = new Set(prev);
+                next.delete(chunkId);
+                return next;
+              });
               setChunkGenState(prev => ({ ...prev, [chunkId]: { phase: "idle" } }));
             }, 500);
             return;
@@ -264,6 +292,10 @@ export function TabExercises({
         const msg = err instanceof ConnectError ? err.message : "Mất kết nối với máy chủ.";
         setChunkGenState(prev => ({ ...prev, [chunkId]: { phase: "error", message: msg } }));
         toast.error(`Lỗi tạo bài tập cho "${chunkSummary}"`);
+      } finally {
+        if (chunkAbortRefs.current[chunkId] === ctrl) {
+          delete chunkAbortRefs.current[chunkId];
+        }
       }
     })();
   }
@@ -318,7 +350,7 @@ export function TabExercises({
               : questionsGenerated
                 ? <RefreshCwIcon className="size-4" />
                 : <SparklesIcon className="size-4" />}
-            {isGenerating ? "Đang tạo…" : questionsGenerated ? "Tạo thêm toàn lesson" : "Tạo AI toàn lesson"}
+            {isGenerating ? "Đang tạo…" : questionsGenerated ? "Tạo thêm toàn bài học" : "Tạo AI toàn bài học"}
           </Button>
 
           <Button
@@ -343,7 +375,7 @@ export function TabExercises({
         {/* Inline default config panel */}
         {expandedConfig && (
           <div className="rounded-md border border-border p-3 bg-background flex flex-col gap-3">
-            <p className="text-xs font-medium">Cấu hình mặc định cho cả lesson</p>
+            <p className="text-xs font-medium">Cấu hình mặc định cho cả bài học</p>
             <p className="text-xs text-muted-foreground">Áp dụng cho các phân đoạn chưa có cấu hình riêng</p>
             <KindQuantityGrid
               value={defaultQuantities}
@@ -451,7 +483,7 @@ export function TabExercises({
               interactions={interactions.filter(it => it.chunkId === chunk.id)}
               expanded={expandedChunks.has(chunk.id)}
               onToggle={() => toggleChunk(chunk.id)}
-              isGenerating={generatingChunkId === chunk.id}
+              isGenerating={openGenerateChunkIds.has(chunk.id) || chunkGenState[chunk.id]?.phase === "running"}
               isAdding={addingChunkId === chunk.id}
               chunkGen={chunkGenState[chunk.id]}
               lessonId={lessonId}
@@ -460,7 +492,7 @@ export function TabExercises({
               addSaving={addSaving}
               addError={addError}
               onOpenGenerate={() => handleOpenGenerate(chunk.id)}
-              onCloseGenerate={() => { setGeneratingChunkId(null); }}
+              onCloseGenerate={() => handleCloseGenerate(chunk.id)}
               onGenerate={(count, kinds, strategy) => handleChunkGenerate(chunk.id, count, kinds, strategy)}
               onOpenAdd={() => handleOpenAdd(chunk.id)}
               onCloseAdd={() => { setAddingChunkId(null); setAddError(null); }}

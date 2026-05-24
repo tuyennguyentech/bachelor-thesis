@@ -166,6 +166,29 @@ func TestBuildAIChoosePrompt_ContainsBothSchemas(t *testing.T) {
 	if !strings.Contains(prompt, fbGen.GeminiSchema()) {
 		t.Error("prompt missing fill_blank schema")
 	}
+	if !strings.Contains(prompt, "start_seconds PHẢI bằng thời điểm kết thúc đoạn: 120.0 giây") {
+		t.Error("prompt should force generated checkpoints to the chunk end")
+	}
+}
+
+func TestGeneratedInteractionCheckpointSecondsUsesChunkEnd(t *testing.T) {
+	var id pgtype.UUID
+	_ = id.Scan("00000000-0000-0000-0000-000000000003")
+
+	chunk := gen.LessonTranscriptChunk{ID: id, StartSeconds: 10, EndSeconds: 63}
+	if got := generatedInteractionCheckpointSeconds(chunk); got != 63 {
+		t.Fatalf("checkpoint seconds: want chunk end 63, got %v", got)
+	}
+
+	chunk.EndSeconds = 0
+	if got := generatedInteractionCheckpointSeconds(chunk); got != 10 {
+		t.Fatalf("fallback checkpoint seconds: want chunk start 10, got %v", got)
+	}
+
+	chunk.StartSeconds = 0
+	if got := generatedInteractionCheckpointSeconds(chunk); got != 0 {
+		t.Fatalf("zero-boundary checkpoint seconds: want 0, got %v", got)
+	}
 }
 
 // ── geminiResponseText tests ──────────────────────────────────────────────────

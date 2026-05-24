@@ -295,6 +295,7 @@ export function VideoPlayer({
     try {
       video.currentTime = value;
       setCurrentTime(value);
+      onTimeUpdateRef.current?.(value);
     } catch {}
   };
 
@@ -359,7 +360,11 @@ export function VideoPlayer({
           onCanPlay={handleLoadedMetadata}
           onDurationChange={handleLoadedMetadata}
           onVolumeChange={handleVolumeChange}
-          onEnded={() => setPaused(true)}
+          onSeeked={handleNativeTimeUpdate}
+          onEnded={() => {
+            setPaused(true);
+            handleNativeTimeUpdate();
+          }}
         />
 
         <div

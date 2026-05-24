@@ -1276,7 +1276,7 @@ Với mỗi bài tập, chọn loại phù hợp nhất từ các loại cho ph�
 Đoạn nội dung (%.1f - %.1f giây):
 %s
 
-start_seconds là thời điểm (giây) trong khoảng %.1f - %.1f mà nội dung liên quan xuất hiện.
+start_seconds PHẢI bằng thời điểm kết thúc đoạn: %.1f giây.
 
 Mỗi item trong mảng "items" PHẢI có trường "kind" (một trong: %s) và các trường tương ứng với loại đó theo schema ở trên.
 
@@ -1285,7 +1285,7 @@ Trả về JSON object: {"items": [...]}`,
 		kindDescs.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
-		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		float32(chunk.EndSeconds),
 		allowedList,
 	)
 }
@@ -1840,6 +1840,16 @@ type generatedItem struct {
 	kindStr     string
 }
 
+func generatedInteractionCheckpointSeconds(chunk gen.LessonTranscriptChunk) float32 {
+	if chunk.EndSeconds > 0 {
+		return float32(chunk.EndSeconds)
+	}
+	if chunk.StartSeconds > 0 {
+		return float32(chunk.StartSeconds)
+	}
+	return 0
+}
+
 // runGeminiGenerateItems calls Gemini using the provided GeminiGenerator interface
 // and returns a list of generatedItem parsed from the response.
 // lessonLanguage is used by TTSProvider handlers to synthesise audio.
@@ -1866,7 +1876,7 @@ func (s *AISvc) runGeminiGenerateItems(
 Đoạn nội dung (%.1f - %.1f giây):
 %s
 
-start_seconds là thời điểm (giây) trong khoảng %.1f - %.1f mà nội dung liên quan xuất hiện.
+start_seconds PHẢI bằng thời điểm kết thúc đoạn: %.1f giây.
 
 Mỗi item trong mảng "items" phải tuân theo JSON schema sau:
 %s
@@ -1876,7 +1886,7 @@ Trả về JSON object: {"items": [...]}`,
 		generator.GeminiPromptHint(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
-		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
+		float32(chunk.EndSeconds),
 		generator.GeminiSchema(),
 	)
 
@@ -1903,11 +1913,12 @@ Trả về JSON object: {"items": [...]}`,
 		if chunk.QuestionCountConfig > 0 && len(items) >= int(chunk.QuestionCountConfig) {
 			break
 		}
-		prompt, explanation, startSecs, configJSON, err := generator.ParseGeminiItem(rawItem)
+		prompt, explanation, _, configJSON, err := generator.ParseGeminiItem(rawItem)
 		if err != nil {
 			s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
 			continue
 		}
+		startSecs := generatedInteractionCheckpointSeconds(chunk)
 		if ttsProv, ok := generator.(svcinteractions.TTSProvider); ok {
 			if text := ttsProv.AudioSourceText(configJSON); text != "" {
 				configJSON, err = s.synthesiseAndEmbed(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
@@ -2019,11 +2030,12 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 			continue
 		}
 		handler := handlerByKind[kindHolder.Kind]
-		prompt, explanation, startSecs, configJSON, parseErr := handler.ParseGeminiItem(rawItem)
+		prompt, explanation, _, configJSON, parseErr := handler.ParseGeminiItem(rawItem)
 		if parseErr != nil {
 			s.log.WarnContext(ctx, "ai-choose: skipping item that failed validation", "index", i, "kind", kindHolder.Kind, "err", parseErr)
 			continue
 		}
+		startSecs := generatedInteractionCheckpointSeconds(chunk)
 		if ttsProv, ok := handler.(svcinteractions.TTSProvider); ok {
 			if text := ttsProv.AudioSourceText(configJSON); text != "" {
 				configJSON, parseErr = s.synthesiseAndEmbed(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())

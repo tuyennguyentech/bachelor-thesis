@@ -42,7 +42,7 @@ export function LessonWideGenForm({
 
   return (
     <div className="rounded-md border border-border p-3 bg-background flex flex-col gap-2">
-      <p className="text-xs font-medium">🤖 Tạo bài tập AI — Toàn lesson</p>
+      <p className="text-xs font-medium">🤖 Tạo bài tập AI — Toàn bài học</p>
 
       {showConfigWarning && (
         <div className="rounded border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-2.5 py-2 flex flex-col gap-1">
