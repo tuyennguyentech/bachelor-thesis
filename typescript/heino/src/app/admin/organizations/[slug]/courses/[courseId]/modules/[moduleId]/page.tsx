@@ -4,10 +4,13 @@ import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { ChevronLeftIcon, BookOpenIcon } from "lucide-react";
+import { BookOpenIcon, ChevronLeftIcon, PlaySquareIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import { AddLessonDialog } from "./add-lesson-dialog";
 import { LessonActions } from "./lesson-actions";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function ModuleDetailPage({
   params,
@@ -39,20 +42,16 @@ export default async function ModuleDetailPage({
   const { lessons } = await lessonClient.listLessons({ moduleId: mod.id, limit: 500, offset: 0 });
 
   return (
-    <div className="mx-auto max-w-3xl flex flex-col gap-6">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-        <Link href="/admin/organizations" className="hover:text-foreground">Organizations</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}`} className="hover:text-foreground">{org.name}</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}/courses`} className="hover:text-foreground">Khóa học</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}/courses/${courseId}`} className="hover:text-foreground truncate max-w-[140px]">
-          {course.title}
-        </Link>
-        <span>/</span>
-        <span className="text-foreground truncate max-w-[140px]">{mod.title}</span>
-      </div>
+    <div className="flex flex-col gap-6">
+      <Breadcrumbs
+        items={[
+          { label: "Tổ chức", href: "/admin/organizations" },
+          { label: org.name, href: `/admin/organizations/${slug}` },
+          { label: "Khóa học", href: `/admin/organizations/${slug}/courses` },
+          { label: course.title, href: `/admin/organizations/${slug}/courses/${courseId}` },
+          { label: mod.title },
+        ]}
+      />
 
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
@@ -63,10 +62,13 @@ export default async function ModuleDetailPage({
         </Button>
       </div>
 
-      <h1 className="text-xl font-semibold">{mod.title}</h1>
+      <PageHeader
+        title={mod.title}
+        description={`Quản lý các bài học trong chương thuộc khóa học ${course.title}.`}
+      />
 
       {/* Danh sách bài học */}
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpenIcon className="size-4 text-muted-foreground" />
@@ -82,15 +84,17 @@ export default async function ModuleDetailPage({
         </div>
 
         {lessons.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            Chưa có bài học nào. Thêm bài học đầu tiên để bắt đầu.
-          </p>
+          <EmptyState
+            icon={<PlaySquareIcon className="size-5" />}
+            title="Chưa có bài học nào"
+            description="Thêm bài học đầu tiên để bắt đầu xây dựng nội dung cho chương."
+          />
         ) : (
           <div className="flex flex-col gap-2">
             {lessons.map((lesson, i) => (
               <div
                 key={lesson.id}
-                className="flex items-center justify-between rounded-md border px-4 py-3"
+                className="flex items-center justify-between rounded-md border px-4 py-3 transition-colors hover:bg-muted/30"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-muted-foreground font-mono w-6">{i + 1}.</span>

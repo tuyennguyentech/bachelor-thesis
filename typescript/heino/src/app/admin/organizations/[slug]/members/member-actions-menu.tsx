@@ -58,11 +58,12 @@ export function MemberActionsMenu({
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8">
             <MoreHorizontalIcon className="size-4" />
+            <span className="sr-only">Mở menu thao tác thành viên</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>Đổi role</DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger>Đổi vai trò</DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               {[
                 { label: "Chủ sở hữu", value: OrganizationRole.OWNER },
@@ -123,7 +124,7 @@ export function MemberActionsMenu({
             className="text-destructive"
             onSelect={() => setShowRemoveConfirm(true)}
           >
-            Xóa khỏi org
+            Xóa khỏi tổ chức
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

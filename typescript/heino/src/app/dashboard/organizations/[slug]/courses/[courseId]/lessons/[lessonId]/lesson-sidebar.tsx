@@ -30,7 +30,7 @@ export function LessonSidebar({ chunks, segments, transcript, videoRef }: Props)
   if (!hasOutline && !hasTranscript) return null;
 
   return (
-    <div className="rounded-lg border overflow-hidden flex flex-col">
+    <div className="rounded-md border overflow-hidden flex flex-col">
       {/* Tab header + collapse toggle */}
       <div className="flex items-center border-b bg-muted/30">
         {hasOutline && (

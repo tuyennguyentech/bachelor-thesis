@@ -59,7 +59,7 @@ function CreateOrgForm({ token, userId, onClose }: CreateOrgFormProps) {
         router.push(`/dashboard/organizations/${newSlug}`);
         onClose();
       } catch (err) {
-        setError(err instanceof ConnectError ? err.message : "Không thể tạo tổ chức. Slug có thể đã tồn tại.");
+        setError(err instanceof ConnectError ? err.message : "Không thể tạo tổ chức. Đường dẫn có thể đã tồn tại.");
       }
     });
   }
@@ -82,7 +82,7 @@ function CreateOrgForm({ token, userId, onClose }: CreateOrgFormProps) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="org-slug">Slug (URL)</Label>
+        <Label htmlFor="org-slug">Đường dẫn (URL)</Label>
         <Input
           id="org-slug"
           name="slug"

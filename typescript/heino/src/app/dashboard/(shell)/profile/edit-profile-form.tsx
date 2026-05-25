@@ -69,7 +69,7 @@ export function EditProfileForm({ firstName, lastName, middleName, userId, token
       </div>
       <div className="flex justify-end">
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Đang lưu..." : "Lưu thay đổi"}
+          {pending ? "Đang lưu…" : "Lưu thay đổi"}
         </Button>
       </div>
     </form>

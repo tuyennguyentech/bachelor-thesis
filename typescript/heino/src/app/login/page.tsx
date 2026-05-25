@@ -16,7 +16,7 @@ export default async function Page({
       <div className="w-full max-w-sm flex flex-col gap-4">
         {registered && (
           <div className="rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-700 dark:text-green-400">
-            Đăng ký thành công. Tài khoản đang chờ kích hoạt bởi admin.
+            Đăng ký thành công. Tài khoản đang chờ quản trị viên kích hoạt.
           </div>
         )}
         <LoginForm next={next} />

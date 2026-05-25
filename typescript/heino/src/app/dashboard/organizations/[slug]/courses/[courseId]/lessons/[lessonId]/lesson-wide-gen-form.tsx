@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { SparklesIcon } from "lucide-react";
+import { SparklesIcon, TriangleAlertIcon } from "lucide-react";
 import type { TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { KIND_OPTIONS, fromConfig, totalQuantity, type KindQuantities } from "./kind-quantity-grid";
 
@@ -42,12 +42,16 @@ export function LessonWideGenForm({
 
   return (
     <div className="rounded-md border border-border p-3 bg-background flex flex-col gap-2">
-      <p className="text-xs font-medium">🤖 Tạo bài tập AI — Toàn bài học</p>
+      <p className="flex items-center gap-1.5 text-xs font-medium">
+        <SparklesIcon className="size-3.5 text-primary" />
+        Tạo bài tập AI - Toàn bài học
+      </p>
 
       {showConfigWarning && (
         <div className="rounded border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-2.5 py-2 flex flex-col gap-1">
-          <p className="text-xs text-amber-700 dark:text-amber-400">
-            ⚠ {chunksWithoutConfig.length} phân đoạn chưa có cấu hình riêng. Sẽ dùng mặc định (2 MCQ).
+          <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span>{chunksWithoutConfig.length} phân đoạn chưa có cấu hình riêng. Sẽ dùng mặc định (2 MCQ).</span>
           </p>
           <button
             type="button"
@@ -74,7 +78,7 @@ export function LessonWideGenForm({
                     Đoạn {i + 1} ({formatTime(chunk.startSeconds)}–{formatTime(chunk.endSeconds)}):
                   </span>
                   {" "}{desc}
-                  {!chunk.interactionConfig && <span className="text-muted-foreground"> ← mặc định</span>}
+                  {!chunk.interactionConfig && <span className="text-muted-foreground"> - mặc định</span>}
                 </p>
               );
             })}

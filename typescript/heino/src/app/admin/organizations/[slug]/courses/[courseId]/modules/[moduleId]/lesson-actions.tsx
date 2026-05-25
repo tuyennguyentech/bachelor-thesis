@@ -12,6 +12,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -96,7 +97,7 @@ function EditLessonForm({ id, currentTitle, currentDescription, orderIndex, toke
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>Hủy</Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang lưu..." : "Lưu"}
+          {pending ? "Đang lưu…" : "Lưu"}
         </Button>
       </div>
     </form>
@@ -127,6 +128,7 @@ export function LessonActions({ id, moduleId, courseId, slug, title, description
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-7">
             <MoreHorizontalIcon className="size-4" />
+            <span className="sr-only">Mở menu thao tác bài học</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -142,6 +144,9 @@ export function LessonActions({ id, moduleId, courseId, slug, title, description
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Chỉnh sửa bài học</DialogTitle>
+            <DialogDescription>
+              Cập nhật tên và mô tả ngắn của bài học.
+            </DialogDescription>
           </DialogHeader>
           {/* key forces remount on open so defaultValue and error state reset cleanly */}
           <EditLessonForm

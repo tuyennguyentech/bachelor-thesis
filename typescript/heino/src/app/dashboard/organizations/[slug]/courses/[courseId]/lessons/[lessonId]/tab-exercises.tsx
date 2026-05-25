@@ -350,7 +350,7 @@ export function TabExercises({
               : questionsGenerated
                 ? <RefreshCwIcon className="size-4" />
                 : <SparklesIcon className="size-4" />}
-            {isGenerating ? "Đang tạo…" : questionsGenerated ? "Tạo thêm toàn bài học" : "Tạo AI toàn bài học"}
+            {isGenerating ? "Đang tạo..." : questionsGenerated ? "Tạo thêm toàn bài học" : "Tạo AI toàn bài học"}
           </Button>
 
           <Button
@@ -444,7 +444,7 @@ export function TabExercises({
           <div className="flex items-center gap-2 flex-wrap">
             <input
               type="search"
-              placeholder="🔍 Tìm phân đoạn theo nội dung..."
+              placeholder="Tìm phân đoạn theo nội dung..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="flex-1 min-w-[180px] text-xs rounded border border-input bg-background px-2.5 py-1.5 text-foreground placeholder:text-muted-foreground"

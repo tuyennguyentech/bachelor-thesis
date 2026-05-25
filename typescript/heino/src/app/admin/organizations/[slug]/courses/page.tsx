@@ -12,11 +12,14 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { ChevronLeftIcon } from "lucide-react";
+import { ChevronLeftIcon, GraduationCapIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Pagination } from "@/components/pagination";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { CreateCourseDialog } from "./create-course-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
 const LIMIT = 20;
 
@@ -59,26 +62,29 @@ export default async function CoursesPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/admin/organizations" className="hover:text-foreground">Organizations</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}`} className="hover:text-foreground">{org.name}</Link>
-        <span>/</span>
-        <span className="text-foreground">Khóa học</span>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: "Tổ chức", href: "/admin/organizations" },
+          { label: org.name, href: `/admin/organizations/${slug}` },
+          { label: "Khóa học" },
+        ]}
+      />
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <PageHeader
+        title="Khóa học"
+        description={`Quản lý khóa học thuộc tổ chức ${org.name}.`}
+        actions={
+          <>
           <Button variant="ghost" size="sm" asChild className="gap-1">
             <Link href={`/admin/organizations/${slug}`}>
               <ChevronLeftIcon className="size-4" />
               {org.name}
             </Link>
           </Button>
-          <h1 className="text-xl font-semibold">Khóa học</h1>
-        </div>
-        <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />
-      </div>
+          <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />
+          </>
+        }
+      />
 
       <div className="rounded-md border">
         <Table>
@@ -94,8 +100,12 @@ export default async function CoursesPage({
           <TableBody>
             {courses.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                  Chưa có khóa học nào
+                <TableCell colSpan={5} className="p-0">
+                  <EmptyState
+                    icon={<GraduationCapIcon className="size-5" />}
+                    title="Chưa có khóa học nào"
+                    description="Tạo khóa học đầu tiên để tổ chức bắt đầu xây dựng nội dung học tập."
+                  />
                 </TableCell>
               </TableRow>
             ) : (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useTransition } from "react";
-import { SendIcon, PanelRightClose, PanelRightOpen, Maximize } from "lucide-react";
+import { InfoIcon, Maximize, PanelRightClose, PanelRightOpen, PlayIcon, SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
@@ -519,7 +519,7 @@ export function StudentLessonView({
           </div>
         )}
 
-        <div ref={containerRef} className="relative w-full rounded-lg overflow-hidden border bg-black shadow-lg group [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-none">
+        <div ref={containerRef} className="relative w-full rounded-md overflow-hidden border bg-black shadow-sm group [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-none">
           <VideoPlayer
             playerKey={playerKey}
             videoRef={videoRef}
@@ -552,7 +552,7 @@ export function StudentLessonView({
                       setShowFullscreenTip(false);
                       toggleFullscreen();
                     }}
-                    className="flex-1 bg-white hover:bg-zinc-200 text-black font-semibold rounded-full py-5 shadow-lg transition-all duration-200"
+                    className="flex-1 bg-white hover:bg-zinc-200 text-black font-semibold rounded-full py-5 shadow-sm transition-all duration-200"
                   >
                     Bật ngay
                   </Button>
@@ -606,13 +606,14 @@ export function StudentLessonView({
 
         {/* State machine card */}
         {interactions.length > 0 && ((!submitted && !activeInteraction) || readyToSubmit || (submitted && result) || error) && (
-          <div className="rounded-lg border p-4 flex flex-col gap-3">
+          <div className="rounded-md border p-4 flex flex-col gap-3">
             {/* Not started — idle tip */}
             {!submitted && !activeInteraction && passedIds.size === 0 && (
-              <div className="rounded-lg bg-muted/30 p-6 text-center">
-                <p className="text-base font-medium mb-1">💡 Bài học có {interactions.length} câu hỏi tương tác</p>
-                <p className="text-sm text-muted-foreground">
-                  Video sẽ tạm dừng tại mỗi mốc để bạn trả lời. Bấm ▶ để bắt đầu.
+              <div className="rounded-md bg-muted/30 p-6 text-center">
+                <InfoIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
+                <p className="mb-1 text-base font-medium">Bài học có {interactions.length} câu hỏi tương tác</p>
+                <p className="inline-flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+                  Video sẽ tạm dừng tại mỗi mốc để bạn trả lời. Bấm <PlayIcon className="size-3.5" /> để bắt đầu.
                 </p>
               </div>
             )}

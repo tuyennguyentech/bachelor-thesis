@@ -103,13 +103,13 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
         body: blobRef.current,
         headers: { "Content-Type": contentType },
       });
-      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Tải bản ghi thất bại: ${res.status}`);
       setAudioKey(key);
       setState("done");
       onComplete(key);
     } catch (e) {
       setState("error");
-      setErrorMsg(e instanceof Error ? e.message : "Upload thất bại");
+      setErrorMsg(e instanceof Error ? e.message : "Tải bản ghi thất bại");
     }
   }
 

@@ -341,7 +341,7 @@ export function VideoPlayer({
       <div
         ref={containerRef}
         data-testid="video-player"
-        className="relative w-full rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center border group"
+        className="relative w-full rounded-md overflow-hidden bg-black aspect-video flex items-center justify-center border group"
       >
         <video
           key={stableIdentity}
@@ -436,7 +436,7 @@ export function VideoPlayer({
                     video.volume = val;
                     if (val > 0) video.muted = false;
                   }}
-                  className="w-16 opacity-100 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white hover:bg-white/40 transition-all duration-150"
+                  className="w-16 opacity-100 h-1 bg-white/20 rounded-md appearance-none cursor-pointer accent-white hover:bg-white/40 transition-all duration-150"
                 />
               </div>
 
@@ -460,7 +460,7 @@ export function VideoPlayer({
       </div>
 
       {showTranscript && (segments.length > 0 || transcript) && (
-        <div className="rounded-lg border p-4 flex flex-col gap-3">
+        <div className="rounded-md border p-4 flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <FileTextIcon className="size-4 text-muted-foreground" />
             <h2 className="font-medium text-sm">Phiên âm nội dung</h2>

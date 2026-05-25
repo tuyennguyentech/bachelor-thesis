@@ -19,7 +19,7 @@ interface SearchInputProps {
   slugLabel?: string;
 }
 
-export function SearchInput({ placeholder = "ID / email...", slugLabel }: SearchInputProps) {
+export function SearchInput({ placeholder = "ID hoặc email…", slugLabel }: SearchInputProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

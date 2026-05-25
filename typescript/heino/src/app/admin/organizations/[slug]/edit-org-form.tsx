@@ -53,7 +53,7 @@ export function EditOrgForm({ orgId, orgSlug, orgName, token }: Props) {
       </div>
       <div className="flex justify-end">
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Đang lưu..." : "Lưu"}
+          {pending ? "Đang lưu…" : "Lưu"}
         </Button>
       </div>
     </form>

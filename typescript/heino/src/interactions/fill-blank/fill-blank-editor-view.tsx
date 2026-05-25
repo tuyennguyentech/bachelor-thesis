@@ -46,7 +46,7 @@ export function FillBlankEditorView({ config, onChange }: EditorViewProps<FillBl
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
         <label className="text-xs text-muted-foreground">
-          Template <span className="font-mono">{"{{0}}"}</span>, <span className="font-mono">{"{{1}}"}</span>, ... cho chỗ trống
+          Template <span className="font-mono">{"{{0}}"}</span>, <span className="font-mono">{"{{1}}"}</span>, … cho chỗ trống
         </label>
         <textarea
           value={config.template}

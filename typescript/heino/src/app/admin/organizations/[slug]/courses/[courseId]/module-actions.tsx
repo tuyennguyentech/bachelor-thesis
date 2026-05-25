@@ -12,6 +12,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -84,7 +85,7 @@ function EditModuleForm({ id, currentTitle, orderIndex, token, onClose }: EditMo
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>Hủy</Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang lưu..." : "Lưu"}
+          {pending ? "Đang lưu…" : "Lưu"}
         </Button>
       </div>
     </form>
@@ -113,6 +114,7 @@ export function ModuleActions({ id, courseId, slug, title, orderIndex, token }: 
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-7">
             <MoreHorizontalIcon className="size-4" />
+            <span className="sr-only">Mở menu thao tác chương</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -128,6 +130,9 @@ export function ModuleActions({ id, courseId, slug, title, orderIndex, token }: 
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Đổi tên chương</DialogTitle>
+            <DialogDescription>
+              Cập nhật tên hiển thị của chương trong khóa học.
+            </DialogDescription>
           </DialogHeader>
           {/* key forces remount on open so defaultValue and error state reset cleanly */}
           <EditModuleForm

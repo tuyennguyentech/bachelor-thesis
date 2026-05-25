@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CheckCircleIcon, XCircleIcon } from "lucide-react";
+import { ArrowRightIcon, CheckCircleIcon, LightbulbIcon, PlayIcon, XCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { StudentViewProps, FillBlankConfig, FillBlankResponse } from "../types";
@@ -122,7 +122,10 @@ export function FillBlankStudentView({
       )}
 
       {revealNow && explanation && (
-        <p className="text-xs text-muted-foreground px-1">💡 {explanation}</p>
+        <div className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <LightbulbIcon className="mt-0.5 size-3.5 shrink-0" />
+          <p>{explanation}</p>
+        </div>
       )}
 
       {submitted && !revealNow && (
@@ -144,7 +147,17 @@ export function FillBlankStudentView({
 
       {submitted && (
         <Button ref={continueRef} size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
+          {hasNextInCheckpoint ? (
+            <>
+              Câu tiếp theo
+              <ArrowRightIcon className="size-4" />
+            </>
+          ) : (
+            <>
+              <PlayIcon className="size-4" />
+              Tiếp tục xem
+            </>
+          )}
         </Button>
       )}
     </div>

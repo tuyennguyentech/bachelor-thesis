@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -95,7 +96,7 @@ function AddMemberForm({ organizationId, token, onClose }: AddMemberFormProps) {
           Hủy
         </Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang thêm..." : "Thêm"}
+          {pending ? "Đang thêm…" : "Thêm"}
         </Button>
       </div>
     </form>
@@ -122,6 +123,9 @@ export function AddMemberDialog({ organizationId, slug, token }: AddMemberDialog
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Thêm thành viên</DialogTitle>
+          <DialogDescription>
+            Nhập email người dùng đã có tài khoản và chọn vai trò trong tổ chức.
+          </DialogDescription>
         </DialogHeader>
         <AddMemberForm
           organizationId={organizationId}

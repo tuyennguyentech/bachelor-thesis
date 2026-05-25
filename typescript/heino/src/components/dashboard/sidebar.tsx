@@ -6,7 +6,7 @@ import { LayoutDashboardIcon, UserIcon, BuildingIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
+  { href: "/dashboard", label: "Trang chính", icon: LayoutDashboardIcon, exact: true },
   { href: "/dashboard/profile", label: "Hồ sơ", icon: UserIcon },
   { href: "/dashboard/organizations", label: "Tổ chức", icon: BuildingIcon },
 ];

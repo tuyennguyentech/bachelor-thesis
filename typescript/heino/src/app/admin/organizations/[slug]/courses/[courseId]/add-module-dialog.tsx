@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -59,7 +60,7 @@ function AddModuleForm({ courseId, nextOrder, token, onClose }: AddModuleFormPro
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>Hủy</Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang thêm..." : "Thêm"}
+          {pending ? "Đang thêm…" : "Thêm"}
         </Button>
       </div>
     </form>
@@ -86,6 +87,9 @@ export function AddModuleDialog({ courseId, nextOrder, token }: AddModuleDialogP
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Thêm chương mới</DialogTitle>
+          <DialogDescription>
+            Chương giúp nhóm các bài học theo mạch nội dung của khóa học.
+          </DialogDescription>
         </DialogHeader>
         <AddModuleForm
           courseId={courseId}

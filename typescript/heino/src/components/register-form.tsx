@@ -25,7 +25,7 @@ export function RegisterForm({ className }: React.ComponentProps<"form">) {
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-2xl font-bold">Đăng ký</h1>
           <p className="text-balance text-sm text-muted-foreground">
-            Tạo tài khoản — admin sẽ kích hoạt trước khi bạn đăng nhập được
+            Tạo tài khoản; quản trị viên sẽ kích hoạt trước khi bạn đăng nhập được
           </p>
         </div>
 
@@ -78,7 +78,7 @@ export function RegisterForm({ className }: React.ComponentProps<"form">) {
         </Field>
 
         <Button type="submit" disabled={pending} className="w-full">
-          {pending ? "Đang đăng ký..." : "Đăng ký"}
+          {pending ? "Đang đăng ký…" : "Đăng ký"}
         </Button>
 
         <p className="text-center text-sm text-muted-foreground">

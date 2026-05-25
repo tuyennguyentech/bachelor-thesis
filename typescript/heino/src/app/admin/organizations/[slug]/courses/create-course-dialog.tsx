@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -65,7 +66,7 @@ function CreateCourseForm({ organizationId, token, userId, onClose }: CreateCour
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>Hủy</Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang tạo..." : "Tạo"}
+          {pending ? "Đang tạo…" : "Tạo"}
         </Button>
       </div>
     </form>
@@ -92,6 +93,9 @@ export function CreateCourseDialog({ organizationId, slug, token, userId }: Crea
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Tạo khóa học mới</DialogTitle>
+          <DialogDescription>
+            Khóa học mới sẽ được tạo trong tổ chức hiện tại và có thể thêm chương sau khi lưu.
+          </DialogDescription>
         </DialogHeader>
         <CreateCourseForm organizationId={organizationId} slug={slug} token={token} userId={userId} onClose={() => setOpen(false)} />
       </DialogContent>

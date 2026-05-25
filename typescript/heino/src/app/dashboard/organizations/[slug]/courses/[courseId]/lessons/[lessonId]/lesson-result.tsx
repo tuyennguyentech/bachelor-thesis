@@ -75,7 +75,7 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3">
+      <div className="rounded-md border bg-muted/30 p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">🎯 Kết quả</span>
           {canRetake ? (
@@ -89,7 +89,7 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
       </div>
 
       {feedbackMode !== FeedbackMode.HIDDEN && interactions.length > 0 && (
-        <div className="flex flex-col rounded-lg border divide-y">
+        <div className="flex flex-col rounded-md border divide-y">
           {interactions.map((it, idx) => {
             const respItem = result.responses.find((r) => r.interactionId === it.id);
             const config = extractConfig(it);

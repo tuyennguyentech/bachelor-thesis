@@ -15,7 +15,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { roleName, memberStatusBadge } from "@/lib/org-utils";
 import { Pagination } from "@/components/pagination";
-import { CreateOrgDialog } from "./create-org-dialog";
+import { CreateOrgDialog } from "@/app/dashboard/organizations/create-org-dialog";
 
 const LIMIT = 20;
 

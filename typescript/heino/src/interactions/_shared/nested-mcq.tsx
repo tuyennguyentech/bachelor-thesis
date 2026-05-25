@@ -28,8 +28,9 @@ export function NestedMcqStudent({
   return (
     <div className="flex flex-col gap-2">
       {revealAnswer && hasAnswered && (
-        <p className={`text-xs font-medium ${selectedIsCorrect ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-          {selectedIsCorrect ? "✅ Chính xác!" : "❌ Chưa đúng"}
+        <p className={`flex items-center gap-1.5 text-xs font-medium ${selectedIsCorrect ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+          {selectedIsCorrect ? <CheckCircleIcon className="size-3.5" /> : <XCircleIcon className="size-3.5" />}
+          {selectedIsCorrect ? "Chính xác" : "Chưa đúng"}
         </p>
       )}
       <div className="flex flex-col gap-1.5">
@@ -39,7 +40,7 @@ export function NestedMcqStudent({
           const isWrong = revealAnswer && isSelected && oi !== config.correctAnswer;
 
           let cls =
-            "w-full text-left px-3 py-2 rounded-lg border text-sm flex items-center gap-2 transition-colors";
+            "w-full text-left px-3 py-2 rounded-md border text-sm flex items-center gap-2 transition-colors";
           if (isCorrect)
             cls += " border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 cursor-default";
           else if (isWrong)

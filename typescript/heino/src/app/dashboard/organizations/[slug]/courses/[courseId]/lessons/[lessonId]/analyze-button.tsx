@@ -967,7 +967,7 @@ export function AnalyzeButton({
             <option value="vi">🇻🇳 Tiếng Việt</option>
             <option value="en">🇬🇧 English</option>
           </select>
-          {savingLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu…</span>}
+          {savingLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
         </div>
 
         <div className="flex items-center gap-2">
@@ -984,7 +984,7 @@ export function AnalyzeButton({
             className="text-xs w-16 rounded border border-input bg-background px-2 py-1 text-center focus:ring-1 focus:ring-primary focus:outline-none"
           />
           <span className="text-[10px] text-muted-foreground">(0 = không giới hạn)</span>
-          {savingMaxAttempts && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu…</span>}
+          {savingMaxAttempts && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
         </div>
       </div>
 
@@ -1010,7 +1010,7 @@ export function AnalyzeButton({
                   {isExtracting
                     ? <Loader2Icon className="size-4 animate-spin" />
                     : <PlayIcon className="size-4" />}
-                  {isExtracting ? "Đang trích xuất…" :
+                  {isExtracting ? "Đang trích xuất..." :
                     hasSegments ? "Trích xuất lại transcript" : "Trích xuất transcript"}
                 </Button>
               )}
@@ -1101,7 +1101,7 @@ export function AnalyzeButton({
                 {isChunking
                   ? <Loader2Icon className="size-4 animate-spin" />
                   : <RefreshCwIcon className="size-4" />}
-                {isChunking ? "Đang phân đoạn…" : "Phân đoạn lại"}
+                {isChunking ? "Đang phân đoạn..." : "Phân đoạn lại"}
               </Button>
               {isChunkSyncing && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -1127,7 +1127,7 @@ export function AnalyzeButton({
             <div className="flex flex-col gap-1.5">
               {isReloadingChunks ? (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2Icon className="size-3 animate-spin" /> Đang tải…
+                  <Loader2Icon className="size-3 animate-spin" /> Đang tải...
                 </div>
               ) : (
                 chunks.map((chunk, i) => (

@@ -54,7 +54,7 @@ export function EditPasswordForm({ userId, token }: Props) {
       </div>
       <div className="flex justify-end">
         <Button type="submit" size="sm" variant="outline" disabled={pending}>
-          {pending ? "Đang đặt..." : "Đặt mật khẩu"}
+          {pending ? "Đang đặt…" : "Đặt mật khẩu"}
         </Button>
       </div>
     </form>

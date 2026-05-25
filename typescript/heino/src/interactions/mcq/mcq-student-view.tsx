@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CheckCircleIcon, XCircleIcon } from "lucide-react";
+import { ArrowRightIcon, CheckCircleIcon, LightbulbIcon, PlayIcon, XCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { StudentViewProps, McqConfig, McqResponse } from "../types";
@@ -43,7 +43,17 @@ export function McqStudentView({
             selectedIsCorrect ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
           }`}
         >
-          {selectedIsCorrect ? "✅ Chính xác!" : "❌ Chưa đúng — xem lại nhé"}
+          {selectedIsCorrect ? (
+            <>
+              <CheckCircleIcon className="size-4" />
+              Chính xác
+            </>
+          ) : (
+            <>
+              <XCircleIcon className="size-4" />
+              Chưa đúng, xem lại nhé
+            </>
+          )}
         </div>
       )}
 
@@ -54,7 +64,7 @@ export function McqStudentView({
           const isWrong = revealNow && isSelected && oi !== config.correctAnswer;
 
           let cls =
-            "w-full text-left px-3 py-2.5 rounded-lg border text-sm flex items-center gap-2 transition-colors";
+            "w-full text-left px-3 py-2.5 rounded-md border text-sm flex items-center gap-2 transition-colors";
 
           if (isCorrect)
             cls +=
@@ -104,9 +114,10 @@ export function McqStudentView({
 
       {/* AFTER_EACH: explanation (shown for both correct and wrong) */}
       {revealNow && explanation && (
-        <p className="text-xs text-muted-foreground px-1">
-          💡 {explanation}
-        </p>
+        <div className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <LightbulbIcon className="mt-0.5 size-3.5 shrink-0" />
+          <p>{explanation}</p>
+        </div>
       )}
 
       {/* AFTER_SUBMIT / HIDDEN: acknowledgement text */}
@@ -116,7 +127,17 @@ export function McqStudentView({
 
       {hasAnswered && (
         <Button ref={continueRef} size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
+          {hasNextInCheckpoint ? (
+            <>
+              Câu tiếp theo
+              <ArrowRightIcon className="size-4" />
+            </>
+          ) : (
+            <>
+              <PlayIcon className="size-4" />
+              Tiếp tục xem
+            </>
+          )}
         </Button>
       )}
     </div>

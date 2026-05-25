@@ -36,9 +36,9 @@ export function DeleteUserButton({ userId, token }: Props) {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Xóa user?</AlertDialogTitle>
+          <AlertDialogTitle>Xóa người dùng?</AlertDialogTitle>
           <AlertDialogDescription>
-            Hành động này không thể hoàn tác. User sẽ bị xóa vĩnh viễn.
+            Hành động này không thể hoàn tác. Người dùng sẽ bị xóa vĩnh viễn.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

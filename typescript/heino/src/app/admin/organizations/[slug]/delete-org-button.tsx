@@ -36,9 +36,9 @@ export function DeleteOrgButton({ orgId, token }: Props) {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Xóa organization?</AlertDialogTitle>
+          <AlertDialogTitle>Xóa tổ chức?</AlertDialogTitle>
           <AlertDialogDescription>
-            Hành động này không thể hoàn tác. Organization và toàn bộ dữ liệu liên quan sẽ bị xóa.
+            Hành động này không thể hoàn tác. Tổ chức và toàn bộ dữ liệu liên quan sẽ bị xóa.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

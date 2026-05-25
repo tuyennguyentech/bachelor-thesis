@@ -30,7 +30,7 @@ export function ListeningEditorView({ config, onChange, lessonId = "", token = "
   async function handleAudioFile(file: File) {
     const ct = file.type || "audio/mpeg";
     if (!AUDIO_CONTENT_TYPES.has(ct) && !ct.startsWith("audio/")) {
-      setUploadError("Chỉ hỗ trợ tệp audio (mp3, wav, ogg, m4a…).");
+      setUploadError("Chỉ hỗ trợ tệp nghe (mp3, wav, ogg, m4a...).");
       return;
     }
     setUploading(true);
@@ -63,7 +63,7 @@ export function ListeningEditorView({ config, onChange, lessonId = "", token = "
 
       onChange({ ...config, audioObjectKey: key, durationSeconds: duration });
     } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "Upload thất bại");
+      setUploadError(e instanceof Error ? e.message : "Tải tệp nghe thất bại");
     } finally {
       setUploading(false);
     }
@@ -85,11 +85,11 @@ export function ListeningEditorView({ config, onChange, lessonId = "", token = "
     <div className="flex flex-col gap-3">
       {/* Audio upload */}
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-muted-foreground">File audio</label>
+        <label className="text-xs text-muted-foreground">Tệp nghe</label>
         <div className="flex items-center gap-2">
           <label className={`inline-flex items-center gap-1.5 text-sm cursor-pointer rounded border border-input px-3 py-1.5 hover:bg-muted/50 transition-colors ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
             {uploading ? <Loader2Icon className="size-3.5 animate-spin" /> : <UploadCloudIcon className="size-3.5" />}
-            {uploading ? "Đang tải…" : config.audioObjectKey ? "Thay audio" : "Tải audio lên"}
+            {uploading ? "Đang tải..." : config.audioObjectKey ? "Thay tệp nghe" : "Tải tệp nghe lên"}
             <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAudioFile(f); e.target.value = ""; }} />
           </label>
           {config.audioObjectKey && <span className="text-xs text-muted-foreground truncate max-w-[160px]">{config.audioObjectKey.split("/").pop()}</span>}
@@ -122,7 +122,7 @@ export function ListeningEditorView({ config, onChange, lessonId = "", token = "
             rows={3}
             value={config.expectedText}
             onChange={(e) => onChange({ ...config, expectedText: e.target.value })}
-            placeholder="Nhập nội dung đúng mà học sinh cần nghe…"
+            placeholder="Nhập nội dung đúng mà học sinh cần nghe..."
             className="text-sm rounded border border-input bg-background px-2 py-1.5 resize-none"
           />
         </div>

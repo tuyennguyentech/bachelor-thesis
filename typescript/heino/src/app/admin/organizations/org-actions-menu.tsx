@@ -45,6 +45,7 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsM
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8">
             <MoreHorizontalIcon className="size-4" />
+            <span className="sr-only">Mở menu thao tác tổ chức</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -52,7 +53,7 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsM
             <Link href={`/admin/organizations/${orgSlug}`}>Xem chi tiết</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href={`/admin/organizations/${orgSlug}/members`}>Quản lý members</Link>
+            <Link href={`/admin/organizations/${orgSlug}/members`}>Quản lý thành viên</Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {orgStatus === OrganizationStatus.ACTIVE ? (
@@ -91,9 +92,9 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsM
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Xóa organization?</AlertDialogTitle>
+            <AlertDialogTitle>Xóa tổ chức?</AlertDialogTitle>
             <AlertDialogDescription>
-              Hành động này không thể hoàn tác. Organization và toàn bộ dữ liệu liên quan sẽ bị xóa.
+              Hành động này không thể hoàn tác. Tổ chức và toàn bộ dữ liệu liên quan sẽ bị xóa.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

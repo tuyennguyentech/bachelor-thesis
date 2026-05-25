@@ -3,7 +3,13 @@ import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { CourseService, LessonService, CourseModuleService } from "buf/gen/richter/v1/courses_pb";
+import {
+  CourseService,
+  LessonService,
+  CourseModuleService,
+  type CourseModule,
+  type Lesson,
+} from "buf/gen/richter/v1/courses_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { AIService, AnalysisStatus } from "buf/gen/richter/v1/ai_pb";
 import { InteractionService, FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -17,6 +23,7 @@ import {
   SparklesIcon,
   UsersIcon,
   EyeIcon,
+  ListTreeIcon,
 } from "lucide-react";
 import { VideoUpload } from "./video-upload";
 import { AnalyzeButton } from "./analyze-button";
@@ -24,8 +31,92 @@ import { LessonAttempts } from "./lesson-attempts";
 import { VideoPlayer } from "./video-player";
 import { StudentLessonView } from "./student-lesson-view";
 import { extractLocalResponse } from "@/interactions/registry";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
+const COURSE_NAV_LIMIT = 100;
+
+function CourseLessonJump({
+  slug,
+  courseId,
+  currentLessonId,
+  modules,
+  lessons,
+}: {
+  slug: string;
+  courseId: string;
+  currentLessonId: string;
+  modules: CourseModule[];
+  lessons: Lesson[];
+}) {
+  if (modules.length === 0 || lessons.length === 0) return null;
+
+  const lessonsByModule = new Map<string, Lesson[]>();
+  for (const lesson of lessons) {
+    const moduleLessons = lessonsByModule.get(lesson.moduleId) ?? [];
+    moduleLessons.push(lesson);
+    lessonsByModule.set(lesson.moduleId, moduleLessons);
+  }
+
+  return (
+    <section className="rounded-md border bg-card p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <ListTreeIcon className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">Trong khóa học</h2>
+        </div>
+        <Button variant="ghost" size="sm" asChild className="gap-1.5 text-xs">
+          <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
+            Xem cấu trúc
+            <ChevronLeftIcon className="size-3.5 rotate-180" />
+          </Link>
+        </Button>
+      </div>
+      <div className="flex max-h-56 flex-col gap-2 overflow-y-auto pr-1">
+        {modules.map((module, moduleIndex) => {
+          const moduleLessons = lessonsByModule.get(module.id) ?? [];
+          if (moduleLessons.length === 0) return null;
+          return (
+            <div key={module.id} className="flex flex-col gap-1">
+              <p className="px-1 text-xs font-medium text-muted-foreground">
+                {moduleIndex + 1}. {module.title}
+              </p>
+              <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+                {moduleLessons.map((lesson) => {
+                  const active = lesson.id === currentLessonId;
+                  const content = (
+                    <span className="flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-sm">
+                      <span className="tabular-nums text-xs text-muted-foreground">
+                        {lesson.orderIndex + 1}
+                      </span>
+                      <span className="truncate">{lesson.title}</span>
+                    </span>
+                  );
+                  return active ? (
+                    <div
+                      key={lesson.id}
+                      className="font-medium text-primary [&>span]:border-primary/40 [&>span]:bg-primary/10"
+                    >
+                      {content}
+                    </div>
+                  ) : (
+                    <Link
+                      key={lesson.id}
+                      href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
+                      className="text-muted-foreground transition-colors hover:text-foreground [&>span]:hover:bg-muted/50"
+                    >
+                      {content}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function statusLabel(s: AnalysisStatus): string {
   switch (s) {
@@ -118,6 +209,15 @@ export default async function LessonDetailPage({
   }
   if (!module_ || module_.courseId !== courseId) notFound();
 
+  const [{ modules: courseModules }, { lessons: courseLessons }] = await Promise.all([
+    moduleClient
+      .listCourseModules({ courseId, limit: COURSE_NAV_LIMIT, offset: 0 })
+      .catch(() => ({ modules: [] })),
+    lessonClient
+      .listLessonsByCourse({ courseId, limit: COURSE_NAV_LIMIT, offset: 0 })
+      .catch(() => ({ lessons: [] })),
+  ]);
+
   const interactionClient = createRichterClient(InteractionService, token);
   const aiClient = createRichterClient(AIService, token);
 
@@ -172,6 +272,17 @@ export default async function LessonDetailPage({
 
   return (
     <div className="mx-auto w-full max-w-screen-2xl px-4 lg:px-6 flex flex-col gap-6">
+      <RecentAccessRecorder
+        entry={{
+          id: `lesson:${lesson.id}`,
+          type: "lesson",
+          orgSlug: slug,
+          title: lesson.title,
+          subtitle: `${course.title} · ${org.name}`,
+          href: `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`,
+        }}
+      />
+
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
           <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
@@ -208,9 +319,17 @@ export default async function LessonDetailPage({
         </div>
       </div>
 
+      <CourseLessonJump
+        slug={slug}
+        courseId={courseId}
+        currentLessonId={lessonId}
+        modules={courseModules}
+        lessons={courseLessons}
+      />
+
       {/* Preview banner */}
       {isPreview && (
-        <div className="flex items-center justify-between rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 px-4 py-2 text-sm">
+        <div className="flex items-center justify-between rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 px-4 py-2 text-sm">
           <span className="text-yellow-800 dark:text-yellow-300 font-medium">Đang xem thử dưới dạng học viên</span>
           <Link href="?">
             <Button variant="outline" size="sm" className="gap-1.5 text-xs border-yellow-400 text-yellow-800 hover:bg-yellow-100 dark:text-yellow-300 dark:border-yellow-600 dark:hover:bg-yellow-900/30">
@@ -272,7 +391,7 @@ export default async function LessonDetailPage({
             maxAttempts={lesson.maxAttempts}
           />
         ) : (
-          <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
+          <div className="rounded-md border overflow-hidden bg-black aspect-video flex items-center justify-center">
             <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
               <PlayCircleIcon className="size-10 opacity-30" />
               <p className="text-sm">Nội dung chưa được cung cấp.</p>
@@ -296,7 +415,7 @@ export default async function LessonDetailPage({
                 allowNativeFullscreen={true}
               />
             ) : (
-              <div className="rounded-lg border overflow-hidden bg-black aspect-video flex items-center justify-center">
+              <div className="rounded-md border overflow-hidden bg-black aspect-video flex items-center justify-center">
                 <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
                   <VideoIcon className="size-10 opacity-30" />
                   <p className="text-sm">Chưa có video. Tải video lên bên dưới.</p>
@@ -305,7 +424,7 @@ export default async function LessonDetailPage({
             )}
 
             {/* Video Management & Analysis controls */}
-            <div className="rounded-lg border p-4 flex flex-col gap-4">
+            <div className="rounded-md border p-4 flex flex-col gap-4">
               <div className="flex items-center justify-between">
                 <h2 className="font-medium text-sm">Quản lý video</h2>
                 <Link href="?preview=1">
@@ -365,7 +484,7 @@ export default async function LessonDetailPage({
         ) : (
           /* Student progress tab content */
           attemptsData && (
-            <div className="rounded-lg border p-4 flex flex-col gap-3">
+            <div className="rounded-md border p-4 flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <UsersIcon className="size-4 text-muted-foreground" />
                 <h2 className="font-medium text-sm">Tiến độ học viên</h2>

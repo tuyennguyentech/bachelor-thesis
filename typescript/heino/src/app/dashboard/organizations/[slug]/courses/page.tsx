@@ -15,10 +15,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, GraduationCapIcon } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateCourseDialog } from "@/app/admin/organizations/[slug]/courses/create-course-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 
 const LIMIT = 20;
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
@@ -69,18 +71,11 @@ export default async function DashboardCoursesPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" asChild className="gap-1">
-            <Link href={`/dashboard/organizations/${slug}`}>
-              <ChevronLeftIcon className="size-4" />
-              {org.name}
-            </Link>
-          </Button>
-          <h1 className="text-xl font-semibold">Khóa học</h1>
-        </div>
-        {canManage && <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />}
-      </div>
+      <PageHeader
+        title="Khóa học"
+        description={`Danh sách khóa học trong tổ chức ${org.name}.`}
+        actions={canManage && <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />}
+      />
 
       <div className="rounded-md border">
         <Table>
@@ -95,8 +90,16 @@ export default async function DashboardCoursesPage({
           <TableBody>
             {courses.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
-                  Chưa có khóa học nào.
+                <TableCell colSpan={4} className="p-0">
+                  <EmptyState
+                    icon={<GraduationCapIcon className="size-5" />}
+                    title="Chưa có khóa học nào"
+                    description={
+                      canManage
+                        ? "Tạo khóa học đầu tiên để bắt đầu xây dựng nội dung cho tổ chức."
+                        : "Tổ chức này chưa mở khóa học cho thành viên."
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

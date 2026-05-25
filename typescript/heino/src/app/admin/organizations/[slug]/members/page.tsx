@@ -16,6 +16,10 @@ import { AddMemberDialog } from "./add-member-dialog";
 import { MemberActionsMenu } from "./member-actions-menu";
 import { Pagination } from "@/components/pagination";
 import { roleName, memberStatusBadge } from "@/lib/org-utils";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { UsersIcon } from "lucide-react";
 
 const LIMIT = 50;
 
@@ -59,18 +63,19 @@ export default async function MembersPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/admin/organizations" className="hover:text-foreground">Organizations</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}`} className="hover:text-foreground">{org.name}</Link>
-        <span>/</span>
-        <span className="text-foreground">Members</span>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: "Tổ chức", href: "/admin/organizations" },
+          { label: org.name, href: `/admin/organizations/${slug}` },
+          { label: "Thành viên" },
+        ]}
+      />
 
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Members — {org.name}</h1>
-        <AddMemberDialog organizationId={org.id} slug={slug} token={token} />
-      </div>
+      <PageHeader
+        title="Thành viên"
+        description={`Quản lý thành viên và quyền truy cập trong tổ chức ${org.name}.`}
+        actions={<AddMemberDialog organizationId={org.id} slug={slug} token={token} />}
+      />
 
       <div className="rounded-md border">
         <Table>
@@ -86,17 +91,23 @@ export default async function MembersPage({
           <TableBody>
             {members.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                  Chưa có thành viên
+                <TableCell colSpan={5} className="p-0">
+                  <EmptyState
+                    icon={<UsersIcon className="size-5" />}
+                    title="Chưa có thành viên"
+                    description="Thêm thành viên để phân quyền học, dạy hoặc quản trị tổ chức."
+                  />
                 </TableCell>
               </TableRow>
             ) : (
               members.map((m) => {
+                const displayName = `${m.userFirstName} ${m.userLastName}`.trim() || m.userEmail || m.userId;
                 return (
                   <TableRow key={m.userId}>
                     <TableCell>
-                      <Link href={`/admin/users/${m.userId}`} className="font-mono text-xs hover:underline text-muted-foreground">
-                        {m.userId}
+                      <Link href={`/admin/users/${m.userId}`} className="flex flex-col gap-0.5 hover:text-primary">
+                        <span className="text-sm font-medium">{displayName}</span>
+                        <span className="text-xs text-muted-foreground">{m.userEmail || m.userId}</span>
                       </Link>
                     </TableCell>
                     <TableCell>{roleName(m.role)}</TableCell>

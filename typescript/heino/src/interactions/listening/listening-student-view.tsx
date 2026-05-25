@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2Icon, Volume2Icon } from "lucide-react";
+import { ArrowRightIcon, Loader2Icon, PlayIcon, Volume2Icon } from "lucide-react";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
@@ -69,7 +69,7 @@ export function ListeningStudentView({
   if (loadingUrl) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2Icon className="size-4 animate-spin" /> Đang tải audio…
+        <Loader2Icon className="size-4 animate-spin" /> Đang tải tệp nghe…
       </div>
     );
   }
@@ -80,7 +80,7 @@ export function ListeningStudentView({
       {audioUrl ? (
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Volume2Icon className="size-3.5" /> Nghe audio
+            <Volume2Icon className="size-3.5" /> Nghe tệp
           </div>
           <audio
             ref={audioRef}
@@ -92,7 +92,7 @@ export function ListeningStudentView({
         </div>
       ) : (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-          Không tải được audio cho bài nghe. Vui lòng báo giáo viên tạo lại hoặc tải audio khác.
+          Không tải được tệp nghe. Vui lòng báo giáo viên tạo lại hoặc tải tệp khác.
         </div>
       )}
 
@@ -156,7 +156,17 @@ export function ListeningStudentView({
 
       {audioReady && hasAnswered && (
         <Button size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
+          {hasNextInCheckpoint ? (
+            <>
+              Câu tiếp theo
+              <ArrowRightIcon className="size-4" />
+            </>
+          ) : (
+            <>
+              <PlayIcon className="size-4" />
+              Tiếp tục xem
+            </>
+          )}
         </Button>
       )}
     </div>

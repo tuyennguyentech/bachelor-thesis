@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { SparklesIcon, Loader2Icon } from "lucide-react";
+import { CheckCircleIcon, Loader2Icon, SparklesIcon, XCircleIcon } from "lucide-react";
 import type { TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { GenerationStrategy } from "buf/gen/richter/v1/ai_pb";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
@@ -42,7 +42,10 @@ export function ChunkGenerateForm({
 
   return (
     <div className="rounded-md border border-border bg-background p-3 flex flex-col gap-2">
-      <p className="text-xs font-medium">🤖 Tạo bài tập AI — {chunk.summary}</p>
+      <p className="flex items-center gap-1.5 text-xs font-medium">
+        <SparklesIcon className="size-3.5 text-primary" />
+        Tạo bài tập AI - {chunk.summary}
+      </p>
 
       {isRunning ? (
         <p className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -50,9 +53,15 @@ export function ChunkGenerateForm({
           {chunkGen.message}
         </p>
       ) : isDone ? (
-        <p className="text-xs text-green-700 dark:text-green-400">✅ Hoàn thành</p>
+        <p className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400">
+          <CheckCircleIcon className="size-3.5" />
+          Hoàn thành
+        </p>
       ) : isError ? (
-        <p className="text-xs text-destructive">❌ {chunkGen.message}</p>
+        <p className="flex items-center gap-1.5 text-xs text-destructive">
+          <XCircleIcon className="size-3.5" />
+          {chunkGen.message}
+        </p>
       ) : (
         <>
           <KindQuantityGrid

@@ -1,13 +1,9 @@
-// dashboard members page
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { OrganizationMemberService, OrganizationRole, type OrganizationMember } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -20,6 +16,9 @@ import { roleName, memberStatusBadge } from "@/lib/org-utils";
 import { Pagination } from "@/components/pagination";
 import { AddMemberDialog } from "@/app/admin/organizations/[slug]/members/add-member-dialog";
 import { MemberActionsMenu } from "@/app/admin/organizations/[slug]/members/member-actions-menu";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { UsersIcon } from "lucide-react";
 
 const LIMIT = 50;
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
@@ -68,21 +67,11 @@ export default async function DashboardMembersPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" asChild className="gap-1">
-          <Link href={`/dashboard/organizations/${slug}`}>
-            <ChevronLeftIcon className="size-4" />
-            {org.name}
-          </Link>
-        </Button>
-        <h1 className="text-xl font-semibold">Thành viên</h1>
-      </div>
-
-      {canManage && (
-        <div className="flex justify-end">
-          <AddMemberDialog organizationId={org.id} slug={slug} token={token} />
-        </div>
-      )}
+      <PageHeader
+        title="Thành viên"
+        description={`Danh sách người dùng đang tham gia tổ chức ${org.name}.`}
+        actions={canManage && <AddMemberDialog organizationId={org.id} slug={slug} token={token} />}
+      />
 
       <div className="rounded-md border">
         <Table>
@@ -98,8 +87,16 @@ export default async function DashboardMembersPage({
           <TableBody>
             {members.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canManage ? 5 : 4} className="py-10 text-center text-muted-foreground">
-                  Chưa có thành viên
+                <TableCell colSpan={canManage ? 5 : 4} className="p-0">
+                  <EmptyState
+                    icon={<UsersIcon className="size-5" />}
+                    title="Chưa có thành viên"
+                    description={
+                      canManage
+                        ? "Thêm thành viên để phân quyền học, dạy hoặc quản trị tổ chức."
+                        : "Tổ chức này chưa có thành viên khác."
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

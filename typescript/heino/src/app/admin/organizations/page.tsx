@@ -13,7 +13,10 @@ import { CreateOrgDialog } from "./create-org-dialog";
 import { OrgActionsMenu } from "./org-actions-menu";
 import { SearchInput } from "@/components/search-input";
 import { Pagination } from "@/components/pagination";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { orgStatusBadge } from "@/lib/org-utils";
+import { BuildingIcon } from "lucide-react";
 
 const LIMIT = 20;
 
@@ -35,13 +38,16 @@ export default async function OrganizationsPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Tổ chức</h1>
-        <div className="flex items-center gap-2">
-          <SearchInput placeholder="ID / slug..." slugLabel="slug" />
+      <PageHeader
+        title="Tổ chức"
+        description="Quản lý các tổ chức, trạng thái hoạt động và quyền truy cập ban đầu."
+        actions={
+          <>
+          <SearchInput placeholder="ID hoặc slug…" slugLabel="slug" />
           <CreateOrgDialog token={token} />
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div className="rounded-md border">
         <Table>
@@ -57,8 +63,16 @@ export default async function OrganizationsPage({
           <TableBody>
             {orgs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                  Không có organization nào
+                <TableCell colSpan={5} className="p-0">
+                  <EmptyState
+                    icon={<BuildingIcon className="size-5" />}
+                    title={query ? "Không tìm thấy tổ chức phù hợp" : "Chưa có tổ chức nào"}
+                    description={
+                      query
+                        ? "Thử tìm bằng ID hoặc slug khác."
+                        : "Tạo tổ chức đầu tiên để bắt đầu phân quyền và mở khóa học."
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

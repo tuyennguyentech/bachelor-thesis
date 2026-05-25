@@ -17,6 +17,7 @@ import { AddModuleDialog } from "@/app/admin/organizations/[slug]/courses/[cours
 import { ModuleActions } from "@/app/admin/organizations/[slug]/courses/[courseId]/module-actions";
 import { AddLessonDialog } from "@/app/admin/organizations/[slug]/courses/[courseId]/modules/[moduleId]/add-lesson-dialog";
 import { LessonActions } from "@/app/admin/organizations/[slug]/courses/[courseId]/modules/[moduleId]/lesson-actions";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const CAN_CHANGE_STATUS = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
@@ -74,7 +75,18 @@ export default async function DashboardCourseDetailPage({
   const redirectAfterDelete = `/dashboard/organizations/${slug}/courses`;
 
   return (
-    <div className="mx-auto max-w-3xl flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
+      <RecentAccessRecorder
+        entry={{
+          id: `course:${course.id}`,
+          type: "course",
+          orgSlug: slug,
+          title: course.title,
+          subtitle: org.name,
+          href: `/dashboard/organizations/${slug}/courses/${course.id}`,
+        }}
+      />
+
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
           <Link href={`/dashboard/organizations/${slug}/courses`}>
@@ -97,7 +109,7 @@ export default async function DashboardCourseDetailPage({
       {/* Management: edit info + status */}
       {canManage && (
         <>
-          <div className="rounded-lg border p-4 flex flex-col gap-4">
+          <div className="rounded-md border p-4 flex flex-col gap-4">
             <h2 className="font-medium">Thông tin chung</h2>
             <EditCourseForm
               key={`${course.title}|${course.description}`}
@@ -109,7 +121,7 @@ export default async function DashboardCourseDetailPage({
             />
           </div>
 
-          <div className="rounded-lg border p-4 flex items-center justify-between gap-4">
+          <div className="rounded-md border p-4 flex items-center justify-between gap-4">
             <div>
               <h2 className="font-medium">Trạng thái</h2>
               <p className="text-sm text-muted-foreground">
@@ -128,7 +140,7 @@ export default async function DashboardCourseDetailPage({
       )}
 
       {/* Nội dung khóa học */}
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpenIcon className="size-4 text-muted-foreground" />
@@ -220,7 +232,7 @@ export default async function DashboardCourseDetailPage({
 
       {/* Danger zone */}
       {canChangeStatus && (
-        <div className="rounded-lg border border-destructive/30 p-4 flex items-center justify-between">
+        <div className="rounded-md border border-destructive/30 p-4 flex items-center justify-between">
           <div>
             <p className="font-medium text-sm">Xóa khóa học</p>
             <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>

@@ -11,6 +11,7 @@ import { EditProfileForm } from "./edit-profile-form";
 import { EditPasswordForm } from "./edit-password-form";
 import { notFound } from "next/navigation";
 import { userFullName } from "@/lib/user-utils";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { token } = await requireAdmin();
@@ -39,14 +40,9 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         </Button>
       </div>
 
-      <div>
-        <h1 className="text-xl font-semibold">
-          {userFullName(user)}
-        </h1>
-        <p className="text-sm text-muted-foreground">{user.email}</p>
-      </div>
+      <PageHeader title={userFullName(user)} description={user.email} />
 
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Thông tin cá nhân</h2>
         <EditProfileForm
           userId={user.id}
@@ -57,7 +53,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         />
       </div>
 
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Tài khoản</h2>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
@@ -83,14 +79,14 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
         </div>
       </div>
 
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Đổi mật khẩu</h2>
         <EditPasswordForm userId={user.id} token={token} />
       </div>
 
-      <div className="rounded-lg border border-destructive/30 p-4 flex items-center justify-between">
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 flex items-center justify-between">
         <div>
-          <p className="font-medium text-sm">Xóa user</p>
+          <p className="font-medium text-sm">Xóa người dùng</p>
           <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
         </div>
         <DeleteUserButton userId={user.id} token={token} />

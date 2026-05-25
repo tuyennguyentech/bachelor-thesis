@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -65,15 +66,15 @@ function CreateOrgForm({ token, onClose }: CreateOrgFormProps) {
         <p className="text-xs text-muted-foreground">Chỉ dùng chữ thường, số và dấu gạch ngang</p>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="createdBy">Owner (User ID)</Label>
-        <Input id="createdBy" name="createdBy" required placeholder="uuid của user" />
+        <Label htmlFor="createdBy">Người sở hữu ban đầu</Label>
+        <Input id="createdBy" name="createdBy" required placeholder="UUID người dùng" />
       </div>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>
           Hủy
         </Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang tạo..." : "Tạo"}
+          {pending ? "Đang tạo…" : "Tạo"}
         </Button>
       </div>
     </form>
@@ -92,12 +93,15 @@ export function CreateOrgDialog({ token }: CreateOrgDialogProps) {
       <DialogTrigger asChild>
         <Button size="sm" className="gap-2">
           <PlusIcon className="size-4" />
-          Tạo organization
+          Tạo tổ chức
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Tạo organization mới</DialogTitle>
+          <DialogTitle>Tạo tổ chức mới</DialogTitle>
+          <DialogDescription>
+            Điền thông tin nhận diện và người sở hữu ban đầu cho tổ chức.
+          </DialogDescription>
         </DialogHeader>
         <CreateOrgForm token={token} onClose={() => setOpen(false)} />
       </DialogContent>

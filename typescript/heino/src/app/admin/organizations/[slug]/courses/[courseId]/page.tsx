@@ -4,7 +4,7 @@ import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, CourseModuleService } from "buf/gen/richter/v1/courses_pb";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { ChevronLeftIcon, BookOpenIcon } from "lucide-react";
+import { BookOpenIcon, ChevronLeftIcon, LayersIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { EditCourseForm } from "./edit-course-form";
@@ -12,6 +12,9 @@ import { CourseStatusSelect } from "./course-status-select";
 import { DeleteCourseButton } from "./delete-course-button";
 import { AddModuleDialog } from "./add-module-dialog";
 import { ModuleActions } from "./module-actions";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function CourseDetailPage({
   params,
@@ -46,16 +49,15 @@ export default async function CourseDetailPage({
   const { modules } = await moduleClient.listCourseModules({ courseId: course.id, limit: 500, offset: 0 });
 
   return (
-    <div className="mx-auto max-w-3xl flex flex-col gap-6">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/admin/organizations" className="hover:text-foreground">Organizations</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}`} className="hover:text-foreground">{org.name}</Link>
-        <span>/</span>
-        <Link href={`/admin/organizations/${slug}/courses`} className="hover:text-foreground">Khóa học</Link>
-        <span>/</span>
-        <span className="text-foreground truncate max-w-[200px]">{course.title}</span>
-      </div>
+    <div className="flex flex-col gap-6">
+      <Breadcrumbs
+        items={[
+          { label: "Tổ chức", href: "/admin/organizations" },
+          { label: org.name, href: `/admin/organizations/${slug}` },
+          { label: "Khóa học", href: `/admin/organizations/${slug}/courses` },
+          { label: course.title },
+        ]}
+      />
 
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
@@ -66,18 +68,14 @@ export default async function CourseDetailPage({
         </Button>
       </div>
 
-      <div className="flex items-start justify-between">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">{course.title}</h1>
-          {course.description && (
-            <p className="text-sm text-muted-foreground">{course.description}</p>
-          )}
-        </div>
-        {courseStatusBadge(course.status)}
-      </div>
+      <PageHeader
+        title={course.title}
+        description={course.description || "Quản lý thông tin, trạng thái và cấu trúc chương của khóa học."}
+        actions={courseStatusBadge(course.status)}
+      />
 
       {/* Thông tin chung */}
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Thông tin chung</h2>
         <EditCourseForm
           key={`${course.title}|${course.description}`}
@@ -90,7 +88,7 @@ export default async function CourseDetailPage({
       </div>
 
       {/* Trạng thái */}
-      <div className="rounded-lg border p-4 flex items-center justify-between gap-4">
+      <div className="rounded-md border p-4 flex items-center justify-between gap-4">
         <div>
           <h2 className="font-medium">Trạng thái</h2>
           <p className="text-sm text-muted-foreground">
@@ -104,25 +102,27 @@ export default async function CourseDetailPage({
       </div>
 
       {/* Chương học */}
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BookOpenIcon className="size-4 text-muted-foreground" />
+            <LayersIcon className="size-4 text-muted-foreground" />
             <h2 className="font-medium">Nội dung chương ({modules.length})</h2>
           </div>
           <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modules.length} token={token} />
         </div>
 
         {modules.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            Chưa có chương nào. Thêm chương đầu tiên để bắt đầu.
-          </p>
+          <EmptyState
+            icon={<BookOpenIcon className="size-5" />}
+            title="Chưa có chương nào"
+            description="Thêm chương đầu tiên để bắt đầu sắp xếp các bài học trong khóa học."
+          />
         ) : (
           <div className="flex flex-col gap-2">
             {modules.map((m, i) => (
               <div
                 key={m.id}
-                className="flex items-center justify-between rounded-md border px-4 py-3"
+                className="flex items-center justify-between rounded-md border px-4 py-3 transition-colors hover:bg-muted/30"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-muted-foreground font-mono w-6">{i + 1}.</span>
@@ -148,7 +148,7 @@ export default async function CourseDetailPage({
       </div>
 
       {/* Danger zone */}
-      <div className="rounded-lg border border-destructive/30 p-4 flex items-center justify-between">
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 flex items-center justify-between">
         <div>
           <p className="font-medium text-sm">Xóa khóa học</p>
           <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>

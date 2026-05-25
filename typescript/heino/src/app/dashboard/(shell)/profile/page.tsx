@@ -26,10 +26,15 @@ export default async function ProfilePage() {
   if (!user) notFound();
 
   return (
-    <div className="mx-auto max-w-2xl flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Hồ sơ cá nhân</h1>
+    <div className="mx-auto max-w-3xl flex flex-col gap-6">
+      <div>
+        <h1 className="text-xl font-semibold">Hồ sơ cá nhân</h1>
+        <p className="text-sm text-muted-foreground">
+          Cập nhật thông tin tài khoản và bảo mật đăng nhập.
+        </p>
+      </div>
 
-      <div className="flex items-center gap-4 rounded-lg border p-4">
+      <div className="flex items-center gap-4 rounded-md border bg-card/40 p-4">
         <Avatar className="size-14">
           <AvatarFallback className="text-lg">{initials(user.firstName, user.lastName)}</AvatarFallback>
         </Avatar>
@@ -43,7 +48,7 @@ export default async function ProfilePage() {
         </div>
       </div>
 
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Thông tin cá nhân</h2>
         <EditProfileForm
           key={`${user.firstName}|${user.middleName ?? ""}|${user.lastName}`}
@@ -55,7 +60,7 @@ export default async function ProfilePage() {
         />
       </div>
 
-      <div className="rounded-lg border p-4 flex flex-col gap-4">
+      <div className="rounded-md border p-4 flex flex-col gap-4">
         <h2 className="font-medium">Đổi mật khẩu</h2>
         <EditPasswordForm userId={claims.sub} token={token} />
       </div>

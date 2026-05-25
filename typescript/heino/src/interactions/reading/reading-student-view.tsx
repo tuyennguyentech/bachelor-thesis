@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Loader2Icon } from "lucide-react";
+import { ArrowRightIcon, Loader2Icon, MessageSquareIcon, PlayIcon, TriangleAlertIcon } from "lucide-react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { FeedbackMode, InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
@@ -139,7 +139,7 @@ export function ReadingStudentView({
           </p>
           {gradeState.feedback && (
             <div className="rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 flex gap-2">
-              <span className="shrink-0 text-sm">💬</span>
+              <MessageSquareIcon className="mt-0.5 size-3.5 shrink-0 text-blue-700 dark:text-blue-300" />
               <p data-testid="reading-grade-feedback" className="text-xs text-blue-700 dark:text-blue-300 whitespace-pre-line">{gradeState.feedback}</p>
             </div>
           )}
@@ -152,13 +152,26 @@ export function ReadingStudentView({
         </div>
       )}
       {wantsInlineGrade && gradeState.phase === "error" && (
-        <p data-testid="reading-grade-error" className="text-xs text-destructive">⚠ {gradeState.message}</p>
+        <p data-testid="reading-grade-error" className="flex items-center gap-1.5 text-xs text-destructive">
+          <TriangleAlertIcon className="size-3.5" />
+          {gradeState.message}
+        </p>
       )}
 
       {/* Continue button */}
       {canContinue && (
         <Button size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
-          {hasNextInCheckpoint ? "Câu tiếp theo →" : "▶ Tiếp tục xem"}
+          {hasNextInCheckpoint ? (
+            <>
+              Câu tiếp theo
+              <ArrowRightIcon className="size-4" />
+            </>
+          ) : (
+            <>
+              <PlayIcon className="size-4" />
+              Tiếp tục xem
+            </>
+          )}
         </Button>
       )}
     </div>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -135,7 +136,7 @@ function CreateUserForm({ token, onClose }: CreateUserFormProps) {
           Hủy
         </Button>
         <Button type="submit" disabled={pending}>
-          {pending ? "Đang tạo..." : "Tạo"}
+          {pending ? "Đang tạo…" : "Tạo"}
         </Button>
       </div>
     </form>
@@ -154,12 +155,15 @@ export function CreateUserDialog({ token }: CreateUserDialogProps) {
       <DialogTrigger asChild>
         <Button size="sm" className="gap-2">
           <PlusIcon className="size-4" />
-          Tạo user
+          Tạo người dùng
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Tạo user mới</DialogTitle>
+          <DialogTitle>Tạo người dùng mới</DialogTitle>
+          <DialogDescription>
+            Tạo tài khoản và gán vai trò truy cập hệ thống.
+          </DialogDescription>
         </DialogHeader>
         <CreateUserForm token={token} onClose={() => setOpen(false)} />
       </DialogContent>

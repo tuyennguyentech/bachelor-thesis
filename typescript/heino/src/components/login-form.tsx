@@ -62,7 +62,7 @@ export function LoginForm({ className, next, ...props }: LoginFormProps) {
         </Field>
 
         <Button type="submit" disabled={pending} className="w-full">
-          {pending ? "Đang đăng nhập..." : "Đăng nhập"}
+          {pending ? "Đang đăng nhập…" : "Đăng nhập"}
         </Button>
 
         <p className="text-center text-sm text-muted-foreground">

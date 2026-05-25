@@ -55,7 +55,7 @@ export function VideoUpload({ lessonId, hasVideo, token }: Props) {
       const res = await storageClient.getUploadUrl({ key, contentType: file.type || "video/mp4", expiresInSeconds: 3600 });
       uploadUrl = res.uploadUrl;
     } catch {
-      setError("Không lấy được URL upload. Kiểm tra kết nối storage.");
+      setError("Không lấy được đường dẫn tải lên. Kiểm tra kết nối lưu trữ.");
       setProgress(null);
       return;
     }
@@ -70,11 +70,11 @@ export function VideoUpload({ lessonId, hasVideo, token }: Props) {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Upload thất bại (HTTP ${xhr.status})`));
+          reject(new Error(`Tải video thất bại (HTTP ${xhr.status})`));
         }
       });
       xhr.addEventListener("error", () => reject(new Error("Lỗi mạng khi tải lên")));
-      xhr.addEventListener("timeout", () => reject(new Error("Upload quá thời gian. Thử lại sau.")));
+      xhr.addEventListener("timeout", () => reject(new Error("Tải video quá thời gian. Thử lại sau.")));
       xhr.timeout = 600_000;
       xhr.open("PUT", uploadUrl);
       xhr.setRequestHeader("Content-Type", file.type || "video/mp4");

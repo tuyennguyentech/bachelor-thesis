@@ -17,15 +17,15 @@ export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingC
           onChange={(e) => onChange({ ...config, mode: e.target.value as "pronunciation" | "open_answer" })}
           className="text-sm rounded border border-input bg-background px-2 py-1.5"
         >
-          <option value="pronunciation">🗣 Đọc to (Pronunciation)</option>
-          <option value="open_answer">💬 Trả lời câu hỏi (Open Answer)</option>
+          <option value="pronunciation">Đọc to</option>
+          <option value="open_answer">Trả lời câu hỏi</option>
         </select>
       </div>
 
       {/* Passage */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <label className="text-xs text-muted-foreground">Đoạn văn (Markdown)</label>
+          <label className="text-xs text-muted-foreground">Đoạn văn (hỗ trợ Markdown)</label>
           <button
             type="button"
             className="text-xs text-primary hover:underline"

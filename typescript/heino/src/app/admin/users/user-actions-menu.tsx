@@ -47,6 +47,7 @@ export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuPr
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8">
             <MoreHorizontalIcon className="size-4" />
+            <span className="sr-only">Mở menu thao tác người dùng</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -101,9 +102,9 @@ export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuPr
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Xóa user?</AlertDialogTitle>
+            <AlertDialogTitle>Xóa người dùng?</AlertDialogTitle>
             <AlertDialogDescription>
-              Hành động này không thể hoàn tác. User sẽ bị xóa vĩnh viễn.
+              Hành động này không thể hoàn tác. Người dùng sẽ bị xóa vĩnh viễn.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

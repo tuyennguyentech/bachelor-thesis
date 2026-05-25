@@ -13,7 +13,10 @@ import { CreateUserDialog } from "./create-user-dialog";
 import { UserActionsMenu } from "./user-actions-menu";
 import { SearchInput } from "@/components/search-input";
 import { Pagination } from "@/components/pagination";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { roleBadge, userStatusBadge, userFullName } from "@/lib/user-utils";
+import { UsersIcon } from "lucide-react";
 
 const LIMIT = 20;
 
@@ -36,13 +39,16 @@ export default async function UsersPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Người dùng</h1>
-        <div className="flex items-center gap-2">
-          <SearchInput placeholder="ID / email..." />
+      <PageHeader
+        title="Người dùng"
+        description="Quản lý tài khoản, vai trò và trạng thái truy cập hệ thống."
+        actions={
+          <>
+          <SearchInput placeholder="ID hoặc email…" />
           <CreateUserDialog token={token} />
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div className="rounded-md border">
         <Table>
@@ -59,8 +65,16 @@ export default async function UsersPage({
           <TableBody>
             {users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                  Không có user nào
+                <TableCell colSpan={6} className="p-0">
+                  <EmptyState
+                    icon={<UsersIcon className="size-5" />}
+                    title={query ? "Không tìm thấy người dùng phù hợp" : "Chưa có người dùng nào"}
+                    description={
+                      query
+                        ? "Thử tìm bằng ID hoặc email khác."
+                        : "Tạo tài khoản đầu tiên để phân quyền quản trị hoặc tham gia tổ chức."
+                    }
+                  />
                 </TableCell>
               </TableRow>
             ) : (

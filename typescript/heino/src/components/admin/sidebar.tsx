@@ -17,7 +17,7 @@ export function AdminSidebar() {
     <aside className="flex h-full w-56 flex-col border-r bg-card">
       <div className="flex h-14 items-center gap-2 border-b px-4">
         <LayoutDashboardIcon className="size-5 text-primary" />
-        <span className="font-semibold">Dyadia Admin</span>
+        <span className="font-semibold">Quản trị Dyadia</span>
       </div>
       <nav className="flex flex-col gap-1 p-2">
         {navItems.map(({ href, label, icon: Icon }) => {

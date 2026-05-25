@@ -54,7 +54,7 @@ const KIND_META: Partial<Record<InteractionKind, {
     badgeClass: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300",
   },
   [InteractionKind.LISTENING]: {
-    description: "Nghe audio rồi trả lời",
+    description: "Nghe tệp rồi trả lời",
     icon: HeadphonesIcon,
     shellClass: "border-l-amber-400",
     badgeClass: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
@@ -80,7 +80,7 @@ export function InteractionCheckpoint({
     renderer = getRenderer(interaction.kind);
   } catch {
     return (
-      <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+      <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
         Loại câu hỏi chưa được hỗ trợ.
       </div>
     );
@@ -90,7 +90,7 @@ export function InteractionCheckpoint({
 
   if (!config) {
     return (
-      <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+      <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
         Loại câu hỏi chưa được hỗ trợ.
       </div>
     );
@@ -103,7 +103,7 @@ export function InteractionCheckpoint({
     <div
       data-testid="quiz-checkpoint"
       className={cn(
-        "rounded-lg border border-l-4 bg-muted/40 p-4 flex flex-col gap-4",
+        "rounded-md border border-l-4 bg-muted/40 p-4 flex flex-col gap-4",
         kindMeta?.shellClass ?? "border-l-border",
       )}
     >

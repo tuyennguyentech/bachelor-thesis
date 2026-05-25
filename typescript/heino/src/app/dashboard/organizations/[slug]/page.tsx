@@ -3,11 +3,39 @@ import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { BookOpenIcon, ChevronLeftIcon, UsersIcon } from "lucide-react";
+import {
+  CourseService,
+  CourseStatus,
+  LessonService,
+  type Course,
+  type Lesson,
+} from "buf/gen/richter/v1/courses_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { roleName, memberStatusBadge, orgStatusBadge } from "@/lib/org-utils";
+import {
+  ArrowRightIcon,
+  BookOpenIcon,
+  CalendarIcon,
+  GraduationCapIcon,
+  PlusIcon,
+} from "lucide-react";
+import { courseStatusBadge } from "@/lib/course-utils";
+
+const COURSE_LIMIT = 8;
+const LESSONS_PER_COURSE = 5;
+const RECENT_LESSON_LIMIT = 5;
+
+interface LessonItem {
+  lesson: Lesson;
+  course: Course;
+}
+
+function timestampMs(value?: { seconds: bigint | number | string }) {
+  return value ? Number(value.seconds) * 1000 : 0;
+}
+
+function lessonHref(slug: string, item: LessonItem) {
+  return `/dashboard/organizations/${slug}/courses/${item.course.id}/lessons/${item.lesson.id}`;
+}
 
 export default async function OrgDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -24,84 +52,147 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
   }
   if (!org) notFound();
 
-  const { member } = await requireOrgMember(org.id);
+  await requireOrgMember(org.id);
+
+  const courseClient = createRichterClient(CourseService, token);
+  const lessonClient = createRichterClient(LessonService, token);
+
+  const { courses } = await courseClient
+    .listCourses({ organizationId: org.id, limit: COURSE_LIMIT, offset: 0 })
+    .catch(() => ({ courses: [] }));
+
+  const lessonResults = await Promise.allSettled(
+    courses.map((course) =>
+      lessonClient
+        .listLessonsByCourse({ courseId: course.id, limit: LESSONS_PER_COURSE, offset: 0 })
+        .then((r) => (r.lessons ?? []).map((lesson) => ({ lesson, course }))),
+    ),
+  );
+
+  const lessonItems: LessonItem[] = lessonResults.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
+
+  const recentLessons = [...lessonItems]
+    .sort((a, b) => {
+      const aTime = timestampMs(a.lesson.updatedAt) || timestampMs(a.lesson.createdAt);
+      const bTime = timestampMs(b.lesson.updatedAt) || timestampMs(b.lesson.createdAt);
+      return bTime - aTime;
+    })
+    .slice(0, RECENT_LESSON_LIMIT);
+
+  const publishedCourses = courses.filter((course) => course.status === CourseStatus.PUBLISHED);
+  const draftCourses = courses.filter((course) => course.status === CourseStatus.DRAFT);
 
   return (
-    <div className="mx-auto max-w-2xl flex flex-col gap-6">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" asChild className="gap-1">
-          <Link href="/dashboard/organizations">
-            <ChevronLeftIcon className="size-4" />
-            Tổ chức của tôi
-          </Link>
-        </Button>
-      </div>
-
-      <div className="flex items-start justify-between">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">{org.name}</h1>
-          <p className="text-sm text-muted-foreground">/{org.slug}</p>
-        </div>
-        {orgStatusBadge(org.status)}
-      </div>
-
-      <div className="rounded-lg border p-4 flex flex-col gap-3">
-        <h2 className="font-medium">Thông tin chung</h2>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">Slug</p>
-            <p className="text-sm font-mono">/{org.slug}</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">Ngày tạo</p>
-            <p className="text-sm">
-              {org.createdAt
-                ? new Date(Number(org.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                : "—"}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-lg border p-4 flex items-center justify-between">
-        <div className="flex flex-col gap-1">
-          <h2 className="font-medium">Khóa học</h2>
-          <p className="text-sm text-muted-foreground">Xem các khóa học của tổ chức</p>
-        </div>
-        <Button variant="outline" size="sm" asChild className="gap-2">
-          <Link href={`/dashboard/organizations/${slug}/courses`}>
-            <BookOpenIcon className="size-4" />
-            Xem khóa học
-          </Link>
-        </Button>
-      </div>
-
-      <div className="rounded-lg border p-4 flex items-center justify-between">
-        <div className="flex flex-col gap-1">
-          <h2 className="font-medium">Thành viên</h2>
-          <p className="text-sm text-muted-foreground">Xem và quản lý thành viên tổ chức</p>
-        </div>
-        <Button variant="outline" size="sm" asChild className="gap-2">
-          <Link href={`/dashboard/organizations/${slug}/members`}>
-            <UsersIcon className="size-4" />
-            Xem thành viên
-          </Link>
-        </Button>
-      </div>
-
-      <div className="rounded-lg border p-4 flex flex-col gap-3">
-        <h2 className="font-medium">Vai trò của bạn</h2>
-        <div className="flex items-center gap-3">
-          <Badge variant="secondary">{roleName(member.role)}</Badge>
-          {memberStatusBadge(member.status)}
-        </div>
-        {member.createdAt && (
+          <h1 className="text-xl font-semibold">Tổng quan tổ chức</h1>
           <p className="text-sm text-muted-foreground">
-            Tham gia:{" "}
-            {new Date(Number(member.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")}
+            Theo dõi nội dung, khóa học và bài học mới cập nhật trong tổ chức này.
           </p>
-        )}
+        </div>
       </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-md border p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <GraduationCapIcon className="size-4" />
+            Khóa học
+          </div>
+          <p className="mt-2 text-2xl font-semibold">{courses.length}</p>
+        </div>
+        <div className="rounded-md border p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <BookOpenIcon className="size-4" />
+            Bài học
+          </div>
+          <p className="mt-2 text-2xl font-semibold">{lessonItems.length}</p>
+        </div>
+        <div className="rounded-md border p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CalendarIcon className="size-4" />
+            Đã xuất bản
+          </div>
+          <p className="mt-2 text-2xl font-semibold">{publishedCourses.length}</p>
+        </div>
+        <div className="rounded-md border p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <PlusIcon className="size-4" />
+            Bản nháp
+          </div>
+          <p className="mt-2 text-2xl font-semibold">{draftCourses.length}</p>
+        </div>
+      </div>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">Khóa học trong tổ chức</h2>
+            <Link
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              href={`/dashboard/organizations/${slug}/courses`}
+            >
+              Xem danh sách
+              <ArrowRightIcon className="size-3.5" />
+            </Link>
+          </div>
+
+          <div className="rounded-md border">
+            {courses.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                Tổ chức này chưa có khóa học nào.
+              </p>
+            ) : (
+              <div className="divide-y">
+                {courses.map((course) => (
+                  <Link
+                    key={course.id}
+                    href={`/dashboard/organizations/${slug}/courses/${course.id}`}
+                    className="grid gap-3 px-4 py-3 transition-colors hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_auto]"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{course.title}</p>
+                      {course.description && (
+                        <p className="truncate text-xs text-muted-foreground">{course.description}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 md:justify-end">
+                      {courseStatusBadge(course.status)}
+                      <ArrowRightIcon className="size-3.5 text-muted-foreground" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <aside className="flex flex-col gap-3">
+          <h2 className="text-base font-semibold">Bài học mới cập nhật</h2>
+          <div className="rounded-md border">
+            {recentLessons.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                Chưa có bài học để mở nhanh.
+              </p>
+            ) : (
+              <div className="divide-y">
+                {recentLessons.map((item) => (
+                  <Link
+                    key={`${item.course.id}:${item.lesson.id}`}
+                    href={lessonHref(slug, item)}
+                    className="block px-4 py-3 transition-colors hover:bg-muted/50"
+                  >
+                    <p className="truncate text-sm font-medium">{item.lesson.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{item.course.title}</p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      </section>
     </div>
   );
 }
