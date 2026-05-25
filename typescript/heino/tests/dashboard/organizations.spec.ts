@@ -36,24 +36,22 @@ test.describe("Dashboard organizations list", () => {
 });
 
 test.describe("Dashboard org detail", () => {
-  test("shows org name and slug", async ({ userPage: page }) => {
+  test("shows org name without exposing the slug in the sidebar card", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    // Slug appears in two places on the page — first() avoids strict mode
-    await expect(page.getByText(`/${SEED_MEMBER_ORG}`).first()).toBeVisible();
+    await expect(page.getByText(`/${SEED_MEMBER_ORG}`)).not.toBeVisible();
   });
 
   test("shows member role info", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
-    await expect(page.getByText("Vai trò của bạn")).toBeVisible();
     // alice is admin in hust-cs → roleName returns "Quản trị viên"
     await expect(page.getByText("Quản trị viên")).toBeVisible();
   });
 
-  test("back button navigates to org list", async ({ userPage: page }) => {
+  test("back button navigates to dashboard home", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
-    await page.getByRole("link", { name: "Tổ chức của tôi" }).click();
-    await expect(page).toHaveURL(/\/dashboard\/organizations$/);
+    await page.getByRole("link", { name: "Trang chính" }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
   });
 
   test("non-member cannot access org detail (redirected or 404)", async ({ page }) => {
@@ -62,14 +60,14 @@ test.describe("Dashboard org detail", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("shows Xem khóa học link", async ({ userPage: page }) => {
+  test("shows Khóa học link in organization sidebar", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
-    await expect(page.getByRole("link", { name: "Xem khóa học" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Khóa học", exact: true })).toBeVisible();
   });
 
-  test("Xem khóa học link navigates to courses page", async ({ userPage: page }) => {
+  test("Khóa học link navigates to courses page", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
-    await page.getByRole("link", { name: "Xem khóa học" }).click();
+    await page.getByRole("link", { name: "Khóa học", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`));
   });
 });
@@ -94,7 +92,7 @@ test.describe("Dashboard org courses", () => {
 
   test("back button navigates to org detail", async ({ userPage: page }) => {
     await page.goto(COURSES_URL);
-    await page.getByRole("link").filter({ hasText: "HUST Computer Science" }).click();
+    await page.getByRole("link", { name: "Tổng quan", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}$`));
   });
 

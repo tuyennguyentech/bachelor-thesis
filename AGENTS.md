@@ -25,7 +25,7 @@ Default container is `debug` (alpine/curl). Replace `<service>` with `richter`, 
 | Heino dev | `pnpm --filter heino dev` |
 | Heino build | `pnpm --filter heino build` |
 | Heino lint | `pnpm --filter heino lint` |
-| Heino E2E | `pnpm --filter heino exec playwright test` |
+| Heino E2E | `./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino test:e2e` |
 
 ## Verification after changes
 
@@ -200,7 +200,12 @@ const hasNext = res.users.length === LIMIT  // no total field
 `limit`/`offset` are `number` (int32), not bigint. Proto must validate `limit: gte:1, lte:100`, `offset: gte:0`.
 
 ### Playwright E2E
-- `baseURL` uses Caddy `http://localhost` (port 80), not `localhost:3000`
+- Run E2E from the `heino` container namespace:
+  `./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino test:e2e`
+- Test architecture uses Caddy by container DNS: `BASE_URL=http://caddy` in `typescript/heino/.env.test`.
+  The browser context runs inside the `heino` container namespace and reaches the app through Caddy service DNS.
+- Do NOT switch E2E to `localhost:3000` unless the test architecture is changed to provide equivalent Next rewrites/proxies for `/api/richter` and `/api/storage`.
+- Caddy routes test traffic: `/api/richter/*` -> `richter:8080`, `/api/storage/*` -> `storage:9000`, all other paths -> `heino:3000`.
 - Radix `DropdownMenuItem` with `asChild`+`Link` is flaky in Firefox — read `href` attribute instead of click-navigate
 - After `revalidatePath`, wait for updated heading in-place — don't `page.goto` back
 - Use `?q=` search param to find seed data (page 1 may not contain oldest records)

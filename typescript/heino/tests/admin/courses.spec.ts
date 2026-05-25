@@ -84,9 +84,9 @@ test.describe("Course detail page", () => {
 
   test("shows course info sections", async ({ adminPage: page }) => {
     await page.goto(courseUrl);
-    await expect(page.getByText("Thông tin chung")).toBeVisible();
-    await expect(page.getByText("Trạng thái")).toBeVisible();
-    await expect(page.getByText("Nội dung chương")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Thông tin chung" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trạng thái" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Nội dung chương/ })).toBeVisible();
     await expect(page.getByText("Xóa khóa học")).toBeVisible();
   });
 

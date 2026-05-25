@@ -3,15 +3,30 @@ import type { Page } from "@playwright/test";
 
 const SEED_ORG_SLUG = process.env.TEST_ORG_SLUG ?? "dyadia-demo";
 const MEMBERS_URL = `/admin/organizations/${SEED_ORG_SLUG}/members`;
+const CREATE_USER_BUTTON = "Tạo người dùng";
 
 function uniqueEmail() {
   return `e2e.member.${Date.now()}@test.local`;
 }
 
+async function gotoMembers(page: Page) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(MEMBERS_URL, { waitUntil: "domcontentloaded" });
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NS_BINDING_ABORTED") && attempt < 2) {
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // Create a user and return their UUID by reading the detail-link href (avoids click-navigation flakiness).
 async function createUserAndGetId(page: Page, email: string): Promise<string> {
   await page.goto("/admin/users");
-  await page.getByRole("button", { name: "Tạo user" }).click();
+  await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Họ").fill("E2E");
   await dialog.getByLabel("Tên").fill("Member");
@@ -32,8 +47,8 @@ async function createUserAndGetId(page: Page, email: string): Promise<string> {
 
 test.describe("Members list page", () => {
   test("renders heading and table columns", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Members");
+    await gotoMembers(page);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Thành viên");
     await expect(page.getByRole("button", { name: "Thêm thành viên" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Người dùng" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
@@ -42,21 +57,21 @@ test.describe("Members list page", () => {
   });
 
   test("shows seeded members", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
+    await gotoMembers(page);
     // Table should have at least one data row (seeded members exist)
     const rows = page.getByRole("row");
     expect(await rows.count()).toBeGreaterThan(1); // more than just the header
   });
 
   test("opens add-member dialog", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
+    await gotoMembers(page);
     await page.getByRole("button", { name: "Thêm thành viên" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Thêm thành viên" })).toBeVisible();
   });
 
   test("dialog has Email field and role select", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
+    await gotoMembers(page);
     await page.getByRole("button", { name: "Thêm thành viên" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByLabel("Email")).toBeVisible();
@@ -64,14 +79,14 @@ test.describe("Members list page", () => {
   });
 
   test("closes dialog on Hủy", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
+    await gotoMembers(page);
     await page.getByRole("button", { name: "Thêm thành viên" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Hủy" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
   });
 
   test("empty email submit keeps dialog open", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
+    await gotoMembers(page);
     await page.getByRole("button", { name: "Thêm thành viên" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
@@ -79,42 +94,42 @@ test.describe("Members list page", () => {
 });
 
 test.describe("Member management", () => {
-  let memberId: string;
   let memberEmail: string;
 
   test.beforeEach(async ({ adminPage: page }) => {
     memberEmail = uniqueEmail();
-    memberId = await createUserAndGetId(page, memberEmail);
+    await createUserAndGetId(page, memberEmail);
 
     // Add the user as a member of the seed org
-    await page.goto(MEMBERS_URL);
+    await gotoMembers(page);
     await page.getByRole("button", { name: "Thêm thành viên" }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Email").fill(memberEmail);
     // default role is Học viên
     await dialog.getByRole("button", { name: "Thêm" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: memberEmail })).toBeVisible();
   });
 
   test("added member appears in the table", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
-    const memberRow = page.getByRole("row").filter({ hasText: memberId });
+    await gotoMembers(page);
+    const memberRow = page.getByRole("row").filter({ hasText: memberEmail });
     await expect(memberRow).toBeVisible();
     await expect(memberRow.getByText("Học viên")).toBeVisible();
   });
 
   test("updates member role", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
-    const memberRow = page.getByRole("row").filter({ hasText: memberId });
+    await gotoMembers(page);
+    const memberRow = page.getByRole("row").filter({ hasText: memberEmail });
     await memberRow.getByRole("button").click();
-    await page.getByRole("menuitem", { name: "Đổi role" }).hover();
+    await page.getByRole("menuitem", { name: "Đổi vai trò" }).hover();
     await page.getByRole("menuitem", { name: "Giảng viên" }).click();
     await expect(memberRow.getByText("Giảng viên")).toBeVisible();
   });
 
   test("updates member status", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
-    const memberRow = page.getByRole("row").filter({ hasText: memberId });
+    await gotoMembers(page);
+    const memberRow = page.getByRole("row").filter({ hasText: memberEmail });
     await memberRow.getByRole("button").click();
     await page.getByRole("menuitem", { name: "Đổi trạng thái" }).hover();
     await page.getByRole("menuitem", { name: "Tạm khóa" }).click();
@@ -122,15 +137,15 @@ test.describe("Member management", () => {
   });
 
   test("removes member via confirm dialog", async ({ adminPage: page }) => {
-    await page.goto(MEMBERS_URL);
-    const memberRow = page.getByRole("row").filter({ hasText: memberId });
+    await gotoMembers(page);
+    const memberRow = page.getByRole("row").filter({ hasText: memberEmail });
     await memberRow.getByRole("button").click();
-    await page.getByRole("menuitem", { name: "Xóa khỏi org" }).click();
+    await page.getByRole("menuitem", { name: "Xóa khỏi tổ chức" }).click();
 
     await expect(page.getByRole("alertdialog")).toBeVisible();
     await expect(page.getByRole("alertdialog").getByText("Xóa thành viên?")).toBeVisible();
     await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
 
-    await expect(page.getByRole("row").filter({ hasText: memberId })).not.toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: memberEmail })).not.toBeVisible();
   });
 });

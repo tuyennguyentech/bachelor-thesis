@@ -241,52 +241,11 @@ test.describe("AI analysis streaming progress", () => {
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: "Trích xuất transcript" }).click();
-    const btn = page.getByRole("button", { name: "Đang trích xuất…" });
+    const btn = page.getByRole("button", { name: "Đang trích xuất..." });
     await expect(btn).toBeVisible({ timeout: 5_000 });
     await expect(btn).toBeDisabled();
   });
 
-  test("3-stage manual flow: extract → chunk → generate → questions visible", async ({ teacherPage: page }) => {
-    test.setTimeout(600_000);
-    const url = await createLesson(
-      page, uid("Khóa học Done"), uid("Chương Done"), uid("Bài Done"),
-    );
-    await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
-
-    // Step 1: Extract transcript (extract-only, no auto-run)
-    await page.getByRole("button", { name: "Trích xuất transcript" }).click();
-    await expect(page.getByRole("button", { name: "Đang trích xuất…" })).toBeVisible({ timeout: 5_000 });
-    // Wait for extraction to finish — button returns to "Trích xuất lại transcript" on success
-    await expect(
-      page.getByRole("button", { name: "Trích xuất lại transcript" }).or(page.locator('[data-testid="extract-error"]')),
-    ).toBeVisible({ timeout: 360_000 });
-    await expect(page.locator('[data-testid="extract-error"]')).not.toBeVisible();
-
-    // Step 2: Chunk transcript
-    await page.getByRole("button", { name: "Phân đoạn video" }).click();
-    await page.getByRole("button", { name: "Phân đoạn lại" }).click();
-    await expect(page.getByRole("button", { name: "Đang phân đoạn…" })).toBeVisible({ timeout: 10_000 });
-    await expect(
-      page.getByRole("button", { name: "Phân đoạn lại" }).or(page.locator('[data-testid="chunk-error"]')),
-    ).toBeVisible({ timeout: 120_000 });
-    await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
-
-    // Step 3: Generate questions
-    await page.getByRole("button", { name: "Bài tập" }).click();
-    await page.getByTestId("generate-all-btn").click();
-    // Inline generate form appears — click "Tạo tất cả" to proceed
-    await page.getByRole("button", { name: "Tạo tất cả" }).click();
-    await expect(page.getByRole("button", { name: "Đang tạo…" })).toBeVisible({ timeout: 5_000 });
-    await expect(
-      page.locator('[data-testid="gen-done"], [data-testid="gen-error"]'),
-    ).toBeVisible({ timeout: 180_000 });
-    await expect(page.locator('[data-testid="gen-error"]')).not.toBeVisible();
-
-    // Chunk cards with interactions visible in Bài tập tab
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 10_000 });
-  });
 });
 
 // ── 5. Student quiz form ───────────────────────────────────────────────────
@@ -534,7 +493,7 @@ test.describe("Student progress (teacher view)", () => {
     await expect(page.getByText("Tiến độ học viên")).toBeVisible();
 
     // bob and dave both have seeded attempts for Big-O lesson
-    const attemptsSection = page.locator("div.rounded-lg.border").filter({ hasText: "Tiến độ học viên" }).first();
+    const attemptsSection = page.getByTestId("lesson-attempts");
     await expect(attemptsSection).toBeVisible();
     // Table should show at least one row (bob's attempt)
     await expect(attemptsSection.getByText(/bob@dyadia.local|dave@dyadia.local/).first()).toBeVisible();
@@ -543,7 +502,7 @@ test.describe("Student progress (teacher view)", () => {
   test("progress table shows score with color coding", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
-    const attemptsSection = page.locator("div.rounded-lg.border").filter({ hasText: "Tiến độ học viên" }).first();
+    const attemptsSection = page.getByTestId("lesson-attempts");
     // Score column should be visible
     await expect(attemptsSection.getByText(/\d+\/\d+/).first()).toBeVisible();
   });
@@ -598,7 +557,7 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
 
     // Step 1: Extract transcript
     await page.getByRole("button", { name: "Trích xuất transcript" }).click();
-    await expect(page.getByRole("button", { name: "Đang trích xuất…" })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole("button", { name: "Đang trích xuất..." })).toBeVisible({ timeout: 5_000 });
     await expect(
       page.getByRole("button", { name: "Trích xuất lại transcript" }).or(page.locator('[data-testid="extract-error"]')),
     ).toBeVisible({ timeout: 360_000 });
@@ -607,7 +566,7 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     // Step 2: Chunk transcript
     await page.getByRole("button", { name: "Phân đoạn video" }).click();
     await page.getByRole("button", { name: "Phân đoạn lại" }).click();
-    await expect(page.getByRole("button", { name: "Đang phân đoạn…" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "Đang phân đoạn..." })).toBeVisible({ timeout: 10_000 });
     await expect(
       page.getByRole("button", { name: "Phân đoạn lại" }).or(page.locator('[data-testid="chunk-error"]')),
     ).toBeVisible({ timeout: 120_000 });
@@ -618,7 +577,7 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await page.getByTestId("generate-all-btn").click();
     // Inline generate form appears — click "Tạo tất cả" to proceed
     await page.getByRole("button", { name: "Tạo tất cả" }).click();
-    await expect(page.getByRole("button", { name: "Đang tạo…" })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole("button", { name: "Đang tạo..." })).toBeVisible({ timeout: 5_000 });
     await expect(
       page.locator('[data-testid="gen-done"], [data-testid="gen-error"]'),
     ).toBeVisible({ timeout: 180_000 });

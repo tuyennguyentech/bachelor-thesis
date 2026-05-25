@@ -6,27 +6,26 @@ test.describe("Dashboard home", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Xin chào");
   });
 
-  test("shows quick-links to org list and profile", async ({ userPage: page }) => {
+  test("shows primary actions for organization and profile", async ({ userPage: page }) => {
     await page.goto("/dashboard");
-    await expect(page.getByRole("link", { name: "Tổ chức của tôi" })).toBeVisible();
-    // "Cập nhật thông tin" is unique to the profile card (sidebar shows "Hồ sơ")
-    await expect(page.getByText("Cập nhật thông tin")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Tạo tổ chức" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Hồ sơ" }).first()).toBeVisible();
   });
 
-  test("shows recent organizations section", async ({ userPage: page }) => {
+  test("shows recent access section", async ({ userPage: page }) => {
     await page.goto("/dashboard");
-    await expect(page.getByText("Tổ chức gần đây")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Truy cập gần đây" })).toBeVisible();
   });
 
-  test("org list quick-link navigates to /dashboard/organizations", async ({ userPage: page }) => {
+  test("org list action navigates to /dashboard/organizations", async ({ userPage: page }) => {
     await page.goto("/dashboard");
-    await page.getByRole("link", { name: "Tổ chức của tôi" }).click();
+    await page.getByRole("link", { name: "Tất cả tổ chức" }).click();
     await expect(page).toHaveURL(/\/dashboard\/organizations/);
   });
 
-  test("profile quick-link navigates to /dashboard/profile", async ({ userPage: page }) => {
+  test("profile action navigates to /dashboard/profile", async ({ userPage: page }) => {
     await page.goto("/dashboard");
-    await page.getByText("Cập nhật thông tin").click();
+    await page.getByRole("link", { name: "Hồ sơ" }).first().click();
     await expect(page).toHaveURL(/\/dashboard\/profile/);
   });
 

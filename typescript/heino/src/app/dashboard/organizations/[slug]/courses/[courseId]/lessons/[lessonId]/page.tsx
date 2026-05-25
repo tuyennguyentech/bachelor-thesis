@@ -484,7 +484,7 @@ export default async function LessonDetailPage({
         ) : (
           /* Student progress tab content */
           attemptsData && (
-            <div className="rounded-md border p-4 flex flex-col gap-3">
+            <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <UsersIcon className="size-4 text-muted-foreground" />
                 <h2 className="font-medium text-sm">Tiến độ học viên</h2>

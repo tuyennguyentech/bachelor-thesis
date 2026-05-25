@@ -1,6 +1,7 @@
 import { test, expect } from "../fixtures";
 
 const USERS_URL = "/admin/users";
+const CREATE_USER_BUTTON = "Tạo người dùng";
 
 function uniqueEmail() {
   return `e2e.user.${Date.now()}@test.local`;
@@ -10,7 +11,7 @@ test.describe("Users list page", () => {
   test("renders heading, create button, and table columns", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
     await expect(page.getByRole("heading", { name: "Người dùng" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Tạo user" })).toBeVisible();
+    await expect(page.getByRole("button", { name: CREATE_USER_BUTTON })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Email" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Tên" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
@@ -24,14 +25,14 @@ test.describe("Users list page", () => {
 
   test("opens create-user dialog", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Tạo user mới" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tạo người dùng mới" })).toBeVisible();
   });
 
   test("dialog has required form fields", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByLabel("Họ")).toBeVisible();
     await expect(dialog.getByLabel("Tên")).toBeVisible();
@@ -41,14 +42,14 @@ test.describe("Users list page", () => {
 
   test("closes dialog on Hủy", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Hủy" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
   });
 
   test("empty submit keeps dialog open (required fields)", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
   });
@@ -56,7 +57,7 @@ test.describe("Users list page", () => {
   test("creates a new user and shows them in the table", async ({ adminPage: page }) => {
     const email = uniqueEmail();
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Họ").fill("E2E");
     await dialog.getByLabel("Tên").fill("User");
@@ -70,16 +71,16 @@ test.describe("Users list page", () => {
 
   test("search filters users by email", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
-    await page.getByPlaceholder("ID / email...").fill("alice@dyadia.local");
+    await page.getByPlaceholder("ID hoặc email…").fill("alice@dyadia.local");
     await page.waitForURL(/q=alice/);
     await expect(page.getByRole("cell", { name: "alice@dyadia.local" })).toBeVisible();
   });
 
   test("search with no match shows empty state", async ({ adminPage: page }) => {
     await page.goto(USERS_URL);
-    await page.getByPlaceholder("ID / email...").fill("does-not-exist@nowhere.local");
+    await page.getByPlaceholder("ID hoặc email…").fill("does-not-exist@nowhere.local");
     await page.waitForURL(/q=does-not-exist/);
-    await expect(page.getByText("Không có user nào")).toBeVisible();
+    await expect(page.getByText("Không tìm thấy người dùng phù hợp")).toBeVisible();
   });
 });
 
@@ -91,7 +92,7 @@ test.describe("User detail page", () => {
     userEmail = uniqueEmail();
 
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Họ").fill("E2E");
     await dialog.getByLabel("Tên").fill("Detail");
@@ -122,7 +123,7 @@ test.describe("User detail page", () => {
     await expect(page.getByText("Thông tin cá nhân")).toBeVisible();
     await expect(page.getByText("Tài khoản")).toBeVisible();
     await expect(page.getByText("Đổi mật khẩu")).toBeVisible();
-    await expect(page.getByText("Xóa user")).toBeVisible();
+    await expect(page.getByText("Xóa người dùng")).toBeVisible();
   });
 
   test("edits first and last name", async ({ adminPage: page }) => {
@@ -182,7 +183,7 @@ test.describe("User detail page", () => {
     await page.goto(userUrl);
     await page.getByRole("button", { name: "Xóa" }).click();
     await expect(page.getByRole("alertdialog")).toBeVisible();
-    await expect(page.getByRole("alertdialog").getByText("Xóa user?")).toBeVisible();
+    await expect(page.getByRole("alertdialog").getByText("Xóa người dùng?")).toBeVisible();
     await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
     await page.waitForURL(/\/admin\/users$/);
     await expect(page).toHaveURL(/\/admin\/users$/);
@@ -194,7 +195,7 @@ test.describe("User status from list page", () => {
     // Create a user, then disable them from the list
     const email = uniqueEmail();
     await page.goto(USERS_URL);
-    await page.getByRole("button", { name: "Tạo user" }).click();
+    await page.getByRole("button", { name: CREATE_USER_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Họ").fill("E2E");
     await dialog.getByLabel("Tên").fill("Disable");

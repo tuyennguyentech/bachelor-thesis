@@ -24,8 +24,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Playwright Notes
 
-- E2E baseURL is Caddy `http://localhost` on port 80, not `localhost:3000`.
-- Run Playwright through `./scripts/setup/environment.dev/container-shell.sh heino -- pnpm --filter heino exec playwright test`.
+- E2E runs from the `heino` container namespace and uses Caddy service DNS: `BASE_URL=http://caddy` from `.env.test`.
+- Run Playwright through `./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino test:e2e`.
+- Do not use `localhost:3000` for the default E2E topology. Browser RPC/storage paths are relative (`/api/richter`, `/api/storage`) and are expected to be routed by Caddy to `richter:8080` and `storage:9000`.
 - Radix `DropdownMenuItem` with `asChild` + `Link` is flaky in Firefox; read the `href` attribute instead of relying on click navigation.
 - After server actions with `revalidatePath`, wait for the updated UI in-place; do not `page.goto` back just to refresh.
 - Use `?q=` search params to find seed records; page 1 may not contain older seeded data.

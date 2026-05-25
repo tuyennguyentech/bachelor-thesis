@@ -13,14 +13,14 @@ const ORG_SLUG = "hust-cs";
 const MEMBERS_URL = `/dashboard/organizations/${ORG_SLUG}/members`;
 
 test.describe("Dashboard members page visibility", () => {
-  test("shows Xem thành viên link on org detail page", async ({ userPage: page }) => {
+  test("shows Thành viên link on org sidebar", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${ORG_SLUG}`);
-    await expect(page.getByRole("link", { name: "Xem thành viên" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Thành viên" })).toBeVisible();
   });
 
   test("link navigates to members page", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${ORG_SLUG}`);
-    await page.getByRole("link", { name: "Xem thành viên" }).click();
+    await page.getByRole("link", { name: "Thành viên" }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${ORG_SLUG}/members`));
   });
 
@@ -79,7 +79,7 @@ test.describe("Dashboard member management lifecycle", () => {
     const quinnRow = page.getByRole("row").filter({ hasText: NEW_MEMBER_EMAIL });
     if (await quinnRow.isVisible()) {
       await quinnRow.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Xóa khỏi org" }).click();
+      await page.getByRole("menuitem", { name: "Xóa khỏi tổ chức" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
       await expect(quinnRow).not.toBeVisible();
     }
@@ -95,12 +95,12 @@ test.describe("Dashboard member management lifecycle", () => {
     // find carol (teacher) row and change her role to student
     const carolRow = page.getByRole("row").filter({ hasText: "carol@dyadia.local" });
     await carolRow.getByRole("button").click();
-    await page.getByRole("menuitem", { name: "Đổi role" }).hover();
+    await page.getByRole("menuitem", { name: "Đổi vai trò" }).hover();
     await page.getByRole("menuitem", { name: "Học viên" }).click();
     await expect(carolRow.getByText("Học viên")).toBeVisible();
     // restore back to teacher
     await carolRow.getByRole("button").click();
-    await page.getByRole("menuitem", { name: "Đổi role" }).hover();
+    await page.getByRole("menuitem", { name: "Đổi vai trò" }).hover();
     await page.getByRole("menuitem", { name: "Giảng viên" }).click();
     await expect(carolRow.getByText("Giảng viên")).toBeVisible();
   });

@@ -3,6 +3,8 @@ import type { Page } from "@playwright/test";
 
 const SEED_ORG_SLUG = process.env.TEST_ORG_SLUG ?? "dyadia-demo";
 const ORGS_URL = "/admin/organizations";
+const CREATE_ORG_BUTTON = "Tạo tổ chức";
+const OWNER_LABEL = "Người sở hữu ban đầu";
 
 function uniqueSlug() {
   return `e2e-${Date.now()}`;
@@ -28,7 +30,7 @@ test.describe("Org list page", () => {
   test("renders table with heading and create button", async ({ adminPage: page }) => {
     await page.goto(ORGS_URL);
     await expect(page.getByRole("heading", { name: "Tổ chức" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Tạo organization" })).toBeVisible();
+    await expect(page.getByRole("button", { name: CREATE_ORG_BUTTON })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Tên" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Slug" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Trạng thái" })).toBeVisible();
@@ -41,30 +43,30 @@ test.describe("Org list page", () => {
 
   test("opens create-org dialog", async ({ adminPage: page }) => {
     await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: "Tạo organization" }).click();
+    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Tạo organization mới" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tạo tổ chức mới" })).toBeVisible();
   });
 
   test("dialog has Tên, Slug, Owner fields", async ({ adminPage: page }) => {
     await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: "Tạo organization" }).click();
+    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByLabel("Tên")).toBeVisible();
     await expect(dialog.getByLabel("Slug")).toBeVisible();
-    await expect(dialog.getByLabel("Owner (User ID)")).toBeVisible();
+    await expect(dialog.getByLabel(OWNER_LABEL)).toBeVisible();
   });
 
   test("closes dialog on Hủy", async ({ adminPage: page }) => {
     await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: "Tạo organization" }).click();
+    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Hủy" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
   });
 
   test("empty submit keeps dialog open (required fields)", async ({ adminPage: page }) => {
     await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: "Tạo organization" }).click();
+    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
   });
@@ -75,11 +77,11 @@ test.describe("Org list page", () => {
     const name = uniqueName();
 
     await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: "Tạo organization" }).click();
+    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Tên").fill(name);
     await dialog.getByLabel("Slug").fill(slug);
-    await dialog.getByLabel("Owner (User ID)").fill(userId);
+    await dialog.getByLabel(OWNER_LABEL).fill(userId);
     await dialog.getByRole("button", { name: "Tạo" }).click();
 
     await expect(page.getByRole("dialog")).not.toBeVisible();
@@ -88,7 +90,7 @@ test.describe("Org list page", () => {
 
   test("search filters organizations by slug", async ({ adminPage: page }) => {
     await page.goto(ORGS_URL);
-    const searchInput = page.getByPlaceholder("ID / slug...");
+    const searchInput = page.getByPlaceholder("ID hoặc slug…");
     await searchInput.fill(SEED_ORG_SLUG);
     await page.waitForURL(new RegExp(`q=${SEED_ORG_SLUG}`));
     await expect(page.getByRole("cell", { name: SEED_ORG_SLUG, exact: true })).toBeVisible();
@@ -107,7 +109,7 @@ test.describe("Org detail page", () => {
     await page.goto(`/admin/organizations/${SEED_ORG_SLUG}`);
     await expect(page.getByText("Thông tin chung")).toBeVisible();
     await expect(page.getByText("Trạng thái")).toBeVisible();
-    await expect(page.getByText("Xóa organization")).toBeVisible();
+    await expect(page.getByText("Xóa tổ chức")).toBeVisible();
   });
 
   test("Thành viên link navigates to members page", async ({ adminPage: page }) => {
@@ -133,11 +135,11 @@ test.describe("Org detail CRUD", () => {
     const orgName = uniqueName();
 
     await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: "Tạo organization" }).click();
+    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Tên").fill(orgName);
     await dialog.getByLabel("Slug").fill(orgSlug);
-    await dialog.getByLabel("Owner (User ID)").fill(userId);
+    await dialog.getByLabel(OWNER_LABEL).fill(userId);
     await dialog.getByRole("button", { name: "Tạo" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
 
