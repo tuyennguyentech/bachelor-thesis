@@ -9,7 +9,7 @@
  * - Student sees previous quiz attempt result on seeded lesson (new UI: donut + Làm lại)
  * - Student can retake: trigger checkpoints via __triggerVideoCheckpoint, submit, see result
  * - Marker strip shows data-testid="checkpoint-marker-{id}" with data-state attributes
- * - Teacher sees "Thay video", video key, and AI section on lesson with video_key
+ * - Teacher sees "Thay video", technical details, and video authoring workflow on lesson with video_key
  * - Feedback modes: AFTER_SUBMIT (no reveal at checkpoint), AFTER_EACH (immediate reveal)
  */
 
@@ -39,6 +39,46 @@ async function triggerCheckpoint(page: Page, seconds: number) {
 // ── Lesson link navigation ─────────────────────────────────────────────────
 
 test.describe("Lesson row is a link to lesson detail", () => {
+  test("stale lesson URL shows recovery links", async ({ teacherPage: page }) => {
+    const lessonUrl = await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
+    const staleLessonUrl = lessonUrl.replace(
+      /\/lessons\/[^/?#]+/,
+      "/lessons/019e0000-0000-7000-8000-000000000000",
+    );
+
+    await page.goto(staleLessonUrl);
+
+    const notFoundMain = page.locator("main").last();
+    await expect(page.getByRole("heading", { name: "Không tìm thấy bài học" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Về khóa học" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Danh sách khóa học" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Trang chính" })).toBeVisible();
+  });
+
+  test("stale course URL shows course recovery links", async ({ teacherPage: page }) => {
+    const lessonUrl = await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
+    const staleCourseUrl = lessonUrl.replace(
+      /\/courses\/[^/]+\/lessons\/[^/?#]+/,
+      "/courses/019e0000-0000-7000-8000-000000000001",
+    );
+
+    await page.goto(staleCourseUrl);
+
+    const notFoundMain = page.locator("main").last();
+    await expect(page.getByRole("heading", { name: "Không tìm thấy khóa học" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Danh sách khóa học" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Về tổ chức" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Trang chính" })).toBeVisible();
+  });
+
+  test("stale organization URL shows dashboard recovery link", async ({ teacherPage: page }) => {
+    await page.goto("/dashboard/organizations/no-such-org-for-e2e");
+
+    const notFoundMain = page.locator("main").last();
+    await expect(page.getByRole("heading", { name: "Không tìm thấy tổ chức" })).toBeVisible();
+    await expect(notFoundMain.getByRole("link", { name: "Trang chính" })).toBeVisible();
+  });
+
   test("clicking a lesson row navigates to lesson detail page", async ({ teacherPage: page }) => {
     const courseTitle = uid("Khóa học Bài học Link E2E");
     await page.goto(COURSES_URL);
@@ -112,8 +152,8 @@ test.describe("Lesson detail — teacher", () => {
   test("shows lesson title and video upload section", async ({ teacherPage: page }) => {
     await page.goto(lessonUrl);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByText("Quản lý video")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Tải video lên" })).toBeVisible();
+    await expect(page.getByText("Nguồn video")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
   });
 });
 
@@ -138,7 +178,7 @@ test.describe("Lesson detail — student read-only", () => {
     await page.goto(`${href}`);
 
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByText("Quản lý video")).not.toBeVisible();
+    await expect(page.getByText("Nguồn video")).not.toBeVisible();
     await expect(page.getByRole("button", { name: "Tải video lên" })).not.toBeVisible();
   });
 });
@@ -187,7 +227,7 @@ test.describe("Seeded lesson — student sees previous attempt result", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     // Bob has a seeded quiz attempt — the new UI shows LessonResult with donut score + Làm lại
     await expect(page.getByText("🎯 Kết quả")).toBeVisible();
-    await expect(page.getByText(/điểm/)).toBeVisible();
+    await expect(page.getByText(/điểm/).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Làm lại" })).toBeVisible();
   });
 });
@@ -198,8 +238,11 @@ test.describe("Seeded lesson — AFTER_SUBMIT checkpoint flow", () => {
   test("checkpoint shows without reveal, markers turn passed, submit shows result", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
 
-    // Reset via Làm lại
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    // Reset via Làm lại if visible
+    const retakeBtn = page.getByRole("button", { name: "Làm lại" });
+    if (await retakeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await retakeBtn.click();
+    }
 
     // Seeded Big-O lesson: 5 interactions at 208s, 416s, 624s, 831s, 1039s
     // Trigger first checkpoint
@@ -255,22 +298,34 @@ test.describe("Seeded lesson — AFTER_SUBMIT checkpoint flow", () => {
 
     // Result section appears with donut score
     await expect(page.getByText("🎯 Kết quả")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/điểm/)).toBeVisible();
+    await expect(page.getByText(/điểm/).first()).toBeVisible();
   });
 });
 
 // ── Seeded lesson with video key — teacher management section ─────────────
 
 test.describe("Seeded lesson with video key — teacher management section", () => {
-  test("shows Thay video, key display, and AI Phân tích when lesson has video_key", async ({ teacherPage: page }) => {
+  test("shows Thay video, technical details, and authoring workflow when lesson has video_key", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Ẩn danh sách bài học" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Cấu trúc khóa học/ })).toBeVisible();
+    await expect(page.getByText("Trong khóa học")).not.toBeVisible();
+    await page.getByRole("button", { name: "Ẩn danh sách bài học" }).click();
+    await expect(page.getByRole("button", { name: "Hiện danh sách bài học" })).toBeVisible();
+    await page.getByRole("button", { name: "Hiện danh sách bài học" }).click();
+
+    // Click Step 1 to open the upload panel since the lesson is seeded and active step is exercises
+    await page.getByTestId("workflow-step-upload").click();
+
     // Seed set video_key → hasVideo=true → button reads "Thay video"
     await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
-    // Storage key is displayed in the management section
+    await expect(page.getByText("Nguồn video")).toBeVisible();
+    // Storage key is available in technical details, not exposed in the primary UI.
+    await page.getByText("Chi tiết kỹ thuật").click();
     await expect(page.getByText(/Key: seed\/hust-cs\//)).toBeVisible();
-    // AI analysis section visible when videoStorageKey is set
-    await expect(page.getByText("AI Phân tích")).toBeVisible();
+    // Video authoring workflow is visible when videoStorageKey is set.
+    await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
   });
 });
 
@@ -349,8 +404,8 @@ test.describe("Fill-blank interaction — teacher creates via editor", () => {
     await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    // Open the "Bài tập" tab inside AnalyzeButton
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    // Open the "Bài tập" workflow step inside AnalyzeButton.
+    await page.getByTestId("workflow-step-exercises").click();
     // After redesign: chunk-based layout, use add-interaction-btn in first chunk card
     const addBtn = page.getByTestId("add-interaction-btn").first();
     await expect(addBtn).toBeVisible({ timeout: 5000 });

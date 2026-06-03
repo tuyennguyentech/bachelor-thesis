@@ -1,6 +1,7 @@
 package interactions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -59,6 +60,7 @@ func (h *listeningHandler) Grade(configJSON, responseJSON []byte) (score, maxSco
 				opts = append(opts, &richterv1.McqOption{Text: o})
 			}
 			configs = append(configs, &richterv1.McqConfig{
+				Question:      q.Question,
 				Options:       opts,
 				CorrectAnswer: int32(q.CorrectAnswer),
 			})
@@ -70,6 +72,71 @@ func (h *listeningHandler) Grade(configJSON, responseJSON []byte) (score, maxSco
 		return 0, 1, "", fmt.Errorf("listening: unknown mode %q", cfg.Mode)
 	}
 	return score, maxScore, "", nil
+}
+
+func (h *listeningHandler) GradeWithContext(ctx context.Context, deps GradingDeps, configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
+	var cfg listeningConfigJSON
+	if err = json.Unmarshal(configJSON, &cfg); err != nil {
+		return 0, 1, "", fmt.Errorf("listening: unmarshal config: %w", err)
+	}
+	var resp listeningResponseJSON
+	if err = json.Unmarshal(responseJSON, &resp); err != nil {
+		return 0, 1, "", fmt.Errorf("listening: unmarshal response: %w", err)
+	}
+
+	switch cfg.Mode {
+	case "dictation":
+		maxScore = 1.0
+		got := strings.TrimSpace(resp.Transcription)
+		if got == "" {
+			return 0, 1.0, "Bạn chưa điền câu trả lời nghe chính tả.", nil
+		}
+
+		// 1. So khớp tĩnh bằng word overlap ratio trước
+		ratio := wordOverlapRatio(got, cfg.ExpectedText)
+		if ratio >= 0.95 {
+			return 1.0, 1.0, "Xuất sắc! Bạn đã nghe và viết lại rất chính xác.", nil
+		}
+
+		// 2. Nếu overlap ratio thấp, dùng LLM chấm ngữ nghĩa (nếu có deps.GradeText)
+		if deps.GradeText != nil {
+			question := "Nghe và ghi lại chính xác nội dung đoạn âm thanh học được (Dictation/Chính tả)."
+			aiScore, _, aiFeedback, aiErr := deps.GradeText(ctx, question, got, cfg.ExpectedText)
+			if aiErr == nil {
+				feedback = fmt.Sprintf("Kết quả chấm điểm tự động từ AI: %.0f%% chính xác.", aiScore*100)
+				if aiFeedback != "" {
+					feedback += " Nhận xét: " + aiFeedback
+				}
+				feedback += fmt.Sprintf("\nĐáp án mẫu: \"%s\"", cfg.ExpectedText)
+				return aiScore, 1.0, feedback, nil
+			}
+		}
+
+		// Fallback nếu không có AI hoặc lỗi AI
+		feedback = fmt.Sprintf("Độ khớp từ vựng: %.0f%%. Đáp án mẫu: \"%s\"", ratio*100, cfg.ExpectedText)
+		return float32(ratio), 1.0, feedback, nil
+
+	case "comprehension":
+		configs := make([]*richterv1.McqConfig, 0, len(cfg.ComprehensionQuestions))
+		for _, q := range cfg.ComprehensionQuestions {
+			opts := make([]*richterv1.McqOption, 0, len(q.Options))
+			for _, o := range q.Options {
+				opts = append(opts, &richterv1.McqOption{Text: o})
+			}
+			configs = append(configs, &richterv1.McqConfig{
+				Question:      q.Question,
+				Options:       opts,
+				CorrectAnswer: int32(q.CorrectAnswer),
+			})
+		}
+		correct, total, _ := gradeMcqList(configs, resp.ComprehensionAnswers)
+		score = float32(correct)
+		maxScore = float32(total)
+		feedback = fmt.Sprintf("Trả lời đúng %d/%d câu hỏi tìm hiểu nội dung.", correct, total)
+		return score, maxScore, feedback, nil
+	default:
+		return 0, 1, "", fmt.Errorf("listening: unknown mode %q", cfg.Mode)
+	}
 }
 
 func (h *listeningHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
@@ -155,6 +222,11 @@ func (h *listeningHandler) protoToJSON(lc *richterv1.ListeningConfig) ([]byte, e
 		if err := validateMcqList(lc.ComprehensionQuestions); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: %w", err))
 		}
+		for i, q := range lc.ComprehensionQuestions {
+			if strings.TrimSpace(q.Question) == "" {
+				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: question %d: question text required", i))
+			}
+		}
 		var err error
 		cfg.ComprehensionQuestions, err = mcqConfigsToJSON(lc.ComprehensionQuestions)
 		if err != nil {
@@ -177,6 +249,7 @@ type listeningGeminiItem struct {
 }
 
 type mcqGeminiItemNested struct {
+	Question      string   `json:"question"`
 	Options       []string `json:"options"`
 	CorrectAnswer int      `json:"correct_answer"`
 }
@@ -194,8 +267,9 @@ func (h *listeningHandler) GeminiSchema() string {
       "type": "array", "minItems": 1, "maxItems": 4,
       "items": {
         "type": "object",
-        "required": ["options","correct_answer"],
+        "required": ["question","options","correct_answer"],
         "properties": {
+          "question":       {"type": "string", "minLength": 8},
           "options":        {"type": "array", "items": {"type": "string"}, "minItems": 4, "maxItems": 4},
           "correct_answer": {"type": "integer"}
         }
@@ -206,7 +280,7 @@ func (h *listeningHandler) GeminiSchema() string {
 }
 
 func (h *listeningHandler) GeminiPromptHint() string {
-	return `Tạo bài nghe dạng comprehension (hiểu nội dung). Trả về audio_source_text (đoạn văn ngắn ~50-100 từ tóm tắt nội dung để đọc to thành audio TTS) và 2-4 câu hỏi MCQ về nội dung đó.`
+	return `Tạo bài nghe dạng comprehension (hiểu nội dung). Trả về audio_source_text là một đoạn giảng ngắn, tự đủ ngữ cảnh, khoảng 50-100 từ để đọc to thành audio TTS. Tạo 2-4 câu hỏi MCQ bám sát các ý cụ thể trong audio_source_text; mỗi câu hỏi phải có trường question rõ nghĩa, không được chỉ trả về các lựa chọn đáp án.`
 }
 
 func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
@@ -222,13 +296,21 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 	}
 	questions := make([]nestedMcqConfigJSON, 0, len(item.Questions))
 	for i, q := range item.Questions {
+		question := strings.TrimSpace(q.Question)
+		if question == "" {
+			return "", "", 0, nil, fmt.Errorf("listening: question %d: question text empty", i)
+		}
 		if len(q.Options) != 4 {
 			return "", "", 0, nil, fmt.Errorf("listening: question %d: exactly 4 options required", i)
 		}
 		if q.CorrectAnswer < 0 || q.CorrectAnswer >= len(q.Options) {
 			return "", "", 0, nil, fmt.Errorf("listening: question %d: correct_answer out of range", i)
 		}
-		questions = append(questions, nestedMcqConfigJSON{Options: q.Options, CorrectAnswer: q.CorrectAnswer})
+		questions = append(questions, nestedMcqConfigJSON{
+			Question:      question,
+			Options:       q.Options,
+			CorrectAnswer: q.CorrectAnswer,
+		})
 	}
 	// audio_object_key is empty here; AISvc will call TTS + upload and set it via TTSProvider.
 	configJSON, err = json.Marshal(listeningConfigJSON{

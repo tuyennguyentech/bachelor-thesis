@@ -280,6 +280,179 @@ func TestInteractionsLifecycle(t *testing.T) {
 	})
 }
 
+func TestManualInteractionKindMatrix(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
+	if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgRes.Organization.Id,
+		UserId:         studentID,
+		Role:           richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		Status:         richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	}); err != nil {
+		t.Fatalf("add student: %v", err)
+	}
+	courseRes, err := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgRes.Organization.Id, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	moduleRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create module: %v", err)
+	}
+	lessonRes, err := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create lesson: %v", err)
+	}
+	lessonID := lessonRes.Lesson.Id
+
+	create := func(t *testing.T, req *richterv1.CreateManualInteractionRequest, want richterv1.InteractionKind) *richterv1.LessonInteraction {
+		t.Helper()
+		res, err := c.interactions.CreateManualInteraction(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateManualInteraction(%v): %v", want, err)
+		}
+		if res.Interaction == nil {
+			t.Fatalf("CreateManualInteraction(%v): nil interaction", want)
+		}
+		if res.Interaction.Kind != want {
+			t.Fatalf("kind: want %v, got %v", want, res.Interaction.Kind)
+		}
+		return res.Interaction
+	}
+
+	single := create(t, &richterv1.CreateManualInteractionRequest{
+		LessonId: lessonID, Prompt: "Single choice prompt", StartSeconds: 1,
+		Config: &richterv1.CreateManualInteractionRequest_Mcq{Mcq: &richterv1.McqConfig{
+			Options:       []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}},
+			CorrectAnswer: 0,
+		}},
+	}, richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE)
+	multiple := create(t, &richterv1.CreateManualInteractionRequest{
+		LessonId: lessonID, Prompt: "Multiple choice prompt", StartSeconds: 2,
+		Config: &richterv1.CreateManualInteractionRequest_Mcq{Mcq: &richterv1.McqConfig{
+			Options:        []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}},
+			CorrectAnswer:  -1,
+			CorrectAnswers: []int32{0, 2},
+		}},
+	}, richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE)
+	fill := create(t, &richterv1.CreateManualInteractionRequest{
+		LessonId: lessonID, Prompt: "Fill blank prompt", StartSeconds: 3,
+		Config: &richterv1.CreateManualInteractionRequest_FillBlank{FillBlank: &richterv1.FillBlankConfig{
+			Template: "CI/CD tự động {{0}} phần mềm.",
+			Blanks:   []*richterv1.Blank{{Accepted: []string{"triển khai", "deploy"}}},
+		}},
+	}, richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK)
+	reading := create(t, &richterv1.CreateManualInteractionRequest{
+		LessonId: lessonID, Prompt: "Reading prompt", StartSeconds: 4,
+		Config: &richterv1.CreateManualInteractionRequest_Reading{Reading: &richterv1.ReadingConfig{
+			Mode:            richterv1.ReadingMode_READING_MODE_PRONUNCIATION,
+			PassageMarkdown: "Đọc đoạn này để kiểm tra bài đọc thủ công.",
+		}},
+	}, richterv1.InteractionKind_INTERACTION_KIND_READING)
+	listening := create(t, &richterv1.CreateManualInteractionRequest{
+		LessonId: lessonID, Prompt: "Listening prompt", StartSeconds: 5,
+		Config: &richterv1.CreateManualInteractionRequest_Listening{Listening: &richterv1.ListeningConfig{
+			AudioObjectKey:  "lessons/" + lessonID + "/audio/manual.mp3",
+			DurationSeconds: 3,
+			Mode:            richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION,
+			ComprehensionQuestions: []*richterv1.McqConfig{{
+				Question:      "Audio kiểm tra luồng nào?",
+				Options:       []*richterv1.McqOption{{Text: "Nghe"}, {Text: "Đọc"}, {Text: "Xóa"}, {Text: "Theme"}},
+				CorrectAnswer: 0,
+			}},
+		}},
+	}, richterv1.InteractionKind_INTERACTION_KIND_LISTENING)
+
+	studentToken := getUserToken(t, url, studentEmail, studentPassword)
+	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
+	listRes, err := studentIA.ListLessonInteractions(ctx, &richterv1.ListLessonInteractionsRequest{
+		LessonId: lessonID, Limit: 20, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("student ListLessonInteractions: %v", err)
+	}
+	seen := map[richterv1.InteractionKind]bool{}
+	for _, it := range listRes.Interactions {
+		seen[it.Kind] = true
+	}
+	for _, want := range []richterv1.InteractionKind{
+		richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE,
+		richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE,
+		richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK,
+		richterv1.InteractionKind_INTERACTION_KIND_READING,
+		richterv1.InteractionKind_INTERACTION_KIND_LISTENING,
+	} {
+		if !seen[want] {
+			t.Fatalf("student list missing kind %v", want)
+		}
+	}
+
+	submitRes, err := studentIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+		LessonId: lessonID,
+		Responses: []*richterv1.AttemptResponseInput{
+			{InteractionId: single.Id, Response: &richterv1.AttemptResponseInput_McqSelected{McqSelected: 0}},
+			{InteractionId: multiple.Id, Response: &richterv1.AttemptResponseInput_McqMultiple{McqMultiple: &richterv1.McqMultipleResponse{SelectedIndexes: []int32{0, 2}}}},
+			{InteractionId: fill.Id, Response: &richterv1.AttemptResponseInput_FillBlank{FillBlank: &richterv1.FillBlankResponse{Answers: []string{"deploy"}}}},
+			{InteractionId: reading.Id, Response: &richterv1.AttemptResponseInput_Reading{Reading: &richterv1.ReadingResponse{AudioObjectKey: ""}}},
+			{InteractionId: listening.Id, Response: &richterv1.AttemptResponseInput_Listening{Listening: &richterv1.ListeningResponse{ComprehensionAnswers: []int32{0}}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitAttempt: %v", err)
+	}
+	if submitRes.Attempt == nil {
+		t.Fatal("expected attempt")
+	}
+	if submitRes.Attempt.TotalScore != 4 || submitRes.Attempt.MaxScore != 5 {
+		t.Fatalf("score: want 4/5, got %v/%v", submitRes.Attempt.TotalScore, submitRes.Attempt.MaxScore)
+	}
+	if len(submitRes.Attempt.Responses) != 5 {
+		t.Fatalf("responses: want 5, got %d", len(submitRes.Attempt.Responses))
+	}
+	responseKinds := map[string]bool{}
+	for _, r := range submitRes.Attempt.Responses {
+		switch r.Response.(type) {
+		case *richterv1.LessonAttemptResponse_McqSelected:
+			responseKinds["single"] = true
+		case *richterv1.LessonAttemptResponse_McqMultiple:
+			responseKinds["multiple"] = true
+		case *richterv1.LessonAttemptResponse_FillBlank:
+			responseKinds["fill"] = true
+		case *richterv1.LessonAttemptResponse_Reading:
+			responseKinds["reading"] = true
+		case *richterv1.LessonAttemptResponse_Listening:
+			responseKinds["listening"] = true
+		}
+	}
+	for _, key := range []string{"single", "multiple", "fill", "reading", "listening"} {
+		if !responseKinds[key] {
+			t.Fatalf("attempt response missing %s", key)
+		}
+	}
+}
+
 // ── TestInteractionsValidation ────────────────────────────────────────────────
 
 func TestInteractionsValidation(t *testing.T) {
@@ -687,8 +860,8 @@ func TestListeningInteractionLifecycle(t *testing.T) {
 				AudioObjectKey: "lessons/test/audio.mp3",
 				Mode:           richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION,
 				ComprehensionQuestions: []*richterv1.McqConfig{
-					{Options: []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}}, CorrectAnswer: 1},
-					{Options: []*richterv1.McqOption{{Text: "P"}, {Text: "Q"}, {Text: "R"}, {Text: "S"}}, CorrectAnswer: 3},
+					{Question: "What is the main topic?", Options: []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}}, CorrectAnswer: 1},
+					{Question: "What detail was mentioned?", Options: []*richterv1.McqOption{{Text: "P"}, {Text: "Q"}, {Text: "R"}, {Text: "S"}}, CorrectAnswer: 3},
 				},
 			},
 		},
@@ -998,6 +1171,27 @@ func TestPreviewGrade(t *testing.T) {
 		}
 	})
 
+	t.Run("save response caches grade without revealing before after_each", func(t *testing.T) {
+		res, err := studentIA.SaveAttemptResponse(ctx, &richterv1.SaveAttemptResponseRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("SaveAttemptResponse: %v", err)
+		}
+		if res.FeedbackRevealed {
+			t.Fatalf("feedback should not be revealed before after_each mode")
+		}
+		if res.Score != 0 || res.MaxScore != 0 || res.Feedback != "" {
+			t.Fatalf("hidden save response should not leak score/feedback, got score=%v max=%v feedback=%q", res.Score, res.MaxScore, res.Feedback)
+		}
+	})
+
 	// Switch lesson to AFTER_EACH and retry.
 	if _, err := c.lessons.UpdateLessonFeedbackMode(ctx, &richterv1.UpdateLessonFeedbackModeRequest{
 		Id: lessonID, FeedbackMode: richterv1.FeedbackMode_FEEDBACK_MODE_AFTER_EACH,
@@ -1025,6 +1219,30 @@ func TestPreviewGrade(t *testing.T) {
 		}
 		if res.Feedback == "" {
 			t.Errorf("feedback should be populated for empty-audio fallback path, got empty")
+		}
+	})
+
+	t.Run("save response reveals grade in after_each", func(t *testing.T) {
+		res, err := studentIA.SaveAttemptResponse(ctx, &richterv1.SaveAttemptResponseRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("SaveAttemptResponse: %v", err)
+		}
+		if !res.FeedbackRevealed {
+			t.Fatalf("feedback should be revealed in after_each mode")
+		}
+		if res.MaxScore != 1.0 {
+			t.Errorf("maxScore: want 1, got %v", res.MaxScore)
+		}
+		if res.Feedback == "" {
+			t.Errorf("feedback should be populated for after_each save response")
 		}
 	})
 
@@ -1202,6 +1420,124 @@ func TestCreateManualInteractionChunkAssociation(t *testing.T) {
 			t.Errorf("chunk_id: want empty, got %q", res.Interaction.ChunkId)
 		}
 	})
+}
+
+func TestDeleteLessonInteractionsBulk(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+	if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgRes.Organization.Id, UserId: teacherID,
+		Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	}); err != nil {
+		t.Fatalf("add teacher: %v", err)
+	}
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPass)
+	teacherInteractions := richterv1connect.NewInteractionServiceClient(httpClientWithToken(teacherToken), url)
+
+	courseRes, err := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgRes.Organization.Id, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	modRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create module: %v", err)
+	}
+	lessonRes, err := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create lesson: %v", err)
+	}
+	lessonID := lessonRes.Lesson.Id
+	chunkA := insertTestChunk(t, lessonID, 0, "chunk a transcript")
+	chunkB := insertTestChunk(t, lessonID, 1, "chunk b transcript")
+
+	createMCQ := func(t *testing.T, chunkID string) {
+		t.Helper()
+		_, err := teacherInteractions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+			LessonId:     lessonID,
+			ChunkId:      chunkID,
+			Prompt:       gofakeit.Sentence(5),
+			StartSeconds: 10,
+			Config: &richterv1.CreateManualInteractionRequest_Mcq{
+				Mcq: &richterv1.McqConfig{
+					Options:       []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}},
+					CorrectAnswer: 0,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("create interaction: %v", err)
+		}
+	}
+
+	createMCQ(t, chunkA.ID.String())
+	createMCQ(t, chunkA.ID.String())
+	createMCQ(t, chunkB.ID.String())
+	createMCQ(t, "")
+
+	list := func(t *testing.T) []*richterv1.LessonInteraction {
+		t.Helper()
+		res, err := teacherInteractions.ListLessonInteractions(ctx, &richterv1.ListLessonInteractionsRequest{
+			LessonId: lessonID,
+			Limit:    20,
+			Offset:   0,
+		})
+		if err != nil {
+			t.Fatalf("list interactions: %v", err)
+		}
+		return res.Interactions
+	}
+
+	if got := len(list(t)); got != 4 {
+		t.Fatalf("initial interactions: want 4, got %d", got)
+	}
+
+	if _, err := teacherInteractions.DeleteLessonInteractions(ctx, &richterv1.DeleteLessonInteractionsRequest{
+		LessonId: lessonID,
+		ChunkId:  chunkA.ID.String(),
+	}); err != nil {
+		t.Fatalf("delete chunk interactions: %v", err)
+	}
+	remaining := list(t)
+	if got := len(remaining); got != 2 {
+		t.Fatalf("after chunk delete: want 2, got %d", got)
+	}
+	for _, interaction := range remaining {
+		if interaction.ChunkId == chunkA.ID.String() {
+			t.Fatalf("chunk delete left interaction %s in deleted chunk", interaction.Id)
+		}
+	}
+
+	if _, err := teacherInteractions.DeleteLessonInteractions(ctx, &richterv1.DeleteLessonInteractionsRequest{
+		LessonId: lessonID,
+	}); err != nil {
+		t.Fatalf("delete lesson interactions: %v", err)
+	}
+	if got := len(list(t)); got != 0 {
+		t.Fatalf("after lesson delete: want 0, got %d", got)
+	}
 }
 
 // ── TestRegenerateInteraction ─────────────────────────────────────────────────

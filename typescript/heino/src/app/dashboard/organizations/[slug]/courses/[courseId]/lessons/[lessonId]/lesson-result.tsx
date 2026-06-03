@@ -72,6 +72,7 @@ function DonutScore({ score, total, attemptCount, maxAttempts }: { score: number
 
 export function LessonResult({ result, interactions, feedbackMode, onRetake, token, maxAttempts }: Props) {
   const canRetake = !maxAttempts || maxAttempts <= 0 || (result.attemptCount ?? 0) < maxAttempts;
+  const shouldShowDetails = feedbackMode !== FeedbackMode.HIDDEN;
 
   return (
     <div className="flex flex-col gap-4">
@@ -88,7 +89,7 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
         <DonutScore score={result.totalScore} total={result.maxScore} attemptCount={result.attemptCount} maxAttempts={maxAttempts} />
       </div>
 
-      {feedbackMode !== FeedbackMode.HIDDEN && interactions.length > 0 && (
+      {shouldShowDetails && interactions.length > 0 && (
         <div className="flex flex-col rounded-md border divide-y">
           {interactions.map((it, idx) => {
             const respItem = result.responses.find((r) => r.interactionId === it.id);
@@ -104,6 +105,12 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
 
             return (
               <div key={it.id} className="px-4">
+                <div className="flex items-center justify-between gap-3 border-b border-border/50 py-2">
+                  <span className="text-xs font-medium text-muted-foreground">Câu {idx + 1}</span>
+                  <span className="rounded border border-border bg-muted/40 px-2 py-0.5 text-xs font-semibold tabular-nums">
+                    {formatScore(respItem?.score ?? 0)}/{formatScore(respItem?.maxScore ?? it.maxScore)} điểm
+                  </span>
+                </div>
                 <renderer.ReviewRow
                   index={idx + 1}
                   prompt={it.prompt}

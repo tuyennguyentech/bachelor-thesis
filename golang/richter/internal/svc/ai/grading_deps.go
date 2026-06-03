@@ -53,6 +53,15 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 			}
 			return score, 1.0, feedback, nil
 		},
+		GradeText: func(ctx context.Context, question, studentAnswer, expectedAnswer string) (float32, float32, string, error) {
+			score, feedback, err := s.GradeText(ctx, lang, question, studentAnswer, expectedAnswer)
+			if err != nil {
+				s.log.WarnContext(ctx, "AI text grading failed, falling back to pending credit", "err", err)
+				const fallback = "Hệ thống AI tạm thời chưa chấm được câu này. Giáo viên sẽ xem lại."
+				return 0.5, 1.0, fallback, nil
+			}
+			return score, 1.0, feedback, nil
+		},
 		GetAudioBytes: func(ctx context.Context, objectKey string) ([]byte, error) {
 			return s.downloadAudio(ctx, objectKey)
 		},

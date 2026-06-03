@@ -50,6 +50,7 @@ export function FillBlankStudentView({
   const allFilled = answers.every((a) => a.trim() !== "");
 
   const revealNow = feedbackMode === FeedbackMode.AFTER_EACH && submitted;
+  const answerLocked = locked || revealNow;
 
   function handleSubmit() {
     if (submitted || locked) return;
@@ -59,8 +60,10 @@ export function FillBlankStudentView({
   }
 
   function handleChange(idx: number, val: string) {
-    if (submitted || locked) return;
-    setAnswers((prev) => prev.map((a, i) => (i === idx ? val : a)));
+    if (answerLocked) return;
+    const next = answers.map((a, i) => (i === idx ? val : a));
+    setAnswers(next);
+    if (submitted) onAnswer({ answers: next });
   }
 
   return (
@@ -84,7 +87,7 @@ export function FillBlankStudentView({
                 data-testid={`fill-blank-input-${idx}`}
                 value={val}
                 onChange={(e) => handleChange(idx, e.target.value)}
-                disabled={submitted || locked}
+                disabled={answerLocked}
                 placeholder={placeholder}
                 title={placeholder}
                 style={{ width: `${widthCh}ch` }}

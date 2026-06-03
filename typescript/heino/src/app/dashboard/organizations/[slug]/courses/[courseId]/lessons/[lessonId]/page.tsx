@@ -7,15 +7,16 @@ import {
   CourseService,
   LessonService,
   CourseModuleService,
-  type CourseModule,
   type Lesson,
 } from "buf/gen/richter/v1/courses_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
-import { AIService, AnalysisStatus } from "buf/gen/richter/v1/ai_pb";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
 import { InteractionService, FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
+import { ModeToggle } from "@/components/mode-toggle";
+import { logout } from "@/app/actions/auth";
 import {
   ChevronLeftIcon,
   VideoIcon,
@@ -23,131 +24,33 @@ import {
   SparklesIcon,
   UsersIcon,
   EyeIcon,
-  ListTreeIcon,
+  BuildingIcon,
+  LogOutIcon,
 } from "lucide-react";
-import { VideoUpload } from "./video-upload";
 import { AnalyzeButton } from "./analyze-button";
 import { LessonAttempts } from "./lesson-attempts";
 import { VideoPlayer } from "./video-player";
 import { StudentLessonView } from "./student-lesson-view";
 import { extractLocalResponse } from "@/interactions/registry";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
+import { LessonCourseSidebar, LessonWorkspaceShell } from "./lesson-workspace";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const COURSE_NAV_LIMIT = 100;
 
-function CourseLessonJump({
-  slug,
-  courseId,
-  currentLessonId,
-  modules,
-  lessons,
-}: {
-  slug: string;
-  courseId: string;
-  currentLessonId: string;
-  modules: CourseModule[];
-  lessons: Lesson[];
-}) {
-  if (modules.length === 0 || lessons.length === 0) return null;
-
-  const lessonsByModule = new Map<string, Lesson[]>();
-  for (const lesson of lessons) {
-    const moduleLessons = lessonsByModule.get(lesson.moduleId) ?? [];
-    moduleLessons.push(lesson);
-    lessonsByModule.set(lesson.moduleId, moduleLessons);
-  }
-
-  return (
-    <section className="rounded-md border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <ListTreeIcon className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium">Trong khóa học</h2>
-        </div>
-        <Button variant="ghost" size="sm" asChild className="gap-1.5 text-xs">
-          <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
-            Xem cấu trúc
-            <ChevronLeftIcon className="size-3.5 rotate-180" />
-          </Link>
-        </Button>
-      </div>
-      <div className="flex max-h-56 flex-col gap-2 overflow-y-auto pr-1">
-        {modules.map((module, moduleIndex) => {
-          const moduleLessons = lessonsByModule.get(module.id) ?? [];
-          if (moduleLessons.length === 0) return null;
-          return (
-            <div key={module.id} className="flex flex-col gap-1">
-              <p className="px-1 text-xs font-medium text-muted-foreground">
-                {moduleIndex + 1}. {module.title}
-              </p>
-              <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
-                {moduleLessons.map((lesson) => {
-                  const active = lesson.id === currentLessonId;
-                  const content = (
-                    <span className="flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-sm">
-                      <span className="tabular-nums text-xs text-muted-foreground">
-                        {lesson.orderIndex + 1}
-                      </span>
-                      <span className="truncate">{lesson.title}</span>
-                    </span>
-                  );
-                  return active ? (
-                    <div
-                      key={lesson.id}
-                      className="font-medium text-primary [&>span]:border-primary/40 [&>span]:bg-primary/10"
-                    >
-                      {content}
-                    </div>
-                  ) : (
-                    <Link
-                      key={lesson.id}
-                      href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
-                      className="text-muted-foreground transition-colors hover:text-foreground [&>span]:hover:bg-muted/50"
-                    >
-                      {content}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function statusLabel(s: AnalysisStatus): string {
-  switch (s) {
-    case AnalysisStatus.PENDING: return "Chờ xử lý";
-    case AnalysisStatus.PROCESSING: return "Đang xử lý…";
-    case AnalysisStatus.TRANSCRIPT_EXTRACTED: return "Đã trích xuất";
-    case AnalysisStatus.CHUNKS_READY: return "Đã phân đoạn";
-    case AnalysisStatus.DONE: return "Hoàn thành";
-    case AnalysisStatus.ERROR: return "Lỗi";
-    default: return "";
-  }
-}
-
-const videoUrlCache = new Map<string, { url: string; expiresAt: number }>();
-
-async function getCachedVideoUrl(key: string, token: string): Promise<string | null> {
-  const now = Date.now();
-  const cached = videoUrlCache.get(key);
-  if (cached && cached.expiresAt > now) {
-    return cached.url;
-  }
-
+async function getVideoUrl(key: string, token: string): Promise<string | null> {
   try {
     const client = createRichterClient(StorageService, token);
     const res = await client.getDownloadUrl({ key, expiresInSeconds: 3600 });
-    const url = res.downloadUrl;
-    videoUrlCache.set(key, { url, expiresAt: now + 600000 }); // Cache for 10 minutes
-    return url;
+    return res.downloadUrl;
   } catch {
     return null;
   }
+}
+
+function timestampVersion(ts: Lesson["updatedAt"]): string {
+  if (!ts) return "";
+  return `${ts.seconds}:${ts.nanos}`;
 }
 
 export default async function LessonDetailPage({
@@ -220,11 +123,12 @@ export default async function LessonDetailPage({
 
   const interactionClient = createRichterClient(InteractionService, token);
   const aiClient = createRichterClient(AIService, token);
+  const videoVersion = timestampVersion(lesson.updatedAt);
 
   // Parallel fetches: video URL, AI analysis, my attempt, teacher attempts list, watch progress
   const [videoUrl, analysisRes, myAttempt, attemptsData, initialPosition] = await Promise.all([
     lesson.videoStorageKey
-      ? getCachedVideoUrl(lesson.videoStorageKey, token)
+      ? getVideoUrl(lesson.videoStorageKey, token)
       : Promise.resolve(null),
     aiClient
       .getLessonAnalysis({ lessonId })
@@ -271,7 +175,7 @@ export default async function LessonDetailPage({
     : null;
 
   return (
-    <div className="mx-auto w-full max-w-screen-2xl px-4 lg:px-6 flex flex-col gap-6">
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
       <RecentAccessRecorder
         entry={{
           id: `lesson:${lesson.id}`,
@@ -283,217 +187,256 @@ export default async function LessonDetailPage({
         }}
       />
 
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" asChild className="gap-1">
-          <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
-            <ChevronLeftIcon className="size-4" />
-            {course.title}
-          </Link>
-        </Button>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2 text-muted-foreground text-xs">
-          <span>{module_.title}</span>
-          <span>›</span>
-          <span>Bài {lesson.orderIndex + 1}</span>
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight">{lesson.title}</h1>
-        {lesson.description && (
-          <p className="text-sm text-muted-foreground mt-1">{lesson.description}</p>
-        )}
-        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-          {lesson.durationSeconds ? (
-            <span>⏱ ~{Math.ceil(lesson.durationSeconds / 60)} phút</span>
-          ) : null}
-          {lesson.durationSeconds && interactions.length > 0 ? <span>·</span> : null}
-          {interactions.length > 0 && (
-            <span>📝 {interactions.length} câu hỏi</span>
-          )}
-          {interactions.length > 0 && (
-            <>
-              <span>·</span>
-              <span>{previousResult ? "🎯 đã hoàn thành" : "🎯 chưa hoàn thành"}</span>
-            </>
-          )}
-        </div>
-      </div>
-
-      <CourseLessonJump
-        slug={slug}
-        courseId={courseId}
-        currentLessonId={lessonId}
-        modules={courseModules}
-        lessons={courseLessons}
-      />
-
-      {/* Preview banner */}
-      {isPreview && (
-        <div className="flex items-center justify-between rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 px-4 py-2 text-sm">
-          <span className="text-yellow-800 dark:text-yellow-300 font-medium">Đang xem thử dưới dạng học viên</span>
-          <Link href="?">
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs border-yellow-400 text-yellow-800 hover:bg-yellow-100 dark:text-yellow-300 dark:border-yellow-600 dark:hover:bg-yellow-900/30">
-              <EyeIcon className="size-3.5" />
-              Thoát xem thử
-            </Button>
-          </Link>
-        </div>
-      )}
-
-      {/* Teacher/Admin navigation tabs */}
-      {canManage && !isPreview && (
-        <div className="flex border-b border-muted">
-          <Link
-            href="?tab=content"
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors ${
-              activeTab === "content"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            📚 Nội dung & Cấu hình
-          </Link>
-          <Link
-            href="?tab=progress"
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-2 ${
-              activeTab === "progress"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            👥 Tiến độ học viên
-            {attemptsData && attemptsData.total > 0 && (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary font-semibold">
-                {attemptsData.total}
-              </span>
-            )}
-          </Link>
-        </div>
-      )}
-
-      {/* Main content areas based on user role and selected tab */}
-      {!effectiveCanManage || isPreview ? (
-        // STUDENT or PREVIEW VIEW:
-        videoUrl ? (
-          <StudentLessonView
-            key={isPreview ? "preview" : "student"}
-            videoUrl={videoUrl}
-            segments={analysis?.transcriptSegments ?? []}
-            transcript={analysis?.transcript ?? ""}
-            chunks={initialChunks}
-            lessonId={lessonId}
-            initialPosition={isPreview ? 0 : initialPosition}
-            token={token}
-            interactions={interactions}
-            previousResult={isPreview ? null : previousResult}
-            feedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
-            isPreview={isPreview}
-            maxAttempts={lesson.maxAttempts}
-          />
-        ) : (
-          <div className="rounded-md border overflow-hidden bg-black aspect-video flex items-center justify-center">
-            <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
-              <PlayCircleIcon className="size-10 opacity-30" />
-              <p className="text-sm">Nội dung chưa được cung cấp.</p>
+      <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4 lg:px-6 z-10">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button variant="ghost" size="sm" asChild className="gap-1 px-2">
+            <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
+              <ChevronLeftIcon className="size-4" />
+              <span className="hidden sm:inline">Khóa học</span>
+            </Link>
+          </Button>
+          <div className="hidden h-5 w-px bg-border sm:block" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <BuildingIcon className="size-3.5 text-muted-foreground" />
+              <span>{org.name}</span>
+              <span>›</span>
+              <span className="truncate max-w-[150px] inline-block">{course.title}</span>
             </div>
+            <p className="truncate text-sm font-semibold">{lesson.title}</p>
           </div>
-        )
-      ) : (
-        // TEACHER or ADMIN VIEW:
-        activeTab === "content" ? (
-          <div className="flex flex-col gap-6">
-            {/* Video Player */}
-            {videoUrl ? (
-              <VideoPlayer
-                videoUrl={videoUrl}
-                segments={analysis?.transcriptSegments ?? []}
-                transcript={analysis?.transcript ?? ""}
-                lessonId={lessonId}
-                initialPosition={initialPosition}
-                token={token}
-                videoStorageKey={lesson.videoStorageKey}
-                allowNativeFullscreen={true}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <ModeToggle />
+          <form action={logout}>
+            <Button variant="ghost" size="sm" type="submit" className="gap-2">
+              <LogOutIcon className="size-4" />
+              <span className="hidden sm:inline">Đăng xuất</span>
+            </Button>
+          </form>
+        </div>
+      </header>
+
+      <div className="flex-1 min-h-0 overflow-auto p-4 lg:p-6">
+        <div className="mx-auto w-full max-w-screen-2xl">
+          <LessonWorkspaceShell
+            sidebar={
+              <LessonCourseSidebar
+                slug={slug}
+                courseId={courseId}
+                courseTitle={course.title}
+                currentLessonId={lessonId}
+                modules={courseModules}
+                lessons={courseLessons}
               />
-            ) : (
-              <div className="rounded-md border overflow-hidden bg-black aspect-video flex items-center justify-center">
-                <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
-                  <VideoIcon className="size-10 opacity-30" />
-                  <p className="text-sm">Chưa có video. Tải video lên bên dưới.</p>
+            }
+          >
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                  <span>{module_.title}</span>
+                  <span>›</span>
+                  <span>Bài {lesson.orderIndex + 1}</span>
+                </div>
+                <h1 className="text-2xl font-bold tracking-tight">{lesson.title}</h1>
+                {lesson.description && (
+                  <p className="text-sm text-muted-foreground mt-1">{lesson.description}</p>
+                )}
+                <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                  {lesson.durationSeconds ? (
+                    <span>~{Math.ceil(lesson.durationSeconds / 60)} phút</span>
+                  ) : null}
+                  {lesson.durationSeconds && interactions.length > 0 ? <span>·</span> : null}
+                  {interactions.length > 0 && (
+                    <span>{interactions.length} câu hỏi</span>
+                  )}
+                  {interactions.length > 0 && (
+                    <>
+                      <span>·</span>
+                      <span>{previousResult ? "Đã hoàn thành" : "Chưa hoàn thành"}</span>
+                    </>
+                  )}
                 </div>
               </div>
-            )}
 
-            {/* Video Management & Analysis controls */}
-            <div className="rounded-md border p-4 flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-medium text-sm">Quản lý video</h2>
-                <Link href="?preview=1">
-                  <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
-                    <EyeIcon className="size-3.5" />
-                    Xem thử
-                  </Button>
-                </Link>
-              </div>
-              <VideoUpload
-                lessonId={lesson.id}
-                moduleId={lesson.moduleId}
-                courseId={courseId}
-                slug={slug}
-                hasVideo={!!lesson.videoStorageKey}
-                token={token}
-              />
-              {lesson.videoStorageKey && (
-                <>
-                  <p className="text-xs text-muted-foreground font-mono break-all">
-                    Key: {lesson.videoStorageKey}
-                  </p>
-                  <div className="border-t pt-3 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                      <SparklesIcon className="size-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">AI Phân tích</span>
-                      {analysis && (
-                        <span className="text-xs text-muted-foreground">
-                          ({statusLabel(analysis.status)})
-                        </span>
-                      )}
-                    </div>
-                    <AnalyzeButton
-                      key={lesson.videoStorageKey ?? "no-video"}
-                      lessonId={lesson.id}
-                      initialChunks={initialChunks}
-                      initialSegments={analysis?.transcriptSegments ?? []}
-                      initialStatus={analysis?.status}
-                      initialInteractions={analysis?.interactions ?? []}
-                      initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
-                      initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
-                      initialLanguage={lesson.language || "vi"}
-                      initialMaxAttempts={lesson.maxAttempts}
-                      title={lesson.title}
-                      description={lesson.description}
-                      orderIndex={lesson.orderIndex}
-                      token={token}
-                    />
-                    {analysis?.status === AnalysisStatus.ERROR && (
-                      <p className="text-xs text-destructive">{analysis.errorMsg}</p>
+              {/* Preview banner */}
+              {isPreview && (
+                <div className="flex items-center justify-between rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 px-4 py-2 text-sm">
+                  <span className="text-yellow-800 dark:text-yellow-300 font-medium">Đang xem thử dưới dạng học viên</span>
+                  <Link href="?">
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs border-yellow-400 text-yellow-800 hover:bg-yellow-100 dark:text-yellow-300 dark:border-yellow-600 dark:hover:bg-yellow-900/30">
+                      <EyeIcon className="size-3.5" />
+                      Thoát xem thử
+                    </Button>
+                  </Link>
+                </div>
+              )}
+
+              {/* Teacher/Admin navigation tabs */}
+              {canManage && !isPreview && (
+                <div className="flex border-b border-muted">
+                  <Link
+                    href="?tab=content"
+                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors ${
+                      activeTab === "content"
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Nội dung
+                  </Link>
+                  <Link
+                    href="?tab=progress"
+                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-2 ${
+                      activeTab === "progress"
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Tiến độ học viên
+                    {attemptsData && attemptsData.total > 0 && (
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary font-semibold">
+                        {attemptsData.total}
+                      </span>
                     )}
+                  </Link>
+                </div>
+              )}
+
+              {/* Main content areas based on user role and selected tab */}
+              {!effectiveCanManage || isPreview ? (
+                // STUDENT or PREVIEW VIEW:
+                videoUrl ? (
+                  <StudentLessonView
+                    key={`${isPreview ? "preview" : "student"}:${lesson.videoStorageKey}:${videoVersion}`}
+                    videoUrl={videoUrl}
+                    segments={analysis?.transcriptSegments ?? []}
+                    transcript={analysis?.transcript ?? ""}
+                    chunks={initialChunks}
+                    lessonId={lessonId}
+                    initialPosition={isPreview ? 0 : initialPosition}
+                    token={token}
+                    interactions={interactions}
+                    previousResult={isPreview ? null : previousResult}
+                    feedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
+                    isPreview={isPreview}
+                    maxAttempts={lesson.maxAttempts}
+                  />
+                ) : (
+                  <div className="rounded-md border overflow-hidden bg-black aspect-video flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground p-8">
+                      <PlayCircleIcon className="size-10 opacity-30" />
+                      <p className="text-sm">Nội dung chưa được cung cấp.</p>
+                    </div>
                   </div>
-                </>
+                )
+              ) : (
+	                // TEACHER or ADMIN VIEW:
+	                activeTab === "content" ? (
+	                  <div className="flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200">
+
+	                    {/* Top: Video Player / Preview Section */}
+                    <section className="w-full overflow-hidden rounded-2xl border border-border/80 bg-card/40 backdrop-blur-md shadow-xl transition-all duration-300">
+                      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3 bg-muted/15">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <VideoIcon className="size-4 shrink-0 text-primary" />
+                          <h2 className="truncate text-sm font-semibold tracking-tight">Studio bài giảng</h2>
+                        </div>
+                        {lesson.videoStorageKey && (
+                          <Button asChild variant="outline" size="sm" className="gap-1.5 text-xs hover:bg-muted/70 shadow-sm">
+                            <Link href="?preview=1">
+                              <EyeIcon className="size-3.5" />
+                              Chế độ học viên
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
+
+	                      {videoUrl ? (
+                        <div className="p-4 flex flex-col gap-4">
+                          <VideoPlayer
+                            key={`${lesson.videoStorageKey}:${videoVersion}`}
+                            videoUrl={videoUrl}
+                            segments={analysis?.transcriptSegments ?? []}
+                            transcript={analysis?.transcript ?? ""}
+                            lessonId={lessonId}
+                            initialPosition={initialPosition}
+                            token={token}
+                            videoStorageKey={lesson.videoStorageKey ? `${lesson.videoStorageKey}:${videoVersion}` : undefined}
+                            allowNativeFullscreen={true}
+                            interactions={interactions}
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex aspect-video items-center justify-center bg-black/95">
+                          <div className="flex flex-col items-center gap-3 p-8 text-center text-muted-foreground/80">
+                            <div className="rounded-full bg-muted/10 p-4 border border-border/20">
+                              <VideoIcon className="size-10 opacity-40 text-primary" />
+                            </div>
+                            <p className="text-sm font-semibold text-foreground/90">Chưa có video. Tải video lên để bắt đầu tạo nội dung.</p>
+                            <p className="text-xs text-muted-foreground max-w-[280px]">Vui lòng tải video lên ở Bước 1 của quy trình phía dưới để bắt đầu thiết kế bài học.</p>
+                          </div>
+                        </div>
+                      )}
+                    </section>
+
+                    {/* Bottom: AI Co-Pilot Processing Pipeline (Full-width below Video) */}
+                    <section className="rounded-2xl border border-border/80 bg-card/30 backdrop-blur-md p-5 shadow-lg transition-all duration-300">
+                      <div className="mb-4 flex items-start gap-2.5">
+                        <div className="rounded-lg bg-primary/10 p-2 text-primary animate-pulse">
+                          <SparklesIcon className="size-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-sm font-semibold tracking-tight">Tạo nội dung từ video</h2>
+                          <p className="mt-0.5 text-xs text-muted-foreground/90">
+                            Phiên âm, phân đoạn và tạo bài tập trong một luồng xử lý liền mạch.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="border-t border-border/40 pt-4">
+                        <AnalyzeButton
+                          key={`${lesson.videoStorageKey ?? "no-video"}:${videoVersion}`}
+                          lessonId={lesson.id}
+                          initialChunks={initialChunks}
+                          initialSegments={analysis?.transcriptSegments ?? []}
+                          initialTranscript={analysis?.transcript ?? ""}
+                          initialStatus={analysis?.status}
+                          initialErrorMsg={analysis?.errorMsg}
+                          initialInteractions={analysis?.interactions ?? []}
+                          initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
+                          initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
+                          initialLanguage={lesson.language || "vi"}
+                          initialMaxAttempts={lesson.maxAttempts}
+                          title={lesson.title}
+                          description={lesson.description}
+                          orderIndex={lesson.orderIndex}
+                          token={token}
+                          videoStorageKey={lesson.videoStorageKey || undefined}
+                          moduleId={lesson.moduleId}
+                          courseId={courseId}
+                          slug={slug}
+                        />
+                      </div>
+                    </section>
+                  </div>
+                ) : (
+                  /* Student progress tab content */
+                  attemptsData && (
+                    <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
+                      <div className="flex items-center gap-2">
+                        <UsersIcon className="size-4 text-muted-foreground" />
+                        <h2 className="font-medium text-sm">Tiến độ học viên</h2>
+                      </div>
+                      <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} maxAttempts={lesson.maxAttempts} />
+                    </div>
+                  )
+                )
               )}
             </div>
-          </div>
-        ) : (
-          /* Student progress tab content */
-          attemptsData && (
-            <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
-              <div className="flex items-center gap-2">
-                <UsersIcon className="size-4 text-muted-foreground" />
-                <h2 className="font-medium text-sm">Tiến độ học viên</h2>
-              </div>
-              <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} maxAttempts={lesson.maxAttempts} />
-            </div>
-          )
-        )
-      )}
+          </LessonWorkspaceShell>
+        </div>
+      </div>
     </div>
   );
 }

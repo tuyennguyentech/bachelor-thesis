@@ -7,12 +7,15 @@ export interface McqOption {
 }
 
 export interface McqConfig {
+  question?: string; // used for nested MCQs, e.g. listening comprehension
   options: McqOption[];
   correctAnswer: number; // -1 if hidden/not revealed by server
+  correctAnswers?: number[]; // used for MULTIPLE_CHOICE
 }
 
 export interface McqResponse {
-  selected: number; // -1 if unanswered
+  selected: number; // -1 if unanswered (used for SINGLE_CHOICE)
+  selectedIndexes?: number[]; // used for MULTIPLE_CHOICE
 }
 
 export interface Blank {
@@ -56,6 +59,12 @@ export interface ReadingResponse {
   audioObjectKey: string;
 }
 
+export interface InteractionGrade {
+  score: number;
+  maxScore: number;
+  feedback?: string;
+}
+
 export interface StudentViewProps<Config, Response> {
   config: Config;
   explanation?: string;
@@ -77,6 +86,10 @@ export interface StudentViewProps<Config, Response> {
   /** Optional: true when the teacher is previewing the lesson. Renderers that would
    * otherwise burn AI quota (e.g. reading PreviewGrade) should skip server calls. */
   isPreview?: boolean;
+  /** Optional: the InteractionKind of this interaction, useful for components shared across multiple kinds */
+  kind?: InteractionKind;
+  /** Optional: report a server-side or async grade back to the parent view. */
+  onGrade?: (grade: InteractionGrade) => void;
 }
 
 export interface EditorViewProps<Config> {

@@ -27,6 +27,9 @@ export function submitAttemptErrorMessage(err: unknown): string {
         return "Hệ thống đang xử lý chậm. Hãy thử lại sau ít phút — bài làm của bạn chưa bị mất.";
       case Code.Unauthenticated:
         return "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại rồi nộp bài.";
+      case Code.InvalidArgument:
+      case Code.FailedPrecondition:
+        return err.rawMessage || "Bài làm chưa hợp lệ. Kiểm tra lại câu trả lời rồi nộp lại.";
       default:
         return "Không nộp được bài. Vui lòng thử lại.";
     }

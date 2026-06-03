@@ -8,9 +8,17 @@
  */
 
 import { test, expect } from "../fixtures";
+import type { Locator, Page } from "@playwright/test";
 
 const ORG_SLUG = "hust-cs";
 const MEMBERS_URL = `/dashboard/organizations/${ORG_SLUG}/members`;
+
+async function openMemberActions(page: Page, memberRow: Locator) {
+  const actionsButton = memberRow.getByRole("button", { name: "Mở menu thao tác thành viên" });
+  await expect(actionsButton).toBeVisible();
+  await actionsButton.click();
+  await expect(page.getByRole("menuitem", { name: "Đổi vai trò" })).toBeVisible();
+}
 
 test.describe("Dashboard members page visibility", () => {
   test("shows Thành viên link on org sidebar", async ({ userPage: page }) => {
@@ -78,7 +86,7 @@ test.describe("Dashboard member management lifecycle", () => {
     // Remove quinn if already present from a previous run (idempotent)
     const quinnRow = page.getByRole("row").filter({ hasText: NEW_MEMBER_EMAIL });
     if (await quinnRow.isVisible()) {
-      await quinnRow.getByRole("button").click();
+      await openMemberActions(page, quinnRow);
       await page.getByRole("menuitem", { name: "Xóa khỏi tổ chức" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
       await expect(quinnRow).not.toBeVisible();
@@ -94,12 +102,12 @@ test.describe("Dashboard member management lifecycle", () => {
     await page.goto(MEMBERS_URL);
     // find carol (teacher) row and change her role to student
     const carolRow = page.getByRole("row").filter({ hasText: "carol@dyadia.local" });
-    await carolRow.getByRole("button").click();
+    await openMemberActions(page, carolRow);
     await page.getByRole("menuitem", { name: "Đổi vai trò" }).hover();
     await page.getByRole("menuitem", { name: "Học viên" }).click();
     await expect(carolRow.getByText("Học viên")).toBeVisible();
     // restore back to teacher
-    await carolRow.getByRole("button").click();
+    await openMemberActions(page, carolRow);
     await page.getByRole("menuitem", { name: "Đổi vai trò" }).hover();
     await page.getByRole("menuitem", { name: "Giảng viên" }).click();
     await expect(carolRow.getByText("Giảng viên")).toBeVisible();

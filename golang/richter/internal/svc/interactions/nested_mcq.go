@@ -2,6 +2,7 @@ package interactions
 
 import (
 	"fmt"
+	"strings"
 
 	richterv1 "example.com/buf/gen/richter/v1"
 )
@@ -39,6 +40,7 @@ func validateMcqList(configs []*richterv1.McqConfig) error {
 // mcqConfigsToJSON converts a slice of McqConfig protos to the nested JSON representation used
 // in the DB JSONB column (option text strings + correct_answer index per question).
 type nestedMcqConfigJSON struct {
+	Question      string   `json:"question,omitempty"`
 	Options       []string `json:"options"`
 	CorrectAnswer int      `json:"correct_answer"`
 }
@@ -53,7 +55,11 @@ func mcqConfigsToJSON(configs []*richterv1.McqConfig) ([]nestedMcqConfigJSON, er
 		for _, o := range cfg.Options {
 			opts = append(opts, o.Text)
 		}
-		out = append(out, nestedMcqConfigJSON{Options: opts, CorrectAnswer: int(cfg.CorrectAnswer)})
+		out = append(out, nestedMcqConfigJSON{
+			Question:      strings.TrimSpace(cfg.Question),
+			Options:       opts,
+			CorrectAnswer: int(cfg.CorrectAnswer),
+		})
 	}
 	return out, nil
 }
@@ -70,7 +76,11 @@ func mcqConfigsFromJSON(in []nestedMcqConfigJSON, stripAnswers bool) []*richterv
 		if stripAnswers {
 			correctAnswer = -1
 		}
-		out = append(out, &richterv1.McqConfig{Options: opts, CorrectAnswer: correctAnswer})
+		out = append(out, &richterv1.McqConfig{
+			Question:      q.Question,
+			Options:       opts,
+			CorrectAnswer: correctAnswer,
+		})
 	}
 	return out
 }

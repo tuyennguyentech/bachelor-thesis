@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef, useTransition, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
-  SparklesIcon, Loader2Icon, RefreshCwIcon, LockIcon, SettingsIcon,
-  ChevronDownIcon, ChevronRightIcon,
+  SparklesIcon, Loader2Icon, LockIcon, Trash2Icon,
 } from "lucide-react";
 import type { TranscriptChunk, TranscriptSegment, ChunkInteractionConfig } from "buf/gen/richter/v1/ai_pb";
 import {
@@ -19,8 +19,8 @@ import { toast } from "sonner";
 import { InteractionRow, type InteractionFormData, buildProtoConfig } from "./interaction-row";
 import { ChunkSection } from "./chunk-section";
 import { type ChunkGenPhase } from "./chunk-generate-form";
-import { LessonWideGenForm } from "./lesson-wide-gen-form";
-import { KindQuantityGrid, fromConfig, toKindsList, totalQuantity, type KindQuantities } from "./kind-quantity-grid";
+import { GenerateExercisesDialog } from "./generate-exercises-dialog";
+import { fromConfig, toKindsList, totalQuantity, type KindQuantities } from "./kind-quantity-grid";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,11 +43,12 @@ interface Props {
   disabled: boolean;
   genState: GenPhase;
   genWarnings: string[];
-  questionsGenerated: boolean;
+  questionsGenerated?: boolean;
   feedbackMode: FeedbackMode;
   savingFeedback: boolean;
+  openLessonGenerateRequest?: number;
   onFeedbackModeChange: (mode: FeedbackMode) => void;
-  onGenerateLesson: (force?: boolean) => void;
+  onGenerateLesson: (force?: boolean, difficulty?: string, focusPrompt?: string) => void;
   onGenerateChunk?: (chunkId: string, force: boolean) => void;
   onInteractionsChange: (interactions: LessonInteraction[]) => void;
   defaultInteractionConfig?: ChunkInteractionConfig;
@@ -57,11 +58,13 @@ interface Props {
 
 export function TabExercises({
   lessonId, chunks, initialInteractions, token, disabled,
-  genState, genWarnings, questionsGenerated,
+  genState, genWarnings,
   feedbackMode, savingFeedback, onFeedbackModeChange,
+  openLessonGenerateRequest = 0,
   onGenerateLesson, onInteractionsChange,
   defaultInteractionConfig: initialDefaultCfg,
 }: Props) {
+  const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
   const interactionClient = useRichterWebClient(InteractionService, token);
   const chunkAbortRefs = useRef<Record<string, AbortController>>({});
@@ -76,23 +79,34 @@ export function TabExercises({
     setInteractions(initialInteractions);
   }, [initialInteractions]);
 
-  // ── Default config state ────────────────────────────────────────────────────
-  const [expandedConfig, setExpandedConfig] = useState(false);
-  const [defaultQuantities, setDefaultQuantities] = useState<KindQuantities>(
-    () => fromConfig(initialDefaultCfg),
-  );
-  const [savingDefaultCfg, startSaveDefaultCfg] = useTransition();
-  const [defaultCfgError, setDefaultCfgError] = useState<string | null>(null);
-  const [defaultConfigSaved, setDefaultConfigSaved] = useState(!!initialDefaultCfg);
-
-  // ── Lesson-wide gen form state ──────────────────────────────────────────────
-  const [lessonGenFormOpen, setLessonGenFormOpen] = useState(false);
-  const [lessonGenForce, setLessonGenForce] = useState(false);
-
-  // Default force checkbox to true when there are existing interactions (snapshot on open).
   useEffect(() => {
-    if (lessonGenFormOpen) setLessonGenForce(interactions.length > 0);
-  }, [lessonGenFormOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLocalChunks(chunks);
+  }, [chunks]);
+
+  // ── Generate dialog state ───────────────────────────────────────────────────
+  const [genDialogOpen, setGenDialogOpen] = useState(false);
+  const defaultConfigSignature = initialDefaultCfg
+    ? `${initialDefaultCfg.count}:${initialDefaultCfg.strategy}:${initialDefaultCfg.kinds.join(",")}`
+    : "";
+  const initialDefaultQuantities = useMemo(
+    () => fromConfig(initialDefaultCfg),
+    // Keep this tied to value-level config changes instead of protobuf object identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [defaultConfigSignature],
+  );
+  const [defaultQuantities, setDefaultQuantities] = useState<KindQuantities>(
+    () => initialDefaultQuantities,
+  );
+
+  useEffect(() => {
+    setDefaultQuantities(initialDefaultQuantities);
+  }, [initialDefaultQuantities]);
+
+  useEffect(() => {
+    if (openLessonGenerateRequest > 0 && localChunks.length > 0 && genState.phase !== "running") {
+      setGenDialogOpen(true);
+    }
+  }, [openLessonGenerateRequest, localChunks.length, genState.phase]);
 
   // ── Collapse / expand state ─────────────────────────────────────────────────
   const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
@@ -123,6 +137,18 @@ export function TabExercises({
   }, [localChunks, interactions, searchQuery, chunkFilter]);
 
   const isFiltered = searchQuery !== "" || chunkFilter !== "all";
+  const exerciseSummary = useMemo(() => {
+    const byKind = new Map<InteractionKind, number>();
+    interactions.forEach((it) => {
+      byKind.set(it.kind, (byKind.get(it.kind) ?? 0) + 1);
+    });
+    const chunksWithExercises = localChunks.filter((c) => interactions.some((it) => it.chunkId === c.id)).length;
+    return {
+      byKind,
+      chunksWithExercises,
+      chunksWithoutExercises: Math.max(0, localChunks.length - chunksWithExercises),
+    };
+  }, [interactions, localChunks]);
 
   // ── Per-chunk add form state ────────────────────────────────────────────────
   const [addingChunkId, setAddingChunkId] = useState<string | null>(null);
@@ -132,6 +158,7 @@ export function TabExercises({
   // ── Per-chunk generate state ────────────────────────────────────────────────
   const [openGenerateChunkIds, setOpenGenerateChunkIds] = useState<Set<string>>(new Set());
   const [chunkGenState, setChunkGenState] = useState<Record<string, ChunkGenPhase>>({});
+  const [deletingScope, setDeletingScope] = useState<"lesson" | string | null>(null);
 
   useEffect(() => {
     const chunkAbortControllers = chunkAbortRefs.current;
@@ -152,27 +179,27 @@ export function TabExercises({
     updateInteractions(updater(interactionsRef.current));
   }
 
-  // ── Default config ───────────────────────────────────────────────────────────
+  // ── Generate handler ────────────────────────────────────────────────────────
 
-  function handleSaveDefaultCfg() {
-    const total = totalQuantity(defaultQuantities);
-    if (total === 0) { setDefaultCfgError("Chọn ít nhất một câu."); return; }
-    setDefaultCfgError(null);
-    startSaveDefaultCfg(async () => {
+  async function handleGenDialogGenerate(force: boolean, difficulty: string, focusPrompt: string) {
+    // Save default config first
+    const configTotal = totalQuantity(defaultQuantities);
+    if (configTotal > 0) {
       try {
         const kinds = toKindsList(defaultQuantities);
         await aiClient.updateLessonDefaultInteractionConfig({
           lessonId,
           defaultInteractionConfig: create(ChunkInteractionConfigSchema, {
-            count: total, kinds, strategy: GenerationStrategy.EVEN_DISTRIBUTION,
+            count: configTotal, kinds, strategy: GenerationStrategy.EVEN_DISTRIBUTION,
           }),
         });
-        setExpandedConfig(false);
-        setDefaultConfigSaved(true);
-      } catch (err) {
-        setDefaultCfgError(err instanceof ConnectError ? err.message : "Không thể lưu cấu hình");
+      } catch {
+        toast.error("Không thể lưu cấu hình mặc định");
+        return;
       }
-    });
+    }
+    setGenDialogOpen(false);
+    onGenerateLesson(force, difficulty, focusPrompt);
   }
 
   // ── Add interaction ──────────────────────────────────────────────────────────
@@ -192,6 +219,7 @@ export function TabExercises({
           const it = res.interaction;
           updateInteractionsFromCurrent(prev => [...prev, it]);
           setAddingChunkId(null);
+          router.refresh();
         }
       } catch (err) {
         setAddError(err instanceof ConnectError ? err.message : "Không thể thêm câu hỏi");
@@ -300,257 +328,368 @@ export function TabExercises({
     })();
   }
 
+  async function handleDeleteLessonInteractions() {
+    if (interactionsRef.current.length === 0 || deletingScope) return;
+    const ok = window.confirm("Xóa toàn bộ bài tập của bài học này? Hành động này không thể hoàn tác.");
+    if (!ok) return;
+
+    setDeletingScope("lesson");
+    try {
+      await interactionClient.deleteLessonInteractions({ lessonId });
+      updateInteractions([]);
+      router.refresh();
+      toast.success("Đã xóa toàn bộ bài tập");
+    } catch (err) {
+      toast.error(err instanceof ConnectError ? err.message : "Không thể xóa bài tập");
+    } finally {
+      setDeletingScope(null);
+    }
+  }
+
+  async function handleDeleteChunkInteractions(chunkId: string) {
+    const chunkInteractions = interactionsRef.current.filter((it) => it.chunkId === chunkId);
+    if (chunkInteractions.length === 0 || deletingScope) return;
+    const chunkTitle = localChunks.find((c) => c.id === chunkId)?.summary ?? "phân đoạn này";
+    const ok = window.confirm(`Xóa ${chunkInteractions.length} bài tập trong "${chunkTitle}"? Hành động này không thể hoàn tác.`);
+    if (!ok) return;
+
+    setDeletingScope(chunkId);
+    try {
+      await interactionClient.deleteLessonInteractions({ lessonId, chunkId });
+      updateInteractionsFromCurrent((prev) => prev.filter((it) => it.chunkId !== chunkId));
+      router.refresh();
+      toast.success("Đã xóa bài tập của phân đoạn");
+    } catch (err) {
+      toast.error(err instanceof ConnectError ? err.message : "Không thể xóa bài tập của phân đoạn");
+    } finally {
+      setDeletingScope(null);
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   const isGenerating = genState.phase === "running";
   const hasChunks = localChunks.length > 0;
   const someChunkGenerating = Object.values(chunkGenState).some(s => s?.phase === "running");
+  const isDeleting = deletingScope !== null;
+  const isActuallyBusy = disabled || isGenerating || someChunkGenerating || isDeleting;
+  const chunksWithConfigCount = localChunks.filter(c => !!c.interactionConfig).length;
+
+  if (!hasChunks) {
+    return (
+      <div className="flex flex-col items-center justify-center p-10 text-center border border-dashed border-border/80 rounded-2xl bg-muted/5">
+        <div className="rounded-full bg-muted/20 p-4 border border-border/40 mb-4">
+          <LockIcon className="size-6 text-muted-foreground animate-pulse" />
+        </div>
+        <h3 className="text-sm font-semibold text-foreground/90">Thiết kế bài tập chưa sẵn sàng</h3>
+        <p className="text-sm text-muted-foreground max-w-sm mt-2 leading-relaxed">
+          Hoàn thành <strong>Bước 3: Phân đoạn</strong> trước để chia nội dung bài học thành các phần ngữ cảnh.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
 
       {/* ── Header ── */}
-      <div className="rounded-md border border-border bg-muted/20 p-3 flex flex-col gap-3">
-
-        {/* Summary + feedback mode */}
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-xs text-muted-foreground flex-1">
-            {hasChunks
-              ? `${interactions.length} bài tập trong ${localChunks.length} phân đoạn`
-              : "Chưa có phân đoạn — vào tab Phân đoạn video để phân đoạn trước"}
-          </p>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-muted-foreground">Phản hồi:</span>
+      <div className="rounded-xl border border-border bg-gradient-to-r from-background to-muted/20 p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          {/* Summary stats */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-4">
+              <div className="flex flex-col items-center">
+                <span className="text-3xl font-bold tabular-nums">{interactions.length}</span>
+                <span className="text-xs text-muted-foreground">bài tập</span>
+              </div>
+              <div className="h-10 w-px bg-border" />
+              <div className="flex flex-col items-center">
+                <span className="text-3xl font-bold tabular-nums">
+                  {exerciseSummary.chunksWithExercises}<span className="text-lg text-muted-foreground">/{localChunks.length}</span>
+                </span>
+                <span className="text-xs text-muted-foreground">phân đoạn</span>
+              </div>
+              {exerciseSummary.chunksWithoutExercises > 0 && (
+                <>
+                  <div className="h-10 w-px bg-border" />
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-bold tabular-nums text-amber-600 dark:text-amber-400">
+                      {exerciseSummary.chunksWithoutExercises}
+                    </span>
+                    <span className="text-xs text-muted-foreground">trống</span>
+                  </div>
+                </>
+              )}
+            </div>
+            {/* Kind breakdown */}
+            {interactions.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { kind: InteractionKind.SINGLE_CHOICE, label: "MCQ 1 đáp án", color: "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400" },
+                  { kind: InteractionKind.MULTIPLE_CHOICE, label: "MCQ nhiều đáp án", color: "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400" },
+                  { kind: InteractionKind.FILL_BLANK, label: "Điền đáp án", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400" },
+                  { kind: InteractionKind.READING, label: "Bài đọc", color: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400" },
+                  { kind: InteractionKind.LISTENING, label: "Bài nghe", color: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" },
+                ].map(({ kind, label, color }) => {
+                  const count = exerciseSummary.byKind.get(kind) ?? 0;
+                  if (count === 0) return null;
+                  return (
+                    <span key={kind} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${color}`}>
+                      {label}
+                      <span className="bg-background/50 rounded-full px-1.5 py-0.5 text-xs font-bold">{count}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {/* Actions */}
+          <div className="flex items-center gap-3 shrink-0">
             <select
               value={feedbackMode}
-              disabled={savingFeedback}
+              disabled={savingFeedback || isActuallyBusy}
               onChange={(e) => onFeedbackModeChange(Number(e.target.value) as FeedbackMode)}
-              className="text-xs rounded border border-input bg-background px-1.5 py-0.5 text-foreground disabled:opacity-50"
+              className="text-sm rounded-lg border border-input bg-background px-3 py-2 text-foreground disabled:opacity-50"
             >
-              <option value={FeedbackMode.HIDDEN}>Ẩn</option>
-              <option value={FeedbackMode.AFTER_SUBMIT}>Sau khi nộp</option>
-              <option value={FeedbackMode.AFTER_EACH}>Sau mỗi câu</option>
+              <option value={FeedbackMode.HIDDEN}>Phản hồi: Ẩn</option>
+              <option value={FeedbackMode.AFTER_SUBMIT}>Phản hồi: Sau khi nộp</option>
+              <option value={FeedbackMode.AFTER_EACH}>Phản hồi: Sau mỗi câu</option>
             </select>
+            {interactions.length > 0 && (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isActuallyBusy}
+                onClick={handleDeleteLessonInteractions}
+                className="gap-2"
+              >
+                {deletingScope === "lesson" ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <Trash2Icon className="size-4" />
+                )}
+                Xóa tất cả
+              </Button>
+            )}
+            {interactions.length > 0 && (
+              <Button
+                disabled={isActuallyBusy}
+                onClick={() => setGenDialogOpen(true)}
+                className="gap-2"
+                data-testid="generate-all-btn"
+              >
+                {isGenerating ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <SparklesIcon className="size-4" />
+                )}
+                {isGenerating ? "Đang tạo..." : "Tạo thêm"}
+              </Button>
+            )}
           </div>
         </div>
+      </div>
 
-        {/* Action row */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant={questionsGenerated ? "outline" : "default"}
-            size="sm"
-            disabled={disabled || !hasChunks || isGenerating || someChunkGenerating}
-            onClick={() => setLessonGenFormOpen(o => !o)}
-            className="gap-2"
-            data-testid="generate-all-btn"
-            title={someChunkGenerating ? "Đang tạo bài cho một phân đoạn, vui lòng chờ" : undefined}
-          >
-            {isGenerating
-              ? <Loader2Icon className="size-4 animate-spin" />
-              : questionsGenerated
-                ? <RefreshCwIcon className="size-4" />
-                : <SparklesIcon className="size-4" />}
-            {isGenerating ? "Đang tạo..." : questionsGenerated ? "Tạo thêm toàn bài học" : "Tạo AI toàn bài học"}
-          </Button>
-
-          <Button
-            variant="ghost" size="sm" className="gap-1.5 text-muted-foreground"
-            disabled={disabled}
-            onClick={() => setExpandedConfig(o => !o)}
-          >
-            <SettingsIcon className="size-4" />
-            Cấu hình mặc định
-            {expandedConfig
-              ? <ChevronDownIcon className="size-3" />
-              : <ChevronRightIcon className="size-3" />}
-          </Button>
-
-          {!hasChunks && (
-            <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px flex items-center gap-1">
-              <LockIcon className="size-2.5" /> Cần phân đoạn trước
-            </span>
+      {/* ── Generation progress banner ── */}
+      {isGenerating && genState.totalChunks > 0 && (
+        <div className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10 px-5 py-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Loader2Icon className="size-4 animate-spin text-primary" />
+              <p className="text-sm font-semibold">Đang tạo bài tập</p>
+            </div>
+            <p className="text-sm font-medium text-primary">
+              {genState.chunkIndex + 1}/{genState.totalChunks}
+            </p>
+          </div>
+          <div className="w-full bg-primary/20 rounded-full h-2">
+            <div
+              className="bg-primary h-2 rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${((genState.chunkIndex + 1) / genState.totalChunks) * 100}%` }}
+            />
+          </div>
+          {genState.message && (
+            <p className="text-xs text-muted-foreground mt-2.5">{genState.message}</p>
           )}
         </div>
-
-        {/* Inline default config panel */}
-        {expandedConfig && (
-          <div className="rounded-md border border-border p-3 bg-background flex flex-col gap-3">
-            <p className="text-xs font-medium">Cấu hình mặc định cho cả bài học</p>
-            <p className="text-xs text-muted-foreground">Áp dụng cho các phân đoạn chưa có cấu hình riêng</p>
-            <KindQuantityGrid
-              value={defaultQuantities}
-              onChange={setDefaultQuantities}
-              disabled={savingDefaultCfg}
-            />
-            {defaultCfgError && <p className="text-xs text-destructive">{defaultCfgError}</p>}
-            <div className="flex gap-2 justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setExpandedConfig(false)} disabled={savingDefaultCfg}>Hủy</Button>
-              <Button size="sm" onClick={handleSaveDefaultCfg}
-                disabled={savingDefaultCfg || totalQuantity(defaultQuantities) === 0} className="gap-1">
-                {savingDefaultCfg && <Loader2Icon className="size-3 animate-spin" />}
-                Lưu
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Lesson-wide gen form */}
-        {lessonGenFormOpen && !isGenerating && (
-          <LessonWideGenForm
-            chunks={localChunks}
-            interactionsCount={interactions.length}
-            defaultQuantities={defaultQuantities}
-            disabled={disabled}
-            force={lessonGenForce}
-            onForceChange={setLessonGenForce}
-            onGenerate={() => { setLessonGenFormOpen(false); onGenerateLesson(lessonGenForce); }}
-            onCancel={() => setLessonGenFormOpen(false)}
-            hasDefaultConfig={defaultConfigSaved}
-            onOpenDefaultConfig={() => { setLessonGenFormOpen(false); setExpandedConfig(true); }}
-          />
-        )}
-
-        {/* Lesson-wide gen progress */}
-        {genState.phase === "running" && (
-          <p className="text-xs text-muted-foreground">
-            {genState.message}
-            {genState.totalChunks > 0 && ` (${genState.chunkIndex + 1}/${genState.totalChunks})`}
-          </p>
-        )}
-        {genState.phase === "done" && (
-          <p className="text-xs text-green-700 dark:text-green-400 font-medium" data-testid="gen-done">
+      )}
+      {genState.phase === "done" && (
+        <div className="rounded-xl border border-green-200 dark:border-green-800 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 px-5 py-4">
+          <p className="text-sm font-semibold text-green-700 dark:text-green-400" data-testid="gen-done">
             {genWarnings.length > 0
               ? `Hoàn thành (${genWarnings.length} đoạn gặp lỗi)`
-              : "Câu hỏi đã được tạo thành công!"}
+              : "Tạo bài tập thành công!"}
           </p>
-        )}
-        {genWarnings.length > 0 && (
-          <div className="flex flex-col gap-0.5">
-            {genWarnings.map((w, i) => (
-              <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{w}</p>
-            ))}
+        </div>
+      )}
+      {genState.phase === "error" && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-5 py-4" data-testid="gen-error">
+          <p className="text-sm font-semibold text-destructive">Không thể tạo bài tập</p>
+          <p className="text-xs text-destructive/70 mt-1">{genState.message}</p>
+        </div>
+      )}
+
+      {/* ── Empty state CTA ── */}
+      {interactions.length === 0 && !isGenerating && (
+        <div className="flex flex-col items-center gap-5 py-12 rounded-2xl border-2 border-dashed border-primary/20 bg-gradient-to-b from-primary/5 to-transparent">
+          <div className="rounded-2xl bg-primary/10 p-5 shadow-lg shadow-primary/10">
+            <SparklesIcon className="size-10 text-primary" />
           </div>
-        )}
-        {genState.phase === "error" && (
-          <p className="text-xs text-destructive" data-testid="gen-error">{genState.message}</p>
+          <div className="text-center max-w-lg">
+            <h3 className="text-xl font-bold">Tạo bài tập bằng AI</h3>
+            <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+              Tự động tạo câu hỏi trắc nghiệm, điền đáp án, bài đọc, bài nghe cho {localChunks.length} phân đoạn nội dung.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button
+              size="lg"
+              onClick={() => setGenDialogOpen(true)}
+              className="gap-2 px-8"
+              data-testid="generate-all-btn"
+            >
+              <SparklesIcon className="size-5" />
+              Bắt đầu tạo
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Search + filter bar ── */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 min-w-[200px]">
+          <input
+            type="search"
+            placeholder="Tìm phân đoạn..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full text-sm rounded-xl border border-input bg-background pl-10 pr-3 py-2.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <select
+          value={chunkFilter}
+          onChange={e => setChunkFilter(e.target.value as ChunkFilter)}
+          className="text-sm rounded-xl border border-input bg-background px-3 py-2.5 text-foreground"
+        >
+          <option value="all">Tất cả</option>
+          <option value="empty">Chưa có bài tập</option>
+          <option value="has">Đã có bài tập</option>
+          <option value="default-cfg">Cấu hình mặc định</option>
+          <option value="custom-cfg">Cấu hình riêng</option>
+        </select>
+        {isFiltered && (
+          <button
+            type="button"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors px-2"
+            onClick={() => { setSearchQuery(""); setChunkFilter("all"); }}
+          >
+            Xoá lọc
+          </button>
         )}
       </div>
 
       {/* ── Chunk list ── */}
-      {hasChunks ? (
-        <div className="flex flex-col gap-3">
-
-          {/* Search + filter bar */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <input
-              type="search"
-              placeholder="Tìm phân đoạn theo nội dung..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="flex-1 min-w-[180px] text-xs rounded border border-input bg-background px-2.5 py-1.5 text-foreground placeholder:text-muted-foreground"
-            />
-            <select
-              value={chunkFilter}
-              onChange={e => setChunkFilter(e.target.value as ChunkFilter)}
-              className="text-xs rounded border border-input bg-background px-2 py-1.5 text-foreground"
-            >
-              <option value="all">Tất cả phân đoạn</option>
-              <option value="empty">Chưa có bài tập</option>
-              <option value="has">Đã có bài tập</option>
-              <option value="default-cfg">Dùng cấu hình mặc định</option>
-              <option value="custom-cfg">Có cấu hình riêng</option>
-            </select>
-            {isFiltered && (
-              <>
-                <span className="text-xs text-muted-foreground">
-                  {filteredChunks.length}/{localChunks.length} phân đoạn
-                </span>
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => { setSearchQuery(""); setChunkFilter("all"); }}
-                >
-                  Reset ✕
-                </button>
-              </>
-            )}
-          </div>
-
-          {filteredChunks.map((chunk) => (
-            <ChunkSection
-              key={chunk.id}
-              chunk={chunk}
-              interactions={interactions.filter(it => it.chunkId === chunk.id)}
-              expanded={expandedChunks.has(chunk.id)}
-              onToggle={() => toggleChunk(chunk.id)}
-              isGenerating={openGenerateChunkIds.has(chunk.id) || chunkGenState[chunk.id]?.phase === "running"}
-              isAdding={addingChunkId === chunk.id}
-              chunkGen={chunkGenState[chunk.id]}
-              lessonId={lessonId}
-              token={token}
-              disabled={disabled}
-              addSaving={addSaving}
-              addError={addError}
-              onOpenGenerate={() => handleOpenGenerate(chunk.id)}
-              onCloseGenerate={() => handleCloseGenerate(chunk.id)}
-              onGenerate={(count, kinds, strategy) => handleChunkGenerate(chunk.id, count, kinds, strategy)}
-              onOpenAdd={() => handleOpenAdd(chunk.id)}
-              onCloseAdd={() => { setAddingChunkId(null); setAddError(null); }}
-              onSaveAdd={(data) => handleAdd(chunk.id, data)}
-              onUpdate={(updated) => updateInteractionsFromCurrent(prev =>
+      <div className="flex flex-col gap-3">
+        {filteredChunks.map((chunk) => (
+          <ChunkSection
+            key={chunk.id}
+            chunk={chunk}
+            interactions={interactions.filter(it => it.chunkId === chunk.id)}
+            expanded={expandedChunks.has(chunk.id)}
+            onToggle={() => toggleChunk(chunk.id)}
+            isGenerating={openGenerateChunkIds.has(chunk.id) || chunkGenState[chunk.id]?.phase === "running"}
+            isAdding={addingChunkId === chunk.id}
+            chunkGen={chunkGenState[chunk.id]}
+            lessonId={lessonId}
+            token={token}
+            disabled={disabled || isGenerating || isDeleting}
+            addSaving={addSaving}
+            addError={addError}
+            onOpenGenerate={() => handleOpenGenerate(chunk.id)}
+            onCloseGenerate={() => handleCloseGenerate(chunk.id)}
+            onGenerate={(count, kinds, strategy) => handleChunkGenerate(chunk.id, count, kinds, strategy)}
+            onOpenAdd={() => handleOpenAdd(chunk.id)}
+            onCloseAdd={() => { setAddingChunkId(null); setAddError(null); }}
+            onSaveAdd={(data) => handleAdd(chunk.id, data)}
+            onDeleteAllInChunk={() => handleDeleteChunkInteractions(chunk.id)}
+            onUpdate={(updated) => {
+              updateInteractionsFromCurrent(prev =>
                 prev.map(x => x.id === updated.id ? updated : x),
-              )}
-              onDelete={(id) => updateInteractionsFromCurrent(prev =>
+              );
+              router.refresh();
+            }}
+            onDelete={(id) => {
+              updateInteractionsFromCurrent(prev =>
                 prev.filter(x => x.id !== id),
-              )}
-            />
-          ))}
+              );
+              router.refresh();
+            }}
+          />
+        ))}
 
-          {filteredChunks.length === 0 && isFiltered && (
-            <p className="text-xs text-muted-foreground text-center py-4">
-              Không tìm thấy phân đoạn nào phù hợp.
-            </p>
-          )}
-
-          {/* Orphan interactions */}
-          {(() => {
-            const orphans = interactions.filter(
-              (it) => !it.chunkId || !localChunks.some((c) => c.id === it.chunkId),
-            );
-            if (orphans.length === 0) return null;
-            return (
-              <div className="rounded-md border border-dashed border-border p-3">
-                <p className="text-xs text-muted-foreground mb-2">
-                  Bài tập không thuộc phân đoạn nào ({orphans.length})
-                </p>
-                <div className="flex flex-col gap-2">
-                  {orphans.map((it, i) => (
-                    <InteractionRow
-                      key={it.id}
-                      interaction={it}
-                      index={i}
-                      lessonId={lessonId}
-                      token={token}
-                      disabled={disabled}
-                      onUpdate={(updated) => updateInteractionsFromCurrent(prev =>
-                        prev.map(x => x.id === updated.id ? updated : x),
-                      )}
-                      onDelete={(id) => updateInteractionsFromCurrent(prev =>
-                        prev.filter(x => x.id !== id),
-                      )}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      ) : (
-        <div className="rounded-md border border-dashed border-border p-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Vào tab <strong>Phân đoạn video</strong> để phân đoạn transcript trước khi tạo bài tập.
+        {filteredChunks.length === 0 && isFiltered && (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            Không tìm thấy phân đoạn nào phù hợp.
           </p>
-        </div>
+        )}
+
+        {/* Orphan interactions */}
+        {(() => {
+          const orphans = interactions.filter(
+            (it) => !it.chunkId || !localChunks.some((c) => c.id === it.chunkId),
+          );
+          if (orphans.length === 0) return null;
+          return (
+            <div className="rounded-lg border border-dashed border-border p-4">
+              <p className="text-sm text-muted-foreground mb-3">
+                Bài tập không thuộc phân đoạn nào ({orphans.length})
+              </p>
+              <div className="flex flex-col gap-2">
+                {orphans.map((it, i) => (
+                  <InteractionRow
+                    key={it.id}
+                    interaction={it}
+                    index={i}
+                    lessonId={lessonId}
+                    token={token}
+                    disabled={disabled}
+                    onUpdate={(updated) => {
+                      updateInteractionsFromCurrent(prev =>
+                        prev.map(x => x.id === updated.id ? updated : x),
+                      );
+                      router.refresh();
+                    }}
+                    onDelete={(id) => {
+                      updateInteractionsFromCurrent(prev =>
+                        prev.filter(x => x.id !== id),
+                      );
+                      router.refresh();
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* ── Generate dialog ── */}
+      {genDialogOpen && (
+        <GenerateExercisesDialog
+          open={genDialogOpen}
+          onOpenChange={setGenDialogOpen}
+          chunksCount={localChunks.length}
+          chunksWithExercisesCount={exerciseSummary.chunksWithExercises}
+          chunksWithConfigCount={chunksWithConfigCount}
+          interactionsCount={interactions.length}
+          defaultQuantities={defaultQuantities}
+          onDefaultQuantitiesChange={setDefaultQuantities}
+          isGenerating={isGenerating}
+          onGenerate={handleGenDialogGenerate}
+        />
       )}
     </div>
   );

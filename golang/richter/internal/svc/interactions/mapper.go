@@ -91,8 +91,10 @@ func KindToDBString(kind richterv1.InteractionKind) string { return kindToDBStri
 
 func kindToDBString(kind richterv1.InteractionKind) string {
 	switch kind {
-	case richterv1.InteractionKind_INTERACTION_KIND_MCQ:
+	case richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE:
 		return "mcq"
+	case richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE:
+		return "multiple_choice"
 	case richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK:
 		return "fill_blank"
 	case richterv1.InteractionKind_INTERACTION_KIND_LISTENING:
@@ -110,7 +112,9 @@ func DBStringToKind(s string) richterv1.InteractionKind { return dbStringToKind(
 func dbStringToKind(s string) richterv1.InteractionKind {
 	switch s {
 	case "mcq":
-		return richterv1.InteractionKind_INTERACTION_KIND_MCQ
+		return richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE
+	case "multiple_choice":
+		return richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE
 	case "fill_blank":
 		return richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK
 	case "listening":

@@ -3,6 +3,7 @@
 package v1
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"testing"
@@ -10,7 +11,12 @@ import (
 	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/buf/gen/richter/v1/richterv1connect"
+	"example.com/richter/cfg"
+	"example.com/richter/internal"
 	"github.com/brianvoe/gofakeit/v7"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/samber/do/v2"
 )
 
 // ── shared test client struct ─────────────────────────────────────────────────
@@ -36,6 +42,35 @@ func setupCoursesTestClients(t *testing.T) coursesTestClients {
 		members: richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url),
 		users:   richterv1connect.NewUserServiceClient(httpClientWithToken(adminToken), url),
 	}
+}
+
+func putTestLessonVideoObject(t *testing.T, ctx context.Context, key string) {
+	t.Helper()
+	s3cfg, err := do.Invoke[*cfg.S3Cfg](internal.Injector)
+	if err != nil {
+		t.Fatalf("invoke S3Cfg: %v", err)
+	}
+	client, err := minio.New(s3cfg.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(s3cfg.AccessKeyID, s3cfg.SecretAccessKey, ""),
+		Secure: s3cfg.UseSSL,
+	})
+	if err != nil {
+		t.Fatalf("create minio client: %v", err)
+	}
+	if exists, err := client.BucketExists(ctx, s3cfg.Bucket); err != nil {
+		t.Fatalf("check bucket: %v", err)
+	} else if !exists {
+		if err := client.MakeBucket(ctx, s3cfg.Bucket, minio.MakeBucketOptions{}); err != nil {
+			t.Fatalf("create bucket: %v", err)
+		}
+	}
+	body := []byte("fake test video")
+	if _, err := client.PutObject(ctx, s3cfg.Bucket, key, bytes.NewReader(body), int64(len(body)), minio.PutObjectOptions{ContentType: "video/mp4"}); err != nil {
+		t.Fatalf("put test video object: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = client.RemoveObject(context.Background(), s3cfg.Bucket, key, minio.RemoveObjectOptions{})
+	})
 }
 
 // ── setup helpers ─────────────────────────────────────────────────────────────
@@ -995,6 +1030,7 @@ func TestLessonLifecycle(t *testing.T) {
 
 	t.Run("UpdateLessonVideo", func(t *testing.T) {
 		key := "lessons/" + lessonID + "/video.mp4"
+		putTestLessonVideoObject(t, ctx, key)
 		res, err := c.lessons.UpdateLessonVideo(ctx, &richterv1.UpdateLessonVideoRequest{
 			Id:              lessonID,
 			VideoStorageKey: key,
@@ -1238,9 +1274,11 @@ func TestLessonsAuthz(t *testing.T) {
 
 	// --- UpdateLessonVideo ---
 	t.Run("UpdateLessonVideo", func(t *testing.T) {
+		key := "lessons/" + lessonID + "/video.mp4"
+		putTestLessonVideoObject(t, ctx, key)
 		req := &richterv1.UpdateLessonVideoRequest{
 			Id:              lessonID,
-			VideoStorageKey: "lessons/" + lessonID + "/video.mp4",
+			VideoStorageKey: key,
 			DurationSeconds: 60,
 		}
 		t.Run("Anon/Unauthenticated", func(t *testing.T) {

@@ -1,6 +1,7 @@
 package interactions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -67,6 +68,99 @@ func (h *fillBlankHandler) Grade(configJSON, responseJSON []byte) (score, maxSco
 		}
 	}
 	return score, maxScore, "", nil
+}
+
+func (h *fillBlankHandler) GradeWithContext(ctx context.Context, deps GradingDeps, configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
+	var cfg fillBlankConfigJSON
+	if err = json.Unmarshal(configJSON, &cfg); err != nil {
+		return 0, 0, "", fmt.Errorf("fill_blank: unmarshal config: %w", err)
+	}
+	var resp fillBlankResponseJSON
+	if err = json.Unmarshal(responseJSON, &resp); err != nil {
+		return 0, 0, "", fmt.Errorf("fill_blank: unmarshal response: %w", err)
+	}
+
+	maxScore = float32(len(cfg.Blanks))
+	var feedbacks []string
+
+	for i, blank := range cfg.Blanks {
+		if i >= len(resp.Answers) {
+			feedbacks = append(feedbacks, fmt.Sprintf("Chỗ trống %d: Chưa trả lời.", i+1))
+			continue
+		}
+		got := strings.TrimSpace(resp.Answers[i])
+		if got == "" {
+			feedbacks = append(feedbacks, fmt.Sprintf("Chỗ trống %d: Chưa trả lời.", i+1))
+			continue
+		}
+
+		// 1. So khớp tĩnh trước để tối ưu hóa hiệu năng
+		matched := false
+		for _, want := range blank.Accepted {
+			if blank.CaseSensitive {
+				if got == want {
+					matched = true
+					break
+				}
+			} else {
+				if strings.EqualFold(got, strings.TrimSpace(want)) {
+					matched = true
+					break
+				}
+			}
+		}
+
+		if matched {
+			score++
+			feedbacks = append(feedbacks, fmt.Sprintf("Chỗ trống %d: Chính xác!", i+1))
+			continue
+		}
+
+		// 2. So khớp tĩnh không thành công -> Dùng LLM chấm điểm ngữ nghĩa (nếu có deps.GradeText)
+		if deps.GradeText != nil {
+			// Tạo ngữ cảnh trực quan cho câu chứa chỗ trống đang chấm
+			// Ví dụ: thay {{0}} bằng ___, giữ nguyên {{1}}...
+			contextTemplate := cfg.Template
+			for j := range cfg.Blanks {
+				placeholder := fmt.Sprintf("{{%d}}", j)
+				if j == i {
+					contextTemplate = strings.ReplaceAll(contextTemplate, placeholder, "______")
+				} else {
+					// Nếu học sinh đã điền các chỗ trống khác, có thể hiển thị câu trả lời của họ để làm rõ ngữ cảnh
+					if j < len(resp.Answers) && strings.TrimSpace(resp.Answers[j]) != "" {
+						contextTemplate = strings.ReplaceAll(contextTemplate, placeholder, "["+resp.Answers[j]+"]")
+					}
+				}
+			}
+
+			question := fmt.Sprintf("Điền từ vào chỗ trống trong câu: '%s'. Chỗ trống hiện tại đang được biểu thị bằng '______'.", contextTemplate)
+			expectedAnswer := strings.Join(blank.Accepted, ", ")
+
+			aiScore, _, aiFeedback, aiErr := deps.GradeText(ctx, question, got, expectedAnswer)
+			if aiErr == nil && aiScore >= 0.8 {
+				score++
+				msg := fmt.Sprintf("Chỗ trống %d: Chính xác (chấm bằng AI: %s)", i+1, got)
+				if aiFeedback != "" {
+					msg += " - " + aiFeedback
+				}
+				feedbacks = append(feedbacks, msg)
+				continue
+			} else {
+				msg := fmt.Sprintf("Chỗ trống %d: Không chính xác. Bạn điền: '%s'. Đáp án đúng gợi ý: '%s'.", i+1, got, blank.Accepted[0])
+				if aiFeedback != "" && aiScore > 0 {
+					msg += " Nhận xét: " + aiFeedback
+				}
+				feedbacks = append(feedbacks, msg)
+				continue
+			}
+		}
+
+		// Fallback nếu không có AI (unit tests)
+		feedbacks = append(feedbacks, fmt.Sprintf("Chỗ trống %d: Không chính xác. Bạn điền: '%s'.", i+1, got))
+	}
+
+	feedback = strings.Join(feedbacks, "\n")
+	return score, maxScore, feedback, nil
 }
 
 func (h *fillBlankHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
@@ -142,10 +236,10 @@ func (h *fillBlankHandler) ConfigFromUpdateProto(req *richterv1.UpdateInteractio
 // ── GeminiGenerator ───────────────────────────────────────────────────────────
 
 type fillBlankGeminiItem struct {
-	Prompt      string          `json:"prompt"`
-	Explanation string          `json:"explanation"`
-	StartSeconds float32        `json:"start_seconds"`
-	Config      fillBlankConfigJSON `json:"config"`
+	Prompt       string              `json:"prompt"`
+	Explanation  string              `json:"explanation"`
+	StartSeconds float32             `json:"start_seconds"`
+	Config       fillBlankConfigJSON `json:"config"`
 }
 
 func (h *fillBlankHandler) GeminiSchema() string {

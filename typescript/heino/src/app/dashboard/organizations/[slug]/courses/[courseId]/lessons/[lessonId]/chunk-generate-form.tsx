@@ -41,58 +41,63 @@ export function ChunkGenerateForm({
   }
 
   return (
-    <div className="rounded-md border border-border bg-background p-3 flex flex-col gap-2">
-      <p className="flex items-center gap-1.5 text-xs font-medium">
-        <SparklesIcon className="size-3.5 text-primary" />
-        Tạo bài tập AI - {chunk.summary}
+    <div className="rounded-xl border border-border bg-muted/10 p-4 flex flex-col gap-3">
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <div className="rounded-lg bg-primary/10 p-1.5">
+          <SparklesIcon className="size-4 text-primary" />
+        </div>
+        Tạo bài tập AI
       </p>
 
       {isRunning ? (
-        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <Loader2Icon className="size-3 animate-spin shrink-0" />
+        <div className="flex items-center gap-2 text-sm text-muted-foreground rounded-lg bg-primary/5 px-3 py-2.5">
+          <Loader2Icon className="size-4 animate-spin shrink-0 text-primary" />
           {chunkGen.message}
-        </p>
+        </div>
       ) : isDone ? (
-        <p className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400">
-          <CheckCircleIcon className="size-3.5" />
+        <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 rounded-lg bg-green-50 dark:bg-green-950/30 px-3 py-2.5">
+          <CheckCircleIcon className="size-4" />
           Hoàn thành
-        </p>
+        </div>
       ) : isError ? (
-        <p className="flex items-center gap-1.5 text-xs text-destructive">
-          <XCircleIcon className="size-3.5" />
+        <div className="flex items-center gap-2 text-sm text-destructive rounded-lg bg-destructive/5 px-3 py-2.5">
+          <XCircleIcon className="size-4" />
           {chunkGen.message}
-        </p>
+        </div>
       ) : (
         <>
           <KindQuantityGrid
             value={quantities}
             onChange={setQuantities}
             disabled={disabled}
+            helperText="Áp dụng cho phân đoạn đang mở."
+            totalLabel={(n) => `${n} câu`}
           />
 
           {chunkInteractionsCount > 0 && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
+            <p className="text-xs text-amber-700 dark:text-amber-400 rounded-lg bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
               {chunkInteractionsCount} bài hiện có sẽ được giữ lại; câu mới sẽ được thêm vào cuối.
             </p>
           )}
 
           <div className="flex gap-2">
             <Button
-              size="sm"
-              className="gap-1"
+              className="gap-2 rounded-xl"
               disabled={disabled || total === 0}
               onClick={handleGenerate}
             >
-              <SparklesIcon className="size-3" />
-              Tạo thêm {total} câu
+              <SparklesIcon className="size-4" />
+              Tạo {total} câu hỏi
             </Button>
-            <Button size="sm" variant="ghost" onClick={onClose}>Hủy</Button>
+            <Button variant="ghost" onClick={onClose} className="rounded-xl">
+              Hủy
+            </Button>
           </div>
         </>
       )}
 
       {(isDone || isError) && (
-        <Button size="sm" variant="ghost" className="self-start" onClick={onClose}>
+        <Button variant="ghost" className="self-start rounded-xl" onClick={onClose}>
           Đóng
         </Button>
       )}

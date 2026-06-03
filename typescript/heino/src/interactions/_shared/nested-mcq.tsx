@@ -24,9 +24,15 @@ export function NestedMcqStudent({
 }: NestedMcqStudentProps) {
   const hasAnswered = selected >= 0;
   const selectedIsCorrect = revealAnswer && selected === config.correctAnswer;
+  const questionText = config.question?.trim();
 
   return (
     <div className="flex flex-col gap-2">
+      {questionText && (
+        <p className="text-sm font-medium leading-relaxed text-foreground">
+          {questionText}
+        </p>
+      )}
       {revealAnswer && hasAnswered && (
         <p className={`flex items-center gap-1.5 text-xs font-medium ${selectedIsCorrect ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
           {selectedIsCorrect ? <CheckCircleIcon className="size-3.5" /> : <XCircleIcon className="size-3.5" />}
@@ -47,7 +53,7 @@ export function NestedMcqStudent({
             cls += " border-red-400 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 cursor-default";
           else if (isSelected)
             cls += " border-primary bg-primary/10 cursor-default";
-          else if (locked || hasAnswered)
+          else if (locked || revealAnswer)
             cls += " border-border text-muted-foreground cursor-default opacity-70";
           else
             cls += " border-border hover:border-primary/50 hover:bg-muted/50 cursor-pointer";
@@ -57,7 +63,7 @@ export function NestedMcqStudent({
               key={oi}
               type="button"
               className={cls}
-              disabled={locked || hasAnswered}
+              disabled={locked || revealAnswer}
               onClick={() => onSelect(oi)}
               data-testid={`nested-mcq-${questionIndex}-option-${oi}`}
             >
@@ -112,6 +118,13 @@ export function NestedMcqEditor({ questionIndex, config, onChange, onRemove }: N
           </button>
         )}
       </div>
+      <input
+        type="text"
+        value={config.question ?? ""}
+        onChange={(e) => onChange({ ...config, question: e.target.value })}
+        placeholder={`Nội dung câu hỏi ${questionIndex + 1}`}
+        className="rounded border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+      />
       {config.options.map((opt, oi) => (
         <div key={oi} className="flex items-center gap-2">
           <button
@@ -152,10 +165,11 @@ interface NestedMcqReviewProps {
 
 export function NestedMcqReview({ questionIndex, config, selected, canReveal }: NestedMcqReviewProps) {
   const correct = config.correctAnswer;
+  const questionText = config.question?.trim() || `Câu ${questionIndex + 1}`;
 
   return (
     <div className="flex flex-col gap-1 ml-2">
-      <p className="text-xs text-muted-foreground">Câu {questionIndex + 1}</p>
+      <p className="text-xs font-medium text-foreground">{questionText}</p>
       <div className="flex flex-col gap-0.5">
         {config.options.map((opt, oi) => {
           const isSelected = selected === oi;

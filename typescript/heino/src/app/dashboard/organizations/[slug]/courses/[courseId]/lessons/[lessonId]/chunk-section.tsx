@@ -1,51 +1,24 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronRightIcon, ChevronDownIcon, SparklesIcon, PlusIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  ChevronRightIcon, ChevronDownIcon, SparklesIcon, PlusIcon, MoreHorizontalIcon,
+  Trash2Icon,
+} from "lucide-react";
 import type { TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { GenerationStrategy } from "buf/gen/richter/v1/ai_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
-import { InteractionRow, KIND_BADGE_CLS, type InteractionFormData } from "./interaction-row";
+import { InteractionRow, type InteractionFormData } from "./interaction-row";
 import { ChunkGenerateForm, type ChunkGenPhase } from "./chunk-generate-form";
 import { ChunkAddForm } from "./chunk-add-form";
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
   return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
-
-const KIND_SHORT: Partial<Record<InteractionKind, string>> = {
-  [InteractionKind.MCQ]: "MCQ",
-  [InteractionKind.FILL_BLANK]: "Fill",
-  [InteractionKind.READING]: "Đọc",
-  [InteractionKind.LISTENING]: "Nghe",
-};
-
-function ChunkSummaryChip({ interactions }: { interactions: LessonInteraction[] }) {
-  if (interactions.length === 0) {
-    return <span className="text-xs text-muted-foreground">Chưa có bài tập</span>;
-  }
-  const byKind = interactions.reduce<Partial<Record<InteractionKind, number>>>((acc, i) => {
-    acc[i.kind] = (acc[i.kind] ?? 0) + 1;
-    return acc;
-  }, {});
-  return (
-    <span className="text-xs flex items-center gap-1">
-      <span className="text-muted-foreground">{interactions.length} bài tập</span>
-      <span className="flex gap-0.5">
-        {(Object.entries(byKind) as [string, number][]).map(([kind, count]) => (
-          <span
-            key={kind}
-            className={cn("rounded px-1 py-px text-xs font-medium", KIND_BADGE_CLS[Number(kind) as InteractionKind])}
-          >
-            {KIND_SHORT[Number(kind) as InteractionKind]}{count > 1 ? `×${count}` : ""}
-          </span>
-        ))}
-      </span>
-    </span>
-  );
 }
 
 interface ChunkSectionProps {
@@ -67,6 +40,7 @@ interface ChunkSectionProps {
   onOpenAdd: () => void;
   onCloseAdd: () => void;
   onSaveAdd: (data: InteractionFormData) => void;
+  onDeleteAllInChunk: () => void;
   onUpdate: (updated: LessonInteraction) => void;
   onDelete: (id: string) => void;
 }
@@ -78,78 +52,115 @@ export function ChunkSection({
   addSaving, addError,
   onOpenGenerate, onCloseGenerate, onGenerate,
   onOpenAdd, onCloseAdd, onSaveAdd,
+  onDeleteAllInChunk,
   onUpdate, onDelete,
 }: ChunkSectionProps) {
-  const hasCustomConfig = !!chunk.interactionConfig;
+  const openGenerate = () => {
+    if (!expanded) onToggle();
+    onOpenGenerate();
+  };
+  const openAdd = () => {
+    if (!expanded) onToggle();
+    onOpenAdd();
+  };
 
   return (
-    <div className="rounded-md border border-border overflow-hidden">
-      {/* Title bar — always visible */}
+    <div className="rounded-xl border border-border overflow-hidden bg-background shadow-sm hover:shadow-md transition-shadow">
+      {/* Title bar */}
       <div
         data-testid="chunk-title-bar"
-        className="flex items-center gap-2 px-3 py-2 bg-muted/30 cursor-pointer select-none"
+        className="flex items-center gap-3 px-5 py-4 hover:bg-muted/20 cursor-pointer select-none transition-colors"
         onClick={onToggle}
       >
         {expanded
-          ? <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          : <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />}
+          ? <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+          : <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />}
 
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate">{chunk.summary}</p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-muted-foreground shrink-0">
+          <div className="flex items-center gap-2 mt-1">
+            <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground font-mono">
               {formatTime(chunk.startSeconds)}–{formatTime(chunk.endSeconds)}
             </span>
-            <ChunkSummaryChip interactions={interactions} />
-            {hasCustomConfig && (
-              <span
-                className="text-xs border border-border rounded px-1 py-px text-muted-foreground"
-                title={`Cấu hình riêng: ${chunk.interactionConfig!.count} bài, ${chunk.interactionConfig!.kinds.map(k => KIND_SHORT[k]).filter(Boolean).join(" + ")}`}
-              >
-                ⚙
-              </span>
-            )}
+            <span className={`text-xs font-medium ${interactions.length > 0 ? "text-foreground" : "text-muted-foreground"}`}>
+              {interactions.length > 0
+                ? `${interactions.length} bài tập`
+                : "Chưa có bài tập"}
+            </span>
           </div>
         </div>
 
-        {/* Action buttons — stop propagation so clicking them doesn't toggle expand */}
-        <div
-          className="flex items-center gap-0.5 shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
+        {/* Primary actions */}
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           <Button
-            variant="ghost"
+            type="button"
+            variant="outline"
             size="sm"
-            className="size-6 p-0"
-            title={isGenerating ? "Đóng form tạo AI" : "Tạo bài tập bằng AI"}
+            className="h-8 gap-1.5 rounded-lg px-2.5"
             disabled={disabled || chunkGen?.phase === "running"}
-            onClick={() => {
-              if (isGenerating) onCloseGenerate();
-              else onOpenGenerate();
-            }}
+            onClick={openGenerate}
           >
-            <SparklesIcon className="size-3" />
+            <SparklesIcon className="size-3.5" />
+            AI
           </Button>
           <Button
-            variant="ghost"
+            type="button"
+            variant="secondary"
             size="sm"
-            className="size-6 p-0"
-            title={isAdding ? "Đóng form thêm" : "Thêm bài tập thủ công"}
+            className="h-8 gap-1.5 rounded-lg px-2.5"
             disabled={disabled}
-            onClick={() => {
-              if (isAdding) onCloseAdd();
-              else onOpenAdd();
-            }}
+            onClick={openAdd}
             data-testid="add-interaction-btn"
           >
-            <PlusIcon className="size-3" />
+            <PlusIcon className="size-3.5" />
+            Thêm
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="size-8 p-0 rounded-lg"
+                disabled={disabled}
+              >
+                <MoreHorizontalIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="rounded-xl">
+              <DropdownMenuItem
+                disabled={disabled || chunkGen?.phase === "running"}
+                onSelect={openGenerate}
+                className="rounded-lg"
+              >
+                <SparklesIcon className="size-4 mr-2" />
+                Tạo bài tập AI
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={disabled}
+                onSelect={openAdd}
+                className="rounded-lg"
+              >
+                <PlusIcon className="size-4 mr-2" />
+                Thêm thủ công
+              </DropdownMenuItem>
+              {interactions.length > 0 && (
+                <DropdownMenuItem
+                  disabled={disabled || chunkGen?.phase === "running"}
+                  onSelect={() => onDeleteAllInChunk()}
+                  className="rounded-lg text-destructive focus:text-destructive"
+                >
+                  <Trash2Icon className="size-4 mr-2" />
+                  Xóa bài tập phân đoạn
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {/* Body — only rendered when expanded */}
+      {/* Body */}
       {expanded && (
-        <div className="flex flex-col gap-2 p-2">
+        <div className="flex flex-col gap-3 px-5 pb-5 pt-2 border-t border-border">
           {isGenerating && (
             <ChunkGenerateForm
               chunk={chunk}
@@ -162,7 +173,32 @@ export function ChunkSection({
           )}
 
           {interactions.length === 0 && !isAdding && !isGenerating && (
-            <p className="text-xs text-muted-foreground px-1 py-1">Chưa có bài tập nào.</p>
+            <div className="flex flex-col items-center gap-3 py-6 rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10">
+              <p className="text-sm text-muted-foreground">Phân đoạn này chưa có bài tập</p>
+              <div className="flex gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-1.5 rounded-lg"
+                  disabled={disabled}
+                  onClick={openGenerate}
+                >
+                  <SparklesIcon className="size-3.5" />
+                  Tạo AI
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 rounded-lg"
+                  disabled={disabled}
+                  onClick={openAdd}
+                  data-testid="add-interaction-btn"
+                >
+                  <PlusIcon className="size-3.5" />
+                  Thêm thủ công
+                </Button>
+              </div>
+            </div>
           )}
 
           {interactions.map((it, i) => (

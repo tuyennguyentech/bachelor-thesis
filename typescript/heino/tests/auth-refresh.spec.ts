@@ -20,13 +20,13 @@ test.describe("Silent refresh flow", () => {
     expect(after.find((c) => c.name === "dyadia_refresh")?.value).not.toEqual(refreshBefore);
   });
 
-  test("expired access + invalid refresh redirects to /login?next=... + clears cookies", async ({ adminPage: page, context }) => {
+  test("expired access + invalid refresh redirects to /login?next=... + clears cookies", async ({ adminPage: page, context, baseURL }) => {
     await context.clearCookies({ name: "dyadia_access" });
-    const host = new URL(page.url()).hostname;
+    const origin = baseURL ?? "http://caddy";
     // Replace refresh cookie với token rác
     await context.clearCookies({ name: "dyadia_refresh" });
     await context.addCookies([
-      { name: "dyadia_refresh", value: "not-a-real-token", domain: host, path: "/" },
+      { name: "dyadia_refresh", value: "not-a-real-token", url: origin },
     ]);
 
     await page.goto("/admin/organizations");
@@ -37,12 +37,12 @@ test.describe("Silent refresh flow", () => {
     expect(after.find((c) => c.name === "dyadia_refresh")).toBeFalsy();
   });
 
-  test("after re-login user returns to original page (bug 2 fix)", async ({ adminPage: page, context }) => {
+  test("after re-login user returns to original page (bug 2 fix)", async ({ adminPage: page, context, baseURL }) => {
     await context.clearCookies({ name: "dyadia_access" });
-    const host = new URL(page.url()).hostname;
+    const origin = baseURL ?? "http://caddy";
     await context.clearCookies({ name: "dyadia_refresh" });
     await context.addCookies([
-      { name: "dyadia_refresh", value: "bogus", domain: host, path: "/" },
+      { name: "dyadia_refresh", value: "bogus", url: origin },
     ]);
 
     const targetPath = "/admin/organizations";

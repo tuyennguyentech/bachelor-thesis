@@ -130,6 +130,7 @@ test.describe("Video upload flow", () => {
 
     // Hard reload — server must render "Thay video" since video_key is now set
     await page.goto(lessonUrl);
+    await page.getByTestId("workflow-step-upload").click();
     await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
   });
 
@@ -143,6 +144,7 @@ test.describe("Video upload flow", () => {
 
     // Reload so button is server-rendered as "Thay video"
     await page.goto(lessonUrl);
+    await page.getByTestId("workflow-step-upload").click();
     await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
 
     // Second upload via the replace button (same hidden input, button label irrelevant to setInputFiles)

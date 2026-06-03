@@ -33,16 +33,16 @@ import (
 // ── shared setup ──────────────────────────────────────────────────────────────
 
 type aiTestEnv struct {
-	url           string
-	orgID         string
-	lessonID      string
-	moduleID      string
-	courseID      string
-	ownerID       string
-	ownerToken    string
-	teacherToken  string
-	studentToken  string
-	student2Token string
+	url            string
+	orgID          string
+	lessonID       string
+	moduleID       string
+	courseID       string
+	ownerID        string
+	ownerToken     string
+	teacherToken   string
+	studentToken   string
+	student2Token  string
 	nonMemberToken string
 
 	aiAnon      richterv1connect.AIServiceClient
@@ -128,16 +128,16 @@ func setupAIEnv(t *testing.T) aiTestEnv {
 	}
 
 	return aiTestEnv{
-		url:           url,
-		orgID:         orgID,
-		lessonID:      lessonRes.Lesson.Id,
-		moduleID:      modRes.Module.Id,
-		courseID:      courseRes.Course.Id,
-		ownerID:       ownerID,
-		ownerToken:    ownerToken,
-		teacherToken:  teacherToken,
-		studentToken:  studentToken,
-		student2Token: student2Token,
+		url:            url,
+		orgID:          orgID,
+		lessonID:       lessonRes.Lesson.Id,
+		moduleID:       modRes.Module.Id,
+		courseID:       courseRes.Course.Id,
+		ownerID:        ownerID,
+		ownerToken:     ownerToken,
+		teacherToken:   teacherToken,
+		studentToken:   studentToken,
+		student2Token:  student2Token,
 		nonMemberToken: nonMemberToken,
 
 		aiAnon:      richterv1connect.NewAIServiceClient(http.DefaultClient, url),
@@ -530,7 +530,6 @@ func TestAIWatchProgress(t *testing.T) {
 		}(), connect.CodeInvalidArgument)
 	})
 }
-
 
 // ── TestAIChunkConfig ─────────────────────────────────────────────────────────
 
@@ -1110,6 +1109,27 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 			t.Errorf("cross-lesson chunk: want CodeInvalidArgument, got %v (err=%v)", connect.CodeOf(got), got)
 		}
 	})
+
+	t.Run("CustomDifficultyAndPrompt/Processes", func(t *testing.T) {
+		s, err := e.aiTeacher.GenerateInteractionsStream(ctx, &richterv1.GenerateInteractionsRequest{
+			LessonId:        e.lessonID,
+			ForceRegenerate: true,
+			Difficulty:      "medium",
+			FocusPrompt:     "Test focus",
+		})
+		if err != nil {
+			t.Fatalf("GenerateInteractionsStream call: %v", err)
+		}
+		var events []*richterv1.GenerateInteractionsProgressEvent
+		for s.Receive() {
+			events = append(events, s.Msg())
+		}
+		_ = s.Err()
+
+		if len(events) == 0 {
+			t.Fatal("expected at least one event with custom difficulty and prompt")
+		}
+	})
 }
 
 // ── TestAIFDBContent ──────────────────────────────────────────────────────────
@@ -1610,7 +1630,7 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		}
 	}
 
-	videoKey := fmt.Sprintf("test-pipeline/%s/edu-sample.mp4", e.lessonID)
+	videoKey := fmt.Sprintf("lessons/%s/video/edu-sample.mp4", e.lessonID)
 	if err := testUploadVideoToS3(t, ctx, s3client, s3cfg.Bucket, videoKey, videoPath); err != nil {
 		t.Fatalf("upload video to S3: %v", err)
 	}
@@ -1954,7 +1974,8 @@ func TestUpdateLessonVideo_SameKey_ResetsAnalysis(t *testing.T) {
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
-	const videoKey = "lessons/test-replace/video.mp4"
+	videoKey := "lessons/" + e.lessonID + "/video.mp4"
+	putTestLessonVideoObject(t, ctx, videoKey)
 
 	// First upload: set the initial video key.
 	if _, err := e.adminLessons.UpdateLessonVideo(ctx, &richterv1.UpdateLessonVideoRequest{
@@ -2011,7 +2032,7 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 			ChunkId: chunkID,
 			InteractionConfig: &richterv1.ChunkInteractionConfig{
 				Count:    3,
-				Kinds:    []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ, richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK},
+				Kinds:    []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE, richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK},
 				Strategy: richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION,
 			},
 		})
@@ -2096,7 +2117,7 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 			LessonId: e.lessonID,
 			DefaultInteractionConfig: &richterv1.ChunkInteractionConfig{
 				Count:    4,
-				Kinds:    []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ},
+				Kinds:    []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE},
 				Strategy: richterv1.GenerationStrategy_GENERATION_STRATEGY_AI_CHOOSE,
 			},
 		})

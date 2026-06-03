@@ -4,6 +4,7 @@ import { BookOpenIcon, CheckSquareIcon, ClockIcon, HeadphonesIcon, PencilLineIco
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import { getRenderer, extractConfig } from "@/interactions/registry";
+import type { InteractionGrade } from "@/interactions/types";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -21,6 +22,7 @@ interface Props {
   token?: string;
   lessonId?: string;
   isPreview?: boolean;
+  onGrade?: (grade: InteractionGrade) => void;
 }
 
 function formatTime(seconds: number) {
@@ -35,11 +37,17 @@ const KIND_META: Partial<Record<InteractionKind, {
   shellClass: string;
   badgeClass: string;
 }>> = {
-  [InteractionKind.MCQ]: {
+  [InteractionKind.SINGLE_CHOICE]: {
     description: "Chọn một đáp án đúng",
     icon: CheckSquareIcon,
     shellClass: "border-l-rose-400",
     badgeClass: "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+  },
+  [InteractionKind.MULTIPLE_CHOICE]: {
+    description: "Chọn một hoặc nhiều đáp án đúng",
+    icon: CheckSquareIcon,
+    shellClass: "border-l-purple-400",
+    badgeClass: "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300",
   },
   [InteractionKind.FILL_BLANK]: {
     description: "Điền đủ các chỗ trống",
@@ -74,6 +82,7 @@ export function InteractionCheckpoint({
   token,
   lessonId,
   isPreview,
+  onGrade,
 }: Props) {
   let renderer;
   try {
@@ -147,6 +156,8 @@ export function InteractionCheckpoint({
         lessonId={lessonId}
         interactionId={interaction.id}
         isPreview={isPreview}
+        kind={interaction.kind}
+        onGrade={onGrade}
       />
     </div>
   );

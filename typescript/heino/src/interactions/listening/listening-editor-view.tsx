@@ -18,6 +18,7 @@ const AUDIO_CONTENT_TYPES = new Set([
 ]);
 
 const EMPTY_MCQ: McqConfig = {
+  question: "",
   options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }],
   correctAnswer: 0,
 };

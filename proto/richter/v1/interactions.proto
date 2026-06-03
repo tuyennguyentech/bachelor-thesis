@@ -21,10 +21,11 @@ enum FeedbackMode {
 
 enum InteractionKind {
   INTERACTION_KIND_UNSPECIFIED = 0;
-  INTERACTION_KIND_MCQ = 1;
+  INTERACTION_KIND_SINGLE_CHOICE = 1;
   INTERACTION_KIND_FILL_BLANK = 2;
   INTERACTION_KIND_LISTENING = 3;
   INTERACTION_KIND_READING = 4;
+  INTERACTION_KIND_MULTIPLE_CHOICE = 5;
 }
 
 enum ListeningMode {
@@ -52,6 +53,10 @@ message McqConfig {
   // correct_answer is stripped (set to -1) for students before submission,
   // unless feedback_mode == AFTER_EACH. Server enforces this as defense-in-depth.
   int32 correct_answer = 2;
+  // correct_answers is used for MULTIPLE_CHOICE (set to empty for students)
+  repeated int32 correct_answers = 3;
+  // Optional question text for nested MCQs, e.g. listening comprehension items.
+  string question = 4;
 }
 
 // ── Fill-blank config ─────────────────────────────────────────────────────────
@@ -148,6 +153,10 @@ message LessonAttempt {
   int32 attempt_count = 9;
 }
 
+message McqMultipleResponse {
+  repeated int32 selected_indexes = 1;
+}
+
 message LessonAttemptResponse {
   string interaction_id = 1;
   float score = 2;
@@ -158,6 +167,7 @@ message LessonAttemptResponse {
     FillBlankResponse fill_blank = 21;
     ListeningResponse listening = 22;
     ReadingResponse reading = 23;
+    McqMultipleResponse mcq_multiple = 24;
   }
 }
 
@@ -214,12 +224,22 @@ message DeleteInteractionRequest {
 
 message DeleteInteractionResponse {}
 
+message DeleteLessonInteractionsRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  // Optional. When set, only interactions attached to this chunk are deleted.
+  string chunk_id = 2;
+}
+
+message DeleteLessonInteractionsResponse {}
+
 // ── Regenerate single ─────────────────────────────────────────────────────────
 
 message RegenerateInteractionRequest {
   string interaction_id = 1 [(buf.validate.field).string.uuid = true];
   // If unspecified, keep the existing kind.
   InteractionKind new_kind = 2;
+  // Custom prompt / instructions to rewrite/edit the question with AI Magic.
+  string custom_prompt = 3;
 }
 
 message RegenerateInteractionResponse {
@@ -235,6 +255,7 @@ message AttemptResponseInput {
     FillBlankResponse fill_blank = 21;
     ListeningResponse listening = 22;
     ReadingResponse reading = 23;
+    McqMultipleResponse mcq_multiple = 24;
   }
 }
 
@@ -277,8 +298,8 @@ message ListAttemptsResponse {
 }
 
 // Used by AFTER_EACH feedback for interactions where grading requires a server
-// roundtrip (e.g. reading audio → Gemini). The result is computed but not
-// persisted — final scores still come from SubmitAttempt.
+// roundtrip (e.g. reading audio -> Gemini). The result is cached so SubmitAttempt
+// can reuse it when the response has not changed.
 message PreviewGradeRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
   AttemptResponseInput response = 2;
@@ -290,6 +311,21 @@ message PreviewGradeResponse {
   string feedback = 3;
 }
 
+// Saves and grades one in-progress response. The server may cache the real
+// score/feedback for fast final submit, but only reveals them when feedback_mode
+// permits per-question feedback.
+message SaveAttemptResponseRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  AttemptResponseInput response = 2;
+}
+
+message SaveAttemptResponseResponse {
+  float score = 1;
+  float max_score = 2;
+  string feedback = 3;
+  bool feedback_revealed = 4;
+}
+
 service InteractionService {
   // Teacher: list all interactions for a lesson.
   rpc ListLessonInteractions(ListLessonInteractionsRequest) returns (ListLessonInteractionsResponse) {}
@@ -299,6 +335,8 @@ service InteractionService {
   rpc UpdateInteraction(UpdateInteractionRequest) returns (UpdateInteractionResponse) {}
   // Teacher: delete an interaction.
   rpc DeleteInteraction(DeleteInteractionRequest) returns (DeleteInteractionResponse) {}
+  // Teacher: delete all interactions in a lesson or in one transcript chunk.
+  rpc DeleteLessonInteractions(DeleteLessonInteractionsRequest) returns (DeleteLessonInteractionsResponse) {}
   // Teacher: AI-regenerate a single interaction (same or new kind).
   rpc RegenerateInteraction(RegenerateInteractionRequest) returns (RegenerateInteractionResponse) {}
   // Teacher: list student attempt summaries.
@@ -308,8 +346,9 @@ service InteractionService {
   rpc SubmitAttempt(SubmitAttemptRequest) returns (SubmitAttemptResponse) {}
   // Student: retrieve a previously submitted attempt (may be nil if not yet submitted).
   rpc GetMyAttempt(GetMyAttemptRequest) returns (GetMyAttemptResponse) {}
-  // Student: preview the grade for a single response without persisting. Used
-  // by AFTER_EACH feedback mode when grading needs a server roundtrip (e.g.
-  // reading audio). Final attempt scores still come from SubmitAttempt.
+  // Student: preview the grade for a single response. Used by AFTER_EACH
+  // feedback mode when grading needs a server roundtrip (e.g. reading audio).
   rpc PreviewGrade(PreviewGradeRequest) returns (PreviewGradeResponse) {}
+  // Student: save/grade one in-progress response so final submit can be fast.
+  rpc SaveAttemptResponse(SaveAttemptResponseRequest) returns (SaveAttemptResponseResponse) {}
 }

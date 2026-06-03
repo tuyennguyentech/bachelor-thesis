@@ -12,10 +12,13 @@
 
 import { test as base, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
+import fs from "fs";
+import path from "path";
 
 const SEEDED_LESSON_TITLE = "Bài 2: Phân tích đệ quy với Master Theorem";
 const RICHTER_BASE = "/api/richter";
 const LONG_HINT = "Hành động Chip lén lút giấu bài kiểm tra"; // 40 chars
+const TEST_VIDEO = path.join(__dirname, "../fixtures/test-video.mp4");
 
 // ── RPC helpers ──────────────────────────────────────────────────────────────
 
@@ -83,9 +86,23 @@ async function ensureVideoAttached(page: Page, lessonId: string) {
     { id: lessonId },
   );
   if (res.lesson?.videoStorageKey) return; // already attached, leave it
+  const videoStorageKey = `lessons/${lessonId}/video/test-video.mp4`;
+  const upload = await rpc<{ uploadUrl: string }>(
+    page,
+    "richter.v1.StorageService",
+    "GetUploadUrl",
+    { key: videoStorageKey, contentType: "video/mp4", expiresInSeconds: 3600 },
+  );
+  const putRes = await page.request.put(upload.uploadUrl, {
+    headers: { "Content-Type": "video/mp4" },
+    data: fs.readFileSync(TEST_VIDEO),
+  });
+  if (!putRes.ok()) {
+    throw new Error(`PUT lesson test video -> HTTP ${putRes.status()} ${await putRes.text()}`);
+  }
   await rpc(page, "richter.v1.LessonService", "UpdateLessonVideo", {
     id: lessonId,
-    videoStorageKey: "seed/hust-cs/dsa/ch1-big-o-notation.mp4",
+    videoStorageKey,
     durationSeconds: 60,
   });
 }

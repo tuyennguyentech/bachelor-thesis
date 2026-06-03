@@ -36,6 +36,7 @@ export function ListeningStudentView({
     config.mode === "comprehension" && config.comprehensionQuestions.length > 0 && answers.every((a) => a >= 0);
   const hasAnswered = config.mode === "dictation" ? dictationSubmitted : allComprehensionAnswered;
   const audioReady = !!audioUrl;
+  const dictationLocked = locked || (dictationSubmitted && feedbackMode === FeedbackMode.AFTER_EACH);
 
   useEffect(() => {
     if (!config.audioObjectKey) {
@@ -64,6 +65,14 @@ export function ListeningStudentView({
     if (!audioReady || locked || !transcription.trim()) return;
     setDictationSubmitted(true);
     onAnswer({ transcription, comprehensionAnswers: [] });
+  }
+
+  function handleDictationChange(value: string) {
+    if (dictationLocked) return;
+    setTranscription(value);
+    if (dictationSubmitted) {
+      onAnswer({ transcription: value, comprehensionAnswers: [] });
+    }
   }
 
   if (loadingUrl) {
@@ -103,8 +112,8 @@ export function ListeningStudentView({
           <textarea
             rows={3}
             value={transcription}
-            onChange={(e) => setTranscription(e.target.value)}
-            disabled={!audioReady || locked || dictationSubmitted}
+            onChange={(e) => handleDictationChange(e.target.value)}
+            disabled={!audioReady || dictationLocked}
             placeholder="Nhập nội dung bạn nghe được…"
             className="text-sm rounded border border-input bg-background px-2 py-1.5 resize-none"
           />

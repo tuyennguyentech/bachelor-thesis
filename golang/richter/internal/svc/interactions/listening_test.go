@@ -1,8 +1,10 @@
 package interactions
 
 import (
+	"context"
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -151,4 +153,44 @@ func TestWordOverlapRatio(t *testing.T) {
 	if math.Abs(r-1.0/3.0) > 0.01 {
 		t.Errorf("partial: want ~0.333, got %v", r)
 	}
+}
+
+func TestListeningGradeDictationWithAIContext(t *testing.T) {
+	h := &listeningHandler{}
+	cfg := listeningConfigJSON{
+		AudioObjectKey: "lessons/uuid/audio.mp3",
+		Mode:           "dictation",
+		ExpectedText:   "I love learning computer science at school",
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+
+	t.Run("AI grades synonym computer vs machine correctly", func(t *testing.T) {
+		// Học sinh điền "I love learning machine science at school" (thay computer = machine)
+		resp := listeningResponseJSON{Transcription: "I love learning machine science at school"}
+		respJSON, _ := json.Marshal(resp)
+
+		deps := GradingDeps{
+			Language: "en",
+			GradeText: func(ctx context.Context, question, studentAnswer, expectedAnswer string) (float32, float32, string, error) {
+				if strings.Contains(studentAnswer, "machine science") {
+					return 0.85, 1.0, "Synonym matched correctly by AI.", nil
+				}
+				return 0.0, 1.0, "Wrong.", nil
+			},
+		}
+
+		score, max, feedback, err := h.GradeWithContext(context.Background(), deps, cfgJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if max != 1.0 {
+			t.Errorf("expected maxScore 1.0, got %v", max)
+		}
+		if math.Abs(float64(score-0.85)) > 0.01 {
+			t.Errorf("expected score 0.85 from AI grading, got %v", score)
+		}
+		if !strings.Contains(feedback, "chấm điểm tự động từ AI") {
+			t.Errorf("expected feedback to mention AI, got: %q", feedback)
+		}
+	})
 }

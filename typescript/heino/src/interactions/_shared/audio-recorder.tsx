@@ -190,7 +190,14 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
 
       {/* Status */}
       {state === "done" && audioKey && (
-        <p className="text-xs text-green-600 dark:text-green-400">✓ Đã ghi âm thành công</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs text-green-600 dark:text-green-400">✓ Đã ghi âm thành công</p>
+          {!disabled && (
+            <Button size="sm" variant="ghost" onClick={reset} className="h-7 gap-1.5 px-2 text-xs">
+              <RefreshCwIcon className="size-3.5" /> Ghi lại
+            </Button>
+          )}
+        </div>
       )}
       {state === "error" && (
         <p className="text-xs text-destructive">{errorMsg || "Có lỗi xảy ra"}</p>

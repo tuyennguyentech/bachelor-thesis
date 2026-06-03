@@ -7,6 +7,8 @@ import {
   Loader2Icon, CheckIcon, XIcon,
   ChevronRightIcon, ChevronDownIcon, RefreshCwIcon, MergeIcon, Trash2Icon,
   PencilIcon, LockIcon, ScissorsIcon, ArrowUpIcon, ArrowDownIcon, PlayIcon,
+  FileTextIcon, ListTreeIcon, SparklesIcon, EyeIcon, AlertCircleIcon,
+  VideoIcon,
 } from "lucide-react";
 import {
   AnalysisProgressStep, AnalysisStatus, GenerateInteractionsStep, AIService,
@@ -18,6 +20,7 @@ import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { ConnectError } from "@connectrpc/connect";
 import { TabExercises } from "./tab-exercises";
+import { VideoUpload } from "./video-upload";
 
 // ── Step progress helpers ─────────────────────────────────────────────────────
 
@@ -63,88 +66,15 @@ type GenRunState =
   | { phase: "done" }
   | { phase: "error"; message: string };
 
-// ── Tab types ─────────────────────────────────────────────────────────────────
+// ── Workflow types ────────────────────────────────────────────────────────────
 
-type TabKey = "phienAm" | "doanNoidung" | "baiTap";
+type WorkflowStepKey = "upload" | "transcript" | "chunks" | "exercises" | "preview";
+type WorkflowContentStepKey = Extract<WorkflowStepKey, "upload" | "transcript" | "chunks" | "exercises">;
+type WorkflowStatus = "locked" | "ready" | "active" | "running" | "done" | "error";
 
-// ── Pipeline step wrapper ─────────────────────────────────────────────────────
+// ── Workflow task wrapper ─────────────────────────────────────────────────────
 
 type PipelineStepStatus = "locked" | "available" | "active" | "done" | "error";
-
-function PipelineStep({
-  number,
-  title,
-  pipelineStatus = "available",
-  optional = false,
-  collapsible = false,
-  defaultOpen = true,
-  isLast = false,
-  children,
-}: {
-  number: number;
-  title: string;
-  pipelineStatus?: PipelineStepStatus;
-  optional?: boolean;
-  collapsible?: boolean;
-  defaultOpen?: boolean;
-  isLast?: boolean;
-  children?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const locked = pipelineStatus === "locked";
-
-  const badgeClass = {
-    locked: "bg-muted text-muted-foreground border-muted-foreground/30",
-    available: "border-border text-foreground bg-background",
-    active: "border-blue-500 bg-blue-500 text-white",
-    done: "border-green-500 bg-green-500 text-white",
-    error: "border-destructive bg-destructive text-white",
-  }[pipelineStatus];
-
-  const titleClass = locked ? "text-muted-foreground" : "text-foreground";
-
-  return (
-    <div className="flex gap-3">
-      {/* number badge + connector line */}
-      <div className="flex flex-col items-center shrink-0">
-        <div className={`size-7 rounded-full border-2 flex items-center justify-center text-xs font-semibold ${badgeClass}`}>
-          {pipelineStatus === "done" ? <CheckIcon className="size-3.5" /> :
-           pipelineStatus === "error" ? <XIcon className="size-3.5" /> :
-           pipelineStatus === "active" ? <Loader2Icon className="size-3.5 animate-spin" /> :
-           pipelineStatus === "locked" ? <LockIcon className="size-3" /> :
-           number}
-        </div>
-        {!isLast && <div className="flex-1 w-px bg-border mt-1 mb-0" />}
-      </div>
-
-      {/* title + content */}
-      <div className={`flex flex-col gap-2 ${isLast ? "pb-1" : "pb-5"} flex-1 min-w-0`}>
-        <div className="flex items-center gap-1.5 min-h-7">
-          <span className={`text-sm font-medium ${titleClass}`}>{title}</span>
-          {optional && (
-            <span className="text-xs text-muted-foreground border border-border/50 rounded px-1.5 py-px">
-              Tuỳ chọn
-            </span>
-          )}
-          {collapsible && !locked && (
-            <button
-              type="button"
-              className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground"
-              onClick={() => setOpen(o => !o)}
-              aria-label={open ? "Thu gọn" : "Mở rộng"}
-            >
-              {open
-                ? <ChevronDownIcon className="size-3.5" />
-                : <ChevronRightIcon className="size-3.5" />}
-            </button>
-          )}
-        </div>
-
-        {!locked && (!collapsible || open) && children}
-      </div>
-    </div>
-  );
-}
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
 
@@ -350,30 +280,39 @@ function ChunkEditor({
   const busy = disabled || isMerging || isDeleting || isSplitting || isMoving;
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/20 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-muted/40">
+      <div
+        className="flex items-center gap-2 px-3 py-2 bg-muted/40 cursor-pointer hover:bg-muted/60 transition-colors group"
+        onClick={() => {
+          const ev = new CustomEvent("seek-video", { detail: { seconds: chunk.startSeconds } });
+          window.dispatchEvent(ev);
+        }}
+      >
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-sm truncate">{chunk.summary}</p>
+          <div className="flex items-center gap-1.5">
+            <PlayIcon className="size-3 text-primary shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" />
+            <p className="font-medium text-sm truncate group-hover:text-primary transition-colors">{chunk.summary}</p>
+          </div>
           <p className="text-xs text-muted-foreground">{formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}</p>
         </div>
         {chunkSegments.length > 0 && <CoherenceBadge score={chunk.coherenceScore} />}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           {prevChunkId && (
             <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs h-6"
-              disabled={busy} onClick={() => onMergeWithPrev(chunk.id)} title="Gộp với đoạn trước">
+              disabled={busy} onClick={(e) => { e.stopPropagation(); onMergeWithPrev(chunk.id); }} title="Gộp với đoạn trước">
               {isMerging ? <Loader2Icon className="size-3 animate-spin" /> : <MergeIcon className="size-3" />}
               Gộp lên
             </Button>
           )}
           {nextChunkId && (
             <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs h-6"
-              disabled={busy} onClick={() => onMergeWithNext(chunk.id)} title="Gộp với đoạn sau">
+              disabled={busy} onClick={(e) => { e.stopPropagation(); onMergeWithNext(chunk.id); }} title="Gộp với đoạn sau">
               {isMerging ? <Loader2Icon className="size-3 animate-spin" /> : <MergeIcon className="size-3" />}
               Gộp xuống
             </Button>
           )}
           <Button variant="ghost" size="sm"
             className="gap-1 px-2 text-xs h-6 text-destructive hover:text-destructive"
-            disabled={busy} onClick={() => onDelete(chunk.id)}>
+            disabled={busy} onClick={(e) => { e.stopPropagation(); onDelete(chunk.id); }}>
             {isDeleting ? <Loader2Icon className="size-3 animate-spin" /> : <Trash2Icon className="size-3" />}
             Xoá
           </Button>
@@ -386,15 +325,22 @@ function ChunkEditor({
             const isLastSeg = i === chunkSegments.length - 1;
             const nextSegStart = !isLastSeg ? chunkSegments[i + 1].startSeconds : null;
             return (
-              <div key={seg.startSeconds} className="flex items-start gap-2 px-2 py-1.5 text-xs group">
+              <div
+                key={seg.startSeconds}
+                className="flex items-start gap-2 px-2 py-1.5 text-xs group cursor-pointer hover:bg-muted/10 transition-colors rounded-sm"
+                onClick={() => {
+                  const ev = new CustomEvent("seek-video", { detail: { seconds: seg.startSeconds } });
+                  window.dispatchEvent(ev);
+                }}
+              >
                 <span className="text-muted-foreground tabular-nums shrink-0 pt-0.5">{formatTime(seg.startSeconds)}</span>
                 <p className="flex-1 text-foreground leading-relaxed">{seg.text}</p>
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0" onClick={(e) => e.stopPropagation()}>
                   {isFirstSeg && prevChunkId && !isLastSeg && (
                     <Button variant="ghost" size="sm"
                       className="px-1 text-xs h-5"
                       disabled={busy}
-                      onClick={() => onMoveSegment(prevChunkId, chunk.id, nextSegStart ?? chunk.endSeconds, chunk.id)}
+                      onClick={(e) => { e.stopPropagation(); onMoveSegment(prevChunkId, chunk.id, nextSegStart ?? chunk.endSeconds, chunk.id); }}
                       title="Chuyển lên đoạn trước">
                       {isMoving ? <Loader2Icon className="size-3 animate-spin" /> : <ArrowUpIcon className="size-3" />}
                     </Button>
@@ -403,7 +349,7 @@ function ChunkEditor({
                     <Button variant="ghost" size="sm"
                       className="px-1 text-xs h-5"
                       disabled={busy}
-                      onClick={() => onMoveSegment(chunk.id, nextChunkId, seg.startSeconds, chunk.id)}
+                      onClick={(e) => { e.stopPropagation(); onMoveSegment(chunk.id, nextChunkId, seg.startSeconds, chunk.id); }}
                       title="Chuyển xuống đoạn sau">
                       {isMoving ? <Loader2Icon className="size-3 animate-spin" /> : <ArrowDownIcon className="size-3" />}
                     </Button>
@@ -411,7 +357,7 @@ function ChunkEditor({
                   {!isFirstSeg && (
                     <Button variant="ghost" size="sm"
                       className="gap-1 px-1.5 text-xs h-5"
-                      disabled={busy} onClick={() => onSplit(chunk.id, seg.startSeconds)}
+                      disabled={busy} onClick={(e) => { e.stopPropagation(); onSplit(chunk.id, seg.startSeconds); }}
                       title="Tách chunk tại đây">
                       {isSplitting ? <Loader2Icon className="size-3 animate-spin" /> : <ScissorsIcon className="size-3" />}
                       Tách
@@ -427,45 +373,313 @@ function ChunkEditor({
   );
 }
 
-// ── Tab bar ───────────────────────────────────────────────────────────────────
+// ── Workflow shell ────────────────────────────────────────────────────────────
 
-function TabBar({
-  active,
-  onChange,
-  tabs,
+const workflowStatusClass: Record<WorkflowStatus, string> = {
+  locked: "border-border bg-muted/40 text-muted-foreground",
+  ready: "border-border bg-background text-foreground",
+  active: "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  running: "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  done: "border-green-500 bg-green-500/10 text-green-700 dark:text-green-300",
+  error: "border-destructive bg-destructive/10 text-destructive",
+};
+
+function WorkflowStepIcon({ status, icon }: { status: WorkflowStatus; icon: React.ReactNode }) {
+  if (status === "done") return <CheckIcon className="size-3.5" />;
+  if (status === "error") return <XIcon className="size-3.5" />;
+  if (status === "running") return <Loader2Icon className="size-3.5 animate-spin" />;
+  if (status === "locked") return <LockIcon className="size-3.5" />;
+  return icon;
+}
+
+function VideoProcessingStepper({
+  steps,
+  currentStep,
+  onSelect,
 }: {
-  active: TabKey;
-  onChange: (t: TabKey) => void;
-  tabs: { key: TabKey; label: string; dot?: "done" | "active" | "error" }[];
+  steps: {
+    key: WorkflowStepKey;
+    title: string;
+    subtitle: string;
+    status: WorkflowStatus;
+    icon: React.ReactNode;
+    targetStep?: WorkflowContentStepKey;
+  }[];
+  currentStep: WorkflowContentStepKey;
+  onSelect: (step: { key: WorkflowStepKey; status: WorkflowStatus; targetStep?: WorkflowContentStepKey }) => void;
 }) {
   return (
-    <div className="flex border-b border-border mb-4">
-      {tabs.map(({ key, label, dot }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChange(key)}
-          className={[
-            "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
-            active === key
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
-          ].join(" ")}
-        >
-          {label}
-          {dot === "done" && (
-            <span className="size-1.5 rounded-full bg-green-500 shrink-0" />
-          )}
-          {dot === "active" && (
-            <Loader2Icon className="size-3 shrink-0 animate-spin text-blue-500" />
-          )}
-          {dot === "error" && (
-            <span className="size-1.5 rounded-full bg-destructive shrink-0" />
-          )}
-        </button>
-      ))}
+    <div className="rounded-xl border border-border/60 bg-card/45 backdrop-blur-md p-3 shadow-md transition-all duration-300" data-testid="video-workflow-stepper">
+      <div className="grid gap-3 md:grid-cols-5">
+        {steps.map((step) => {
+          const disabled = step.status === "locked";
+          const actionable = !disabled && (step.targetStep || step.key === "preview");
+          const active = step.status === "active" || step.status === "running" || step.key === currentStep;
+          const isRunning = step.status === "running";
+
+          return (
+            <button
+              key={step.key}
+              type="button"
+              disabled={disabled}
+              onClick={() => {
+                if (actionable) onSelect(step);
+              }}
+              aria-current={active ? "step" : undefined}
+              aria-disabled={!actionable ? true : undefined}
+              data-testid={`workflow-step-${step.key}`}
+              className={[
+                "flex min-w-0 items-center gap-3 rounded-lg border px-3.5 py-2.5 text-left transition-all duration-300 relative overflow-hidden",
+                workflowStatusClass[step.status],
+                active ? "ring-2 ring-primary/45 bg-primary/5 dark:bg-primary/10 border-primary/40 shadow-sm" : "border-border/60",
+                isRunning ? "animate-pulse shadow-[0_0_12px_rgba(59,130,246,0.35)] dark:shadow-[0_0_12px_rgba(59,130,246,0.2)] border-blue-500 dark:border-blue-400 bg-blue-500/5" : "",
+                disabled ? "cursor-not-allowed opacity-40 grayscale-[30%]" : actionable ? "hover:bg-muted/40 hover:border-muted-foreground/30 hover:scale-[1.01] active:scale-[0.99] cursor-pointer" : "cursor-default",
+              ].join(" ")}
+            >
+              {/* Glowing highlight indicator for active steps */}
+              {active && (
+                <span className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-500 to-indigo-500 rounded-r-md" />
+              )}
+
+              <span className={[
+                "flex size-8 shrink-0 items-center justify-center rounded-full border bg-background/80 transition-all duration-300 shadow-sm",
+                active ? "border-primary/40 bg-gradient-to-br from-primary/10 to-indigo-500/10 text-primary" : "border-border/80",
+                isRunning ? "animate-spin-slow ring-2 ring-blue-400/30 text-blue-500 dark:text-blue-400" : "",
+              ].join(" ")}>
+                <WorkflowStepIcon status={step.status} icon={step.icon} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground/80 mb-0.5">Bước {steps.indexOf(step) + 1}</span>
+                <span className="block truncate text-sm font-semibold tracking-tight text-foreground">{step.title}</span>
+                <span className="block truncate text-xs font-medium text-muted-foreground opacity-90">{step.subtitle}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
+}
+
+function WorkflowActionPanel({
+  title,
+  description,
+  primaryLabel,
+  onPrimary,
+  primaryDisabled = false,
+  secondaryLabel,
+  onSecondary,
+  tone = "default",
+}: {
+  title: string;
+  description: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  primaryDisabled?: boolean;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+  tone?: "default" | "success" | "warning" | "error";
+}) {
+  const toneClass = {
+    default: "border-border bg-muted/20",
+    success: "border-green-500/40 bg-green-500/10",
+    warning: "border-amber-500/40 bg-amber-500/10",
+    error: "border-destructive/40 bg-destructive/10",
+  }[tone];
+
+  return (
+    <div className={`rounded-md border p-3 ${toneClass}`} data-testid="workflow-next-action">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {secondaryLabel && onSecondary && (
+            <Button variant="outline" size="sm" onClick={onSecondary}>
+              {secondaryLabel}
+            </Button>
+          )}
+          <Button size="sm" disabled={primaryDisabled} onClick={onPrimary}>
+            {primaryLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowStatusSummary({
+  tone,
+  title,
+  description,
+  technicalDetail,
+  testId,
+}: {
+  tone: "success" | "warning" | "error";
+  title: string;
+  description: string;
+  technicalDetail?: string;
+  testId?: string;
+}) {
+  const toneClass = {
+    success: "border-green-500/40 bg-green-500/10 text-green-800 dark:text-green-300",
+    warning: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+    error: "border-destructive/40 bg-destructive/10 text-destructive",
+  }[tone];
+
+  return (
+    <div className={`rounded-md border px-3 py-2 text-xs ${toneClass}`} data-testid={testId}>
+      <div className="flex items-start gap-2">
+        {tone === "success" ? <CheckIcon className="mt-0.5 size-3.5 shrink-0" /> :
+          tone === "warning" ? <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" /> :
+          <XIcon className="mt-0.5 size-3.5 shrink-0" />}
+        <div className="min-w-0">
+          <p className="font-medium">{title}</p>
+          <p className="mt-0.5 opacity-90">{description}</p>
+          {technicalDetail && (
+            <details className="mt-1">
+              <summary className="cursor-pointer font-medium">Chi tiết lỗi</summary>
+              <p className="mt-1 break-words font-mono opacity-80">{technicalDetail}</p>
+            </details>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowReadyState({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-4 py-5">
+      <div className="flex items-start gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full border bg-background text-muted-foreground">
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{title}</p>
+          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">{description}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowStepPanel({
+  stepNumber,
+  title,
+  description,
+  children,
+}: {
+  stepNumber: number;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-md border bg-background" data-testid="workflow-step-body">
+      <div className="border-b px-4 py-3">
+        <div className="flex items-start gap-3">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full border bg-muted text-sm font-semibold">
+            {stepNumber}
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">{title}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          </div>
+        </div>
+      </div>
+      <div className="p-4">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function WorkflowTaskSection({
+  title,
+  status,
+  optional = false,
+  collapsible = false,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  status?: PipelineStepStatus;
+  optional?: boolean;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  children?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const state = status ?? "available";
+  const locked = state === "locked";
+  const iconClass = {
+    locked: "border-muted-foreground/30 bg-muted text-muted-foreground",
+    available: "border-border bg-background text-muted-foreground",
+    active: "border-blue-500 bg-blue-500 text-white",
+    done: "border-green-500 bg-green-500 text-white",
+    error: "border-destructive bg-destructive text-white",
+  }[state];
+
+  return (
+    <section className="rounded-md border bg-muted/10 p-3">
+      <div className="flex min-h-7 items-center gap-2">
+        <span className={`flex size-6 shrink-0 items-center justify-center rounded-full border ${iconClass}`}>
+          {state === "done" ? <CheckIcon className="size-3.5" /> :
+            state === "error" ? <XIcon className="size-3.5" /> :
+            state === "active" ? <Loader2Icon className="size-3.5 animate-spin" /> :
+            state === "locked" ? <LockIcon className="size-3" /> :
+            <ChevronRightIcon className="size-3.5" />}
+        </span>
+        <h4 className={`text-sm font-medium ${locked ? "text-muted-foreground" : "text-foreground"}`}>
+          {title}
+        </h4>
+        {optional && (
+          <span className="rounded border border-border/50 px-1.5 py-px text-xs text-muted-foreground">
+            Tuỳ chọn
+          </span>
+        )}
+        {collapsible && !locked && (
+          <button
+            type="button"
+            className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setOpen(o => !o)}
+            aria-label={open ? "Thu gọn" : "Mở rộng"}
+          >
+            {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+          </button>
+        )}
+      </div>
+      {!locked && (!collapsible || open) && (
+        <div className="mt-3">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getInitialWorkflowStep(
+  hasVideo: boolean,
+  segments: TranscriptSegment[],
+  chunks: TranscriptChunk[],
+  interactions: LessonInteraction[],
+  transcript: string,
+  status?: AnalysisStatus,
+): WorkflowContentStepKey {
+  if (!hasVideo) return "upload";
+  if (chunks.length > 0 || interactions.length > 0 || status === AnalysisStatus.DONE) return "exercises";
+  if (segments.length > 0 || transcript.trim() || status === AnalysisStatus.TRANSCRIPT_EXTRACTED) return "chunks";
+  return "transcript";
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -474,7 +688,9 @@ interface Props {
   lessonId: string;
   initialChunks?: TranscriptChunk[];
   initialSegments?: TranscriptSegment[];
+  initialTranscript?: string;
   initialStatus?: AnalysisStatus;
+  initialErrorMsg?: string;
   initialInteractions?: LessonInteraction[];
   initialFeedbackMode?: FeedbackMode;
   initialDefaultInteractionConfig?: ChunkInteractionConfig;
@@ -484,13 +700,21 @@ interface Props {
   description: string;
   orderIndex: number;
   token: string;
+
+  // New props for integrating VideoUpload
+  videoStorageKey?: string;
+  moduleId: string;
+  courseId: string;
+  slug: string;
 }
 
 export function AnalyzeButton({
   lessonId,
   initialChunks = [],
   initialSegments = [],
+  initialTranscript = "",
   initialStatus,
+  initialErrorMsg,
   initialInteractions = [],
   initialFeedbackMode = FeedbackMode.AFTER_SUBMIT,
   initialDefaultInteractionConfig,
@@ -500,6 +724,10 @@ export function AnalyzeButton({
   description,
   orderIndex,
   token,
+  videoStorageKey,
+  moduleId,
+  courseId,
+  slug,
 }: Props) {
   const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
@@ -548,7 +776,11 @@ export function AnalyzeButton({
   }
   const abortRef = useRef<AbortController | null>(null);
 
-  const [activeTab, setActiveTab] = useState<TabKey>("phienAm");
+  const [activeStep, setActiveStep] = useState<WorkflowContentStepKey>(() =>
+    getInitialWorkflowStep(!!videoStorageKey, initialSegments, initialChunks, initialInteractions, initialTranscript, initialStatus),
+  );
+
+
 
   function handleFeedbackModeChange(mode: FeedbackMode) {
     setFeedbackMode(mode);
@@ -563,10 +795,16 @@ export function AnalyzeButton({
   }
   const [status, setStatus] = useState<AnalysisStatus | undefined>(initialStatus);
   const [extractState, setExtractState] = useState<StreamRunState>(() => {
+    if (initialStatus === AnalysisStatus.ERROR && initialSegments.length === 0) {
+      return { phase: "error", failedAt: null, message: initialErrorMsg || "Thao tác thất bại." };
+    }
     if (initialStatus !== AnalysisStatus.PROCESSING) return { phase: "idle" };
     return initialSegments.length > 0 ? { phase: "done" } : { phase: "syncing" };
   });
   const [chunkState, setChunkState] = useState<StreamRunState>(() => {
+    if (initialStatus === AnalysisStatus.ERROR && initialSegments.length > 0 && initialChunks.length === 0) {
+      return { phase: "error", failedAt: null, message: initialErrorMsg || "Thao tác thất bại." };
+    }
     if (initialStatus === AnalysisStatus.PROCESSING && initialSegments.length > 0 && initialChunks.length === 0) {
       return { phase: "syncing" };
     }
@@ -579,12 +817,34 @@ export function AnalyzeButton({
   const [chunks, setChunks] = useState<TranscriptChunk[]>(initialChunks);
   const [mutatingChunkId, setMutatingChunkId] = useState<string | null>(null);
   const [mutatingOp, setMutatingOp] = useState<"merge" | "delete" | "split" | "move" | null>(null);
-  const [genState, setGenState] = useState<GenRunState>({ phase: "idle" });
+  const [genState, setGenState] = useState<GenRunState>(() =>
+    initialStatus === AnalysisStatus.ERROR && initialChunks.length > 0
+      ? { phase: "error", message: initialErrorMsg || "Thao tác thất bại." }
+      : { phase: "idle" },
+  );
   const [isReloadingChunks, setIsReloadingChunks] = useState(false);
   const [genWarnings, setGenWarnings] = useState<string[]>([]);
   const [mutatingError, setMutatingError] = useState<string | null>(null);
   const [confirmReExtract, setConfirmReExtract] = useState(false);
   const [interactions, setInteractions] = useState<LessonInteraction[]>(initialInteractions);
+  const [exerciseOpenRequest, setExerciseOpenRequest] = useState(0);
+
+  // Sync props to state on RSC refresh
+  useEffect(() => {
+    setSegments(initialSegments);
+  }, [initialSegments]);
+
+  useEffect(() => {
+    setChunks(initialChunks);
+  }, [initialChunks]);
+
+  useEffect(() => {
+    setInteractions(initialInteractions);
+  }, [initialInteractions]);
+
+  useEffect(() => {
+    setStatus(initialStatus);
+  }, [initialStatus]);
 
   useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
 
@@ -605,7 +865,8 @@ export function AnalyzeButton({
     setExtractTimings({});
     setChunkTimings({});
     setConfirmReExtract(false);
-  }, [initialStatus]);
+    setActiveStep(!videoStorageKey ? "upload" : "transcript");
+  }, [initialStatus, videoStorageKey]);
 
   useEffect(() => {
     const isRunning = extractState.phase === "running" || chunkState.phase === "running";
@@ -635,6 +896,7 @@ export function AnalyzeButton({
           setStatus(analysis.status);
           if (isSyncingExtract) setExtractState({ phase: "done" });
           if (isSyncingChunk) setChunkState({ phase: "done" });
+          setActiveStep(freshChunks.length > 0 ? "exercises" : "chunks");
           router.refresh();
         } else if (analysis.status === AnalysisStatus.ERROR) {
           const msg = analysis.errorMsg || "Thao tác thất bại.";
@@ -730,11 +992,13 @@ export function AnalyzeButton({
     setChunkTimings({});
     setGenState({ phase: "idle" });
     setGenWarnings([]);
+    setActiveStep(analysis?.transcriptSegments.length ? "chunks" : "transcript");
     router.refresh();
   }
 
   function startExtract() {
     setConfirmReExtract(false);
+    setActiveStep("transcript");
     setChunkState({ phase: "idle" });
     setChunkTimings({});
     setGenState({ phase: "idle" });
@@ -755,6 +1019,7 @@ export function AnalyzeButton({
       const res = await aiClient.listLessonTranscriptChunks({ lessonId, limit: 500, offset: 0 });
       setChunks(res.chunks);
       setStatus(AnalysisStatus.CHUNKS_READY);
+      if (res.chunks.length > 0) setActiveStep("exercises");
     } finally {
       setIsReloadingChunks(false);
     }
@@ -762,6 +1027,7 @@ export function AnalyzeButton({
 
   function handleChunk() {
     if (chunkState.phase === "running") return;
+    setActiveStep("chunks");
     setGenState({ phase: "idle" });
     setGenWarnings([]);
     startStream(
@@ -870,10 +1136,11 @@ export function AnalyzeButton({
     router.refresh();
   }
 
-  function handleGenerate(force?: boolean, chunkId?: string) {
+  function handleGenerate(force?: boolean, chunkId?: string, difficulty?: string, focusPrompt?: string) {
     abortRef.current?.abort();
     const abortController = new AbortController();
     abortRef.current = abortController;
+    setActiveStep("exercises");
     setGenState({ phase: "running", message: "Đang bắt đầu...", chunkIndex: 0, totalChunks: 0 });
     setGenWarnings([]);
 
@@ -881,13 +1148,21 @@ export function AnalyzeButton({
 
     (async () => {
       try {
+        let lastStreamError = "";
         for await (const event of aiClient.generateInteractionsStream(
-          { lessonId, chunkId: chunkId ?? "", forceRegenerate: shouldForce },
+          {
+            lessonId,
+            chunkId: chunkId ?? "",
+            forceRegenerate: shouldForce,
+            difficulty: difficulty ?? "",
+            focusPrompt: focusPrompt ?? "",
+          },
           { signal: abortController.signal },
         )) {
           if (event.step === GenerateInteractionsStep.ERROR) {
-            setGenWarnings(prev => [...prev, event.message || "Lỗi tạo câu hỏi cho một đoạn"]);
-            setGenState({ phase: "running", message: event.message || "Lỗi, tiếp tục đoạn khác...", chunkIndex: event.chunkIndex, totalChunks: event.totalChunks });
+            lastStreamError = event.message || "Lỗi tạo câu hỏi cho một đoạn";
+            setGenWarnings(prev => [...prev, lastStreamError]);
+            setGenState({ phase: "running", message: `${lastStreamError}...`, chunkIndex: event.chunkIndex, totalChunks: event.totalChunks });
             continue;
           }
           if (event.step === GenerateInteractionsStep.DONE) {
@@ -897,6 +1172,10 @@ export function AnalyzeButton({
           }
           setGenState({ phase: "running", message: event.message, chunkIndex: event.chunkIndex, totalChunks: event.totalChunks });
         }
+        setGenState({
+          phase: "error",
+          message: lastStreamError || "Luồng tạo bài tập kết thúc trước khi hoàn tất.",
+        });
       } catch (err) {
         if (abortController.signal.aborted) return;
         const msg = err instanceof ConnectError ? err.message : "Mất kết nối với máy chủ.";
@@ -917,250 +1196,567 @@ export function AnalyzeButton({
 
   const hasSegments = segments.length > 0;
   const hasChunks = chunks.length > 0;
-  const questionsGenerated = genState.phase === "done" || status === AnalysisStatus.DONE || interactions.length > 0;
+  const questionsGenerated = interactions.length > 0;
+  const hasTranscriptContent =
+    hasSegments ||
+    !!initialTranscript.trim() ||
+    hasChunks ||
+    questionsGenerated ||
+    status === AnalysisStatus.TRANSCRIPT_EXTRACTED ||
+    status === AnalysisStatus.CHUNKS_READY;
+  const shouldShowTranscriptTask = hasTranscriptContent || extractState.phase !== "idle" || confirmReExtract;
+  const shouldShowChunkTask = hasChunks || chunkState.phase !== "idle";
 
   const step2Status: PipelineStepStatus =
     isExtracting || isSyncing ? "active" :
     extractState.phase === "error" ? "error" :
-    hasSegments ? "done" : "available";
+    hasTranscriptContent ? "done" : "available";
 
   const step3Status: PipelineStepStatus = hasSegments ? "available" : "locked";
 
   const step4Status: PipelineStepStatus =
-    !hasSegments ? "locked" :
+    !hasTranscriptContent ? "locked" :
     isChunking || isChunkSyncing ? "active" :
     chunkState.phase === "error" ? "error" :
     hasChunks ? "done" : "available";
 
   const step5Status: PipelineStepStatus = hasChunks ? "available" : "locked";
 
-  const tabDefs: { key: TabKey; label: string; dot?: "done" | "active" | "error" }[] = [
+
+
+  const uploadWorkflowStatus: WorkflowStatus =
+    !videoStorageKey ? "active" : "done";
+
+  const transcriptWorkflowStatus: WorkflowStatus =
+    !videoStorageKey ? "locked" :
+    extractState.phase === "error" ? "error" :
+    isExtracting ? "running" :
+    hasSegments || hasTranscriptContent ? "done" :
+    activeStep === "transcript" ? "active" : "ready";
+
+  const chunkWorkflowStatus: WorkflowStatus =
+    !hasTranscriptContent ? "locked" :
+    chunkState.phase === "error" ? "error" :
+    isChunking ? "running" :
+    hasChunks ? "done" :
+    activeStep === "chunks" ? "active" : "ready";
+
+  const exerciseWorkflowStatus: WorkflowStatus =
+    !hasChunks ? "locked" :
+    genState.phase === "error" ? "error" :
+    isGenerating ? "running" :
+    questionsGenerated ? "done" :
+    activeStep === "exercises" ? "active" : "ready";
+
+  const previewWorkflowStatus: WorkflowStatus = (questionsGenerated || interactions.length > 0) ? "ready" : "locked";
+
+  const workflowSteps = [
     {
-      key: "phienAm",
-      label: "Phiên âm",
-      dot: isExtracting || isSyncing ? "active" : extractState.phase === "error" ? "error" : hasSegments ? "done" : undefined,
+      key: "upload" as const,
+      title: "Tải video",
+      subtitle: videoStorageKey ? "Đã tải lên" : "Chờ tải video",
+      status: uploadWorkflowStatus,
+      icon: <VideoIcon className="size-3.5" />,
+      targetStep: "upload" as const,
     },
     {
-      key: "doanNoidung",
-      label: "Phân đoạn video",
-      dot: isChunking || isChunkSyncing ? "active" : chunkState.phase === "error" ? "error" : hasChunks ? "done" : undefined,
+      key: "transcript" as const,
+      title: "Phiên âm",
+      subtitle: isExtracting || isSyncing
+        ? "Đang xử lý"
+        : hasSegments ? `${segments.length} đoạn`
+        : hasTranscriptContent ? "Đã có transcript"
+        : "Sẵn sàng",
+      status: transcriptWorkflowStatus,
+      icon: <FileTextIcon className="size-3.5" />,
+      targetStep: "transcript" as const,
     },
     {
-      key: "baiTap",
-      label: "Bài tập",
-      dot: isGenerating ? "active" : genState.phase === "error" ? "error" : questionsGenerated ? "done" : undefined,
+      key: "chunks" as const,
+      title: "Phân đoạn",
+      subtitle: isChunking || isChunkSyncing ? "Đang xử lý" : hasChunks ? `${chunks.length} đoạn` : hasTranscriptContent ? "Sẵn sàng" : "Chưa sẵn sàng",
+      status: chunkWorkflowStatus,
+      icon: <ListTreeIcon className="size-3.5" />,
+      targetStep: "chunks" as const,
+    },
+    {
+      key: "exercises" as const,
+      title: "Bài tập",
+      subtitle: isGenerating ? "Đang tạo" : questionsGenerated ? `${interactions.length} câu` : hasChunks ? "Sẵn sàng" : "Chưa tạo",
+      status: exerciseWorkflowStatus,
+      icon: <SparklesIcon className="size-3.5" />,
+      targetStep: "exercises" as const,
+    },
+    {
+      key: "preview" as const,
+      title: "Xem thử",
+      subtitle: questionsGenerated ? "Sẵn sàng" : "Chưa sẵn sàng",
+      status: previewWorkflowStatus,
+      icon: <EyeIcon className="size-3.5" />,
     },
   ];
+
+  function handleWorkflowSelect(step: { key: WorkflowStepKey; status: WorkflowStatus; targetStep?: WorkflowContentStepKey }) {
+    if (step.status === "locked") return;
+    if (step.key === "preview") {
+      router.push("?preview=1");
+      return;
+    }
+    if (step.targetStep) setActiveStep(step.targetStep);
+  }
+
+  const workflowAction =
+    !videoStorageKey ? {
+      title: "Tiếp theo: Tải video bài giảng",
+      description: "Cần có video trước khi phiên âm, phân đoạn và tạo bài tập.",
+      primaryLabel: "Mở bước tải video",
+      onPrimary: () => setActiveStep("upload"),
+      tone: "default" as const,
+    } :
+    extractState.phase === "error" ? {
+      title: "Không thể phiên âm video",
+      description: "Hãy thử lại hoặc kiểm tra video có âm thanh rõ ràng.",
+      primaryLabel: "Thử lại",
+      onPrimary: startExtract,
+      secondaryLabel: "Mở phiên âm",
+      onSecondary: () => setActiveStep("transcript"),
+      tone: "error" as const,
+    } :
+    chunkState.phase === "error" ? {
+      title: "Không thể phân đoạn bài học",
+      description: "Transcript đã có, nhưng bước chia nội dung gặp lỗi. Bạn có thể thử phân đoạn lại.",
+      primaryLabel: hasChunks ? "Phân đoạn lại" : "Phân đoạn bài học",
+      onPrimary: () => { setActiveStep("chunks"); handleChunk(); },
+      secondaryLabel: "Mở phân đoạn",
+      onSecondary: () => setActiveStep("chunks"),
+      tone: "error" as const,
+    } :
+    genState.phase === "error" ? {
+      title: "Không thể tạo bài tập",
+      description: "Bước tạo bài tập gặp lỗi. Mở phần bài tập để kiểm tra cấu hình và thử lại.",
+      primaryLabel: "Mở bài tập",
+      onPrimary: () => setActiveStep("exercises"),
+      tone: "error" as const,
+    } :
+    isExtracting || isSyncing ? {
+      title: "Đang trích xuất transcript",
+      description: "Hệ thống đang lấy âm thanh từ video và phiên âm bằng Whisper.",
+      primaryLabel: "Đang trích xuất...",
+      onPrimary: () => setActiveStep("transcript"),
+      primaryDisabled: true,
+      tone: "default" as const,
+    } :
+    isChunking || isChunkSyncing ? {
+      title: "Đang phân đoạn bài học",
+      description: "Hệ thống đang chia transcript thành các đoạn học tập có ngữ cảnh rõ ràng.",
+      primaryLabel: "Đang phân đoạn...",
+      onPrimary: () => setActiveStep("chunks"),
+      primaryDisabled: true,
+      tone: "default" as const,
+    } :
+    isGenerating ? {
+      title: "Đang tạo bài tập",
+      description: "AI đang tạo câu hỏi từ các phân đoạn của bài học.",
+      primaryLabel: "Đang tạo...",
+      onPrimary: () => setActiveStep("exercises"),
+      primaryDisabled: true,
+      tone: "default" as const,
+    } :
+    !hasTranscriptContent ? {
+      title: "Tiếp theo: Trích xuất transcript",
+      description: "Hệ thống sẽ lấy âm thanh từ video và phiên âm bằng Whisper.",
+      primaryLabel: "Trích xuất transcript",
+      onPrimary: startExtract,
+      tone: "default" as const,
+    } :
+    !hasChunks ? {
+      title: "Tiếp theo: Phân đoạn bài học",
+      description: "Transcript đã sẵn sàng. Chia bài học thành các đoạn nhỏ để tạo bài tập đúng ngữ cảnh.",
+      primaryLabel: "Phân đoạn bài học",
+      onPrimary: () => { setActiveStep("chunks"); handleChunk(); },
+      secondaryLabel: "Xem transcript",
+      onSecondary: () => setActiveStep("transcript"),
+      tone: "default" as const,
+    } :
+    !questionsGenerated ? {
+      title: "Tiếp theo: Tạo bài tập",
+      description: `Đã có ${chunks.length} phân đoạn. Chọn số lượng từng loại câu hỏi rồi tạo bài tập.`,
+      primaryLabel: "Tạo bài tập",
+      onPrimary: () => {
+        setActiveStep("exercises");
+        setExerciseOpenRequest(n => n + 1);
+      },
+      secondaryLabel: "Chỉnh phân đoạn",
+      onSecondary: () => setActiveStep("chunks"),
+      tone: "default" as const,
+    } :
+    {
+      title: "Đã sẵn sàng dùng thử",
+      description: "Video, transcript, phân đoạn và bài tập đã được tạo. Bạn có thể xem thử với vai trò học viên.",
+      primaryLabel: "Xem thử",
+      onPrimary: () => router.push("?preview=1"),
+      secondaryLabel: "Tạo thêm bài tập",
+      onSecondary: () => {
+        setActiveStep("exercises");
+        setExerciseOpenRequest(n => n + 1);
+      },
+      tone: "success" as const,
+    };
+
+  const shouldShowWorkflowAction =
+    !(activeStep === "upload" && !videoStorageKey) &&
+    !(activeStep === "exercises" && hasChunks && genState.phase !== "error" && !isGenerating && !questionsGenerated);
+
+  const activeStepMeta = {
+    upload: {
+      stepNumber: 1,
+      title: "Tải video bài giảng",
+      description: videoStorageKey
+        ? "Video bài giảng đã được tải lên thành công. Nhấn Tiếp tục để qua bước Phiên âm."
+        : "Vui lòng kéo thả hoặc chọn tệp video từ máy tính của bạn để bắt đầu bài giảng.",
+    },
+    transcript: {
+      stepNumber: 2,
+      title: "Phiên âm bài giảng",
+      description: hasSegments
+        ? "Kiểm tra và chỉnh transcript trước khi phân đoạn bài học."
+        : "Tạo transcript từ âm thanh video để làm dữ liệu cho các bước tiếp theo.",
+    },
+    chunks: {
+      stepNumber: 3,
+      title: "Phân đoạn bài học",
+      description: hasChunks
+        ? "Rà soát mốc thời gian và chỉnh các đoạn nội dung trước khi tạo bài tập."
+        : "Chia transcript thành các đoạn học tập có ngữ cảnh rõ ràng.",
+    },
+    exercises: {
+      stepNumber: 4,
+      title: "Tạo bài tập",
+      description: questionsGenerated
+        ? "Quản lý, chỉnh sửa hoặc tạo thêm bài tập từ các phân đoạn đã có."
+        : "Chọn cấu hình câu hỏi và tạo bài tập cho học viên.",
+    },
+  }[activeStep];
 
   return (
     <div className="flex flex-col gap-3">
       {/* Settings section */}
-      <div className="flex flex-wrap items-center gap-4 border-b pb-3 mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground shrink-0 font-medium">Ngôn ngữ bài giảng:</span>
-          <select
-            value={language}
-            onChange={(e) => handleLanguageChange(e.target.value)}
-            disabled={savingLanguage}
-            className="text-xs rounded border border-input bg-background px-2 py-1 focus:ring-1 focus:ring-primary focus:outline-none"
-          >
-            <option value="vi">🇻🇳 Tiếng Việt</option>
-            <option value="en">🇬🇧 English</option>
-          </select>
-          {savingLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
+      {videoStorageKey && (
+        <div className="flex flex-wrap items-center gap-4 border-b pb-3 mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground shrink-0 font-medium">Ngôn ngữ bài giảng:</span>
+            <select
+              value={language}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              disabled={savingLanguage}
+              className="text-xs rounded border border-input bg-background px-2 py-1 focus:ring-1 focus:ring-primary focus:outline-none"
+            >
+              <option value="vi">🇻🇳 Tiếng Việt</option>
+              <option value="en">🇬🇧 English</option>
+            </select>
+            {savingLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground shrink-0 font-medium">Số lượt nộp tối đa:</span>
+            <input
+              type="number"
+              min="0"
+              value={maxAttempts}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                handleMaxAttemptsChange(isNaN(val) ? 0 : val);
+              }}
+              disabled={savingMaxAttempts}
+              className="text-xs w-16 rounded border border-input bg-background px-2 py-1 text-center focus:ring-1 focus:ring-primary focus:outline-none"
+            />
+            <span className="text-[10px] text-muted-foreground">(0 = không giới hạn)</span>
+            {savingMaxAttempts && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
+          </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground shrink-0 font-medium">Số lượt nộp tối đa:</span>
-          <input
-            type="number"
-            min="0"
-            value={maxAttempts}
-            onChange={(e) => {
-              const val = parseInt(e.target.value, 10);
-              handleMaxAttemptsChange(isNaN(val) ? 0 : val);
-            }}
-            disabled={savingMaxAttempts}
-            className="text-xs w-16 rounded border border-input bg-background px-2 py-1 text-center focus:ring-1 focus:ring-primary focus:outline-none"
-          />
-          <span className="text-[10px] text-muted-foreground">(0 = không giới hạn)</span>
-          {savingMaxAttempts && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
+      <VideoProcessingStepper steps={workflowSteps} currentStep={activeStep} onSelect={handleWorkflowSelect} />
+      {shouldShowWorkflowAction && <WorkflowActionPanel {...workflowAction} />}
+
+      <WorkflowStepPanel
+        stepNumber={activeStepMeta.stepNumber}
+        title={activeStepMeta.title}
+        description={activeStepMeta.description}
+      >
+      {activeStep === "upload" && (
+        <div className="flex flex-col gap-3">
+          <WorkflowTaskSection title="Nguồn video" status={videoStorageKey ? "done" : "active"}>
+            <VideoUpload
+              lessonId={lessonId}
+              moduleId={moduleId}
+              courseId={courseId}
+              slug={slug}
+              hasVideo={!!videoStorageKey}
+              token={token}
+            />
+            {videoStorageKey && (
+              <details className="mt-3 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs text-muted-foreground/80">
+                <summary className="cursor-pointer font-medium hover:text-foreground transition-colors">Chi tiết kỹ thuật</summary>
+                <p className="mt-2 break-all font-mono text-[10px] bg-background/50 p-1.5 rounded border">Key: {videoStorageKey}</p>
+              </details>
+            )}
+          </WorkflowTaskSection>
         </div>
-      </div>
+      )}
 
-      <TabBar active={activeTab} onChange={setActiveTab} tabs={tabDefs} />
+      {activeStep === "transcript" && (
+        <div className="flex flex-col gap-3 animate-in fade-in duration-200">
+          {!videoStorageKey ? (
+            <div className="flex flex-col items-center justify-center p-10 text-center border border-dashed border-border/80 rounded-2xl bg-muted/5 shadow-inner">
+              <div className="rounded-full bg-muted/20 p-4 border border-border/40 mb-3.5">
+                <LockIcon className="size-6 text-muted-foreground animate-pulse" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground/90">Tính năng phiên âm chưa sẵn sàng</h3>
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
+                Vui lòng hoàn thành Bước 1: Tải video trước để tải tệp bài giảng lên hệ thống. AI cần tệp video để bắt đầu quá trình trích xuất âm thanh và tự động tạo transcript.
+              </p>
+            </div>
+          ) : (
+            <>
+              {shouldShowTranscriptTask ? (
+                <WorkflowTaskSection title="Tác vụ phiên âm" status={step2Status}>
+                  <div className="flex flex-col gap-2">
+                    {hasTranscriptContent && !confirmReExtract && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        disabled={isBusy}
+                        onClick={() => {
+                          if (hasTranscriptContent) { setConfirmReExtract(true); return; }
+                          startExtract();
+                        }}
+                        className="gap-2 w-fit"
+                      >
+                        {isExtracting
+                          ? <Loader2Icon className="size-4 animate-spin" />
+                          : <PlayIcon className="size-4" />}
+                        {isExtracting ? "Đang trích xuất..." :
+                          hasTranscriptContent ? "Trích xuất lại" : "Trích xuất transcript"}
+                      </Button>
+                    )}
 
-      {/* ── Tab 1: Phiên âm ── */}
-      {activeTab === "phienAm" && (
-        <div className="flex flex-col">
-          {/* Step 1: Analyze */}
-          <PipelineStep number={1} title="Phân tích bài giảng" pipelineStatus={step2Status}>
-            <div className="flex flex-col gap-2">
-              {!confirmReExtract && (
-                <Button
-                  variant="default"
-                  size="sm"
-                  disabled={isBusy}
-                  onClick={() => {
-                    if (hasSegments) { setConfirmReExtract(true); return; }
-                    startExtract();
-                  }}
-                  className="gap-2 w-fit"
-                >
-                  {isExtracting
-                    ? <Loader2Icon className="size-4 animate-spin" />
-                    : <PlayIcon className="size-4" />}
-                  {isExtracting ? "Đang trích xuất..." :
-                    hasSegments ? "Trích xuất lại transcript" : "Trích xuất transcript"}
-                </Button>
-              )}
+                    {confirmReExtract && (
+                      <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs flex flex-col gap-2">
+                        <p className="font-medium text-amber-800 dark:text-amber-300">Trích xuất lại transcript?</p>
+                        <p className="text-amber-700 dark:text-amber-400">
+                          Transcript, phân đoạn và bài tập hiện tại sẽ bị xoá vì chúng gắn với video cũ.
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm" variant="destructive" className="h-6 text-xs px-2"
+                            onClick={() => startExtract()}
+                          >
+                            Xoá và trích xuất lại
+                          </Button>
+                          <Button
+                            size="sm" variant="ghost" className="h-6 text-xs px-2"
+                            onClick={() => setConfirmReExtract(false)}
+                          >
+                            Giữ nội dung hiện tại
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
-              {confirmReExtract && (
-                <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs flex flex-col gap-2">
-                  <p className="text-amber-700 dark:text-amber-400">
-                    Trích xuất lại sẽ <strong>xoá toàn bộ</strong> transcript, đoạn nội dung và câu hỏi hiện tại. Tiếp tục?
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm" variant="destructive" className="h-6 text-xs px-2"
-                      onClick={() => startExtract()}
-                    >
-                      Xoá & trích xuất lại
-                    </Button>
-                    <Button
-                      size="sm" variant="ghost" className="h-6 text-xs px-2"
-                      onClick={() => setConfirmReExtract(false)}
-                    >
-                      Huỷ
-                    </Button>
+                    {hasTranscriptContent && extractState.phase !== "error" && !isExtracting && !isSyncing && (
+                      <WorkflowStatusSummary
+                        tone="success"
+                        title="Đã có transcript"
+                        description={hasSegments
+                          ? `Transcript hiện có ${segments.length} đoạn. Bạn có thể chỉnh sửa trước khi phân đoạn.`
+                          : "Transcript đã có sẵn cho bài học này. Nếu cần chỉnh từng đoạn theo thời gian, hãy trích xuất lại từ video."}
+                      />
+                    )}
+                    {isSyncing && (
+                      <WorkflowStatusSummary
+                        tone="warning"
+                        title="Đang kiểm tra tiến trình trước"
+                        description="Tiến trình trước có vẻ bị gián đoạn. Nếu không tự hoàn tất, hãy thử trích xuất lại."
+                      />
+                    )}
+                    {extractState.phase !== "idle" && extractState.phase !== "syncing" && (
+                      <div data-testid="extract-progress">
+                        <ProgressStrip steps={EXTRACT_STEPS} runState={extractState} stepTimings={extractTimings} now={now} />
+                      </div>
+                    )}
+                    {extractState.phase === "error" && (
+                      <WorkflowStatusSummary
+                        tone="error"
+                        title="Không thể phiên âm video"
+                        description="Hãy thử lại hoặc kiểm tra video có âm thanh rõ ràng."
+                        technicalDetail={extractState.message}
+                        testId="extract-error"
+                      />
+                    )}
                   </div>
-                </div>
-              )}
-
-              {isSyncing && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Tiến trình trước có vẻ bị gián đoạn. Bấm &ldquo;Phân tích lại&rdquo; để thử lại.
-                </p>
-              )}
-              {extractState.phase !== "idle" && extractState.phase !== "syncing" && (
-                <div data-testid="extract-progress">
-                  <ProgressStrip steps={EXTRACT_STEPS} runState={extractState} stepTimings={extractTimings} now={now} />
-                </div>
-              )}
-              {extractState.phase === "error" && (
-                <p className="text-xs text-destructive" data-testid="extract-error">{extractState.message}</p>
-              )}
-            </div>
-          </PipelineStep>
-
-          {/* Step 2: Edit transcript */}
-          <PipelineStep
-            number={2} title="Chỉnh sửa transcript" pipelineStatus={step3Status}
-            optional collapsible defaultOpen={true} isLast
-          >
-            <div className="flex flex-col gap-1 max-h-64 overflow-y-auto pr-1">
-              {segments.map((seg, i) => (
-                <SegmentRow
-                  key={i}
-                  segment={seg}
-                  index={i}
-                  lessonId={lessonId}
-                  disabled={isBusy}
-                  aiClient={aiClient}
-                  onUpdated={(idx, text) =>
-                    setSegments(prev => prev.map((s, j) => j === idx ? { ...s, text } : s))
-                  }
-                  onSaved={() => {
-                    setChunkState({ phase: "idle" });
-                    setChunkTimings({});
-                    setGenState({ phase: "idle" });
-                    setGenWarnings([]);
-                    // Bug 3 fix: refresh the RSC so VideoPlayer receives updated segments.
-                    router.refresh();
-                  }}
-                />
-              ))}
-            </div>
-          </PipelineStep>
-        </div>
-      )}
-
-      {/* ── Tab 2: Đoạn nội dung ── */}
-      {activeTab === "doanNoidung" && (
-        <div className="flex flex-col">
-          {/* Step 1: Re-chunk */}
-          <PipelineStep number={1} title="Phân đoạn lại" pipelineStatus={step4Status} optional collapsible defaultOpen={!hasChunks}>
-            <div className="flex flex-col gap-2">
-              <Button
-                variant={hasChunks ? "outline" : "default"}
-                size="sm"
-                disabled={isBusy}
-                onClick={handleChunk}
-                className="gap-2 w-fit"
-              >
-                {isChunking
-                  ? <Loader2Icon className="size-4 animate-spin" />
-                  : <RefreshCwIcon className="size-4" />}
-                {isChunking ? "Đang phân đoạn..." : "Phân đoạn lại"}
-              </Button>
-              {isChunkSyncing && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Phân đoạn trước có vẻ bị gián đoạn. Bấm &ldquo;Phân đoạn lại&rdquo; để thử lại.
-                </p>
-              )}
-              {chunkState.phase !== "idle" && chunkState.phase !== "syncing" && (
-                <div data-testid="chunk-progress">
-                  <ProgressStrip steps={CHUNK_STEPS} runState={chunkState} stepTimings={chunkTimings} now={now} />
-                </div>
-              )}
-              {chunkState.phase === "error" && (
-                <p className="text-xs text-destructive" data-testid="chunk-error">{chunkState.message}</p>
-              )}
-            </div>
-          </PipelineStep>
-
-          {/* Step 2: Edit chunks */}
-          <PipelineStep
-            number={2} title="Chỉnh sửa đoạn" pipelineStatus={step5Status}
-            optional collapsible defaultOpen={false} isLast
-          >
-            <div className="flex flex-col gap-1.5">
-              {isReloadingChunks ? (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2Icon className="size-3 animate-spin" /> Đang tải...
-                </div>
+                </WorkflowTaskSection>
               ) : (
-                chunks.map((chunk, i) => (
-                  <ChunkEditor
-                    key={chunk.id}
-                    chunk={chunk}
-                    chunkSegments={getChunkSegments(chunk, segments)}
-                    prevChunkId={i > 0 ? chunks[i - 1].id : null}
-                    nextChunkId={i < chunks.length - 1 ? chunks[i + 1].id : null}
-                    onMergeWithPrev={handleMergeWithPrev}
-                    onMergeWithNext={handleMergeWithNext}
-                    onDelete={handleDeleteChunk}
-                    onSplit={handleSplitChunk}
-                    onMoveSegment={handleMoveSegment}
-                    isMerging={mutatingChunkId === chunk.id && mutatingOp === "merge"}
-                    isDeleting={mutatingChunkId === chunk.id && mutatingOp === "delete"}
-                    isSplitting={mutatingChunkId === chunk.id && mutatingOp === "split"}
-                    isMoving={mutatingChunkId === chunk.id && mutatingOp === "move"}
-                    disabled={isBusy}
-                  />
-                ))
+                <WorkflowReadyState
+                  icon={<FileTextIcon className="size-4" />}
+                  title="Video sẵn sàng phiên âm"
+                  description="Video đã được tải lên và có thể được xử lý để tạo transcript cho các bước phân đoạn và bài tập."
+                />
               )}
-              {mutatingError && (
-                <p className="text-xs text-destructive mt-1">{mutatingError}</p>
-              )}
-            </div>
-          </PipelineStep>
 
+              {hasSegments && (
+                <WorkflowTaskSection
+                  title="Chỉnh sửa transcript" status={step3Status}
+                  optional collapsible defaultOpen={hasSegments}
+                >
+                  <div className="flex max-h-64 flex-col gap-1 overflow-y-auto pr-1">
+                    {segments.map((seg, i) => (
+                      <SegmentRow
+                        key={i}
+                        segment={seg}
+                        index={i}
+                        lessonId={lessonId}
+                        disabled={isBusy}
+                        aiClient={aiClient}
+                        onUpdated={(idx, text) =>
+                          setSegments(prev => prev.map((s, j) => j === idx ? { ...s, text } : s))
+                        }
+                        onSaved={() => {
+                          setChunkState({ phase: "idle" });
+                          setChunkTimings({});
+                          setGenState({ phase: "idle" });
+                          setGenWarnings([]);
+                          // Bug 3 fix: refresh the RSC so VideoPlayer receives updated segments.
+                          router.refresh();
+                        }}
+                      />
+                    ))}
+                  </div>
+                </WorkflowTaskSection>
+              )}
+            </>
+          )}
         </div>
       )}
 
-      {/* ── Tab 3: Bài tập ── */}
-      {activeTab === "baiTap" && (
+      {activeStep === "chunks" && (
+        <div className="flex flex-col gap-3 animate-in fade-in duration-200">
+          {!hasTranscriptContent ? (
+            <div className="flex flex-col items-center justify-center p-10 text-center border border-dashed border-border/80 rounded-2xl bg-muted/5 shadow-inner">
+              <div className="rounded-full bg-muted/20 p-4 border border-border/40 mb-3.5">
+                <LockIcon className="size-6 text-muted-foreground animate-pulse" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground/90">Tính năng phân đoạn chưa sẵn sàng</h3>
+              <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
+                Vui lòng hoàn thành Bước 2: Phiên âm trước để tạo văn bản bài giảng. Sau khi có transcript, AI sẽ tự động phân tích cấu trúc bài giảng để chia thành các phân đoạn ngữ cảnh rõ ràng.
+              </p>
+            </div>
+          ) : (
+            <>
+              {shouldShowChunkTask ? (
+                <WorkflowTaskSection
+                  title="Tác vụ phân đoạn"
+                  status={step4Status}
+                  optional
+                  collapsible
+                  defaultOpen={!hasChunks || chunkState.phase === "error"}
+                >
+                  <div className="flex flex-col gap-2">
+                    {hasChunks && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isBusy}
+                        onClick={handleChunk}
+                        className="gap-2 w-fit"
+                      >
+                        {isChunking
+                          ? <Loader2Icon className="size-4 animate-spin" />
+                          : <RefreshCwIcon className="size-4" />}
+                        {isChunking ? "Đang phân đoạn..." : "Phân đoạn lại"}
+                      </Button>
+                    )}
+                    {hasChunks && chunkState.phase !== "error" && !isChunking && !isChunkSyncing && (
+                      <WorkflowStatusSummary
+                        tone="success"
+                        title="Đã phân đoạn bài học"
+                        description={`Bài học hiện có ${chunks.length} phân đoạn. Bạn có thể chỉnh sửa trước khi tạo bài tập.`}
+                      />
+                    )}
+                    {isChunkSyncing && (
+                      <WorkflowStatusSummary
+                        tone="warning"
+                        title="Đang kiểm tra tiến trình phân đoạn"
+                        description="Phân đoạn trước có vẻ bị gián đoạn. Nếu không tự hoàn tất, hãy thử phân đoạn lại."
+                      />
+                    )}
+                    {chunkState.phase !== "idle" && chunkState.phase !== "syncing" && (
+                      <div data-testid="chunk-progress">
+                        <ProgressStrip steps={CHUNK_STEPS} runState={chunkState} stepTimings={chunkTimings} now={now} />
+                      </div>
+                    )}
+                    {chunkState.phase === "error" && (
+                      <WorkflowStatusSummary
+                        tone="error"
+                        title="Không thể phân đoạn bài học"
+                        description="Transcript đã có, nhưng bước chia nội dung gặp lỗi. Hãy thử lại."
+                        technicalDetail={chunkState.message}
+                        testId="chunk-error"
+                      />
+                    )}
+                  </div>
+                </WorkflowTaskSection>
+              ) : (
+                <WorkflowReadyState
+                  icon={<ListTreeIcon className="size-4" />}
+                  title="Transcript sẵn sàng phân đoạn"
+                  description="Transcript đã có sẵn để chia thành các phân đoạn học tập có ngữ cảnh rõ ràng."
+                />
+              )}
+
+              {hasChunks && (
+                <WorkflowTaskSection
+                  title="Chỉnh sửa phân đoạn" status={step5Status}
+                  optional collapsible defaultOpen={hasChunks}
+                >
+                  <div className="flex flex-col gap-1.5">
+                    {isReloadingChunks ? (
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Loader2Icon className="size-3 animate-spin" /> Đang tải...
+                      </div>
+                    ) : (
+                      chunks.map((chunk, i) => (
+                        <ChunkEditor
+                          key={chunk.id}
+                          chunk={chunk}
+                          chunkSegments={getChunkSegments(chunk, segments)}
+                          prevChunkId={i > 0 ? chunks[i - 1].id : null}
+                          nextChunkId={i < chunks.length - 1 ? chunks[i + 1].id : null}
+                          onMergeWithPrev={handleMergeWithPrev}
+                          onMergeWithNext={handleMergeWithNext}
+                          onDelete={handleDeleteChunk}
+                          onSplit={handleSplitChunk}
+                          onMoveSegment={handleMoveSegment}
+                          isMerging={mutatingChunkId === chunk.id && mutatingOp === "merge"}
+                          isDeleting={mutatingChunkId === chunk.id && mutatingOp === "delete"}
+                          isSplitting={mutatingChunkId === chunk.id && mutatingOp === "split"}
+                          isMoving={mutatingChunkId === chunk.id && mutatingOp === "move"}
+                          disabled={isBusy}
+                        />
+                      ))
+                    )}
+                    {mutatingError && (
+                      <p className="text-xs text-destructive mt-1">{mutatingError}</p>
+                    )}
+                  </div>
+                </WorkflowTaskSection>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {activeStep === "exercises" && (
         <TabExercises
           lessonId={lessonId}
           chunks={chunks}
@@ -1174,12 +1770,14 @@ export function AnalyzeButton({
           questionsGenerated={questionsGenerated}
           feedbackMode={feedbackMode}
           savingFeedback={savingFeedback}
+          openLessonGenerateRequest={exerciseOpenRequest}
           onFeedbackModeChange={handleFeedbackModeChange}
-          onGenerateLesson={handleGenerate}
+          onGenerateLesson={(force, difficulty, focusPrompt) => handleGenerate(force, undefined, difficulty, focusPrompt)}
           onGenerateChunk={(chunkId, force) => handleGenerate(force, chunkId)}
           onInteractionsChange={setInteractions}
         />
       )}
+      </WorkflowStepPanel>
     </div>
   );
 }

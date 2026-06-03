@@ -1,11 +1,13 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { InfoIcon, Maximize, PanelRightClose, PanelRightOpen, PlayIcon, SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
+import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
 import type { TranscriptSegment, TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { submitAttemptErrorMessage } from "@/interactions/_shared/connect-error-message";
 import { useRichterWebClient } from "@/lib/connect-webclient";
@@ -15,7 +17,7 @@ import { LessonResult } from "./lesson-result";
 import type { QuizResult } from "./lesson-result";
 import { InteractionCheckpoint } from "./interaction-checkpoint";
 import { getRenderer, extractConfig, extractLocalResponse } from "@/interactions/registry";
-import type { FillBlankResponse, ListeningResponse, McqResponse, ReadingResponse } from "@/interactions/types";
+import type { FillBlankResponse, InteractionGrade, ListeningResponse, McqResponse, ReadingResponse } from "@/interactions/types";
 
 const CHECKPOINT_EPSILON_SECONDS = 0.35;
 
@@ -58,6 +60,7 @@ export function StudentLessonView({
   isPreview,
   maxAttempts,
 }: Props) {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevTimeRef = useRef(initialPosition);
@@ -72,17 +75,37 @@ export function StudentLessonView({
     isInitialLoadRef.current = true;
   }, [playerKey]);
   const interactionClient = useRichterWebClient(InteractionService, token);
+  const aiClient = useRichterWebClient(AIService, token);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(previousResult !== null);
   const [result, setResult] = useState<QuizResult | null>(previousResult);
+  const [lessonInteractions, setLessonInteractions] = useState(interactions);
+  const [draftGrades, setDraftGrades] = useState<Map<string, InteractionGrade>>(() => new Map());
+  const [savingResponseId, setSavingResponseId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLessonInteractions(interactions);
+  }, [interactions]);
 
   // Track if sidebar is open
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  useEffect(() => {
+    const saved = localStorage.getItem("dyadia_student_sidebar_open");
+    if (saved !== null) {
+      setSidebarOpen(saved === "true");
+    }
+  }, []);
+
+  const handleToggleSidebar = (open: boolean) => {
+    setSidebarOpen(open);
+    localStorage.setItem("dyadia_student_sidebar_open", String(open));
+  };
+
   // Track answered interaction IDs and their local responses
   const [passedIds, setPassedIds] = useState<Set<string>>(
-    () => previousResult !== null ? new Set(interactions.map((it) => it.id)) : new Set(),
+    () => previousResult !== null ? new Set(lessonInteractions.map((it) => it.id)) : new Set(),
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [responses, setResponses] = useState<Map<string, any>>(
@@ -99,16 +122,16 @@ export function StudentLessonView({
   // Which checkpoint is currently active (paused on)
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const allAnswered = interactions.length > 0 && passedIds.size >= interactions.length;
+  const allAnswered = lessonInteractions.length > 0 && passedIds.size >= lessonInteractions.length;
   const readyToSubmit = allAnswered && !submitted;
 
   // The current active interaction object
   const activeInteraction = activeId
-    ? interactions.find((it) => it.id === activeId) ?? null
+    ? lessonInteractions.find((it) => it.id === activeId) ?? null
     : null;
 
   // Pending checkpoints (not yet passed) ordered by startSeconds
-  const pendingCheckpoints = interactions
+  const pendingCheckpoints = lessonInteractions
     .filter((it) => it.startSeconds > 0 && !passedIds.has(it.id))
     .sort((a, b) => a.startSeconds - b.startSeconds);
 
@@ -147,11 +170,11 @@ export function StudentLessonView({
     isInitialLoadRef.current = false;
     prevTimeRef.current = videoRef.current?.currentTime ?? 0;
     // Unlock interactions with startSeconds <= 0 immediately on first play
-    const earlyIds = interactions.filter((it) => it.startSeconds <= 0).map((it) => it.id);
+    const earlyIds = lessonInteractions.filter((it) => it.startSeconds <= 0).map((it) => it.id);
     if (earlyIds.length > 0) {
       setPassedIds((prev) => new Set([...prev, ...earlyIds]));
     }
-  }, [interactions]);
+  }, [lessonInteractions]);
 
   // While a checkpoint is active: prevent the student from playing the video.
   useEffect(() => {
@@ -168,7 +191,7 @@ export function StudentLessonView({
     if (!activeId) return;
     const video = videoRef.current;
     if (!video) return;
-    const interaction = interactions.find((it) => it.id === activeId);
+    const interaction = lessonInteractions.find((it) => it.id === activeId);
     if (!interaction || interaction.startSeconds <= 0) return;
     const cap = interaction.startSeconds + 5;
     const clampSeek = () => {
@@ -349,13 +372,92 @@ export function StudentLessonView({
     setResponses((prev) => new Map(prev).set(id, response));
   }
 
-  function handleContinue(id: string) {
+  function buildAttemptResponseInput(it: LessonInteraction, localResp: unknown) {
+    if (it.kind === InteractionKind.MULTIPLE_CHOICE) {
+      return {
+        interactionId: it.id,
+        response: {
+          case: "mcqMultiple" as const,
+          value: { selectedIndexes: (localResp as McqResponse | undefined)?.selectedIndexes ?? [] },
+        },
+      };
+    }
+    switch (it.config.case) {
+      case "fillBlank":
+        return {
+          interactionId: it.id,
+          response: {
+            case: "fillBlank" as const,
+            value: { answers: (localResp as FillBlankResponse | undefined)?.answers ?? [] },
+          },
+        };
+      case "reading":
+        return {
+          interactionId: it.id,
+          response: {
+            case: "reading" as const,
+            value: { audioObjectKey: (localResp as ReadingResponse | undefined)?.audioObjectKey ?? "" },
+          },
+        };
+      case "listening": {
+        const r = localResp as ListeningResponse | undefined;
+        return {
+          interactionId: it.id,
+          response: {
+            case: "listening" as const,
+            value: {
+              transcription: r?.transcription ?? "",
+              comprehensionAnswers: r?.comprehensionAnswers ?? [],
+            },
+          },
+        };
+      }
+      default:
+        return {
+          interactionId: it.id,
+          response: {
+            case: "mcqSelected" as const,
+            value: (localResp as McqResponse | undefined)?.selected ?? 0,
+          },
+        };
+    }
+  }
+
+  async function saveDraftResponse(id: string) {
+    if (isPreview) return;
+    const interaction = lessonInteractions.find((it) => it.id === id);
+    if (!interaction) return;
+    // Reading AFTER_EACH already calls PreviewGrade as soon as the recording is ready.
+    if (interaction.kind === InteractionKind.READING && feedbackMode === FeedbackMode.AFTER_EACH) return;
+
+    const response = buildAttemptResponseInput(interaction, responses.get(id));
+    try {
+      setSavingResponseId(id);
+      const saved = await interactionClient.saveAttemptResponse({ lessonId, response });
+      if (saved.feedbackRevealed) {
+        setDraftGrades((prev) => new Map(prev).set(id, {
+          score: saved.score,
+          maxScore: saved.maxScore,
+          feedback: saved.feedback,
+        }));
+      }
+    } catch {
+      // Best effort: final submit can still grade this response if the draft save failed.
+      setError("Một câu trả lời chưa được lưu tạm thời. Hệ thống sẽ chấm lại khi nộp bài.");
+    } finally {
+      setSavingResponseId((current) => (current === id ? null : current));
+    }
+  }
+
+  async function handleContinue(id: string) {
+    if (savingResponseId) return;
+    await saveDraftResponse(id);
     // Find the next pending timed interaction at the SAME timestamp (or an earlier one
     // missed somehow). Untimed (startSeconds <= 0) interactions are skipped — those are
     // auto-passed on first play and never part of a checkpoint cluster.
-    const current = interactions.find((it) => it.id === id);
+    const current = lessonInteractions.find((it) => it.id === id);
     const nextInCheckpoint = current
-      ? interactions
+      ? lessonInteractions
           .filter(
             (it) =>
               it.id !== id &&
@@ -398,11 +500,15 @@ export function StudentLessonView({
     startTransition(async () => {
       try {
         if (isPreview) {
-          const respList = interactions.map((it) => {
+          const respList = lessonInteractions.map((it) => {
             const localResp = responses.get(it.id) ?? null;
             const config = extractConfig(it);
             let score = 0, maxScore = 1;
-            if (config && localResp) {
+            const draftGrade = draftGrades.get(it.id);
+            if (draftGrade) {
+              score = draftGrade.score;
+              maxScore = draftGrade.maxScore;
+            } else if (config && localResp) {
               try {
                 const renderer = getRenderer(it.kind);
                 if (renderer.gradeLocal) {
@@ -421,48 +527,7 @@ export function StudentLessonView({
             responses: respList,
           });
         } else {
-          const protoResponses = interactions.map((it) => {
-            const localResp = responses.get(it.id);
-            switch (it.config.case) {
-              case "fillBlank":
-                return {
-                  interactionId: it.id,
-                  response: {
-                    case: "fillBlank" as const,
-                    value: { answers: (localResp as FillBlankResponse | undefined)?.answers ?? [] },
-                  },
-                };
-              case "reading":
-                return {
-                  interactionId: it.id,
-                  response: {
-                    case: "reading" as const,
-                    value: { audioObjectKey: (localResp as ReadingResponse | undefined)?.audioObjectKey ?? "" },
-                  },
-                };
-              case "listening": {
-                const r = localResp as ListeningResponse | undefined;
-                return {
-                  interactionId: it.id,
-                  response: {
-                    case: "listening" as const,
-                    value: {
-                      transcription: r?.transcription ?? "",
-                      comprehensionAnswers: r?.comprehensionAnswers ?? [],
-                    },
-                  },
-                };
-              }
-              default:
-                return {
-                  interactionId: it.id,
-                  response: {
-                    case: "mcqSelected" as const,
-                    value: (localResp as McqResponse | undefined)?.selected ?? 0,
-                  },
-                };
-            }
-          });
+          const protoResponses = lessonInteractions.map((it) => buildAttemptResponseInput(it, responses.get(it.id)));
           const res = await interactionClient.submitAttempt({ lessonId, responses: protoResponses });
           const attempt = res.attempt;
           if (attempt) {
@@ -478,9 +543,20 @@ export function StudentLessonView({
                 feedback: r.feedback,
               })),
             });
+            void aiClient
+              .getLessonAnalysis({ lessonId })
+              .then((analysisResult) => {
+                if (analysisResult.analysis?.interactions) {
+                  setLessonInteractions(analysisResult.analysis.interactions);
+                }
+              })
+              .catch(() => null);
           }
         }
         setSubmitted(true);
+        if (!isPreview) {
+          router.refresh();
+        }
       } catch (err) {
         setError(submitAttemptErrorMessage(err));
       }
@@ -501,7 +577,7 @@ export function StudentLessonView({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={() => handleToggleSidebar(!sidebarOpen)}
               className="gap-2 text-xs font-medium hover:bg-accent hover:text-accent-foreground transition-all duration-200"
             >
               {sidebarOpen ? (
@@ -533,6 +609,7 @@ export function StudentLessonView({
             allowNativeFullscreen={false}
             isFullscreen={isFullscreen}
             onFullscreenToggle={toggleFullscreen}
+            interactions={lessonInteractions}
           />
 
           {/* Fullscreen Helper Tip Overlay */}
@@ -571,7 +648,7 @@ export function StudentLessonView({
             // A "cluster" is all interactions sharing the same start_seconds as
             // the active one (the video paused for a batch at one timestamp).
             // We label questions by their position within this cluster.
-            const cluster = interactions
+            const cluster = lessonInteractions
               .filter((it) => it.startSeconds === activeInteraction.startSeconds)
               .sort((a, b) => a.orderIndex - b.orderIndex);
             const clusterIndex = cluster.findIndex((it) => it.id === activeInteraction.id) + 1;
@@ -587,7 +664,7 @@ export function StudentLessonView({
                     locked={submitted}
                     onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
                     onContinue={() => handleContinue(activeInteraction.id)}
-                    hasNextInCheckpoint={interactions.some(
+                    hasNextInCheckpoint={lessonInteractions.some(
                       (it) =>
                         it.id !== activeInteraction.id &&
                         !passedIds.has(it.id) &&
@@ -597,7 +674,13 @@ export function StudentLessonView({
                     token={token}
                     lessonId={lessonId}
                     isPreview={isPreview}
+                    onGrade={(grade) => {
+                      setDraftGrades((prev) => new Map(prev).set(activeInteraction.id, grade));
+                    }}
                   />
+                  {savingResponseId === activeInteraction.id && (
+                    <p className="mt-3 text-xs text-muted-foreground">Đang lưu câu trả lời...</p>
+                  )}
                 </div>
               </div>
             );
@@ -605,13 +688,13 @@ export function StudentLessonView({
         </div>
 
         {/* State machine card */}
-        {interactions.length > 0 && ((!submitted && !activeInteraction) || readyToSubmit || (submitted && result) || error) && (
+        {lessonInteractions.length > 0 && ((!submitted && !activeInteraction) || readyToSubmit || (submitted && result) || error) && (
           <div className="rounded-md border p-4 flex flex-col gap-3">
             {/* Not started — idle tip */}
             {!submitted && !activeInteraction && passedIds.size === 0 && (
               <div className="rounded-md bg-muted/30 p-6 text-center">
                 <InfoIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
-                <p className="mb-1 text-base font-medium">Bài học có {interactions.length} câu hỏi tương tác</p>
+                <p className="mb-1 text-base font-medium">Bài học có {lessonInteractions.length} câu hỏi tương tác</p>
                 <p className="inline-flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                   Video sẽ tạm dừng tại mỗi mốc để bạn trả lời. Bấm <PlayIcon className="size-3.5" /> để bắt đầu.
                 </p>
@@ -621,7 +704,7 @@ export function StudentLessonView({
             {/* In progress */}
             {!submitted && !activeInteraction && passedIds.size > 0 && !allAnswered && (
               <p className="text-sm text-muted-foreground">
-                Đã trả lời {passedIds.size}/{interactions.length} câu — tiếp tục xem video.
+                Đã trả lời {passedIds.size}/{lessonInteractions.length} câu — tiếp tục xem video.
               </p>
             )}
 
@@ -629,7 +712,7 @@ export function StudentLessonView({
             {readyToSubmit && !activeInteraction && (
               <div className="flex flex-col gap-3">
                 <p className="text-sm text-muted-foreground">
-                  Đã trả lời đủ {interactions.length}/{interactions.length} câu. Sẵn sàng nộp bài!
+                  Đã trả lời đủ {lessonInteractions.length}/{lessonInteractions.length} câu. Sẵn sàng nộp bài!
                 </p>
                 <Button
                   size="sm"
@@ -647,7 +730,7 @@ export function StudentLessonView({
             {submitted && result && (
               <LessonResult
                 result={result}
-                interactions={interactions}
+                interactions={lessonInteractions}
                 feedbackMode={feedbackMode}
                 onRetake={handleRetake}
                 token={token}

@@ -78,7 +78,7 @@ export function LessonSidebar({ chunks, segments, transcript, videoRef }: Props)
       </div>
 
       {!collapsed && (
-        <div className="overflow-y-auto max-h-[calc(100vh-200px)]">
+        <div className={`max-h-[calc(100vh-200px)] ${tab === "outline" || segments.length === 0 ? "overflow-y-auto" : ""}`}>
           {tab === "outline" && hasOutline && (
             <div className="flex flex-col divide-y divide-border/50 p-2">
               {chunks.map((chunk) => (
@@ -97,7 +97,7 @@ export function LessonSidebar({ chunks, segments, transcript, videoRef }: Props)
           {tab === "transcript" && hasTranscript && (
             <div className="p-3">
               {segments.length > 0 ? (
-                <InteractiveTranscript segments={segments} videoRef={videoRef} />
+                <InteractiveTranscript segments={segments} videoRef={videoRef} maxHeightClass="max-h-[calc(100vh-260px)] lg:max-h-[calc(100vh-220px)]" />
               ) : (
                 <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
                   {transcript}

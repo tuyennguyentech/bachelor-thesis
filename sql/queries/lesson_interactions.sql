@@ -14,7 +14,7 @@ SELECT * FROM lesson_interactions WHERE id = $1;
 
 -- name: UpdateLessonInteraction :one
 UPDATE lesson_interactions
-SET prompt = $2, explanation = $3, start_seconds = $4, config = $5, updated_at = now()
+SET prompt = $2, explanation = $3, start_seconds = $4, config = $5, kind = $6, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

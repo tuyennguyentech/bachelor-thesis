@@ -40,6 +40,13 @@ function uid(base: string) {
   return `${base} ${Date.now()}`;
 }
 
+async function ensureRetakeState(page: Page) {
+  const retakeBtn = page.getByRole("button", { name: "Làm lại" });
+  if (await retakeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await retakeBtn.click();
+  }
+}
+
 /** Creates a fresh course → module → lesson, returns the lesson URL. */
 async function createLesson(
   page: Page,
@@ -88,15 +95,12 @@ test.describe("Video upload flow", () => {
       page, uid("Khóa học Upload Flow"), uid("Chương Upload"), uid("Bài Upload"),
     );
     await page.goto(url);
-    await expect(page.getByRole("button", { name: "Tải video lên" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
 
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText(/Đang tải lên/)).toBeVisible();
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
-
-    // Video key is displayed below the upload button
-    await expect(page.getByText(/Key: lessons\//)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Thay video" }).first()).toBeVisible();
   });
 
   test("after upload, video key enables AI analysis button", async ({ teacherPage: page }) => {
@@ -104,17 +108,42 @@ test.describe("Video upload flow", () => {
       page, uid("Khóa học AI Enabled"), uid("Chương AI"), uid("Bài AI"),
     );
     await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
-    // After upload, AI analysis section appears with the new 2-stage extract button
-    await expect(page.getByText("AI Phân tích")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+    // After upload, authoring workflow appears with the transcript extract button.
+    await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+  });
+
+  test("workflow stepper guides the next video processing action", async ({ teacherPage: page }) => {
+    const scriptTagConsoleErrors: string[] = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error" && msg.text().includes("Encountered a script tag")) {
+        scriptTagConsoleErrors.push(msg.text());
+      }
+    });
+
+    const url = await createLesson(
+      page, uid("Khóa học Workflow"), uid("Chương Workflow"), uid("Bài Workflow"),
+    );
+    await page.goto(url);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
+    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+
+    await page.reload();
+    await expect(page.getByTestId("video-workflow-stepper")).toBeVisible();
+    await expect(page.getByTestId("workflow-next-action")).toContainText("Tiếp theo: Trích xuất transcript");
+    await expect(page.getByTestId("workflow-step-transcript")).toBeVisible();
+    await expect(page.getByTestId("workflow-step-chunks")).toBeDisabled();
+    await expect(page.getByText("Video sẵn sàng phiên âm")).toBeVisible();
+    await expect(page.getByText("Tác vụ phiên âm")).not.toBeVisible();
+    expect(scriptTagConsoleErrors).toEqual([]);
   });
 
   test("student does not see upload controls", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await expect(page.getByText("Quản lý video")).not.toBeVisible();
+    await expect(page.getByText("Nguồn video")).not.toBeVisible();
     await expect(page.getByRole("button", { name: "Tải video lên" })).not.toBeVisible();
     await expect(page.getByRole("button", { name: "Thay video" })).not.toBeVisible();
   });
@@ -137,14 +166,14 @@ test.describe("Video player", () => {
 
   test("lesson without video shows teacher placeholder", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, "Bài 3: Benchmark thực tế");
-    await expect(page.getByText("Chưa có video. Tải video lên bên dưới.")).toBeVisible();
+    await expect(page.getByText("Chưa có video. Tải video lên để bắt đầu tạo nội dung.")).toBeVisible();
   });
 
   test("video load error shows error placeholder instead of broken player", async ({ teacherPage: page }) => {
     const lessonUrl = await createLesson(page, uid("ErrorVideoTest"), "Module 1", uid("Lesson"));
     await page.goto(lessonUrl);
     // Upload a real file so video_storage_key is set in DB
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
     // Reload so the server fetches the presigned download URL and renders the video player
     await page.reload();
@@ -180,25 +209,28 @@ test.describe("AI analysis", () => {
       page, uid("Khóa học Analyze"), uid("Chương Analyze"), uid("Bài Analyze"),
     );
     await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
     // Reload so server re-renders with video_key set → AI section appears
     await page.reload();
-    await expect(page.getByText("AI Phân tích")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+    await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
   });
 
   test("seeded lesson shows analysis status Hoàn thành", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    // Analysis was seeded with status=done
-    await expect(page.getByText("(Hoàn thành)")).toBeVisible();
+    // Analysis was seeded with status=done; the redesigned lesson overview surfaces it as readiness.
+    await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
+    await expect(page.getByTestId("workflow-step-exercises")).toContainText(/\d+ câu/);
+    await expect(page.getByText("Đã sẵn sàng dùng thử")).toBeVisible();
+    await expect(page.getByTestId("workflow-next-action")).not.toContainText("Trích xuất transcript");
   });
 
   test("teacher sees questions with correct answers highlighted", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Questions are inside the AnalyzeButton "Bài tập" tab for teachers
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
@@ -216,10 +248,10 @@ test.describe("AI analysis streaming progress", () => {
       page, uid("Khóa học SSE"), uid("Chương SSE"), uid("Bài SSE"),
     );
     await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
-    await page.getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
 
     // Progress panel appears immediately
     const panel = page.locator('[data-testid="extract-progress"]');
@@ -237,10 +269,10 @@ test.describe("AI analysis streaming progress", () => {
       page, uid("Khóa học Busy"), uid("Chương Busy"), uid("Bài Busy"),
     );
     await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
-    await page.getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
     const btn = page.getByRole("button", { name: "Đang trích xuất..." });
     await expect(btn).toBeVisible({ timeout: 5_000 });
     await expect(btn).toBeDisabled();
@@ -272,7 +304,7 @@ test.describe("Student quiz form", () => {
     // Bob has a seeded attempt → starts in result state
     await expect(page.getByText("🎯 Kết quả")).toBeVisible();
     // Click Làm lại to reset to fresh state
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     // In fresh state no checkpoint is active → no green borders visible
     await expect(page.locator(".border-green-500")).toHaveCount(0);
   });
@@ -288,7 +320,7 @@ test.describe("Student quiz form", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
 
     // "Nộp bài" should not appear until all checkpoints answered
     await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
@@ -307,7 +339,7 @@ test.describe("Student quiz form", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
 
     // Initially "Nộp bài" not visible
     await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
@@ -330,7 +362,7 @@ test.describe("Student quiz form", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
 
     // q1 correct_answer=1 per seed; others pick first option
     await answerAllCheckpoints(page, [1, 0, 0, 0, 0]);
@@ -351,7 +383,7 @@ test.describe("Video quiz checkpoint", () => {
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Bob has a seeded attempt → start in submitted state; reset first
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
     // Trigger via test hook (Object.defineProperty on currentTime is unreliable in Firefox)
@@ -365,7 +397,7 @@ test.describe("Video quiz checkpoint", () => {
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
     // Bob has a seeded attempt (server reveals correct answers) → reset to trigger checkpoints
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
@@ -380,7 +412,7 @@ test.describe("Video quiz checkpoint", () => {
 
   test("Tiếp tục xem dismisses checkpoint", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
@@ -397,7 +429,7 @@ test.describe("Video quiz checkpoint", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
     // Trigger checkpoint
@@ -436,7 +468,7 @@ test.describe("Video quiz checkpoint", () => {
     studentPage: page,
   }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
@@ -456,7 +488,7 @@ test.describe("Video quiz checkpoint", () => {
 
   test("student cannot bypass checkpoint by seeking past it", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Làm lại" }).click();
+    await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
     await triggerCheckpoint(page, 210);
@@ -552,37 +584,51 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
       page, uid("Pipeline Course"), uid("Pipeline Module"), uid("Pipeline Lesson"),
     );
     await page.goto(lessonUrl);
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO_WITH_AUDIO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
     // Step 1: Extract transcript
-    await page.getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
     await expect(page.getByRole("button", { name: "Đang trích xuất..." })).toBeVisible({ timeout: 5_000 });
     await expect(
-      page.getByRole("button", { name: "Trích xuất lại transcript" }).or(page.locator('[data-testid="extract-error"]')),
+      page.getByTestId("workflow-next-action").getByRole("button", { name: "Phân đoạn bài học" }).or(page.locator('[data-testid="extract-error"]')),
     ).toBeVisible({ timeout: 360_000 });
     await expect(page.locator('[data-testid="extract-error"]')).not.toBeVisible();
+    await expect(page.getByTestId("workflow-step-body")).toContainText("Phân đoạn bài học");
+    await expect(page.getByText("Tác vụ phân đoạn")).not.toBeVisible();
 
     // Step 2: Chunk transcript
-    await page.getByRole("button", { name: "Phân đoạn video" }).click();
-    await page.getByRole("button", { name: "Phân đoạn lại" }).click();
+    await page.getByTestId("workflow-step-chunks").click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Phân đoạn bài học" }).click();
     await expect(page.getByRole("button", { name: "Đang phân đoạn..." })).toBeVisible({ timeout: 10_000 });
     await expect(
-      page.getByRole("button", { name: "Phân đoạn lại" }).or(page.locator('[data-testid="chunk-error"]')),
+      page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')),
     ).toBeVisible({ timeout: 120_000 });
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
+    await expect(page.getByTestId("workflow-step-body")).toContainText("Tạo bài tập");
 
     // Step 3: Generate questions
-    await page.getByRole("button", { name: "Bài tập" }).click();
-    await page.getByTestId("generate-all-btn").click();
-    // Inline generate form appears — click "Tạo tất cả" to proceed
-    await page.getByRole("button", { name: "Tạo tất cả" }).click();
-    await expect(page.getByRole("button", { name: "Đang tạo..." })).toBeVisible({ timeout: 5_000 });
+    await page.getByTestId("workflow-step-exercises").click();
+    await page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).click();
+    // Fill the custom AI configuration to verify custom generation payload mapping
+    await page.getByRole("button", { name: "Tăng Trắc nghiệm nhiều đáp án" }).click();
+    await page.getByRole("button", { name: "Tăng Điền đáp án" }).click();
+    await page.getByRole("button", { name: "Tăng Bài đọc" }).click();
+    await page.getByRole("button", { name: "Tăng Bài nghe" }).click();
+    await page.getByRole("button", { name: /Khó/ }).click();
+    await page.locator("#gen-focus-prompt").fill("Tập trung vào cấu trúc dữ liệu Giải thuật và Big O");
+    await page.getByRole("button", { name: "Tạo 5 bài tập" }).click();
+    await expect(page.getByText("Đang tạo bài tập")).toBeVisible({ timeout: 5_000 });
     await expect(
-      page.locator('[data-testid="gen-done"], [data-testid="gen-error"]'),
+      page.getByText("Đã sẵn sàng dùng thử").or(page.locator('[data-testid="gen-error"]')),
     ).toBeVisible({ timeout: 180_000 });
     await expect(page.locator('[data-testid="gen-error"]')).not.toBeVisible();
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("workflow-step-preview")).toContainText("Sẵn sàng");
+    await expect(page.getByText("Trắc nghiệm 1 đáp án").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Trắc nghiệm chọn nhiều").first()).toBeVisible();
+    await expect(page.getByText("Điền đáp án").first()).toBeVisible();
+    await expect(page.getByText("Bài đọc").first()).toBeVisible();
+    await expect(page.getByText("Bài nghe").first()).toBeVisible();
   });
 
   test("after pipeline: transcript segments visible with seek hint", async ({ teacherPage: page }) => {
@@ -612,12 +658,12 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     expect(videoTime).toBeGreaterThanOrEqual(startSec - 0.5);
   });
 
-  test("after pipeline: transcript chunks visible in Phân đoạn video tab", async ({ teacherPage: page }) => {
+  test("after pipeline: transcript chunks visible in Phân đoạn step", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     await page.goto(lessonUrl);
     await page.reload();
 
-    await page.getByRole("button", { name: "Phân đoạn video" }).click();
+    await page.getByTestId("workflow-step-chunks").click();
     // PipelineStep 1 "Phân đoạn lại" is collapsed after pipeline (defaultOpen={!hasChunks}=false).
     // Expand it first so children are rendered in the DOM.
     await page.getByLabel("Mở rộng").first().click();
@@ -628,15 +674,16 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     await page.goto(lessonUrl);
     await page.reload();
-    await expect(page.getByText("(Hoàn thành)")).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText("Đã sẵn sàng dùng thử")).toBeVisible({ timeout: 5_000 });
   });
 
-  test("after pipeline: 'Trích xuất lại transcript' button visible when segments exist", async ({ teacherPage: page }) => {
+  test("after pipeline: 'Trích xuất lại' button visible when segments exist", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     await page.goto(lessonUrl);
     await page.reload();
-    // After pipeline, lesson has transcript segments → extract button shows "Trích xuất lại transcript"
-    await expect(page.getByRole("button", { name: "Trích xuất lại transcript" })).toBeVisible({ timeout: 5_000 });
+    await page.getByTestId("workflow-step-transcript").click();
+    // After pipeline, lesson has transcript segments → extract button shows "Trích xuất lại"
+    await expect(page.getByRole("button", { name: "Trích xuất lại" })).toBeVisible({ timeout: 5_000 });
   });
 
   test("editing transcript segment updates VideoPlayer transcript display", async ({ teacherPage: page }) => {
@@ -647,8 +694,8 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     // Pre-condition: interactive transcript is visible in VideoPlayer
     await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
 
-    // Open the "Phiên âm" tab in AnalyzeButton to access segment editing
-    await page.getByRole("button", { name: "Phiên âm" }).click();
+    // Open the "Phiên âm" workflow step in AnalyzeButton to access segment editing.
+    await page.getByTestId("workflow-step-transcript").click();
     await expect(page.locator('[data-testid="transcript-segment-0"]').first()).toBeVisible();
 
     // Edit the first segment
@@ -675,8 +722,8 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await page.goto(lessonUrl);
     await page.reload();
 
-    // Navigate to "Phân đoạn video" tab where the "Phân đoạn lại" button lives
-    await page.getByRole("button", { name: "Phân đoạn video" }).click();
+    // Navigate to the "Phân đoạn" workflow step where the "Phân đoạn lại" button lives.
+    await page.getByTestId("workflow-step-chunks").click();
     // PipelineStep 1 is collapsed after pipeline — expand it so the button is in the DOM
     await page.getByLabel("Mở rộng").first().click();
     await page.getByRole("button", { name: "Phân đoạn lại" }).click();
@@ -688,7 +735,7 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
 
     // Wait for the re-chunk to actually finish so subsequent tests in this block
     // see chunks (not an empty list during the in-flight ChunkTranscriptStream).
-    await expect(page.getByRole("button", { name: "Phân đoạn lại" })).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByText("Đã sẵn sàng dùng thử").or(page.locator('[data-testid="chunk-error"]'))).toBeVisible({ timeout: 120_000 });
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
   });
 
@@ -702,13 +749,12 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await page.goto(lessonUrl);
     await page.reload();
 
-    // After redesign: "Phân đoạn video" tab has 2 steps, both collapsible (default closed).
-    // Step 2 "Chỉnh sửa đoạn" contains the CoherenceBadge. Expand both.
-    await page.getByRole("button", { name: "Phân đoạn video" }).click();
-    // Expand Step 2: the second "Mở rộng" button (Step 1 is also collapsible)
-    const expandButtons = page.getByLabel("Mở rộng");
-    await expect(expandButtons.nth(1)).toBeVisible({ timeout: 5_000 });
-    await expandButtons.nth(1).click();
+    await page.getByTestId("workflow-step-chunks").click();
+    for (const button of await page.getByLabel("Mở rộng").all()) {
+      if (await button.isVisible().catch(() => false)) {
+        await button.click();
+      }
+    }
 
     const badges = page.getByTestId("coherence-badge");
     await expect(badges.first()).toBeVisible({ timeout: 10_000 });
@@ -745,17 +791,28 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     // Pre-condition: pipeline ran → transcript sections are visible
     await expect(page.getByText("Phiên âm nội dung")).toBeVisible();
     await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
+    const oldVideoSrc = await page.locator('[data-testid="video-player"] video').getAttribute("src");
+    expect(oldVideoSrc).toBeTruthy();
+
+    // Open Step 1 (Upload) to mount the VideoUpload component and file input
+    await page.getByTestId("workflow-step-upload").click();
 
     // Upload a replacement video (same format, triggers status → PENDING)
-    await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
-    // After replacement: VideoPlayer transcript section should disappear (status → PENDING, FDB cleared)
+    // After replacement: the actual media source changes, and transcript state clears.
+    await expect.poll(
+      async () => page.locator('[data-testid="video-player"] video').getAttribute("src"),
+      { timeout: 10_000 },
+    ).not.toBe(oldVideoSrc);
+
+    // VideoPlayer transcript section should disappear (status → PENDING, FDB cleared)
     await expect(page.getByText("Phiên âm nội dung")).not.toBeVisible({ timeout: 10_000 });
 
-    // AnalyzeButton state reset: button reverts to "Trích xuất transcript" (not "Trích xuất lại transcript")
-    await expect(page.getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Trích xuất lại transcript" })).not.toBeVisible();
+    // AnalyzeButton state reset: button reverts to "Trích xuất transcript" (not "Trích xuất lại")
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Trích xuất lại" })).not.toBeVisible();
   });
 });
 
@@ -764,7 +821,7 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
 test.describe("Teacher question editing (seeded data)", () => {
   test("teacher sees edit/delete buttons on each question", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
@@ -776,7 +833,7 @@ test.describe("Teacher question editing (seeded data)", () => {
 
   test("teacher can edit a question inline", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
@@ -794,18 +851,18 @@ test.describe("Teacher question editing (seeded data)", () => {
 
     // Edit form closes and new text appears
     await expect(page.locator("textarea").first()).not.toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(newText)).toBeVisible();
+    await expect(page.getByText(newText).first()).toBeVisible();
   });
 
   test("teacher can add a manual question", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     // After redesign: chunk-based layout with per-chunk interaction cards
     await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
 
     await page.getByTestId("add-interaction-btn").first().click();
-    // Inline form opens with MCQ selected by default — click "Trắc nghiệm" to confirm kind
-    await page.getByRole("button", { name: "Trắc nghiệm" }).click();
+    // Inline form opens with single-choice selected by default.
+    await expect(page.getByRole("button", { name: "Trắc nghiệm 1 đáp án", exact: true })).toBeVisible();
 
     // Fill in the add form — after selecting kind, InteractionForm appears
     await page.getByPlaceholder("Nhập câu hỏi...").fill("Câu hỏi thủ công mới");
@@ -821,7 +878,7 @@ test.describe("Teacher question editing (seeded data)", () => {
 
   test("bug 1.8: adding 3 questions consecutively keeps all of them visible", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5_000 });
 
     const stamp = Date.now();
@@ -841,22 +898,22 @@ test.describe("Teacher question editing (seeded data)", () => {
     }
 
     await addMcq(q(1));
-    await expect(page.getByText(q(1))).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
 
     await addMcq(q(2));
     // Both questions must be visible — regression: stale closure would drop q(1)
-    await expect(page.getByText(q(1))).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(q(2))).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(2)).first()).toBeVisible({ timeout: 5_000 });
 
     await addMcq(q(3));
-    await expect(page.getByText(q(1))).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(q(2))).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(q(3))).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(2)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(q(3)).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("teacher can delete a question", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
 
     // Add a unique question so the delete is self-contained (seeded timed interactions untouched)
@@ -894,7 +951,7 @@ test.describe("Teacher question editing (seeded data)", () => {
 
   test("cancel edit discards changes", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("button", { name: "Bài tập" }).click();
+    await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
@@ -907,7 +964,7 @@ test.describe("Teacher question editing (seeded data)", () => {
     await page.getByRole("button", { name: "Hủy" }).first().click();
 
     // Original text still shown
-    await expect(page.getByText(questionText ?? "")).toBeVisible();
+    await expect(page.getByText(questionText ?? "").first()).toBeVisible();
     await expect(page.getByText("Đây là thay đổi bị hủy")).not.toBeVisible();
   });
 });

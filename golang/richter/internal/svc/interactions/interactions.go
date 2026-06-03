@@ -32,7 +32,7 @@ import (
 
 // AIRegenerateFunc is provided by the AI service via DI to allow InteractionsSvc
 // to regenerate a single interaction using Gemini without a direct import cycle.
-type AIRegenerateFunc func(ctx context.Context, interactionID pgtype.UUID, newKind richterv1.InteractionKind) (*gen.LessonInteraction, error)
+type AIRegenerateFunc func(ctx context.Context, interactionID pgtype.UUID, newKind richterv1.InteractionKind, customPrompt string) (*gen.LessonInteraction, error)
 
 // GradingDepsProvider is provided by the AI service via DI to supply external
 // grading dependencies (audio AI, S3 download) for ContextualGrader handlers.
@@ -57,14 +57,29 @@ type tempGradeCache struct {
 	Feedback     string  `json:"feedback"`
 }
 
+type singleGradeTarget struct {
+	orgID         pgtype.UUID
+	lesson        gen.Lesson
+	interaction   gen.LessonInteraction
+	interactionID pgtype.UUID
+	responseJSON  []byte
+	handler       Handler
+}
+
+type singleGradeResult struct {
+	score    float32
+	maxScore float32
+	feedback string
+}
+
 type InteractionsSvc struct {
-	pg           *db.PostgresSvc
-	kv           *kv.KVSvc
-	log          *log.LogSvc
-	authz        *authz.AuthzSvc
-	aiRegen      AIRegenerateFunc    // injected by AISvc; nil in test/unit contexts
-	gradingDeps  GradingDepsProvider // injected by AISvc; nil in test/unit contexts
-	deleteAudio  AudioObjectDeleter  // injected by AISvc; nil in test/unit contexts
+	pg          *db.PostgresSvc
+	kv          *kv.KVSvc
+	log         *log.LogSvc
+	authz       *authz.AuthzSvc
+	aiRegen     AIRegenerateFunc    // injected by AISvc; nil in test/unit contexts
+	gradingDeps GradingDepsProvider // injected by AISvc; nil in test/unit contexts
+	deleteAudio AudioObjectDeleter  // injected by AISvc; nil in test/unit contexts
 }
 
 var _ richterv1connect.InteractionServiceHandler = (*InteractionsSvc)(nil)
@@ -117,6 +132,110 @@ func (s *InteractionsSvc) requireTeacherRole(ctx context.Context, lessonID pgtyp
 		gen.OrganizationRoleTeacher,
 	)
 	return err
+}
+
+func (s *InteractionsSvc) lookupSingleGradeTarget(
+	ctx context.Context,
+	lessonID pgtype.UUID,
+	respInput *richterv1.AttemptResponseInput,
+) (singleGradeTarget, error) {
+	if respInput == nil {
+		return singleGradeTarget{}, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("response required"))
+	}
+	interactionID, err := svc.ParseUUID(respInput.GetInteractionId())
+	if err != nil {
+		return singleGradeTarget{}, err
+	}
+
+	type lookup struct {
+		orgID       pgtype.UUID
+		lesson      gen.Lesson
+		interaction gen.LessonInteraction
+	}
+	got, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (lookup, error) {
+		orgID, err := q.GetOrgIDByLessonID(ctx, lessonID)
+		if err != nil {
+			return lookup{}, err
+		}
+		lesson, err := q.GetLessonByID(ctx, lessonID)
+		if err != nil {
+			return lookup{}, err
+		}
+		interaction, err := q.GetLessonInteractionByID(ctx, interactionID)
+		if err != nil {
+			return lookup{}, err
+		}
+		return lookup{orgID: orgID, lesson: lesson, interaction: interaction}, nil
+	})
+	if err != nil {
+		return singleGradeTarget{}, svc.ConnectDBError(err)
+	}
+	if got.interaction.LessonID.String() != lessonID.String() {
+		return singleGradeTarget{}, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("interaction does not belong to lesson"))
+	}
+
+	kind := dbStringToKind(got.interaction.Kind)
+	h := Get(kind)
+	if h == nil {
+		return singleGradeTarget{}, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for interaction kind %q", got.interaction.Kind))
+	}
+	responseJSON, err := h.ResponseProtoToJSON(respInput)
+	if err != nil {
+		return singleGradeTarget{}, err
+	}
+
+	return singleGradeTarget{
+		orgID:         got.orgID,
+		lesson:        got.lesson,
+		interaction:   got.interaction,
+		interactionID: interactionID,
+		responseJSON:  responseJSON,
+		handler:       h,
+	}, nil
+}
+
+func (s *InteractionsSvc) gradeSingleResponse(
+	ctx context.Context,
+	lessonID pgtype.UUID,
+	target singleGradeTarget,
+) (result singleGradeResult, err error) {
+	gradeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.ErrorContext(ctx, "interactions: panic in single response grade",
+				"interaction_id", target.interactionID.String(), "recover", r)
+			err = errPreviewGradePanicked
+		}
+	}()
+
+	if cg, ok := target.handler.(ContextualGrader); ok && s.gradingDeps != nil {
+		deps, derr := s.gradingDeps(gradeCtx, lessonID)
+		if derr != nil {
+			return singleGradeResult{}, fmt.Errorf("resolve grading deps: %w", derr)
+		}
+		score, maxScore, feedback, gerr := cg.GradeWithContext(gradeCtx, deps, target.interaction.Config, target.responseJSON)
+		return singleGradeResult{score: score, maxScore: maxScore, feedback: feedback}, gerr
+	}
+
+	score, maxScore, feedback, gerr := target.handler.Grade(target.interaction.Config, target.responseJSON)
+	return singleGradeResult{score: score, maxScore: maxScore, feedback: feedback}, gerr
+}
+
+func (s *InteractionsSvc) cacheGrade(claimsSub string, lessonID pgtype.UUID, interactionID string, responseJSON []byte, result singleGradeResult) {
+	if s.kv == nil {
+		return
+	}
+	cacheData := tempGradeCache{
+		ResponseJSON: responseJSON,
+		Score:        result.score,
+		MaxScore:     result.maxScore,
+		Feedback:     result.feedback,
+	}
+	if cacheBytes, err := json.Marshal(cacheData); err == nil {
+		_ = s.kv.Set("temp_grade", tuple.Tuple{claimsSub, lessonID.String(), interactionID}, cacheBytes)
+	}
 }
 
 // ── ListLessonInteractions ────────────────────────────────────────────────────
@@ -182,7 +301,12 @@ func (s *InteractionsSvc) CreateManualInteraction(
 	var kind richterv1.InteractionKind
 	switch req.Config.(type) {
 	case *richterv1.CreateManualInteractionRequest_Mcq:
-		kind = richterv1.InteractionKind_INTERACTION_KIND_MCQ
+		mcqCfg := req.Config.(*richterv1.CreateManualInteractionRequest_Mcq).Mcq
+		if mcqCfg != nil && len(mcqCfg.CorrectAnswers) > 0 {
+			kind = richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE
+		} else {
+			kind = richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE
+		}
 	case *richterv1.CreateManualInteractionRequest_FillBlank:
 		kind = richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK
 	case *richterv1.CreateManualInteractionRequest_Listening:
@@ -255,18 +379,27 @@ func (s *InteractionsSvc) UpdateInteraction(
 
 	// Determine kind from config oneof (default to existing kind)
 	var configJSON []byte
+	kind := dbStringToKind(existing.Kind)
+
 	switch req.Config.(type) {
 	case *richterv1.UpdateInteractionRequest_Mcq:
-		h := Get(richterv1.InteractionKind_INTERACTION_KIND_MCQ)
+		mcqCfg := req.Config.(*richterv1.UpdateInteractionRequest_Mcq).Mcq
+		if mcqCfg != nil && len(mcqCfg.CorrectAnswers) > 0 {
+			kind = richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE
+		} else {
+			kind = richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE
+		}
+		h := Get(kind)
 		if h == nil {
-			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no MCQ handler"))
+			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no MCQ handler for %v", kind))
 		}
 		configJSON, err = h.ConfigFromUpdateProto(req)
 		if err != nil {
 			return nil, err
 		}
 	case *richterv1.UpdateInteractionRequest_FillBlank:
-		h := Get(richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK)
+		kind = richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK
+		h := Get(kind)
 		if h == nil {
 			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no fill_blank handler"))
 		}
@@ -275,7 +408,8 @@ func (s *InteractionsSvc) UpdateInteraction(
 			return nil, err
 		}
 	case *richterv1.UpdateInteractionRequest_Listening:
-		h := Get(richterv1.InteractionKind_INTERACTION_KIND_LISTENING)
+		kind = richterv1.InteractionKind_INTERACTION_KIND_LISTENING
+		h := Get(kind)
 		if h == nil {
 			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no listening handler"))
 		}
@@ -284,7 +418,8 @@ func (s *InteractionsSvc) UpdateInteraction(
 			return nil, err
 		}
 	case *richterv1.UpdateInteractionRequest_Reading:
-		h := Get(richterv1.InteractionKind_INTERACTION_KIND_READING)
+		kind = richterv1.InteractionKind_INTERACTION_KIND_READING
+		h := Get(kind)
 		if h == nil {
 			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no reading handler"))
 		}
@@ -306,6 +441,7 @@ func (s *InteractionsSvc) UpdateInteraction(
 			Explanation:  req.GetExplanation(),
 			StartSeconds: float32(req.GetStartSeconds()),
 			Config:       configJSON,
+			Kind:         kindToDBString(kind),
 		})
 	})
 	if err != nil {
@@ -339,6 +475,49 @@ func (s *InteractionsSvc) DeleteInteraction(
 		return nil, svc.ConnectDBError(err)
 	}
 	return &richterv1.DeleteInteractionResponse{}, nil
+}
+
+func (s *InteractionsSvc) DeleteLessonInteractions(
+	ctx context.Context,
+	req *richterv1.DeleteLessonInteractionsRequest,
+) (*richterv1.DeleteLessonInteractionsResponse, error) {
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
+		return nil, err
+	}
+
+	chunkIDRaw := strings.TrimSpace(req.GetChunkId())
+	if chunkIDRaw != "" {
+		chunkID, err := svc.ParseUUID(chunkIDRaw)
+		if err != nil {
+			return nil, err
+		}
+		chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
+			return q.GetLessonTranscriptChunk(ctx, chunkID)
+		})
+		if err != nil {
+			return nil, svc.ConnectDBError(err)
+		}
+		if chunk.LessonID.String() != lessonID.String() {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunk does not belong to lesson"))
+		}
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			return q.DeleteLessonInteractionsByChunk(ctx, chunkID)
+		}); err != nil {
+			return nil, svc.ConnectDBError(err)
+		}
+		return &richterv1.DeleteLessonInteractionsResponse{}, nil
+	}
+
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.DeleteLessonInteractionsByLesson(ctx, lessonID)
+	}); err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	return &richterv1.DeleteLessonInteractionsResponse{}, nil
 }
 
 // ── SubmitAttempt ─────────────────────────────────────────────────────────────
@@ -637,134 +816,92 @@ func (s *InteractionsSvc) SubmitAttempt(
 
 // ── PreviewGrade ──────────────────────────────────────────────────────────────
 
-// PreviewGrade grades a single response without persisting it. Used by the
-// AFTER_EACH feedback flow on the student side for interactions whose grading
-// requires a server roundtrip (e.g. reading audio → Gemini).
+// PreviewGrade grades a single response for AFTER_EACH feedback. The result is
+// cached so SubmitAttempt can reuse it when the final response has not changed.
 func (s *InteractionsSvc) PreviewGrade(
 	ctx context.Context,
 	req *richterv1.PreviewGradeRequest,
 ) (*richterv1.PreviewGradeResponse, error) {
-	if _, err := s.authz.RequireAuthenticated(ctx); err != nil {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
 		return nil, err
 	}
 	lessonID, err := svc.ParseUUID(req.GetLessonId())
 	if err != nil {
 		return nil, err
 	}
-	respInput := req.GetResponse()
-	if respInput == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("response required"))
-	}
-	interactionID, err := svc.ParseUUID(respInput.GetInteractionId())
+	target, err := s.lookupSingleGradeTarget(ctx, lessonID, req.GetResponse())
 	if err != nil {
 		return nil, err
 	}
-
-	type lookup struct {
-		orgID       pgtype.UUID
-		lesson      gen.Lesson
-		interaction gen.LessonInteraction
-	}
-	got, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (lookup, error) {
-		orgID, err := q.GetOrgIDByLessonID(ctx, lessonID)
-		if err != nil {
-			return lookup{}, err
-		}
-		lesson, err := q.GetLessonByID(ctx, lessonID)
-		if err != nil {
-			return lookup{}, err
-		}
-		interaction, err := q.GetLessonInteractionByID(ctx, interactionID)
-		if err != nil {
-			return lookup{}, err
-		}
-		return lookup{orgID: orgID, lesson: lesson, interaction: interaction}, nil
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, got.orgID); err != nil {
+	if _, err := s.authz.RequireOrgMember(ctx, target.orgID); err != nil {
 		return nil, err
 	}
-	if got.lesson.FeedbackMode != "after_each" {
+	if target.lesson.FeedbackMode != "after_each" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Errorf("preview grading only allowed when feedback_mode is after_each"))
 	}
-	if got.interaction.LessonID.String() != lessonID.String() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("interaction does not belong to lesson"))
-	}
-	interaction := got.interaction
-
-	kind := dbStringToKind(interaction.Kind)
-	h := Get(kind)
-	if h == nil {
-		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for interaction kind %q", interaction.Kind))
-	}
-
-	responseJSON, err := h.ResponseProtoToJSON(respInput)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cap PreviewGrade at 25 s so the proxy (Caddy default 30 s) never times out
-	// the request itself — if Gemini is slow, we'd rather return a graceful
-	// "pending" result than let the FE see Code.Unavailable from a 502/504.
-	gradeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
-
-	var score, maxScore float32
-	var feedback string
-	// Recover from any panic deep inside the grading stack — historically
-	// json.Unmarshal-into-genai.Schema panicked here, killing the connection
-	// mid-response. The FE saw "[unavailable]" / HTTP 502. Now we log and
-	// return a graceful pending result.
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				s.log.ErrorContext(ctx, "interactions: panic in PreviewGrade",
-					"interaction_id", respInput.GetInteractionId(), "recover", r)
-				err = errPreviewGradePanicked
-			}
-		}()
-		if cg, ok := h.(ContextualGrader); ok && s.gradingDeps != nil {
-			deps, derr := s.gradingDeps(gradeCtx, lessonID)
-			if derr != nil {
-				err = fmt.Errorf("resolve grading deps: %w", derr)
-				return
-			}
-			score, maxScore, feedback, err = cg.GradeWithContext(gradeCtx, deps, interaction.Config, responseJSON)
-		} else {
-			score, maxScore, feedback, err = h.Grade(interaction.Config, responseJSON)
-		}
-	}()
+	result, err := s.gradeSingleResponse(ctx, lessonID, target)
 	if err != nil {
 		// Includes context.DeadlineExceeded from the timeout above AND any
 		// panic recovered just above. Always return a graceful pending
 		// response so the FE never renders a hard error during inline grading.
 		s.log.WarnContext(ctx, "interactions: PreviewGrade fell through to graceful pending response",
-			"interaction_id", respInput.GetInteractionId(), "err", err)
+			"interaction_id", req.GetResponse().GetInteractionId(), "err", err)
 		return &richterv1.PreviewGradeResponse{
 			Score: 0.5, MaxScore: 1.0,
 			Feedback: "Đang chấm điểm — kết quả tạm thời sẽ được cập nhật khi bạn nộp bài.",
 		}, nil
 	}
 
-	if s.kv != nil {
-		claims, cerr := s.authz.RequireAuthenticated(ctx)
-		if cerr == nil {
-			cacheData := tempGradeCache{
-				ResponseJSON: responseJSON,
-				Score:        score,
-				MaxScore:     maxScore,
-				Feedback:     feedback,
-			}
-			if cacheBytes, jerr := json.Marshal(cacheData); jerr == nil {
-				_ = s.kv.Set("temp_grade", tuple.Tuple{claims.Sub, lessonID.String(), respInput.GetInteractionId()}, cacheBytes)
-			}
-		}
+	s.cacheGrade(claims.Sub, lessonID, req.GetResponse().GetInteractionId(), target.responseJSON, result)
+
+	return &richterv1.PreviewGradeResponse{Score: result.score, MaxScore: result.maxScore, Feedback: result.feedback}, nil
+}
+
+// ── SaveAttemptResponse ────────────────────────────────────────────────────────
+
+func (s *InteractionsSvc) SaveAttemptResponse(
+	ctx context.Context,
+	req *richterv1.SaveAttemptResponseRequest,
+) (*richterv1.SaveAttemptResponseResponse, error) {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lessonID, err := svc.ParseUUID(req.GetLessonId())
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.lookupSingleGradeTarget(ctx, lessonID, req.GetResponse())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.authz.RequireOrgMember(ctx, target.orgID); err != nil {
+		return nil, err
 	}
 
-	return &richterv1.PreviewGradeResponse{Score: score, MaxScore: maxScore, Feedback: feedback}, nil
+	result, err := s.gradeSingleResponse(ctx, lessonID, target)
+	if err != nil {
+		s.log.WarnContext(ctx, "interactions: SaveAttemptResponse grade failed, caching pending credit",
+			"interaction_id", req.GetResponse().GetInteractionId(), "err", err)
+		result = singleGradeResult{
+			score:    0.5,
+			maxScore: 1,
+			feedback: "Đang chấm điểm — kết quả tạm thời sẽ được cập nhật khi bạn nộp bài.",
+		}
+	}
+	s.cacheGrade(claims.Sub, lessonID, req.GetResponse().GetInteractionId(), target.responseJSON, result)
+
+	if target.lesson.FeedbackMode != "after_each" {
+		return &richterv1.SaveAttemptResponseResponse{FeedbackRevealed: false}, nil
+	}
+	return &richterv1.SaveAttemptResponseResponse{
+		Score:            result.score,
+		MaxScore:         result.maxScore,
+		Feedback:         result.feedback,
+		FeedbackRevealed: true,
+	}, nil
 }
 
 // ── GetMyAttempt ──────────────────────────────────────────────────────────────
@@ -855,7 +992,7 @@ func (s *InteractionsSvc) RegenerateInteraction(
 		newKind = dbStringToKind(existing.Kind)
 	}
 
-	updated, err := s.aiRegen(ctx, interactionID, newKind)
+	updated, err := s.aiRegen(ctx, interactionID, newKind, req.GetCustomPrompt())
 	if err != nil {
 		return nil, err
 	}

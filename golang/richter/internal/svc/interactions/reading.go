@@ -192,7 +192,7 @@ func (h *readingHandler) GeminiSchema() string {
 }
 
 func (h *readingHandler) GeminiPromptHint() string {
-	return `Tạo bài đọc âm thanh. Với mode "pronunciation": viết đoạn văn ngắn (50-150 từ) tóm tắt nội dung transcript để học viên đọc to. Với mode "open_answer": viết câu hỏi mở, đoạn văn ngữ cảnh, VÀ expected_answer (câu trả lời mẫu ngắn gọn dùng để chấm điểm content).`
+	return `Tạo bài đọc âm thanh có mục tiêu học tập rõ ràng, bám vào transcript. Với mode "pronunciation": viết đoạn văn 50-150 từ tự đủ ngữ cảnh để học viên đọc to, tránh câu rời rạc hoặc quá chung chung. Với mode "open_answer": viết đoạn văn ngữ cảnh, một câu hỏi mở cụ thể về đoạn đó, VÀ expected_answer ngắn gọn dùng để chấm điểm nội dung.`
 }
 
 func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
@@ -205,6 +205,9 @@ func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanati
 	}
 	if item.Mode == "open_answer" && strings.TrimSpace(item.Question) == "" {
 		return "", "", 0, nil, fmt.Errorf("reading: question empty for open_answer mode")
+	}
+	if item.Mode == "open_answer" && strings.TrimSpace(item.ExpectedAnswer) == "" {
+		return "", "", 0, nil, fmt.Errorf("reading: expected_answer empty for open_answer mode")
 	}
 	if item.Mode != "pronunciation" && item.Mode != "open_answer" {
 		item.Mode = "pronunciation"

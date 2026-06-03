@@ -6,16 +6,12 @@ import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionForm, type InteractionFormData, emptyFormForKind } from "./interaction-row";
 
 const KIND_OPTIONS = [
-  { kind: InteractionKind.MCQ, label: "Trắc nghiệm" },
-  { kind: InteractionKind.FILL_BLANK, label: "Điền đáp án" },
-  { kind: InteractionKind.READING, label: "Bài đọc" },
-  { kind: InteractionKind.LISTENING, label: "Bài nghe" },
+  { kind: InteractionKind.SINGLE_CHOICE, label: "Trắc nghiệm 1 đáp án", shortLabel: "MCQ1" },
+  { kind: InteractionKind.MULTIPLE_CHOICE, label: "Trắc nghiệm chọn nhiều", shortLabel: "MCQ+" },
+  { kind: InteractionKind.FILL_BLANK, label: "Điền đáp án", shortLabel: "Điền" },
+  { kind: InteractionKind.READING, label: "Bài đọc", shortLabel: "Đọc" },
+  { kind: InteractionKind.LISTENING, label: "Bài nghe", shortLabel: "Nghe" },
 ] as const;
-
-function formatTime(s: number) {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
 
 interface ChunkAddFormProps {
   chunk: TranscriptChunk;
@@ -28,27 +24,30 @@ interface ChunkAddFormProps {
 }
 
 export function ChunkAddForm({ chunk, lessonId, token, saving, error, onSave, onCancel }: ChunkAddFormProps) {
-  const [kind, setKind] = useState<InteractionKind>(InteractionKind.MCQ);
+  const [kind, setKind] = useState<InteractionKind>(InteractionKind.SINGLE_CHOICE);
 
   return (
-    <div className="rounded-md border border-border bg-background p-2 flex flex-col gap-2">
-      <p className="text-xs font-medium text-muted-foreground">
-        ➕ Thêm bài tập — {formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}
+    <div data-testid="chunk-add-form" className="rounded-xl border border-border bg-muted/10 p-4 flex flex-col gap-4">
+      <p className="text-sm font-medium">
+        Thêm bài tập thủ công
       </p>
-      <div className="flex gap-1 flex-wrap">
-        {KIND_OPTIONS.map(({ kind: k, label }) => (
+      <div className="flex gap-2 flex-wrap">
+        {KIND_OPTIONS.map(({ kind: k, label, shortLabel }) => (
           <button
             key={k}
             type="button"
+            aria-label={label}
+            data-testid={`interaction-kind-${k}`}
             onClick={() => setKind(k)}
             className={[
-              "text-xs px-2.5 py-1 rounded-md border transition-colors",
+              "flex flex-col items-center gap-0.5 text-xs px-3 py-2 rounded-xl border-2 transition-all",
               kind === k
-                ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground hover:border-foreground/50",
+                ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm"
+                : "border-transparent bg-muted/30 text-muted-foreground hover:bg-muted/50",
             ].join(" ")}
           >
-            {label}
+            <span className="font-bold">{shortLabel}</span>
+            <span className="text-[10px] opacity-70">{label}</span>
           </button>
         ))}
       </div>

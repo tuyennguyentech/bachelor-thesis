@@ -10,8 +10,8 @@ app = Flask(__name__)
 
 MODELS_DIR = os.environ.get("PIPER_MODELS_DIR", "/models")
 VOICES = {
-    "vi": "vi_VN-25hours_single-low",
-    "en": "en_US-amy-low",
+    "vi": "vi_VN-vais1000-medium",
+    "en": "en_US-lessac-medium",
 }
 
 _cache: dict[str, PiperVoice] = {}

@@ -1175,6 +1175,17 @@ type generationPlan struct {
 	evenCounts  []kindCount                 // EVEN_DISTRIBUTION: per-kind counts
 }
 
+func interactionGenerationBatchSize(kind richterv1.InteractionKind) int32 {
+	switch kind {
+	case richterv1.InteractionKind_INTERACTION_KIND_LISTENING:
+		return 1
+	case richterv1.InteractionKind_INTERACTION_KIND_READING:
+		return 2
+	default:
+		return 4
+	}
+}
+
 // resolveGenerationPlan merges chunk config → lesson default → server default → request overrides
 // and returns the effective generation plan.
 func resolveGenerationPlan(
@@ -1224,7 +1235,7 @@ func resolveGenerationPlan(
 
 	// Server defaults.
 	if len(cfgKinds) == 0 {
-		cfgKinds = []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_MCQ}
+		cfgKinds = []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE}
 	}
 	if cfgCount <= 0 {
 		cfgCount = defaultGenerationCount
@@ -1252,6 +1263,28 @@ func resolveGenerationPlan(
 	return generationPlan{evenCounts: result}
 }
 
+func friendlyLanguageName(langCode string) string {
+	switch strings.ToLower(langCode) {
+	case "vi":
+		return "Tiếng Việt (Vietnamese)"
+	case "en":
+		return "Tiếng Anh (English)"
+	default:
+		if langCode != "" {
+			return langCode
+		}
+		return "Tiếng Việt (Vietnamese)"
+	}
+}
+
+func strongLanguageInstruction(langCode string) string {
+	langName := friendlyLanguageName(langCode)
+	if strings.ToLower(langCode) == "en" {
+		return fmt.Sprintf("BẮT BUỘC SỬ DỤNG TIẾNG ANH (ngôn ngữ: %s) cho toàn bộ câu hỏi, câu trả lời, phương án lựa chọn, đáp án đúng, giải thích đáp án. KHÔNG ĐƯỢC viết bằng tiếng Việt hay bất kỳ ngôn ngữ nào khác.", langName)
+	}
+	return fmt.Sprintf("BẮT BUỘC SỬ DỤNG TIẾNG VIỆT (ngôn ngữ: %s) cho toàn bộ câu hỏi, câu trả lời, phương án lựa chọn, đáp án đúng, giải thích đáp án. KHÔNG ĐƯỢC viết bằng tiếng Anh hay bất kỳ ngôn ngữ nào khác (trừ phi đó là bài tập đặc thù về dịch thuật hoặc học từ vựng tiếng Anh).", langName)
+}
+
 // buildAIChoosePrompt constructs the Gemini prompt for AI_CHOOSE mode.
 // Each allowed kind contributes its prompt hint and schema; the model picks per item.
 func buildAIChoosePrompt(
@@ -1259,6 +1292,9 @@ func buildAIChoosePrompt(
 	transcript string,
 	totalCount int32,
 	specs []aiChooseKindSpec,
+	difficulty string,
+	focusPrompt string,
+	lessonLanguage string,
 ) string {
 	var kindDescs strings.Builder
 	kindNames := make([]string, 0, len(specs))
@@ -1269,10 +1305,19 @@ func buildAIChoosePrompt(
 	}
 	allowedList := strings.Join(kindNames, ", ")
 
+	var customInstructions strings.Builder
+	if difficulty != "" {
+		fmt.Fprintf(&customInstructions, "Mức độ khó của câu hỏi PHẢI là: %s.\n", difficulty)
+	}
+	if focusPrompt != "" {
+		fmt.Fprintf(&customInstructions, "Tập trung vào yêu cầu/chủ đề sau khi tạo câu hỏi: %s.\n", focusPrompt)
+	}
+	fmt.Fprintf(&customInstructions, "%s\n", strongLanguageInstruction(lessonLanguage))
+
 	return fmt.Sprintf(
 		`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d bài tập để kiểm tra hiểu biết của học sinh.
 
-Với mỗi bài tập, chọn loại phù hợp nhất từ các loại cho phép:
+%sVới mỗi bài tập, chọn loại phù hợp nhất từ các loại cho phép:
 %s
 Đoạn nội dung (%.1f - %.1f giây):
 %s
@@ -1283,6 +1328,7 @@ Mỗi item trong mảng "items" PHẢI có trường "kind" (một trong: %s) v�
 
 Trả về JSON object: {"items": [...]}`,
 		totalCount,
+		customInstructions.String(),
 		kindDescs.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
@@ -1404,6 +1450,8 @@ func (s *AISvc) GenerateInteractionsStream(
 		defer geminiClient.Close()
 	}
 
+	savedThisRun := 0
+
 	// Sequential processing — simpler, easier to debug, and one bad chunk doesn't stall others.
 	for i, chunk := range chunks {
 		select {
@@ -1441,7 +1489,7 @@ func (s *AISvc) GenerateInteractionsStream(
 
 		var allItems []generatedItem
 		if plan.useAIChoose {
-			items, genErr := s.runGeminiGenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lesson.Language)
+			items, genErr := s.runGeminiGenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt())
 			if genErr != nil {
 				s.log.WarnContext(ctx, "ai: AI_CHOOSE generation failed", "chunk_id", chunk.ID.String(), "err", genErr)
 			} else {
@@ -1459,31 +1507,30 @@ func (s *AISvc) GenerateInteractionsStream(
 					s.log.WarnContext(ctx, "ai: kind has no Gemini generator, skipping", "kind", kc.kind)
 					continue
 				}
-				chunkCopy := chunk
-				chunkCopy.QuestionCountConfig = kc.count
 				kindStr := svcinteractions.KindToDBString(kc.kind)
-				items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr, lesson.Language)
-				if genErr != nil {
-					s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "err", genErr)
-					continue
+				batchSize := interactionGenerationBatchSize(kc.kind)
+				for remaining := kc.count; remaining > 0; {
+					batchCount := remaining
+					if batchCount > batchSize {
+						batchCount = batchSize
+					}
+					chunkCopy := chunk
+					chunkCopy.QuestionCountConfig = batchCount
+					items, genErr := s.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt())
+					if genErr != nil {
+						s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "count", batchCount, "err", genErr)
+					} else {
+						allItems = append(allItems, items...)
+					}
+					remaining -= batchCount
 				}
-				allItems = append(allItems, items...)
 			}
-		}
-
-		if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
-			Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
-			Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s (%d bài tập)", i+1, total, chunk.Summary, len(allItems)),
-			ChunkIndex:  int32(i),
-			TotalChunks: total,
-		}); sendErr != nil {
-			return nil
 		}
 
 		if len(allItems) == 0 {
 			continue
 		}
-		if _, saveErr := s.saveInteractionsForChunk(ctx, lessonID, chunk.ID, allItems); saveErr != nil {
+		if saved, saveErr := s.saveInteractionsForChunk(ctx, lessonID, chunk.ID, allItems); saveErr != nil {
 			s.log.ErrorContext(ctx, "ai: failed to save interactions for chunk",
 				"chunk_id", chunk.ID.String(), "err", saveErr)
 			if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
@@ -1494,6 +1541,47 @@ func (s *AISvc) GenerateInteractionsStream(
 			}); sendErr != nil {
 				return nil
 			}
+		} else {
+			savedThisRun += len(saved)
+			if sendErr := stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
+				Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s (%d bài tập)", i+1, total, chunk.Summary, len(saved)),
+				ChunkIndex:  int32(i),
+				TotalChunks: total,
+			}); sendErr != nil {
+				return nil
+			}
+		}
+	}
+
+	if savedThisRun == 0 {
+		hasExistingInteractions := false
+		if req.GetChunkId() == "" {
+			existing, listErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+				return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{LessonID: lessonID, Limit: 1, Offset: 0})
+			})
+			if listErr != nil {
+				s.log.WarnContext(ctx, "ai: failed to verify generated interactions", "err", listErr)
+			}
+			hasExistingInteractions = len(existing) > 0
+		}
+		if !hasExistingInteractions {
+			msg := "Không tạo được bài tập nào từ các phân đoạn hiện tại. Hãy kiểm tra transcript, cấu hình loại câu hỏi hoặc thử lại."
+			if req.GetChunkId() == "" {
+				_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+					return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
+						LessonID: lessonID,
+						Status:   gen.LessonAnalysisStatusError,
+						ErrorMsg: pgtype.Text{String: msg, Valid: true},
+					})
+				})
+			}
+			_ = stream.Send(&richterv1.GenerateInteractionsProgressEvent{
+				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
+				Message:     msg,
+				TotalChunks: total,
+			})
+			return nil
 		}
 	}
 
@@ -1746,7 +1834,7 @@ func (s *AISvc) runGeminiGenerateQuestions(ctx context.Context, client *genai.Cl
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.3)
 	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(8192)
+	model.SetMaxOutputTokens(16384)
 
 	prompt := fmt.Sprintf(`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d câu hỏi trắc nghiệm (MCQ) để kiểm tra hiểu biết của học sinh. Mỗi câu có 4 lựa chọn (A, B, C, D), chỉ có 1 đáp án đúng.
 
@@ -1882,6 +1970,8 @@ func (s *AISvc) runGeminiGenerateItems(
 	generator svcinteractions.GeminiGenerator,
 	kindStr string,
 	lessonLanguage string,
+	difficulty string,
+	focusPrompt string,
 ) ([]generatedItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -1889,11 +1979,20 @@ func (s *AISvc) runGeminiGenerateItems(
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.3)
 	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(8192)
+	model.SetMaxOutputTokens(16384)
+
+	var customInstructions strings.Builder
+	if difficulty != "" {
+		fmt.Fprintf(&customInstructions, "Mức độ khó của câu hỏi PHẢI là: %s.\n", difficulty)
+	}
+	if focusPrompt != "" {
+		fmt.Fprintf(&customInstructions, "Tập trung vào yêu cầu/chủ đề sau khi tạo câu hỏi: %s.\n", focusPrompt)
+	}
+	fmt.Fprintf(&customInstructions, "%s\n", strongLanguageInstruction(lessonLanguage))
 
 	prompt := fmt.Sprintf(`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d bài tập để kiểm tra hiểu biết của học sinh.
 %s
-
+%s
 Đoạn nội dung (%.1f - %.1f giây):
 %s
 
@@ -1905,6 +2004,7 @@ Mỗi item trong mảng "items" phải tuân theo JSON schema sau:
 Trả về JSON object: {"items": [...]}`,
 		chunk.QuestionCountConfig,
 		generator.GeminiPromptHint(),
+		customInstructions.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
 		float32(chunk.EndSeconds),
@@ -1971,6 +2071,8 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 	allowedKinds []richterv1.InteractionKind,
 	totalCount int32,
 	lessonLanguage string,
+	difficulty string,
+	focusPrompt string,
 ) ([]generatedItem, error) {
 	// Build kind specs (skip kinds with no GeminiGenerator support).
 	specs := make([]aiChooseKindSpec, 0, len(allowedKinds))
@@ -1994,10 +2096,10 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 	if len(specs) == 1 {
 		chunkCopy := chunk
 		chunkCopy.QuestionCountConfig = totalCount
-		return s.runGeminiGenerateItems(ctx, client, chunkCopy, transcript, specs[0].generator, specs[0].kindStr, lessonLanguage)
+		return s.runGeminiGenerateItems(ctx, client, chunkCopy, transcript, specs[0].generator, specs[0].kindStr, lessonLanguage, difficulty, focusPrompt)
 	}
 
-	prompt := buildAIChoosePrompt(chunk, transcript, totalCount, specs)
+	prompt := buildAIChoosePrompt(chunk, transcript, totalCount, specs, difficulty, focusPrompt, lessonLanguage)
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -2005,7 +2107,7 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.3)
 	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(8192)
+	model.SetMaxOutputTokens(16384)
 
 	s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: calling GenerateContent",
 		"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
@@ -2225,6 +2327,7 @@ func (s *AISvc) doRegenerateInteraction(
 	ctx context.Context,
 	interactionID pgtype.UUID,
 	newKind richterv1.InteractionKind,
+	customPrompt string,
 ) (*gen.LessonInteraction, error) {
 	existing, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
 		return q.GetLessonInteractionByID(ctx, interactionID)
@@ -2274,7 +2377,7 @@ func (s *AISvc) doRegenerateInteraction(
 	chunkForRegen := chunk
 	chunkForRegen.QuestionCountConfig = 1
 	kindStr := svcinteractions.KindToDBString(newKind)
-	items, err := s.runGeminiGenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language)
+	items, err := s.runGeminiGenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language, "", customPrompt)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI generation failed: %w", err))
 	}

@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowRightIcon, CheckCircleIcon, LightbulbIcon, PlayIcon, XCircleIcon } from "lucide-react";
+import { ArrowRightIcon, CheckCircleIcon, LightbulbIcon, PlayIcon, XCircleIcon, CheckSquare2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
+import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { StudentViewProps, McqConfig, McqResponse } from "../types";
 
 export function McqStudentView({
@@ -15,22 +15,65 @@ export function McqStudentView({
   onAnswer,
   onContinue,
   hasNextInCheckpoint,
+  kind,
 }: StudentViewProps<McqConfig, McqResponse>) {
+  const isMultiple = kind === InteractionKind.MULTIPLE_CHOICE;
+
+  // Single Choice states
   const [selected, setSelected] = useState<number>(initialResponse?.selected ?? -1);
+
+  // Multiple Choice states
+  const [selectedIndexes, setSelectedIndexes] = useState<number[]>(initialResponse?.selectedIndexes ?? []);
+  const [multipleSubmitted, setMultipleSubmitted] = useState<boolean>(
+    initialResponse !== null && (initialResponse.selectedIndexes !== undefined || initialResponse.selected !== undefined)
+  );
+
   const continueRef = useRef<HTMLButtonElement>(null);
-  const hasAnswered = selected >= 0;
 
-  // AFTER_EACH: reveal immediately after selection (server must have sent correctAnswer)
-  const revealNow =
-    feedbackMode === FeedbackMode.AFTER_EACH && hasAnswered && config.correctAnswer >= 0;
+  const hasAnswered = isMultiple ? multipleSubmitted : selected >= 0;
 
-  const selectedIsCorrect = revealNow && selected === config.correctAnswer;
+  // AFTER_EACH: reveal immediately after selection or confirmation
+  const revealNow = (() => {
+    if (feedbackMode !== FeedbackMode.AFTER_EACH || !hasAnswered) return false;
+    if (isMultiple) {
+      return Array.isArray(config.correctAnswers);
+    }
+    return config.correctAnswer >= 0;
+  })();
 
-  function handleSelect(idx: number) {
-    if (locked || hasAnswered) return;
+  const selectedIsCorrect = (() => {
+    if (!revealNow) return false;
+    if (isMultiple) {
+      const correct = config.correctAnswers || [];
+      return correct.length === selectedIndexes.length &&
+        correct.every((a) => selectedIndexes.includes(a));
+    }
+    return selected === config.correctAnswer;
+  })();
+
+  function handleSelectSingle(idx: number) {
+    if (locked || revealNow) return;
     setSelected(idx);
-    onAnswer({ selected: idx });
+    onAnswer({ selected: idx, selectedIndexes: [] });
     // Auto-focus continue button so Enter key advances
+    setTimeout(() => continueRef.current?.focus(), 50);
+  }
+
+  function handleToggleMultiple(idx: number) {
+    if (locked || hasAnswered) return;
+    setSelectedIndexes((prev) => {
+      const next = prev.includes(idx)
+        ? prev.filter((i) => i !== idx)
+        : [...prev, idx];
+      return next;
+    });
+  }
+
+  function handleConfirmMultiple() {
+    if (locked || hasAnswered) return;
+    setMultipleSubmitted(true);
+    onAnswer({ selected: -1, selectedIndexes });
+    // Auto-focus continue button
     setTimeout(() => continueRef.current?.focus(), 50);
   }
 
@@ -59,9 +102,23 @@ export function McqStudentView({
 
       <div className="flex flex-col gap-2">
         {config.options.map((opt, oi) => {
-          const isSelected = selected === oi;
-          const isCorrect = revealNow && oi === config.correctAnswer;
-          const isWrong = revealNow && isSelected && oi !== config.correctAnswer;
+          const isSelected = isMultiple ? selectedIndexes.includes(oi) : selected === oi;
+
+          const isCorrect = (() => {
+            if (!revealNow) return false;
+            if (isMultiple) {
+              return (config.correctAnswers || []).includes(oi);
+            }
+            return oi === config.correctAnswer;
+          })();
+
+          const isWrong = (() => {
+            if (!revealNow) return false;
+            if (isMultiple) {
+              return isSelected && !(config.correctAnswers || []).includes(oi);
+            }
+            return isSelected && oi !== config.correctAnswer;
+          })();
 
           let cls =
             "w-full text-left px-3 py-2.5 rounded-md border text-sm flex items-center gap-2 transition-colors";
@@ -74,7 +131,7 @@ export function McqStudentView({
               " border-red-400 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 cursor-default";
           else if (isSelected)
             cls += " border-primary bg-primary/10 text-foreground cursor-default";
-          else if (locked || hasAnswered)
+          else if (locked || revealNow)
             cls += " border-border text-muted-foreground cursor-default opacity-70";
           else
             cls +=
@@ -85,8 +142,8 @@ export function McqStudentView({
               key={oi}
               type="button"
               className={cls}
-              disabled={locked || hasAnswered}
-              onClick={() => handleSelect(oi)}
+              disabled={locked || revealNow}
+              onClick={() => (isMultiple ? handleToggleMultiple(oi) : handleSelectSingle(oi))}
             >
               {revealNow ? (
                 isCorrect ? (
@@ -100,10 +157,15 @@ export function McqStudentView({
                 )
               ) : (
                 <span
-                  className={`size-4 shrink-0 inline-flex items-center justify-center rounded-full border text-xs font-medium
-                    ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}
+                  className={`size-4 shrink-0 inline-flex items-center justify-center border text-xs font-semibold
+                    ${isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}
+                    ${isMultiple ? "rounded-sm" : "rounded-full"}`}
                 >
-                  {String.fromCharCode(65 + oi)}
+                  {isSelected && isMultiple ? (
+                    <CheckSquare2 className="size-3 text-primary-foreground bg-primary" />
+                  ) : (
+                    String.fromCharCode(65 + oi)
+                  )}
                 </span>
               )}
               <span>{opt.text}</span>
@@ -111,6 +173,18 @@ export function McqStudentView({
           );
         })}
       </div>
+
+      {/* Multiple Choice: Confirm Button */}
+      {isMultiple && !hasAnswered && (
+        <Button
+          size="sm"
+          className="self-start mt-1"
+          onClick={handleConfirmMultiple}
+          disabled={locked || selectedIndexes.length === 0}
+        >
+          Xác nhận đáp án
+        </Button>
+      )}
 
       {/* AFTER_EACH: explanation (shown for both correct and wrong) */}
       {revealNow && explanation && (
@@ -126,7 +200,7 @@ export function McqStudentView({
       )}
 
       {hasAnswered && (
-        <Button ref={continueRef} size="sm" className="self-start gap-1.5" onClick={onContinue} disabled={locked}>
+        <Button ref={continueRef} size="sm" className="self-start gap-1.5 mt-1" onClick={onContinue} disabled={locked}>
           {hasNextInCheckpoint ? (
             <>
               Câu tiếp theo

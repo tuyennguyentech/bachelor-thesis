@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
+	"strings"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/validate"
@@ -41,6 +43,30 @@ type LessonsSvc struct {
 	authz    *authz.AuthzSvc
 	s3client *minio.Client
 	s3cfg    *cfg.S3Cfg
+}
+
+func validateLessonVideoKey(lessonID string, key string) error {
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("video storage key is required")
+	}
+	if cleaned := path.Clean(key); cleaned != key {
+		return fmt.Errorf("video storage key contains invalid path components")
+	}
+	if strings.HasPrefix(key, "/") || strings.Contains(key, "..") {
+		return fmt.Errorf("video storage key must not be absolute or contain ..")
+	}
+	prefix := "lessons/" + lessonID + "/"
+	if !strings.HasPrefix(key, prefix) {
+		return fmt.Errorf("video storage key must belong to the lesson")
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	if rest == "" {
+		return fmt.Errorf("video storage key must include a filename")
+	}
+	if rest == "video" || strings.HasPrefix(rest, "video/") || strings.HasPrefix(rest, "video.") {
+		return nil
+	}
+	return fmt.Errorf("video storage key must be under the lesson video path")
 }
 
 var _ richterv1connect.LessonServiceHandler = (*LessonsSvc)(nil)
@@ -349,6 +375,12 @@ func (s *LessonsSvc) UpdateLessonVideo(
 		gen.OrganizationRoleTeacher,
 	); err != nil {
 		return nil, err
+	}
+	if err := validateLessonVideoKey(existing.ID.String(), req.GetVideoStorageKey()); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	if _, err := s.s3client.StatObject(ctx, s.s3cfg.Bucket, req.GetVideoStorageKey(), minio.StatObjectOptions{}); err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("video file not found in storage"))
 	}
 
 	// Collect chunk IDs before the transaction so we can clean up FDB after the PG delete.

@@ -28,6 +28,7 @@ export function ReadingStudentView({
   token = "",
   lessonId = "",
   interactionId = "",
+  onGrade,
 }: StudentViewProps<ReadingConfig, ReadingResponse>) {
   const interactionClient = useRichterWebClient(InteractionService, token);
   const audioObjectKey = initialResponse?.audioObjectKey ?? "";
@@ -67,6 +68,7 @@ export function ReadingStudentView({
         });
         if (cancelled) return;
         setGradeState({ phase: "done", score: res.score, maxScore: res.maxScore, feedback: res.feedback });
+        onGrade?.({ score: res.score, maxScore: res.maxScore, feedback: res.feedback });
       } catch (err) {
         if (cancelled) return;
         const isTransient =
@@ -115,7 +117,7 @@ export function ReadingStudentView({
         <AudioRecorder
           lessonId={lessonId}
           token={token}
-          disabled={locked || hasRecording}
+          disabled={locked || (hasRecording && feedbackMode === FeedbackMode.AFTER_EACH)}
           initialAudioKey={audioObjectKey || undefined}
           onComplete={handleRecordingComplete}
         />

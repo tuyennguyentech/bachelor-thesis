@@ -223,6 +223,10 @@ message GenerateInteractionsRequest {
   int32 count_per_chunk = 6 [(buf.validate.field).int32 = {gte: 0, lte: 20}];
   // Strategy override. UNSPECIFIED = use chunk/lesson config.
   GenerationStrategy strategy = 7;
+  // Custom difficulty level: "easy", "medium", "hard".
+  string difficulty = 8;
+  // Focus prompt focus to guide question content generation.
+  string focus_prompt = 9;
 }
 
 // ── Chunk / lesson config update ─────────────────────────────────────────────

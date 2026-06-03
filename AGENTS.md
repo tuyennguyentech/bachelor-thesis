@@ -130,7 +130,7 @@ Piper TTS is the primary self-hosted TTS provider; VieNeu was rejected because i
 
 | Phase | Feature | Status |
 |-------|---------|--------|
-| 0 | MCQ refactor + registry pattern + UI redesign + feedback mode | Backend done, FE pending |
+| 0 | MCQ refactor + registry pattern + UI redesign + feedback mode | Done |
 | 1 | Fill-blank interaction + AI generation | Done |
 | 2 | Listening + Reading interactions (audio upload, comprehension, dictation) | Done |
 | 3 | Writing interaction (AI-graded essay via Gemini judge, async grading pipeline) | Not started |
@@ -143,7 +143,7 @@ Multi-attempt support: Phase 0 single-attempt; Phases 1+ may differ — scope pe
 
 - Audio reading/listening pipeline is implemented in backend and frontend.
 - Piper TTS replaced VieNeu and is expected to run on CPU-only dev/demo machines.
-- Student Learning UI Phase 0 backend is done; frontend registry/new layout is pending unless code has changed since this note.
+- Student Learning UI Phase 0 (MCQ refactor, registry, dynamic choice count, and full student UI) is successfully completed and verified on both Backend and Frontend via comprehensive tests (unit/integration and Playwright E2E).
 - Historical active plan: heino auth silent refresh should live in `src/proxy.ts`, with `src/lib/auth.ts` read-only during Server Component rendering. Do not set cookies from Server Components.
 - Historical video-player plan: remove any dummy `<video>` or global `document.querySelector("video")` monkey-patch; expose Vidstack's real video element via a React callback/state path.
 

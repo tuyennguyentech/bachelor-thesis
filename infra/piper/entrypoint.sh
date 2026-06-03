@@ -17,7 +17,7 @@ dl() {
     echo "piper: $name ready"
 }
 
-dl vi_VN-25hours_single-low vi/vi_VN/25hours_single/low/vi_VN-25hours_single-low
-dl en_US-amy-low            en/en_US/amy/low/en_US-amy-low
+dl vi_VN-vais1000-medium vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium
+dl en_US-lessac-medium en/en_US/lessac/medium/en_US-lessac-medium
 
 exec python3 /app/server.py

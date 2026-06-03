@@ -7,14 +7,15 @@ import type {
   ListeningConfig, ListeningResponse,
   ReadingConfig, ReadingResponse,
 } from "./types";
-import { mcqRenderer } from "./mcq";
+import { mcqRenderer, multipleChoiceRenderer } from "./mcq";
 import { fillBlankRenderer } from "./fill-blank";
 import { listeningRenderer } from "./listening";
 import { readingRenderer } from "./reading";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const registry: Record<number, InteractionRenderer<any, any>> = {
-  [InteractionKind.MCQ]: mcqRenderer,
+  [InteractionKind.SINGLE_CHOICE]: mcqRenderer,
+  [InteractionKind.MULTIPLE_CHOICE]: multipleChoiceRenderer,
   [InteractionKind.FILL_BLANK]: fillBlankRenderer,
   [InteractionKind.LISTENING]: listeningRenderer,
   [InteractionKind.READING]: readingRenderer,
@@ -34,8 +35,10 @@ export function extractConfig(interaction: LessonInteraction): any | null {
   if (interaction.config.case === "mcq") {
     const v = interaction.config.value;
     return {
+      question: v.question,
       options: v.options.map((o) => ({ text: o.text })),
       correctAnswer: v.correctAnswer,
+      correctAnswers: v.correctAnswers.length > 0 ? [...v.correctAnswers] : undefined,
     } satisfies McqConfig;
   }
   if (interaction.config.case === "fillBlank") {
@@ -57,8 +60,10 @@ export function extractConfig(interaction: LessonInteraction): any | null {
       mode: v.mode === ListeningMode.DICTATION ? "dictation" : "comprehension",
       expectedText: v.expectedText,
       comprehensionQuestions: v.comprehensionQuestions.map((q) => ({
+        question: q.question,
         options: q.options.map((o) => ({ text: o.text })),
         correctAnswer: q.correctAnswer,
+        correctAnswers: q.correctAnswers.length > 0 ? [...q.correctAnswers] : undefined,
       })),
     } satisfies ListeningConfig;
   }
@@ -78,6 +83,13 @@ export function extractConfig(interaction: LessonInteraction): any | null {
 export function extractLocalResponse(protoResp: LessonAttemptResponse): any | null {
   if (protoResp.response.case === "mcqSelected") {
     return { selected: protoResp.response.value } satisfies McqResponse;
+  }
+  if (protoResp.response.case === "mcqMultiple") {
+    const v = protoResp.response.value;
+    return {
+      selected: -1,
+      selectedIndexes: v.selectedIndexes ? [...v.selectedIndexes] : [],
+    } satisfies McqResponse;
   }
   if (protoResp.response.case === "fillBlank") {
     return { answers: [...protoResp.response.value.answers] } satisfies FillBlankResponse;
