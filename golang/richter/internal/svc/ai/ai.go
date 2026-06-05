@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -94,6 +95,65 @@ const (
 	kvNsChunk  = "chunk"
 	kvNsWatch  = "watch"
 )
+
+// analysisLocks guards ExtractTranscriptStream against concurrent re-runs for
+// the same lesson. It deletes idle entries after release so a long-lived server
+// does not retain one lock per historical lesson ID forever.
+//
+// The lock is per-process. For multi-instance deployments, replace this with a
+// FDB-based lease with TTL.
+var analysisLocks = newAnalysisLockRegistry()
+
+type analysisLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type analysisLockRegistry struct {
+	mu    sync.Mutex
+	locks map[string]*analysisLockEntry
+}
+
+func newAnalysisLockRegistry() *analysisLockRegistry {
+	return &analysisLockRegistry{locks: make(map[string]*analysisLockEntry)}
+}
+
+func (r *analysisLockRegistry) tryAcquire(key string) (*analysisLockEntry, bool) {
+	r.mu.Lock()
+	entry := r.locks[key]
+	if entry == nil {
+		entry = &analysisLockEntry{}
+		r.locks[key] = entry
+	}
+	entry.refs++
+	r.mu.Unlock()
+
+	if !entry.mu.TryLock() {
+		r.releaseRef(key, entry)
+		return nil, false
+	}
+	return entry, true
+}
+
+func (r *analysisLockRegistry) release(key string, entry *analysisLockEntry) {
+	entry.mu.Unlock()
+	r.releaseRef(key, entry)
+}
+
+func (r *analysisLockRegistry) releaseRef(key string, entry *analysisLockEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry.refs--
+	if entry.refs == 0 && r.locks[key] == entry {
+		delete(r.locks, key)
+	}
+}
+
+func (r *analysisLockRegistry) len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.locks)
+}
 
 var _ richterv1connect.AIServiceHandler = (*AISvc)(nil)
 
@@ -345,6 +405,21 @@ func (s *AISvc) ExtractTranscriptStream(
 	if err != nil {
 		return err
 	}
+
+	// Per-lesson serialization: a double-click of "Phân tích" would otherwise
+	// race Whisper + ffmpeg + FDB writes, corrupting the chunk set. If another
+	// request is mid-analysis we return immediately so the existing run owns
+	// the pipeline; the client already shows a spinner for the first run.
+	lessonKey := lessonID.String()
+	lock, ok := analysisLocks.tryAcquire(lessonKey)
+	if !ok {
+		_ = stream.Send(&richterv1.AnalysisProgressEvent{
+			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
+			Message: "Phân tích đang được xử lý cho bài học này. Vui lòng chờ.",
+		})
+		return nil
+	}
+	defer analysisLocks.release(lessonKey, lock)
 
 	progress := func(step richterv1.AnalysisProgressStep, msg string) error {
 		return stream.Send(&richterv1.AnalysisProgressEvent{Step: step, Message: msg})
@@ -1176,11 +1251,13 @@ type generationPlan struct {
 }
 
 func interactionGenerationBatchSize(kind richterv1.InteractionKind) int32 {
+	// Listening and reading items each carry a long passage + several nested
+	// MCQ; a batch of 2 reading items can push Gemini past its 16K-token
+	// limit even at 65536 max output. Single-item batches are safe.
 	switch kind {
-	case richterv1.InteractionKind_INTERACTION_KIND_LISTENING:
+	case richterv1.InteractionKind_INTERACTION_KIND_LISTENING,
+		richterv1.InteractionKind_INTERACTION_KIND_READING:
 		return 1
-	case richterv1.InteractionKind_INTERACTION_KIND_READING:
-		return 2
 	default:
 		return 4
 	}
@@ -1712,39 +1789,58 @@ type transcriptChunkRaw struct {
 	EndSeconds   float32 `json:"end_seconds"`
 }
 
-func (s *AISvc) downloadVideo(ctx context.Context, storageKey string) ([]byte, string, error) {
-	s3ctx, s3cancel := context.WithTimeout(ctx, 2*time.Minute)
+func (s *AISvc) downloadVideo(ctx context.Context, storageKey string) (string, string, error) {
+	s3ctx, s3cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer s3cancel()
 
 	const maxVideoBytes = int64(500 * 1024 * 1024) // 500 MB
 
-	obj, err := s.s3client.GetObject(s3ctx, s.s3cfg.Bucket, storageKey, minio.GetObjectOptions{})
-	if err != nil {
-		return nil, "", fmt.Errorf("download video from storage: %w", err)
-	}
-	defer obj.Close()
-
-	videoBytes, err := io.ReadAll(io.LimitReader(obj, maxVideoBytes+1))
-	if err != nil {
-		return nil, "", fmt.Errorf("read video bytes: %w", err)
-	}
-	if int64(len(videoBytes)) > maxVideoBytes {
-		return nil, "", fmt.Errorf("video file exceeds maximum size of 500 MB")
-	}
-
+	ext := "mp4"
 	mimeType := "video/mp4"
 	if idx := strings.LastIndex(storageKey, "."); idx >= 0 {
-		ext := strings.ToLower(storageKey[idx+1:])
-		switch ext {
+		switch strings.ToLower(storageKey[idx+1:]) {
+		case "mp4":
+			ext, mimeType = "mp4", "video/mp4"
 		case "webm":
-			mimeType = "video/webm"
+			ext, mimeType = "webm", "video/webm"
 		case "mov":
-			mimeType = "video/quicktime"
+			ext, mimeType = "mov", "video/quicktime"
 		case "avi":
-			mimeType = "video/x-msvideo"
+			ext, mimeType = "avi", "video/x-msvideo"
 		}
 	}
-	return videoBytes, mimeType, nil
+
+	videoTmp, err := os.CreateTemp("", "richter-video-*."+ext)
+	if err != nil {
+		return "", "", fmt.Errorf("create temp video file: %w", err)
+	}
+	videoPath := videoTmp.Name()
+	cleanup := func() {
+		_ = os.Remove(videoPath)
+	}
+
+	obj, err := s.s3client.GetObject(s3ctx, s.s3cfg.Bucket, storageKey, minio.GetObjectOptions{})
+	if err != nil {
+		cleanup()
+		return "", "", fmt.Errorf("download video from storage: %w", err)
+	}
+
+	// Stream the object body directly to a temp file. The previous implementation
+	// loaded up to 500 MB into RAM before handing it to ffmpeg, which could OOM
+	// the server under concurrent analyses. LimitReader caps writes so a
+	// malicious or truncated file can never balloon the temp file beyond the cap.
+	written, err := io.Copy(videoTmp, io.LimitReader(obj, maxVideoBytes+1))
+	_ = videoTmp.Close()
+	_ = obj.Close()
+	if err != nil {
+		cleanup()
+		return "", "", fmt.Errorf("stream video to temp: %w", err)
+	}
+	if written > maxVideoBytes {
+		cleanup()
+		return "", "", fmt.Errorf("video file exceeds maximum size of 500 MB")
+	}
+	return videoPath, mimeType, nil
 }
 
 // runGeminiChunk calls Gemini with the transcript text (no video) to determine chunk boundaries.
@@ -1979,7 +2075,11 @@ func (s *AISvc) runGeminiGenerateItems(
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.3)
 	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(16384)
+	// gemini-3.1-flash-lite max output is 65536. The previous 16384 limit caused
+	// FinishReasonMaxTokens for listening items (1-4 nested MCQ with audio_source_text)
+	// and any batch with >2 reasoning-heavy kinds. See geminiResponseText for the
+	// user-facing error.
+	model.SetMaxOutputTokens(65536)
 
 	var customInstructions strings.Builder
 	if difficulty != "" {
@@ -2107,7 +2207,7 @@ func (s *AISvc) runGeminiGenerateItemsAIChoose(
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.3)
 	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(16384)
+	model.SetMaxOutputTokens(65536)
 
 	s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: calling GenerateContent",
 		"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
@@ -2403,23 +2503,10 @@ func (s *AISvc) doRegenerateInteraction(
 
 // ── Whisper helpers ───────────────────────────────────────────────────────────
 
-// extractAudio runs ffmpeg to extract 16kHz mono WAV audio from a video byte slice.
-// Both input and output use temp files because MP4 requires seekable input (moov atom
-// can be at the end of the file) and WAV requires seekable output for correct size headers.
-func extractAudio(ctx context.Context, videoBytes []byte) ([]byte, error) {
-	videoTmp, err := os.CreateTemp("", "richter-video-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp video file: %w", err)
-	}
-	videoPath := videoTmp.Name()
-	defer os.Remove(videoPath)
-
-	if _, err := videoTmp.Write(videoBytes); err != nil {
-		videoTmp.Close()
-		return nil, fmt.Errorf("write temp video: %w", err)
-	}
-	videoTmp.Close()
-
+// extractAudio runs ffmpeg to extract 16kHz mono WAV audio from a video file path.
+// The caller owns the input video file; we only own the output WAV. WAV is written
+// to a temp file because ffmpeg requires seekable output for correct size headers.
+func extractAudio(ctx context.Context, videoPath string) ([]byte, error) {
 	audioTmp, err := os.CreateTemp("", "richter-audio-*.wav")
 	if err != nil {
 		return nil, fmt.Errorf("create temp wav file: %w", err)
@@ -2526,10 +2613,11 @@ func (s *AISvc) runWhisperAnalyze(ctx context.Context, storageKey string, progre
 		"Đang tải video từ storage..."); err != nil {
 		return "", nil, err
 	}
-	videoBytes, _, dlErr := s.downloadVideo(ctx, storageKey)
+	videoPath, _, dlErr := s.downloadVideo(ctx, storageKey)
 	if dlErr != nil {
 		return "", nil, dlErr
 	}
+	defer os.Remove(videoPath)
 
 	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_UPLOADING,
 		"Đang trích xuất âm thanh..."); err != nil {
@@ -2537,7 +2625,7 @@ func (s *AISvc) runWhisperAnalyze(ctx context.Context, storageKey string, progre
 	}
 	audioCtx, audioCancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer audioCancel()
-	audioBytes, audioErr := extractAudio(audioCtx, videoBytes)
+	audioBytes, audioErr := extractAudio(audioCtx, videoPath)
 	if audioErr != nil {
 		return "", nil, fmt.Errorf("extract audio: %w", audioErr)
 	}

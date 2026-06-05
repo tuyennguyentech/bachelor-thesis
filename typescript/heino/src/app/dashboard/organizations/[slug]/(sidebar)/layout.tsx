@@ -47,7 +47,7 @@ export default async function OrganizationLayout({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const { token } = await requireAnyUser();
+  const { claims, token } = await requireAnyUser();
 
   const orgClient = createRichterClient(OrganizationService, token);
   let org;
@@ -73,6 +73,7 @@ export default async function OrganizationLayout({
       <RecentAccessRecorder
         exactPath
         entry={{
+          userId: claims.sub,
           id: `organization:${org.id}`,
           type: "organization",
           orgSlug: slug,

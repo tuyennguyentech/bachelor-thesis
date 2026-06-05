@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { ArrowRightIcon, Loader2Icon, MessageSquareIcon, PlayIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowRightIcon, Loader2Icon, PlayIcon, TriangleAlertIcon } from "lucide-react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { FeedbackMode, InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
@@ -10,6 +10,7 @@ import type { StudentViewProps, ReadingConfig, ReadingResponse } from "../types"
 import { AudioRecorder } from "../_shared/audio-recorder";
 import { previewGradeErrorMessage } from "../_shared/connect-error-message";
 import { Button } from "@/components/ui/button";
+import { ReadingFeedbackBlocks } from "./reading-feedback";
 
 type GradeState =
   | { phase: "idle" }
@@ -139,12 +140,11 @@ export function ReadingStudentView({
               {gradeState.maxScore > 0 ? Math.round((gradeState.score / gradeState.maxScore) * 100) : 0}%
             </span>
           </p>
-          {gradeState.feedback && (
-            <div className="rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 flex gap-2">
-              <MessageSquareIcon className="mt-0.5 size-3.5 shrink-0 text-blue-700 dark:text-blue-300" />
-              <p data-testid="reading-grade-feedback" className="text-xs text-blue-700 dark:text-blue-300 whitespace-pre-line">{gradeState.feedback}</p>
-            </div>
-          )}
+          <ReadingFeedbackBlocks
+            feedback={gradeState.feedback}
+            transcriptTestId="reading-grade-transcript"
+            feedbackTestId="reading-grade-feedback"
+          />
           {config.mode === "open_answer" && config.expectedAnswer && (
             <p className="text-xs">
               <span className="text-muted-foreground">Đáp án mẫu: </span>

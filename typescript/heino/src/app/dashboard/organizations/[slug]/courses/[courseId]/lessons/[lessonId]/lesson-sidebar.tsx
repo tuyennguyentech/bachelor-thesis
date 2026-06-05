@@ -20,6 +20,21 @@ function formatTime(seconds: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function seekTo(seconds: number, videoRef: React.RefObject<HTMLVideoElement | null>) {
+  // Direct path: video element is local.
+  const video = videoRef.current;
+  if (video) {
+    try {
+      video.currentTime = seconds;
+      video.play().catch(() => {});
+    } catch {}
+    return;
+  }
+  // Cross-component path: dispatch a window event so VideoPlayer can react
+  // even when the video element lives in a sibling tree.
+  window.dispatchEvent(new CustomEvent("seek-video", { detail: { seconds } }));
+}
+
 export function LessonSidebar({ chunks, segments, transcript, videoRef }: Props) {
   const hasOutline = chunks.length > 0;
   const hasTranscript = segments.length > 0 || !!transcript;
@@ -82,14 +97,22 @@ export function LessonSidebar({ chunks, segments, transcript, videoRef }: Props)
           {tab === "outline" && hasOutline && (
             <div className="flex flex-col divide-y divide-border/50 p-2">
               {chunks.map((chunk) => (
-                <div key={chunk.id} className="flex flex-col gap-0.5 py-2 px-1">
+                <button
+                  key={chunk.id}
+                  type="button"
+                  onClick={() => seekTo(chunk.startSeconds, videoRef)}
+                  className="flex flex-col gap-0.5 py-2 px-1 text-left rounded-md hover:bg-muted/50 focus:bg-muted/60 focus:outline-none transition-colors"
+                  data-testid={`outline-chunk-${chunk.id}`}
+                  data-start-seconds={chunk.startSeconds}
+                  aria-label={`Nhảy tới đoạn ${chunk.summary} tại ${formatTime(chunk.startSeconds)}`}
+                >
                   <p className="text-xs font-medium text-foreground line-clamp-2">
                     {chunk.summary}
                   </p>
                   <p className="text-xs text-muted-foreground tabular-nums">
                     {formatTime(chunk.startSeconds)} – {formatTime(chunk.endSeconds)}
                   </p>
-                </div>
+                </button>
               ))}
             </div>
           )}

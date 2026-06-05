@@ -42,8 +42,9 @@ async function getVideoUrl(key: string, token: string): Promise<string | null> {
   try {
     const client = createRichterClient(StorageService, token);
     const res = await client.getDownloadUrl({ key, expiresInSeconds: 3600 });
-    return res.downloadUrl;
-  } catch {
+    return res.downloadUrl || null;
+  } catch (err) {
+    console.error("[lesson/page] getDownloadUrl failed:", err);
     return null;
   }
 }
@@ -61,7 +62,7 @@ export default async function LessonDetailPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug, courseId, lessonId } = await params;
-  const { token } = await requireAnyUser();
+  const { claims, token } = await requireAnyUser();
 
   const orgClient = createRichterClient(OrganizationService, token);
   let org;
@@ -115,17 +116,25 @@ export default async function LessonDetailPage({
   const [{ modules: courseModules }, { lessons: courseLessons }] = await Promise.all([
     moduleClient
       .listCourseModules({ courseId, limit: COURSE_NAV_LIMIT, offset: 0 })
-      .catch(() => ({ modules: [] })),
+      .catch((err) => {
+        console.error("[lesson/page] listCourseModules failed:", err);
+        return { modules: [] };
+      }),
     lessonClient
       .listLessonsByCourse({ courseId, limit: COURSE_NAV_LIMIT, offset: 0 })
-      .catch(() => ({ lessons: [] })),
+      .catch((err) => {
+        console.error("[lesson/page] listLessonsByCourse failed:", err);
+        return { lessons: [] };
+      }),
   ]);
 
   const interactionClient = createRichterClient(InteractionService, token);
   const aiClient = createRichterClient(AIService, token);
   const videoVersion = timestampVersion(lesson.updatedAt);
 
-  // Parallel fetches: video URL, AI analysis, my attempt, teacher attempts list, watch progress
+  // Parallel fetches: video URL, AI analysis, my attempt, teacher attempts list, watch progress.
+  // Each non-critical call logs to console so a real RPC failure is visible in dev tools
+  // instead of being silently replaced with an empty value.
   const [videoUrl, analysisRes, myAttempt, attemptsData, initialPosition] = await Promise.all([
     lesson.videoStorageKey
       ? getVideoUrl(lesson.videoStorageKey, token)
@@ -133,21 +142,36 @@ export default async function LessonDetailPage({
     aiClient
       .getLessonAnalysis({ lessonId })
       .then((r) => ({ analysis: r.analysis ?? null, chunks: r.chunks }))
-      .catch(() => ({ analysis: null, chunks: [] })),
+      .catch((err) => {
+        console.error("[lesson/page] getLessonAnalysis failed:", err);
+        return { analysis: null, chunks: [] };
+      }),
     effectiveCanManage
       ? Promise.resolve(null)
       : interactionClient
           .getMyAttempt({ lessonId })
           .then((r) => r.attempt ?? null)
-          .catch(() => null),
+          .catch((err) => {
+            console.error("[lesson/page] getMyAttempt failed:", err);
+            return null;
+          }),
     effectiveCanManage
       ? interactionClient
           .listAttempts({ lessonId, limit: 50, offset: 0 })
           .then((r) => ({ attempts: r.attempts, total: r.total }))
-          .catch(() => ({ attempts: [], total: 0 }))
+          .catch((err) => {
+            console.error("[lesson/page] listAttempts failed:", err);
+            return { attempts: [], total: 0 };
+          })
       : Promise.resolve(null),
     lesson.videoStorageKey
-      ? aiClient.getWatchProgress({ lessonId }).then((r) => r.positionSeconds ?? 0).catch(() => 0)
+      ? aiClient
+          .getWatchProgress({ lessonId })
+          .then((r) => r.positionSeconds ?? 0)
+          .catch((err) => {
+            console.error("[lesson/page] getWatchProgress failed:", err);
+            return 0;
+          })
       : Promise.resolve(0),
   ]);
 
@@ -177,7 +201,9 @@ export default async function LessonDetailPage({
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <RecentAccessRecorder
+        exactPath
         entry={{
+          userId: claims.sub,
           id: `lesson:${lesson.id}`,
           type: "lesson",
           orgSlug: slug,
@@ -311,6 +337,7 @@ export default async function LessonDetailPage({
                   <StudentLessonView
                     key={`${isPreview ? "preview" : "student"}:${lesson.videoStorageKey}:${videoVersion}`}
                     videoUrl={videoUrl}
+                    videoStorageKey={lesson.videoStorageKey || undefined}
                     segments={analysis?.transcriptSegments ?? []}
                     transcript={analysis?.transcript ?? ""}
                     chunks={initialChunks}

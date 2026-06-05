@@ -44,6 +44,13 @@ export function NestedMcqStudent({
           const isSelected = selected === oi;
           const isCorrect = revealAnswer && oi === config.correctAnswer;
           const isWrong = revealAnswer && isSelected && oi !== config.correctAnswer;
+          const optionStatus = (() => {
+            if (revealAnswer && isCorrect && isSelected) return "Bạn chọn - đúng";
+            if (revealAnswer && isWrong) return "Bạn chọn - sai";
+            if (revealAnswer && isCorrect) return "Đáp án đúng";
+            if (isSelected) return "Bạn chọn";
+            return "";
+          })();
 
           let cls =
             "w-full text-left px-3 py-2 rounded-md border text-sm flex items-center gap-2 transition-colors";
@@ -85,7 +92,12 @@ export function NestedMcqStudent({
                   {String.fromCharCode(65 + oi)}
                 </span>
               )}
-              <span>{opt.text}</span>
+              <span className="min-w-0 flex-1">{opt.text}</span>
+              {optionStatus && (
+                <span className="ml-auto shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-[11px] font-medium">
+                  {optionStatus}
+                </span>
+              )}
             </button>
           );
         })}
@@ -175,6 +187,13 @@ export function NestedMcqReview({ questionIndex, config, selected, canReveal }: 
           const isSelected = selected === oi;
           const isCorrect = canReveal && oi === correct;
           const isWrong = canReveal && isSelected && oi !== correct;
+          const optionStatus = (() => {
+            if (canReveal && isCorrect && isSelected) return "Bạn chọn - đúng";
+            if (canReveal && isWrong) return "Bạn chọn - sai";
+            if (canReveal && isCorrect) return "Đáp án đúng";
+            if (isSelected) return "Bạn đã chọn";
+            return "";
+          })();
           let cls = "text-xs px-2 py-1 rounded border flex items-center gap-1.5";
           if (isCorrect)
             cls += " border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400";
@@ -191,7 +210,12 @@ export function NestedMcqReview({ questionIndex, config, selected, canReveal }: 
                 isWrong ? <XCircleIcon className="size-3 shrink-0" /> :
                 <span className="size-3 shrink-0" />
               ) : <span className="size-3 shrink-0" />}
-              <span>{String.fromCharCode(65 + oi)}. {opt.text}</span>
+              <span className="min-w-0 flex-1">{String.fromCharCode(65 + oi)}. {opt.text}</span>
+              {optionStatus && (
+                <span className="ml-auto shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                  {optionStatus}
+                </span>
+              )}
             </div>
           );
         })}

@@ -2,6 +2,7 @@
 
 import { useRef, useCallback, useEffect, useState } from "react";
 import type { MutableRefObject, RefObject } from "react";
+import { useRouter } from "next/navigation";
 import type { TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
 import { AIService } from "buf/gen/richter/v1/ai_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
@@ -71,10 +72,12 @@ export function VideoPlayer({
   onFullscreenToggle,
   interactions = [],
 }: Props) {
+  const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastSavedPos = useRef<number>(-1);
+  const lastSetCurrentTime = useRef<number | null>(null);
   const hasPlayedRef = useRef(false);
   const durationRef = useRef(0);
 
@@ -83,16 +86,24 @@ export function VideoPlayer({
   const [paused, setPaused] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  // Player error state — surfaces video element onError events (expired presigned
+  // URL, network down, codec mismatch) so the user sees a useful message instead
+  // of a silent black screen.
+  const [playerError, setPlayerError] = useState<string | null>(null);
 
   // Stabilize the video URL: only update when the storage key changes, not on
   // every RSC refresh that creates a new presigned URL for the same object.
   const stableIdentity = videoStorageKey ?? videoUrl;
   const stableIdentityRef = useRef(stableIdentity);
+  const acceptNextUrlRef = useRef(false);
   const [stableUrl, setStableUrl] = useState(videoUrl);
 
   useEffect(() => {
-    if (stableIdentityRef.current === stableIdentity) return;
+    const identityChanged = stableIdentityRef.current !== stableIdentity;
+    const shouldAcceptRetryUrl = acceptNextUrlRef.current && videoUrl !== stableUrl;
+    if (!identityChanged && !shouldAcceptRetryUrl) return;
     stableIdentityRef.current = stableIdentity;
+    acceptNextUrlRef.current = false;
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) setStableUrl(videoUrl);
@@ -100,7 +111,7 @@ export function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [stableIdentity, videoUrl]);
+  }, [stableIdentity, stableUrl, videoUrl]);
 
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const onFirstPlayRef = useRef(onFirstPlay);
@@ -137,6 +148,9 @@ export function VideoPlayer({
   useEffect(() => {
     hasPlayedRef.current = false;
     durationRef.current = 0;
+    lastSetCurrentTime.current = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlayerError(null);
     const video = nativeVideoRef.current;
     if (!video) return;
     try {
@@ -144,6 +158,13 @@ export function VideoPlayer({
       video.currentTime = 0;
     } catch {}
   }, [playerKey]);
+
+  // When the video file itself changes (new storage key or new presigned URL),
+  // reset the error overlay so a fresh source gets a clean slate.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlayerError(null);
+  }, [stableUrl]);
 
   useEffect(() => {
     if ((playerKey ?? 0) > 0) return;
@@ -289,7 +310,16 @@ export function VideoPlayer({
     if (!video) return;
     syncMediaDuration(video);
     const t = video.currentTime;
-    setCurrentTime(t);
+    // Throttle React state updates to ~4Hz (every 0.25s) so the timeline
+    // gradient, the formatTime label, and any consumer of `currentTime`
+    // re-render at human-noticeable rate instead of on every video timeupdate
+    // event (which can fire up to 66Hz on some browsers). The parent component
+    // already gets every tick via onTimeUpdate (refs only, no re-render).
+    const lastSet = lastSetCurrentTime.current;
+    if (lastSet === null || Math.abs(t - lastSet) >= 0.25 || t === 0) {
+      lastSetCurrentTime.current = t;
+      setCurrentTime(t);
+    }
     if (t - lastSavedPos.current >= SAVE_INTERVAL_S) saveProgress(t);
     onTimeUpdateRef.current?.(t);
   };
@@ -298,6 +328,30 @@ export function VideoPlayer({
     const video = nativeVideoRef.current;
     if (!video) return;
     syncMediaDuration(video);
+  };
+
+  const handleError = () => {
+    const video = nativeVideoRef.current;
+    if (!video) return;
+    const err = video.error;
+    let msg = "Không thể phát video";
+    if (err) {
+      switch (err.code) {
+        case 1: msg = "Video đã bị hủy tải"; break;
+        case 2: msg = "Lỗi mạng khi tải video"; break;
+        case 3: msg = "Lỗi giải mã video"; break;
+        case 4: msg = "Định dạng video không được hỗ trợ hoặc liên kết đã hết hạn"; break;
+        default: msg = `Lỗi video (mã ${err.code})`;
+      }
+    }
+    setPlayerError(msg);
+    setPaused(true);
+  };
+
+  const refreshVideoUrl = () => {
+    acceptNextUrlRef.current = true;
+    setPlayerError(null);
+    router.refresh();
   };
 
   const handleVolumeChange = () => {
@@ -379,11 +433,35 @@ export function VideoPlayer({
           onDurationChange={handleLoadedMetadata}
           onVolumeChange={handleVolumeChange}
           onSeeked={handleNativeTimeUpdate}
+          onError={handleError}
           onEnded={() => {
             setPaused(true);
             handleNativeTimeUpdate();
           }}
         />
+
+        {playerError && (
+          <div
+            className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/85 text-white p-6 text-center"
+            data-testid="video-error-overlay"
+            role="alert"
+          >
+            <div className="max-w-sm flex flex-col items-center gap-3">
+              <div className="text-3xl">⚠️</div>
+              <p className="text-sm font-medium">{playerError}</p>
+              <p className="text-xs text-zinc-300">
+                Liên kết tải video chỉ có hiệu lực trong một khoảng thời gian. Bấm nút bên dưới để thử lại.
+              </p>
+              <button
+                type="button"
+                onClick={refreshVideoUrl}
+                className="mt-2 px-4 py-1.5 rounded-md bg-white/10 hover:bg-white/20 text-sm font-medium border border-white/20 transition-colors"
+              >
+                Thử lại
+              </button>
+            </div>
+          </div>
+        )}
 
         <div
           onClick={(e) => {

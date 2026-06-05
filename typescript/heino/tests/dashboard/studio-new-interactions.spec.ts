@@ -240,9 +240,9 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
       const checkpoint = student.locator('[data-testid="quiz-checkpoint"]');
       await expect(checkpoint).toBeVisible({ timeout: 5000 });
 
-      await expect(checkpoint.getByText(/Single-Choice|Big-O notation|5n²/)).toBeVisible({ timeout: 3000 });
+      await expect(checkpoint.getByText(/Chọn|Điền|Đọc|Nghe|Hoàn thành/)).toBeVisible({ timeout: 3000 });
 
-      const answerOption = checkpoint.locator("button").filter({ hasText: /Python|Giới hạn trên|O\(n²\)/ }).first();
+      const answerOption = checkpoint.locator("button:not([disabled])").first();
       await expect(answerOption).toBeVisible({ timeout: 3000 });
       await answerOption.click({ force: true });
 

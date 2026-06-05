@@ -10,6 +10,7 @@ import {
 } from "buf/gen/richter/v1/organization_members_pb";
 import { OrganizationService, type Organization } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, CourseStatus } from "buf/gen/richter/v1/courses_pb";
+import { UserRole } from "buf/gen/richter/v1/users_pb";
 import { Button } from "@/components/ui/button";
 import {
   ArrowRightIcon,
@@ -46,12 +47,36 @@ interface OrganizationChoice {
 
 function accessTypeLabel(type: RecentAccessEntry["type"]) {
   switch (type) {
+    case "dashboard-organizations":
+      return "Trang chính · Tổ chức";
+    case "dashboard-profile":
+      return "Trang chính · Hồ sơ";
     case "organization":
       return "Tổ chức";
+    case "organization-courses":
+      return "Danh sách khóa học";
+    case "organization-members":
+      return "Thành viên tổ chức";
     case "course":
       return "Khóa học";
     case "lesson":
       return "Bài học";
+    case "admin-users":
+      return "Admin · Người dùng";
+    case "admin-user":
+      return "Admin · Hồ sơ người dùng";
+    case "admin-organizations":
+      return "Admin · Tổ chức";
+    case "admin-organization":
+      return "Admin · Chi tiết tổ chức";
+    case "admin-organization-members":
+      return "Admin · Thành viên tổ chức";
+    case "admin-organization-courses":
+      return "Admin · Khóa học tổ chức";
+    case "admin-course":
+      return "Admin · Chi tiết khóa học";
+    case "admin-module":
+      return "Admin · Chương học";
   }
 }
 
@@ -100,10 +125,16 @@ export default async function DashboardPage() {
   );
 
   const accessibleOrgSlugs = new Set(activeOrganizations.map(({ org }) => org.slug));
+  const canSeeAdminAccess = claims.role === UserRole.ADMIN;
   const recentAccess = parseRecentAccessCookie(
     cookieStore.get(RECENT_ACCESS_COOKIE)?.value,
   )
-    .filter((entry) => accessibleOrgSlugs.has(entry.orgSlug))
+    .filter((entry) => {
+      if (entry.userId !== claims.sub) return false;
+      if (entry.area === "admin") return canSeeAdminAccess;
+      if (entry.type === "dashboard-organizations" || entry.type === "dashboard-profile") return true;
+      return entry.orgSlug ? accessibleOrgSlugs.has(entry.orgSlug) : false;
+    })
     .slice(0, RECENT_LIMIT);
 
   const manageableOrgCount = activeOrganizations.filter(({ member }) => CAN_MANAGE.has(member.role)).length;

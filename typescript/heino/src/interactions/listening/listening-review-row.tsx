@@ -37,18 +37,19 @@ export function ListeningReviewRow({
       </div>
 
       <div className="ml-7 flex flex-col gap-2">
+        {canReveal && config.expectedText && (
+          <div className="rounded border border-border bg-muted/20 px-3 py-2">
+            <p className="text-xs font-medium text-muted-foreground">Nội dung nghe</p>
+            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed">{config.expectedText}</p>
+          </div>
+        )}
+
         {config.mode === "dictation" && (
           <div className="flex flex-col gap-1">
             <p className="text-xs text-muted-foreground">Bài làm của học sinh:</p>
             <p className="text-sm border border-border rounded px-2 py-1.5 bg-muted/20">
               {response?.transcription || <span className="italic text-muted-foreground">Chưa trả lời</span>}
             </p>
-            {canReveal && config.expectedText && (
-              <div className="text-xs">
-                <span className="text-muted-foreground">Đáp án mẫu: </span>
-                <span className="font-medium">{config.expectedText}</span>
-              </div>
-            )}
           </div>
         )}
 

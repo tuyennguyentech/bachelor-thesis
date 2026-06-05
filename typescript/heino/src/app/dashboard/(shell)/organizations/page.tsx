@@ -16,6 +16,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { roleName, memberStatusBadge } from "@/lib/org-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateOrgDialog } from "@/app/dashboard/organizations/create-org-dialog";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 20;
 
@@ -48,6 +49,18 @@ export default async function OrganizationsPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: "dashboard:organizations",
+          type: "dashboard-organizations",
+          title: "Tổ chức của tôi",
+          subtitle: "Trang chính",
+          href: "/dashboard/organizations",
+        }}
+      />
+
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Tổ chức của tôi</h1>
         <CreateOrgDialog token={token} userId={claims.sub} />

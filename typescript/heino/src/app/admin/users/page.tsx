@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { roleBadge, userStatusBadge, userFullName } from "@/lib/user-utils";
 import { UsersIcon } from "lucide-react";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 20;
 
@@ -25,7 +26,7 @@ export default async function UsersPage({
 }: {
   searchParams: Promise<{ page?: string; q?: string }>;
 }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
   const offset = (page - 1) * LIMIT;
@@ -39,6 +40,19 @@ export default async function UsersPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: "admin:users",
+          type: "admin-users",
+          area: "admin",
+          title: "Người dùng",
+          subtitle: "Quản trị hệ thống",
+          href: "/admin/users",
+        }}
+      />
+
       <PageHeader
         title="Người dùng"
         description="Quản lý tài khoản, vai trò và trạng thái truy cập hệ thống."

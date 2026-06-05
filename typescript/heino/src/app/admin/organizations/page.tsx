@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { orgStatusBadge } from "@/lib/org-utils";
 import { BuildingIcon } from "lucide-react";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 20;
 
@@ -25,7 +26,7 @@ export default async function OrganizationsPage({
 }: {
   searchParams: Promise<{ page?: string; q?: string }>;
 }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
   const offset = (page - 1) * LIMIT;
@@ -38,6 +39,19 @@ export default async function OrganizationsPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: "admin:organizations",
+          type: "admin-organizations",
+          area: "admin",
+          title: "Tổ chức",
+          subtitle: "Quản trị hệ thống",
+          href: "/admin/organizations",
+        }}
+      />
+
       <PageHeader
         title="Tổ chức"
         description="Quản lý các tổ chức, trạng thái hoạt động và quyền truy cập ban đầu."

@@ -12,9 +12,10 @@ import { EditPasswordForm } from "./edit-password-form";
 import { notFound } from "next/navigation";
 import { userFullName } from "@/lib/user-utils";
 import { PageHeader } from "@/components/ui/page-header";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 export default async function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const { id } = await params;
 
   const client = createRichterClient(UserService, token);
@@ -31,6 +32,19 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="mx-auto max-w-2xl flex flex-col gap-6">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `admin-user:${user.id}`,
+          type: "admin-user",
+          area: "admin",
+          title: userFullName(user),
+          subtitle: user.email,
+          href: `/admin/users/${user.id}`,
+        }}
+      />
+
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
           <Link href="/admin/users">

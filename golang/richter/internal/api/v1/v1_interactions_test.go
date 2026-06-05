@@ -1101,8 +1101,9 @@ func TestPreviewGrade(t *testing.T) {
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
+	ownerPassword := testPassword()
 	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
-		Email: testEmail(), Password: testPassword(),
+		Email: testEmail(), Password: ownerPassword,
 		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
 		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
 	})
@@ -1148,10 +1149,13 @@ func TestPreviewGrade(t *testing.T) {
 
 	studentToken := getUserToken(t, url, studentEmail, studentPassword)
 	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
+	ownerToken := getUserToken(t, url, ownerRes.User.Email, ownerPassword)
+	ownerIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(ownerToken), url)
 
 	// Default lessons created without feedback_mode = after_each → PreviewGrade
-	// must reject with FailedPrecondition so students can't bypass HIDDEN /
-	// AFTER_SUBMIT modes via devtools.
+	// must reject for students with FailedPrecondition so they can't bypass
+	// HIDDEN / AFTER_SUBMIT modes via devtools. Teacher/admin/owner accounts
+	// may still use this RPC for the management-page preview flow.
 	t.Run("rejects when feedback_mode is not after_each", func(t *testing.T) {
 		_, err := studentIA.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
 			LessonId: lessonID,
@@ -1168,6 +1172,27 @@ func TestPreviewGrade(t *testing.T) {
 		}
 		if cerr.Code() != connect.CodeFailedPrecondition {
 			t.Errorf("code: want FailedPrecondition, got %v", cerr.Code())
+		}
+	})
+
+	t.Run("allows manager preview when feedback_mode is not after_each", func(t *testing.T) {
+		res, err := ownerIA.PreviewGrade(ctx, &richterv1.PreviewGradeRequest{
+			LessonId: lessonID,
+			Response: &richterv1.AttemptResponseInput{
+				InteractionId: interactionID,
+				Response: &richterv1.AttemptResponseInput_Reading{
+					Reading: &richterv1.ReadingResponse{AudioObjectKey: ""},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PreviewGrade as owner: %v", err)
+		}
+		if res.MaxScore != 1.0 {
+			t.Errorf("maxScore: want 1, got %v", res.MaxScore)
+		}
+		if res.Feedback == "" {
+			t.Errorf("feedback should be populated for manager preview")
 		}
 	})
 

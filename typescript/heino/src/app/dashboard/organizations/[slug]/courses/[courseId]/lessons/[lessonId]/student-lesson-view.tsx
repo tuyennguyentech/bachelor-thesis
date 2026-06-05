@@ -32,6 +32,7 @@ interface FullscreenExtensions {
 
 interface Props {
   videoUrl: string;
+  videoStorageKey?: string;
   segments: TranscriptSegment[];
   transcript: string;
   chunks: TranscriptChunk[];
@@ -48,6 +49,7 @@ interface Props {
 
 export function StudentLessonView({
   videoUrl,
+  videoStorageKey,
   segments,
   transcript,
   chunks,
@@ -500,14 +502,28 @@ export function StudentLessonView({
     startTransition(async () => {
       try {
         if (isPreview) {
-          const respList = lessonInteractions.map((it) => {
+          const respList = await Promise.all(lessonInteractions.map(async (it) => {
             const localResp = responses.get(it.id) ?? null;
             const config = extractConfig(it);
             let score = 0, maxScore = 1;
             const draftGrade = draftGrades.get(it.id);
+            let feedback = draftGrade?.feedback;
             if (draftGrade) {
               score = draftGrade.score;
               maxScore = draftGrade.maxScore;
+            } else if (it.kind === InteractionKind.READING && localResp) {
+              try {
+                const grade = await interactionClient.previewGrade({
+                  lessonId,
+                  response: buildAttemptResponseInput(it, localResp),
+                });
+                score = grade.score;
+                maxScore = grade.maxScore;
+                feedback = grade.feedback;
+              } catch {
+                maxScore = 1;
+                feedback = "Chế độ xem thử chưa chấm tự động phần ghi âm này. Khi học viên nộp bài thật, hệ thống sẽ chấm AI và hiển thị phiên âm cùng nhận xét tại đây.";
+              }
             } else if (config && localResp) {
               try {
                 const renderer = getRenderer(it.kind);
@@ -518,8 +534,8 @@ export function StudentLessonView({
                 }
               } catch { /* unsupported kind */ }
             }
-            return { interactionId: it.id, response: localResp, score, maxScore };
-          });
+            return { interactionId: it.id, response: localResp, score, maxScore, feedback };
+          }));
           setResult({
             totalScore: respList.reduce((acc, r) => acc + r.score, 0),
             maxScore: respList.reduce((acc, r) => acc + r.maxScore, 0),
@@ -531,6 +547,13 @@ export function StudentLessonView({
           const res = await interactionClient.submitAttempt({ lessonId, responses: protoResponses });
           const attempt = res.attempt;
           if (attempt) {
+            const freshInteractions = await aiClient
+              .getLessonAnalysis({ lessonId })
+              .then((analysisResult) => analysisResult.analysis?.interactions ?? null)
+              .catch(() => null);
+            if (freshInteractions) {
+              setLessonInteractions(freshInteractions);
+            }
             setResult({
               totalScore: attempt.totalScore,
               maxScore: attempt.maxScore,
@@ -543,14 +566,6 @@ export function StudentLessonView({
                 feedback: r.feedback,
               })),
             });
-            void aiClient
-              .getLessonAnalysis({ lessonId })
-              .then((analysisResult) => {
-                if (analysisResult.analysis?.interactions) {
-                  setLessonInteractions(analysisResult.analysis.interactions);
-                }
-              })
-              .catch(() => null);
           }
         }
         setSubmitted(true);
@@ -600,6 +615,7 @@ export function StudentLessonView({
             playerKey={playerKey}
             videoRef={videoRef}
             videoUrl={videoUrl}
+            videoStorageKey={videoStorageKey}
             lessonId={lessonId}
             initialPosition={initialPosition}
             token={token}

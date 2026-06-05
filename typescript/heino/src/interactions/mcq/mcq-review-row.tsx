@@ -54,6 +54,13 @@ export function McqReviewRow({
           const isWrong = canReveal && isSelected && (isMultiple
             ? !correctAnswers.includes(oi)
             : oi !== correct);
+          const optionStatus = (() => {
+            if (canReveal && isCorrect && isSelected) return "Bạn chọn - đúng";
+            if (canReveal && isWrong) return "Bạn chọn - sai";
+            if (canReveal && isCorrect) return "Đáp án đúng";
+            if (isSelected) return "Bạn đã chọn";
+            return "";
+          })();
 
           let cls = "text-xs px-2.5 py-1.5 rounded border flex items-center gap-2 transition-all";
 
@@ -82,6 +89,11 @@ export function McqReviewRow({
               <span>
                 {String.fromCharCode(65 + oi)}. {opt.text}
               </span>
+              {optionStatus && (
+                <span className="ml-auto shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                  {optionStatus}
+                </span>
+              )}
             </div>
           );
         })}

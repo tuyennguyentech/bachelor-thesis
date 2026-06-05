@@ -24,7 +24,7 @@ function getAuthTransport(baseURL: string) {
   return transport;
 }
 
-async function loginAs(page: Page, email: string, password: string, baseURL = "http://caddy") {
+export async function loginAs(page: Page, email: string, password: string, baseURL = "http://caddy") {
   const client = createClient(AuthService, getAuthTransport(baseURL));
   const res = await client.login({ email, password });
   const secure = baseURL.startsWith("https://");

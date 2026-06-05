@@ -9,9 +9,10 @@ import { OrgStatusSelect } from "./org-status-select";
 import { EditOrgForm } from "./edit-org-form";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 export default async function OrgDetailPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const { slug } = await params;
 
   const client = createRichterClient(OrganizationService, token);
@@ -28,6 +29,20 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
 
   return (
     <div className="mx-auto max-w-2xl flex flex-col gap-6">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `admin-organization:${org.id}`,
+          type: "admin-organization",
+          area: "admin",
+          orgSlug: slug,
+          title: org.name,
+          subtitle: `Slug: ${org.slug}`,
+          href: `/admin/organizations/${slug}`,
+        }}
+      />
+
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1">
           <Link href="/admin/organizations">

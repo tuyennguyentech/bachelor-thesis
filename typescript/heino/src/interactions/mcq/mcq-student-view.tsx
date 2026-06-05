@@ -119,6 +119,13 @@ export function McqStudentView({
             }
             return isSelected && oi !== config.correctAnswer;
           })();
+          const optionStatus = (() => {
+            if (revealNow && isCorrect && isSelected) return "Bạn chọn - đúng";
+            if (revealNow && isWrong) return "Bạn chọn - sai";
+            if (revealNow && isCorrect) return "Đáp án đúng";
+            if (isSelected) return "Bạn chọn";
+            return "";
+          })();
 
           let cls =
             "w-full text-left px-3 py-2.5 rounded-md border text-sm flex items-center gap-2 transition-colors";
@@ -168,7 +175,12 @@ export function McqStudentView({
                   )}
                 </span>
               )}
-              <span>{opt.text}</span>
+              <span className="min-w-0 flex-1">{opt.text}</span>
+              {optionStatus && (
+                <span className="ml-auto shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-[11px] font-medium">
+                  {optionStatus}
+                </span>
+              )}
             </button>
           );
         })}

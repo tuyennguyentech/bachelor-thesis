@@ -20,6 +20,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { UsersIcon } from "lucide-react";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 50;
 
@@ -30,7 +31,7 @@ export default async function MembersPage({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ page?: string }>;
 }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const { slug } = await params;
   const sp = await searchParams;
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
@@ -63,6 +64,20 @@ export default async function MembersPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `admin-organization-members:${org.id}`,
+          type: "admin-organization-members",
+          area: "admin",
+          orgSlug: slug,
+          title: "Thành viên",
+          subtitle: org.name,
+          href: `/admin/organizations/${slug}/members`,
+        }}
+      />
+
       <Breadcrumbs
         items={[
           { label: "Tổ chức", href: "/admin/organizations" },

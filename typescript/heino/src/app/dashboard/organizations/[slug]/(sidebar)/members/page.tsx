@@ -19,6 +19,7 @@ import { MemberActionsMenu } from "@/app/admin/organizations/[slug]/members/memb
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { UsersIcon } from "lucide-react";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 50;
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
@@ -35,7 +36,7 @@ export default async function DashboardMembersPage({
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const offset = (page - 1) * LIMIT;
 
-  const { token } = await requireAnyUser();
+  const { claims, token } = await requireAnyUser();
 
   const orgClient = createRichterClient(OrganizationService, token);
   let org;
@@ -67,6 +68,19 @@ export default async function DashboardMembersPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `organization-members:${org.id}`,
+          type: "organization-members",
+          orgSlug: slug,
+          title: "Thành viên",
+          subtitle: org.name,
+          href: `/dashboard/organizations/${slug}/members`,
+        }}
+      />
+
       <PageHeader
         title="Thành viên"
         description={`Danh sách người dùng đang tham gia tổ chức ${org.name}.`}

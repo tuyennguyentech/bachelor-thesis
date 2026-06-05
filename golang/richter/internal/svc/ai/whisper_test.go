@@ -17,13 +17,26 @@ func TestExtractAudioFromMP4(t *testing.T) {
 		t.Skipf("test video not found at %s — run generation script in testdata/README.md", videoPath)
 	}
 
-	videoBytes, err := os.ReadFile(videoPath)
+	// Copy the test video to a temp file so extractAudio operates on a path.
+	// (The production path no longer loads the whole file into memory.)
+	tmp, err := os.CreateTemp("", "richter-test-video-*.mp4")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	defer os.Remove(tmp.Name())
+	src, err := os.ReadFile(videoPath)
 	if err != nil {
 		t.Fatalf("read test video: %v", err)
 	}
+	if _, err := tmp.Write(src); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
 
 	ctx := context.Background()
-	audioBytes, err := extractAudio(ctx, videoBytes)
+	audioBytes, err := extractAudio(ctx, tmp.Name())
 	if err != nil {
 		t.Fatalf("extractAudio: %v", err)
 	}

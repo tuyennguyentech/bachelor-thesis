@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -23,6 +24,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/samber/do/v2"
+	"golang.org/x/text/unicode/norm"
 )
 
 var Package = do.Package(
@@ -38,7 +40,24 @@ type StorageSvc struct {
 	cfg    *cfg.S3Cfg
 	authz  *authz.AuthzSvc
 	pg     *db.PostgresSvc
+
+	// studentUploadLimits guards the student audio upload endpoint against
+	// abuse (a malicious learner spam-uploading MB of audio per request).
+	// 5 uploads per user per lesson per rolling minute. Per-process; for a
+	// multi-instance deployment the limit would scale with instance count.
+	studentUploadLimits sync.Map // map[string]*uploadCounter
 }
+
+type uploadCounter struct {
+	mu      sync.Mutex
+	count   int
+	resetAt time.Time
+}
+
+const (
+	studentUploadsPerWindow = 5
+	studentUploadWindow     = time.Minute
+)
 
 var _ richterv1connect.StorageServiceHandler = (*StorageSvc)(nil)
 
@@ -74,9 +93,31 @@ func (s *StorageSvc) Handler() (string, http.Handler) {
 	)
 }
 
+// allowedLessonAssetExts is the set of file extensions a teacher (or student,
+// for recordings) may upload under lessons/<id>/. Anything else is rejected
+// to prevent storing arbitrary payloads (executables, scripts, hostile SVG).
+var (
+	allowedLessonAssetExts = map[string]bool{
+		".mp4": true, ".m4v": true, ".webm": true, ".mov": true,
+		".wav": true, ".mp3": true, ".ogg": true, ".pdf": true, ".png": true, ".jpg": true, ".jpeg": true, ".webp": true,
+	}
+	allowedStudentRecordingExts = map[string]bool{
+		".wav": true, ".webm": true, ".ogg": true, ".mp3": true, ".m4a": true,
+	}
+)
+
+// normalizeStorageKey applies NFC Unicode normalization so attackers cannot
+// smuggle look-alike characters (fullwidth slash U+FF0F, etc.) past our
+// structural validators.
+func normalizeStorageKey(key string) string {
+	return norm.NFC.String(key)
+}
+
 // validateLessonKey ensures key is in the form lessons/<uuid>/... and returns the
-// lesson UUID string. Rejects path traversal and other malformed keys.
+// lesson UUID string. Rejects path traversal, other malformed keys, and any
+// file extension outside the allowlist.
 func validateLessonKey(key string) (lessonID string, err error) {
+	key = normalizeStorageKey(key)
 	if cleaned := path.Clean(key); cleaned != key {
 		return "", fmt.Errorf("key contains invalid path components")
 	}
@@ -87,6 +128,10 @@ func validateLessonKey(key string) (lessonID string, err error) {
 	if len(parts) < 3 || parts[0] != "lessons" || parts[1] == "" || parts[2] == "" {
 		return "", fmt.Errorf("key must be in lessons/<id>/<filename> format")
 	}
+	ext := strings.ToLower(path.Ext(key))
+	if !allowedLessonAssetExts[ext] {
+		return "", fmt.Errorf("file extension %q is not allowed for lesson assets", ext)
+	}
 	return parts[1], nil
 }
 
@@ -95,13 +140,19 @@ func validateLessonKey(key string) (lessonID string, err error) {
 // are writable by any active member of the lesson's organization, not just
 // teachers, so students can submit reading-interaction recordings.
 func isStudentRecordingKey(key string) bool {
+	key = normalizeStorageKey(key)
 	parts := strings.SplitN(key, "/", 4)
-	return len(parts) == 4 && parts[0] == "lessons" && parts[2] == "student-recordings"
+	if len(parts) != 4 || parts[0] != "lessons" || parts[2] != "student-recordings" {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(parts[3]))
+	return allowedStudentRecordingExts[ext]
 }
 
 // validateSeedKey ensures key is in the form seed/<org-slug>/... and returns
 // the org slug. Used for seeded demo content that doesn't follow the lessons/ path.
 func validateSeedKey(key string) (orgSlug string, err error) {
+	key = normalizeStorageKey(key)
 	if cleaned := path.Clean(key); cleaned != key {
 		return "", fmt.Errorf("key contains invalid path components")
 	}
@@ -150,6 +201,10 @@ func (s *StorageSvc) GetUploadUrl(
 	ctx context.Context,
 	req *richterv1.GetUploadUrlRequest,
 ) (*richterv1.GetUploadUrlResponse, error) {
+	if s.cfg.PublicEndpoint == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("storage public_endpoint is not configured; contact admin to set the s3.public_endpoint config"))
+	}
 	orgID, err := s.orgIDForKey(ctx, req.GetKey())
 	if err != nil {
 		return nil, err
@@ -158,13 +213,18 @@ func (s *StorageSvc) GetUploadUrl(
 	// by the learner themselves under `lessons/<id>/student-recordings/...`.
 	// Other keys (lesson assets, seeded content) require teacher-level access.
 	if isStudentRecordingKey(req.GetKey()) {
-		if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		claims, err := s.authz.RequireOrgRole(ctx, orgID,
 			gen.OrganizationRoleOwner,
 			gen.OrganizationRoleAdmin,
 			gen.OrganizationRoleTeacher,
 			gen.OrganizationRoleStudent,
-		); err != nil {
+		)
+		if err != nil {
 			return nil, err
+		}
+		if !s.allowStudentUpload(claims.GetSub(), req.GetKey()) {
+			return nil, connect.NewError(connect.CodeResourceExhausted,
+				fmt.Errorf("bạn đã tải lên quá nhiều bản ghi trong thời gian ngắn, vui lòng chờ một phút"))
 		}
 	} else {
 		if _, err := s.authz.RequireOrgRole(ctx, orgID,
@@ -193,6 +253,10 @@ func (s *StorageSvc) GetDownloadUrl(
 	ctx context.Context,
 	req *richterv1.GetDownloadUrlRequest,
 ) (*richterv1.GetDownloadUrlResponse, error) {
+	if s.cfg.PublicEndpoint == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("storage public_endpoint is not configured; contact admin to set the s3.public_endpoint config"))
+	}
 	orgID, err := s.orgIDForKey(ctx, req.GetKey())
 	if err != nil {
 		return nil, err
@@ -216,6 +280,8 @@ func (s *StorageSvc) GetDownloadUrl(
 }
 
 func rewritePresignedURL(raw string, c *cfg.S3Cfg) string {
+	// Callers (GetUploadUrl, GetDownloadUrl) reject requests when PublicEndpoint
+	// is empty, so the empty branch below is a defensive fallback only.
 	if c.PublicEndpoint == "" || c.Endpoint == "" {
 		return raw
 	}
@@ -228,4 +294,31 @@ func rewritePresignedURL(raw string, c *cfg.S3Cfg) string {
 		return c.PublicEndpoint + raw[len(internal):]
 	}
 	return raw
+}
+
+// allowStudentUpload reports whether a student may issue another presigned
+// upload for the given key. Uses a per-process rolling minute window.
+func (s *StorageSvc) allowStudentUpload(userID, key string) bool {
+	if userID == "" {
+		return true // unauthenticated case already rejected above; defensive.
+	}
+	parts := strings.SplitN(normalizeStorageKey(key), "/", 4)
+	if len(parts) < 2 || parts[1] == "" {
+		return true // malformed keys are rejected by orgIDForKey before this point.
+	}
+	bucket := userID + "|" + parts[1]
+	now := time.Now()
+	iface, _ := s.studentUploadLimits.LoadOrStore(bucket, &uploadCounter{resetAt: now.Add(studentUploadWindow)})
+	c := iface.(*uploadCounter)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if now.After(c.resetAt) {
+		c.count = 0
+		c.resetAt = now.Add(studentUploadWindow)
+	}
+	if c.count >= studentUploadsPerWindow {
+		return false
+	}
+	c.count++
+	return true
 }

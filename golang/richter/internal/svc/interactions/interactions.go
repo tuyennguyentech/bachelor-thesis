@@ -838,8 +838,12 @@ func (s *InteractionsSvc) PreviewGrade(
 		return nil, err
 	}
 	if target.lesson.FeedbackMode != "after_each" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Errorf("preview grading only allowed when feedback_mode is after_each"))
+		if _, err := s.authz.RequireOrgRole(ctx, target.orgID,
+			gen.OrganizationRoleOwner, gen.OrganizationRoleAdmin, gen.OrganizationRoleTeacher,
+		); err != nil {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("preview grading only allowed when feedback_mode is after_each"))
+		}
 	}
 	result, err := s.gradeSingleResponse(ctx, lessonID, target)
 	if err != nil {

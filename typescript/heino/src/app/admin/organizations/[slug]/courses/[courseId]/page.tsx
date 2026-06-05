@@ -15,13 +15,14 @@ import { ModuleActions } from "./module-actions";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 export default async function CourseDetailPage({
   params,
 }: {
   params: Promise<{ slug: string; courseId: string }>;
 }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const { slug, courseId } = await params;
 
   const orgClient = createRichterClient(OrganizationService, token);
@@ -50,6 +51,20 @@ export default async function CourseDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `admin-course:${course.id}`,
+          type: "admin-course",
+          area: "admin",
+          orgSlug: slug,
+          title: course.title,
+          subtitle: org.name,
+          href: `/admin/organizations/${slug}/courses/${course.id}`,
+        }}
+      />
+
       <Breadcrumbs
         items={[
           { label: "Tổ chức", href: "/admin/organizations" },

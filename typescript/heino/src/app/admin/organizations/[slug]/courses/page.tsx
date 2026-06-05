@@ -20,6 +20,7 @@ import { CreateCourseDialog } from "./create-course-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 20;
 
@@ -62,6 +63,20 @@ export default async function CoursesPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `admin-organization-courses:${org.id}`,
+          type: "admin-organization-courses",
+          area: "admin",
+          orgSlug: slug,
+          title: "Khóa học",
+          subtitle: org.name,
+          href: `/admin/organizations/${slug}/courses`,
+        }}
+      />
+
       <Breadcrumbs
         items={[
           { label: "Tổ chức", href: "/admin/organizations" },

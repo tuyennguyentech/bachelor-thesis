@@ -21,6 +21,7 @@ import { Pagination } from "@/components/pagination";
 import { CreateCourseDialog } from "@/app/admin/organizations/[slug]/courses/create-course-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 20;
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
@@ -71,6 +72,19 @@ export default async function DashboardCoursesPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `organization-courses:${org.id}`,
+          type: "organization-courses",
+          orgSlug: slug,
+          title: "Khóa học",
+          subtitle: org.name,
+          href: `/dashboard/organizations/${slug}/courses`,
+        }}
+      />
+
       <PageHeader
         title="Khóa học"
         description={`Danh sách khóa học trong tổ chức ${org.name}.`}

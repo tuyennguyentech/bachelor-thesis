@@ -6,6 +6,7 @@ import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import type { ReviewRowProps, ReadingConfig, ReadingResponse } from "../types";
+import { ReadingFeedbackBlocks } from "./reading-feedback";
 
 export function ReadingReviewRow({
   index,
@@ -78,10 +79,11 @@ export function ReadingReviewRow({
           </p>
         )}
         {canReveal && feedback && response?.audioObjectKey && (
-          <div className="rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 flex gap-2">
-            <span className="shrink-0 text-sm">💬</span>
-            <p className="text-xs text-blue-700 dark:text-blue-300 whitespace-pre-line">{feedback}</p>
-          </div>
+          <ReadingFeedbackBlocks
+            feedback={feedback}
+            transcriptTestId="reading-review-transcript"
+            feedbackTestId="reading-review-feedback"
+          />
         )}
       </div>
     </div>

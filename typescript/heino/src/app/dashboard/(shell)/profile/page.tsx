@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { EditProfileForm } from "./edit-profile-form";
 import { EditPasswordForm } from "./edit-password-form";
 import { roleBadge, userStatusBadge } from "@/lib/user-utils";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 function initials(first: string, last: string): string {
   return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
@@ -27,6 +28,18 @@ export default async function ProfilePage() {
 
   return (
     <div className="mx-auto max-w-3xl flex flex-col gap-6">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `dashboard-profile:${claims.sub}`,
+          type: "dashboard-profile",
+          title: "Hồ sơ cá nhân",
+          subtitle: user.email,
+          href: "/dashboard/profile",
+        }}
+      />
+
       <div>
         <h1 className="text-xl font-semibold">Hồ sơ cá nhân</h1>
         <p className="text-sm text-muted-foreground">

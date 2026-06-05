@@ -11,13 +11,14 @@ import { LessonActions } from "./lesson-actions";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 export default async function ModuleDetailPage({
   params,
 }: {
   params: Promise<{ slug: string; courseId: string; moduleId: string }>;
 }) {
-  const { token } = await requireAdmin();
+  const { claims, token } = await requireAdmin();
   const { slug, courseId, moduleId } = await params;
 
   const [orgRes, courseRes, moduleRes] = await Promise.allSettled([
@@ -43,6 +44,20 @@ export default async function ModuleDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
+      <RecentAccessRecorder
+        exactPath
+        entry={{
+          userId: claims.sub,
+          id: `admin-module:${mod.id}`,
+          type: "admin-module",
+          area: "admin",
+          orgSlug: slug,
+          title: mod.title,
+          subtitle: course.title,
+          href: `/admin/organizations/${slug}/courses/${courseId}/modules/${mod.id}`,
+        }}
+      />
+
       <Breadcrumbs
         items={[
           { label: "Tổ chức", href: "/admin/organizations" },

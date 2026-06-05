@@ -28,7 +28,7 @@ export default async function DashboardCourseDetailPage({
   params: Promise<{ slug: string; courseId: string }>;
 }) {
   const { slug, courseId } = await params;
-  const { token } = await requireAnyUser();
+  const { claims, token } = await requireAnyUser();
 
   const orgClient = createRichterClient(OrganizationService, token);
   let org;
@@ -77,7 +77,9 @@ export default async function DashboardCourseDetailPage({
   return (
     <div className="flex flex-col gap-6">
       <RecentAccessRecorder
+        exactPath
         entry={{
+          userId: claims.sub,
           id: `course:${course.id}`,
           type: "course",
           orgSlug: slug,
