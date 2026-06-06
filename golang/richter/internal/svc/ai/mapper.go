@@ -121,15 +121,15 @@ func analysisToProto(a gen.LessonAnalysis, ints []gen.LessonInteraction, stripAn
 	}
 
 	return &richterv1.LessonAnalysis{
-		LessonId:                   a.LessonID.String(),
-		Status:                     status,
-		ErrorMsg:                   errMsg,
-		Transcript:                 transcript,
-		Interactions:               protoInts,
-		CreatedAt:                  createdAt,
-		UpdatedAt:                  updatedAt,
-		TranscriptSegments:         protoSegs,
-		DefaultInteractionConfig:   defaultCfg,
+		LessonId:                 a.LessonID.String(),
+		Status:                   status,
+		ErrorMsg:                 errMsg,
+		Transcript:               transcript,
+		Interactions:             protoInts,
+		CreatedAt:                createdAt,
+		UpdatedAt:                updatedAt,
+		TranscriptSegments:       protoSegs,
+		DefaultInteractionConfig: defaultCfg,
 	}
 }
 

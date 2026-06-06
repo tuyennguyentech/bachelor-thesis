@@ -21,9 +21,9 @@ type AudioGradingResult struct {
 	Feedback string `json:"feedback"`
 }
 
-func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question, expectedAnswer string) (*AudioGradingResult, error) {
+func (s *gradingService) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question, expectedAnswer string) (*AudioGradingResult, error) {
 	// 1. Call Whisper to transcribe the audio.
-	transcript, _, werr := s.whisperTranscribe(ctx, audioMP3)
+	transcript, _, werr := s.transcription.whisperTranscribe(ctx, audioMP3)
 	if werr != nil {
 		return nil, fmt.Errorf("gemini audio grade: whisper transcription: %w", werr)
 	}
@@ -37,7 +37,7 @@ func (s *AISvc) GradeAudio(ctx context.Context, audioMP3 []byte, language, passa
 		}, nil
 	}
 
-	client, err := s.newGeminiClient(ctx)
+	client, err := newGeminiClient(ctx, s.geminiCfg)
 	if err != nil {
 		return nil, fmt.Errorf("gemini audio grade: %w", err)
 	}
@@ -204,36 +204,36 @@ func isWhisperHallucination(transcript string, language string) bool {
 		sb.WriteRune(r)
 	}
 	cleaned := strings.Join(strings.Fields(sb.String()), " ")
-	
+
 	// Common hallucinations list (fully stripped of punctuation and collapsed)
 	hallucinations := map[string]bool{
-		"thank you": true,
-		"thank you thank you": true,
-		"thank you so much": true,
-		"thank you very much": true,
-		"thanks": true,
-		"thanks for watching": true,
+		"thank you":              true,
+		"thank you thank you":    true,
+		"thank you so much":      true,
+		"thank you very much":    true,
+		"thanks":                 true,
+		"thanks for watching":    true,
 		"thank you for watching": true,
-		"you": true,
-		"go": true,
-		"bye": true,
-		"bye bye": true,
-		"oh": true,
-		"yeah": true,
-		"yes": true,
-		"no": true,
-		"uh": true,
-		"um": true,
-		"shh": true,
-		"hãy đăng ký kênh": true,
-		"cảm ơn các bạn đã xem": true,
-		"cảm ơn": true,
-		"cảm ơn bạn": true,
-		"cám ơn": true,
-		"谢谢": true,
-		"谢谢大家": true,
-		"谢谢大家观看": true,
-		"谢谢观看": true,
+		"you":                    true,
+		"go":                     true,
+		"bye":                    true,
+		"bye bye":                true,
+		"oh":                     true,
+		"yeah":                   true,
+		"yes":                    true,
+		"no":                     true,
+		"uh":                     true,
+		"um":                     true,
+		"shh":                    true,
+		"hãy đăng ký kênh":       true,
+		"cảm ơn các bạn đã xem":  true,
+		"cảm ơn":                 true,
+		"cảm ơn bạn":             true,
+		"cám ơn":                 true,
+		"谢谢":                     true,
+		"谢谢大家":                   true,
+		"谢谢大家观看":                 true,
+		"谢谢观看":                   true,
 	}
 
 	if hallucinations[cleaned] {
@@ -252,6 +252,6 @@ func isWhisperHallucination(transcript string, language string) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }

@@ -29,7 +29,7 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 	return svcinteractions.GradingDeps{
 		Language: lang,
 		GradeAudio: func(ctx context.Context, audioBytes []byte, passageMarkdown, question, expectedAnswer string) (float32, float32, string, error) {
-			result, err := s.GradeAudio(ctx, audioBytes, lang, passageMarkdown, question, expectedAnswer)
+			result, err := s.grading.GradeAudio(ctx, audioBytes, lang, passageMarkdown, question, expectedAnswer)
 			if err != nil {
 				// Don't fail the whole submit on AI grading error (Gemini rejection of
 				// audio format, transient API failure, etc.). Give pending credit and
@@ -54,7 +54,7 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 			return score, 1.0, feedback, nil
 		},
 		GradeText: func(ctx context.Context, question, studentAnswer, expectedAnswer string) (float32, float32, string, error) {
-			score, feedback, err := s.GradeText(ctx, lang, question, studentAnswer, expectedAnswer)
+			score, feedback, err := s.grading.GradeText(ctx, lang, question, studentAnswer, expectedAnswer)
 			if err != nil {
 				s.log.WarnContext(ctx, "AI text grading failed, falling back to pending credit", "err", err)
 				const fallback = "Hệ thống AI tạm thời chưa chấm được câu này. Giáo viên sẽ xem lại."

@@ -16,8 +16,8 @@ type TextGradingResult struct {
 
 // GradeText grades a textual response (like fill-blank, dictation, short answer)
 // using Gemini Pro, supporting semantic matching and synomyms.
-func (s *AISvc) GradeText(ctx context.Context, language, question, studentAnswer, expectedAnswer string) (float32, string, error) {
-	client, err := s.newGeminiClient(ctx)
+func (s *gradingService) GradeText(ctx context.Context, language, question, studentAnswer, expectedAnswer string) (float32, string, error) {
+	client, err := newGeminiClient(ctx, s.geminiCfg)
 	if err != nil {
 		return 0, "", fmt.Errorf("gemini text grade: %w", err)
 	}
