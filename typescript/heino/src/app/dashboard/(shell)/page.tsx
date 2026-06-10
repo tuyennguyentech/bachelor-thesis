@@ -11,6 +11,7 @@ import {
 import { OrganizationService, type Organization } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, CourseStatus } from "buf/gen/richter/v1/courses_pb";
 import { UserRole } from "buf/gen/richter/v1/users_pb";
+import { InteractionService, type MyCourseProgress } from "buf/gen/richter/v1/interactions_pb";
 import { Button } from "@/components/ui/button";
 import {
   ArrowRightIcon,
@@ -29,6 +30,8 @@ import {
   parseRecentAccessCookie,
   type RecentAccessEntry,
 } from "@/lib/recent-access";
+import { toUserMessage } from "@/lib/connect-error";
+import { StudentProgressSection } from "./student-progress-section";
 
 const ORG_LIMIT = 12;
 const COURSES_PER_ORG = 8;
@@ -80,12 +83,15 @@ function accessTypeLabel(type: RecentAccessEntry["type"]) {
   }
 }
 
+const PROGRESS_LIMIT = 20;
+
 export default async function DashboardPage() {
   const { claims, token } = await requireAnyUser();
 
   const memberClient = createRichterClient(OrganizationMemberService, token);
   const orgClient = createRichterClient(OrganizationService, token);
   const courseClient = createRichterClient(CourseService, token);
+  const interactionClient = createRichterClient(InteractionService, token);
 
   const [{ members }, cookieStore] = await Promise.all([
     memberClient.listUserMemberships({
@@ -141,6 +147,22 @@ export default async function DashboardPage() {
   const publishedCourseCount = courseItems.filter(({ course }) => course.status === CourseStatus.PUBLISHED).length;
   const recentCourses = courseItems.slice(0, 4);
 
+  const isStudent = manageableOrgCount === 0;
+
+  let myCourseProgress: MyCourseProgress[] = [];
+  let progressErrorMsg: string | undefined;
+  if (isStudent) {
+    try {
+      const { courses } = await interactionClient.listMyCourseProgress({
+        limit: PROGRESS_LIMIT,
+        offset: 0,
+      });
+      myCourseProgress = courses;
+    } catch (err) {
+      progressErrorMsg = toUserMessage(err);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <div className="flex flex-col gap-4 border-b pb-5 md:flex-row md:items-end md:justify-between">
@@ -185,14 +207,32 @@ export default async function DashboardPage() {
           </div>
           <p className="mt-2 text-2xl font-semibold">{publishedCourseCount}</p>
         </div>
-        <div className="rounded-md border p-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <ShieldCheckIcon className="size-4" />
-            Có quyền quản lý
+        {isStudent ? (
+          /* Students see their overall avg score in the 4th card slot */
+          <div className="rounded-md border p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <GraduationCapIcon className="size-4" />
+              Khóa học đang học
+            </div>
+            <p className="mt-2 text-2xl font-semibold">{myCourseProgress.length}</p>
           </div>
-          <p className="mt-2 text-2xl font-semibold">{manageableOrgCount}</p>
-        </div>
+        ) : (
+          <div className="rounded-md border p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <ShieldCheckIcon className="size-4" />
+              Có quyền quản lý
+            </div>
+            <p className="mt-2 text-2xl font-semibold">{manageableOrgCount}</p>
+          </div>
+        )}
       </div>
+
+      {isStudent && (
+        <StudentProgressSection
+          courses={myCourseProgress}
+          errorMsg={progressErrorMsg}
+        />
+      )}
 
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex flex-col gap-4">
