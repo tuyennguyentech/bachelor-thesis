@@ -250,6 +250,10 @@ message RegenerateInteractionResponse {
 
 message AttemptResponseInput {
   string interaction_id = 1 [(buf.validate.field).string.uuid = true];
+  // Time the student took to answer this interaction, in milliseconds. Optional.
+  int32 time_to_answer_ms = 2 [(buf.validate.field).int32.gte = 0];
+  // Number of times the student replayed the video segment for this interaction.
+  int32 replay_count = 3 [(buf.validate.field).int32.gte = 0];
   oneof response {
     int32 mcq_selected = 20;
     FillBlankResponse fill_blank = 21;
@@ -262,6 +266,8 @@ message AttemptResponseInput {
 message SubmitAttemptRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
   repeated AttemptResponseInput responses = 2 [(buf.validate.field).repeated.min_items = 1];
+  // Fraction of the video watched before submitting (0..1). Optional.
+  double video_watch_fraction = 3 [(buf.validate.field).double = {gte: 0, lte: 1}];
 }
 
 message SubmitAttemptResponse {
@@ -284,6 +290,12 @@ message StudentAttemptSummary {
   float max_score = 5;
   google.protobuf.Timestamp submitted_at = 6;
   int32 attempt_count = 7;
+  // Average time to answer across all responses, in milliseconds.
+  double avg_time_to_answer_ms = 8;
+  // Fraction of the lesson video the student watched (0..1).
+  double video_watch_fraction = 9;
+  // Composite engagement score (0..100).
+  double engagement_score = 10;
 }
 
 message ListAttemptsRequest {
@@ -326,6 +338,57 @@ message SaveAttemptResponseResponse {
   bool feedback_revealed = 4;
 }
 
+// ── Analytics ────────────────────────────────────────────────────────────────
+
+// Per-student summary across all lessons in a course (teacher/admin view).
+message CourseStudentSummary {
+  string user_id = 1;
+  string display_name = 2;
+  string email = 3;
+  // Number of distinct lessons this student has submitted an attempt for.
+  int32 lessons_completed = 4;
+  // Total number of lessons in the course.
+  int32 lessons_total = 5;
+  // Average score fraction across all submitted attempts (total_score / max_score).
+  double avg_score = 6;
+  // Composite engagement score (0..100).
+  double engagement_score = 7;
+  // Timestamp of the most recent attempt submission.
+  google.protobuf.Timestamp last_active = 8;
+}
+
+message ListCourseAttemptsSummaryRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 200}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListCourseAttemptsSummaryResponse {
+  repeated CourseStudentSummary students = 1;
+  int64 total = 2;
+}
+
+// Per-course progress summary for the authenticated student (self-view).
+message MyCourseProgress {
+  string course_id = 1;
+  string title = 2;
+  // Number of distinct lessons the student has submitted at least one attempt for.
+  int32 lessons_done = 3;
+  // Total number of lessons in the course.
+  int32 lessons_total = 4;
+  // Average score fraction across all submitted attempts (0..1).
+  double avg_score = 5;
+}
+
+message ListMyCourseProgressRequest {
+  int32 limit = 1 [(buf.validate.field).int32 = {gte: 1, lte: 200}];
+  int32 offset = 2 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListMyCourseProgressResponse {
+  repeated MyCourseProgress courses = 1;
+}
+
 service InteractionService {
   // Teacher: list all interactions for a lesson.
   rpc ListLessonInteractions(ListLessonInteractionsRequest) returns (ListLessonInteractionsResponse) {}
@@ -339,8 +402,10 @@ service InteractionService {
   rpc DeleteLessonInteractions(DeleteLessonInteractionsRequest) returns (DeleteLessonInteractionsResponse) {}
   // Teacher: AI-regenerate a single interaction (same or new kind).
   rpc RegenerateInteraction(RegenerateInteractionRequest) returns (RegenerateInteractionResponse) {}
-  // Teacher: list student attempt summaries.
+  // Teacher: list student attempt summaries for a lesson.
   rpc ListAttempts(ListAttemptsRequest) returns (ListAttemptsResponse) {}
+  // Teacher/Admin: list per-student attempt summaries across an entire course.
+  rpc ListCourseAttemptsSummary(ListCourseAttemptsSummaryRequest) returns (ListCourseAttemptsSummaryResponse) {}
 
   // Student: submit all interaction responses and receive a graded attempt.
   rpc SubmitAttempt(SubmitAttemptRequest) returns (SubmitAttemptResponse) {}
@@ -351,4 +416,6 @@ service InteractionService {
   rpc PreviewGrade(PreviewGradeRequest) returns (PreviewGradeResponse) {}
   // Student: save/grade one in-progress response so final submit can be fast.
   rpc SaveAttemptResponse(SaveAttemptResponseRequest) returns (SaveAttemptResponseResponse) {}
+  // Student: list own course progress (courses where at least one lesson attempt exists).
+  rpc ListMyCourseProgress(ListMyCourseProgressRequest) returns (ListMyCourseProgressResponse) {}
 }

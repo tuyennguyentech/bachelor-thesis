@@ -3,7 +3,9 @@ package interactions
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
+	"time"
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
@@ -126,14 +128,28 @@ func (s *InteractionsSvc) ListAttempts(
 		if r.SubmittedAt.Valid {
 			ts = timestamppb.New(r.SubmittedAt.Time)
 		}
+		var watchFrac float64
+		if r.VideoWatchFraction.Valid {
+			watchFrac = float64(r.VideoWatchFraction.Float32)
+		}
+		// response_rate for lesson-level summary: we don't have total_interactions
+		// directly here so we pass watch=watch, rate=1 (all graded), score=score/max.
+		scoreFrac := float64(0)
+		if r.MaxScore > 0 {
+			scoreFrac = float64(r.TotalScore) / float64(r.MaxScore)
+		}
+		eng := computeEngagementScore(watchFrac, 1.0, scoreFrac)
 		summaries = append(summaries, &richterv1.StudentAttemptSummary{
-			UserId:       r.UserID.String(),
-			DisplayName:  name,
-			Email:        r.Email,
-			TotalScore:   r.TotalScore,
-			MaxScore:     r.MaxScore,
-			SubmittedAt:  ts,
-			AttemptCount: r.AttemptCount,
+			UserId:             r.UserID.String(),
+			DisplayName:        name,
+			Email:              r.Email,
+			TotalScore:         r.TotalScore,
+			MaxScore:           r.MaxScore,
+			SubmittedAt:        ts,
+			AttemptCount:       r.AttemptCount,
+			AvgTimeToAnswerMs:  r.AvgTimeToAnswerMs,
+			VideoWatchFraction: watchFrac,
+			EngagementScore:    eng,
 		})
 	}
 
@@ -141,6 +157,155 @@ func (s *InteractionsSvc) ListAttempts(
 		Attempts: summaries,
 		Total:    int32(ar.total),
 	}, nil
+}
+
+// ── ListCourseAttemptsSummary ─────────────────────────────────────────────────
+
+func (s *InteractionsSvc) ListCourseAttemptsSummary(
+	ctx context.Context,
+	req *richterv1.ListCourseAttemptsSummaryRequest,
+) (*richterv1.ListCourseAttemptsSummaryResponse, error) {
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve org ID for the course to enforce teacher/admin authz.
+	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
+		course, err := q.GetCourseByID(ctx, courseID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		return course.OrganizationID, nil
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	if _, err := s.authz.RequireOrgRole(ctx, orgID,
+		gen.OrganizationRoleOwner, gen.OrganizationRoleAdmin, gen.OrganizationRoleTeacher,
+	); err != nil {
+		return nil, err
+	}
+
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = 50
+	}
+
+	type analyticsResult struct {
+		rows  []gen.ListCourseAttemptsSummaryRow
+		total int64
+	}
+	ar, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (analyticsResult, error) {
+		rows, err := q.ListCourseAttemptsSummary(ctx, gen.ListCourseAttemptsSummaryParams{
+			CourseID: courseID,
+			Limit:    limit,
+			Offset:   req.GetOffset(),
+		})
+		if err != nil {
+			return analyticsResult{}, err
+		}
+		total, err := q.CountCourseAttemptStudents(ctx, courseID)
+		if err != nil {
+			return analyticsResult{}, err
+		}
+		return analyticsResult{rows, total}, nil
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	students := make([]*richterv1.CourseStudentSummary, 0, len(ar.rows))
+	for _, r := range ar.rows {
+		eng := computeEngagementScore(
+			r.AvgVideoWatchFraction,
+			r.ResponseRate,
+			r.AvgScore,
+		)
+		var lastActive *timestamppb.Timestamp
+		if t, ok := r.LastActive.(time.Time); ok && !t.IsZero() {
+			lastActive = timestamppb.New(t)
+		}
+		students = append(students, &richterv1.CourseStudentSummary{
+			UserId:          r.UserID.String(),
+			DisplayName:     buildDisplayName(r.FirstName, r.MiddleName, r.LastName),
+			Email:           r.Email,
+			LessonsCompleted: r.LessonsCompleted,
+			LessonsTotal:    r.LessonsTotal,
+			AvgScore:        r.AvgScore,
+			EngagementScore: eng,
+			LastActive:      lastActive,
+		})
+	}
+
+	return &richterv1.ListCourseAttemptsSummaryResponse{
+		Students: students,
+		Total:    ar.total,
+	}, nil
+}
+
+// ── ListMyCourseProgress ──────────────────────────────────────────────────────
+
+func (s *InteractionsSvc) ListMyCourseProgress(
+	ctx context.Context,
+	req *richterv1.ListMyCourseProgressRequest,
+) (*richterv1.ListMyCourseProgressResponse, error) {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	userID, err := svc.ParseUUID(claims.Sub)
+	if err != nil {
+		return nil, err
+	}
+
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = 50
+	}
+
+	rows, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListMyCourseProgressRow, error) {
+		return q.ListMyCourseProgress(ctx, gen.ListMyCourseProgressParams{
+			UserID: userID,
+			Limit:  limit,
+			Offset: req.GetOffset(),
+		})
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	courses := make([]*richterv1.MyCourseProgress, 0, len(rows))
+	for _, r := range rows {
+		courses = append(courses, &richterv1.MyCourseProgress{
+			CourseId:    r.CourseID.String(),
+			Title:       r.Title,
+			LessonsDone: r.LessonsDone,
+			LessonsTotal: r.LessonsTotal,
+			AvgScore:    r.AvgScore,
+		})
+	}
+
+	return &richterv1.ListMyCourseProgressResponse{Courses: courses}, nil
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// computeEngagementScore returns a composite 0–100 engagement score.
+// Formula: round(100 * (0.4*watch + 0.3*responseRate + 0.3*scoreFrac))
+// Each input is clamped to [0, 1]; divide-by-zero is guarded by callers passing 0.
+func computeEngagementScore(watch, responseRate, scoreFrac float64) float64 {
+	clamp := func(v float64) float64 {
+		if v < 0 {
+			return 0
+		}
+		if v > 1 {
+			return 1
+		}
+		return v
+	}
+	raw := 0.4*clamp(watch) + 0.3*clamp(responseRate) + 0.3*clamp(scoreFrac)
+	return math.Round(100 * raw)
 }
 
 func buildDisplayName(first string, middle pgtype.Text, last string) string {
@@ -151,3 +316,5 @@ func buildDisplayName(first string, middle pgtype.Text, last string) string {
 	parts = append(parts, last)
 	return strings.Join(parts, " ")
 }
+
+

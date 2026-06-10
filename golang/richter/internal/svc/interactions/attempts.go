@@ -235,17 +235,36 @@ func (s *InteractionsSvc) SubmitAttempt(
 		}
 	}
 
+	// Build a per-interaction metrics map keyed by interaction ID string
+	// so we can persist time_to_answer_ms and replay_count per response.
+	type inputMetrics struct {
+		timeToAnswerMs int32
+		replayCount    int32
+	}
+	metricsMap := make(map[string]inputMetrics, len(req.GetResponses()))
+	for _, respInput := range req.GetResponses() {
+		metricsMap[respInput.GetInteractionId()] = inputMetrics{
+			timeToAnswerMs: respInput.GetTimeToAnswerMs(),
+			replayCount:    respInput.GetReplayCount(),
+		}
+	}
+
 	// Upsert attempt + responses in a transaction
 	attempt, txErr := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (struct {
 		attempt   gen.LessonAttempt
 		responses []gen.ListAttemptResponsesRow
 	}, error) {
+		watchFrac := pgtype.Float4{}
+		if f := req.GetVideoWatchFraction(); f >= 0 {
+			watchFrac = pgtype.Float4{Float32: float32(f), Valid: true}
+		}
 		a, err := q.UpsertLessonAttempt(ctx, gen.UpsertLessonAttemptParams{
-			LessonID:   lessonID,
-			UserID:     userID,
-			TotalScore: totalScore,
-			MaxScore:   totalMaxScore,
-			Status:     "submitted",
+			LessonID:           lessonID,
+			UserID:             userID,
+			TotalScore:         totalScore,
+			MaxScore:           totalMaxScore,
+			Status:             "submitted",
+			VideoWatchFraction: watchFrac,
 		})
 		if err != nil {
 			return struct {
@@ -255,13 +274,20 @@ func (s *InteractionsSvc) SubmitAttempt(
 		}
 
 		for _, g := range graded {
+			m := metricsMap[g.interactionID.String()]
+			ttaMs := pgtype.Int4{}
+			if m.timeToAnswerMs > 0 {
+				ttaMs = pgtype.Int4{Int32: m.timeToAnswerMs, Valid: true}
+			}
 			if err := q.UpsertAttemptResponse(ctx, gen.UpsertAttemptResponseParams{
-				AttemptID:     a.ID,
-				InteractionID: g.interactionID,
-				Response:      g.responseJSON,
-				Score:         g.score,
-				MaxScore:      g.maxScore,
-				Feedback:      g.feedback,
+				AttemptID:      a.ID,
+				InteractionID:  g.interactionID,
+				Response:       g.responseJSON,
+				Score:          g.score,
+				MaxScore:       g.maxScore,
+				Feedback:       g.feedback,
+				TimeToAnswerMs: ttaMs,
+				ReplayCount:    m.replayCount,
 			}); err != nil {
 				return struct {
 					attempt   gen.LessonAttempt

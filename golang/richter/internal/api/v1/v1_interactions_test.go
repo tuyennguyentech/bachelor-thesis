@@ -1656,3 +1656,267 @@ func TestRegenerateInteraction(t *testing.T) {
 		}(), connect.CodeInvalidArgument)
 	})
 }
+
+// ── TestMetricsAndAnalytics ───────────────────────────────────────────────────
+
+// TestMetricsAndAnalytics verifies the full metrics pipeline:
+//  1. Submit an attempt WITH metrics (time_to_answer_ms, replay_count, video_watch_fraction).
+//  2. Verify the metrics come back in ListAttempts (avg_time_to_answer_ms, watch_fraction,
+//     engagement_score in a sane range).
+//  3. ListCourseAttemptsSummary returns the student with sane aggregate fields.
+//  4. ListMyCourseProgress returns the course for that student.
+func TestMetricsAndAnalytics(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	// ── setup: org + owner + teacher + student + course + module + lesson ──
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	ownerID := ownerRes.User.Id
+
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerID, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	// Add owner as org owner member so teacher-role RPCs work
+	_, err = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgID, UserId: ownerID,
+		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER,
+		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("add owner member: %v", err)
+	}
+
+	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
+	_, err = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+		OrganizationId: orgID, UserId: studentID,
+		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("add student: %v", err)
+	}
+
+	courseRes, err := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerID, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	courseID := courseRes.Course.Id
+
+	moduleRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create module: %v", err)
+	}
+
+	lessonRes, err := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create lesson: %v", err)
+	}
+	lessonID := lessonRes.Lesson.Id
+
+	// Insert 2 MCQ interactions
+	ints := insertTestInteractions(t, lessonID, 2)
+	correct := correctAnswers(ints)
+
+	studentToken := getUserToken(t, url, studentEmail, studentPassword)
+	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
+
+	// ── 1. Submit attempt with metrics ────────────────────────────────────────
+	t.Run("SubmitAttempt/WithMetrics", func(t *testing.T) {
+		resps := []*richterv1.AttemptResponseInput{
+			{
+				InteractionId:  ints[0].ID.String(),
+				TimeToAnswerMs: 3000,
+				ReplayCount:    1,
+				Response: &richterv1.AttemptResponseInput_McqSelected{
+					McqSelected: correct[0],
+				},
+			},
+			{
+				InteractionId:  ints[1].ID.String(),
+				TimeToAnswerMs: 5000,
+				ReplayCount:    0,
+				Response: &richterv1.AttemptResponseInput_McqSelected{
+					McqSelected: correct[1],
+				},
+			},
+		}
+		res, err := studentIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId:           lessonID,
+			Responses:          resps,
+			VideoWatchFraction: 0.85,
+		})
+		if err != nil {
+			t.Fatalf("SubmitAttempt: %v", err)
+		}
+		if res.Attempt == nil {
+			t.Fatal("expected attempt in response")
+		}
+		if res.Attempt.TotalScore != float32(len(ints)) {
+			t.Errorf("total_score: want %d, got %v", len(ints), res.Attempt.TotalScore)
+		}
+	})
+
+	// ── 2. ListAttempts returns metrics ───────────────────────────────────────
+	t.Run("ListAttempts/HasMetrics", func(t *testing.T) {
+		ownerPassword := testPassword()
+		ownerLoginRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+			Email: testEmail(), Password: ownerPassword,
+			FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+			Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+		})
+		if err != nil {
+			t.Fatalf("create second owner user for token: %v", err)
+		}
+		_, _ = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: ownerLoginRes.User.Id,
+			Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		})
+		ownerToken := getUserToken(t, url, ownerLoginRes.User.Email, ownerPassword)
+		teacherIA2 := richterv1connect.NewInteractionServiceClient(httpClientWithToken(ownerToken), url)
+
+		listRes, err := teacherIA2.ListAttempts(ctx, &richterv1.ListAttemptsRequest{
+			LessonId: lessonID, Limit: 10, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListAttempts: %v", err)
+		}
+		if listRes.Total < 1 {
+			t.Fatalf("expected at least 1 attempt, got %d", listRes.Total)
+		}
+		var found *richterv1.StudentAttemptSummary
+		for _, s := range listRes.Attempts {
+			if s.UserId == studentID {
+				found = s
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("student %s not found in ListAttempts", studentID)
+		}
+		// avg_time_to_answer_ms should be approximately (3000+5000)/2 = 4000
+		if found.AvgTimeToAnswerMs < 1 {
+			t.Errorf("avg_time_to_answer_ms should be > 0, got %v", found.AvgTimeToAnswerMs)
+		}
+		// video_watch_fraction should be approximately 0.85
+		if found.VideoWatchFraction < 0.5 || found.VideoWatchFraction > 1.0 {
+			t.Errorf("video_watch_fraction out of expected range, got %v", found.VideoWatchFraction)
+		}
+		// engagement_score should be in [0, 100]
+		if found.EngagementScore < 0 || found.EngagementScore > 100 {
+			t.Errorf("engagement_score out of range [0,100], got %v", found.EngagementScore)
+		}
+		// A student who answered all correctly + watched most of video should have high engagement
+		if found.EngagementScore < 50 {
+			t.Errorf("expected engagement_score >= 50 for full-correct + 0.85 watch, got %v", found.EngagementScore)
+		}
+	})
+
+	// ── 3. ListCourseAttemptsSummary ──────────────────────────────────────────
+	t.Run("ListCourseAttemptsSummary/TeacherSeesStudent", func(t *testing.T) {
+		ownerToken := getUserToken(t, url, ownerRes.User.Email, testPassword())
+		teacherIA3 := richterv1connect.NewInteractionServiceClient(httpClientWithToken(ownerToken), url)
+
+		res, err := teacherIA3.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 50, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary: %v", err)
+		}
+		if res.Total < 1 {
+			t.Fatalf("expected at least 1 student, got %d", res.Total)
+		}
+		var found *richterv1.CourseStudentSummary
+		for _, s := range res.Students {
+			if s.UserId == studentID {
+				found = s
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("student %s not found in ListCourseAttemptsSummary", studentID)
+		}
+		if found.LessonsCompleted < 1 {
+			t.Errorf("lessons_completed should be >= 1, got %d", found.LessonsCompleted)
+		}
+		if found.LessonsTotal < 1 {
+			t.Errorf("lessons_total should be >= 1, got %d", found.LessonsTotal)
+		}
+		if found.AvgScore < 0 || found.AvgScore > 1 {
+			t.Errorf("avg_score out of [0,1], got %v", found.AvgScore)
+		}
+		if found.EngagementScore < 0 || found.EngagementScore > 100 {
+			t.Errorf("engagement_score out of [0,100], got %v", found.EngagementScore)
+		}
+	})
+
+	// Student cannot call ListCourseAttemptsSummary.
+	t.Run("ListCourseAttemptsSummary/StudentForbidden", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, err := studentIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+				CourseId: courseID, Limit: 10, Offset: 0,
+			})
+			return err
+		}(), connect.CodePermissionDenied)
+	})
+
+	// ── 4. ListMyCourseProgress ───────────────────────────────────────────────
+	t.Run("ListMyCourseProgress/StudentSeesCourse", func(t *testing.T) {
+		res, err := studentIA.ListMyCourseProgress(ctx, &richterv1.ListMyCourseProgressRequest{
+			Limit: 50, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListMyCourseProgress: %v", err)
+		}
+		if len(res.Courses) == 0 {
+			t.Fatal("expected at least 1 course in progress list")
+		}
+		var found *richterv1.MyCourseProgress
+		for _, cp := range res.Courses {
+			if cp.CourseId == courseID {
+				found = cp
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("course %s not found in ListMyCourseProgress", courseID)
+		}
+		if found.LessonsDone < 1 {
+			t.Errorf("lessons_done should be >= 1, got %d", found.LessonsDone)
+		}
+		if found.LessonsTotal < 1 {
+			t.Errorf("lessons_total should be >= 1, got %d", found.LessonsTotal)
+		}
+		if found.AvgScore < 0 || found.AvgScore > 1 {
+			t.Errorf("avg_score out of [0,1], got %v", found.AvgScore)
+		}
+	})
+
+	// Unauthenticated cannot call ListMyCourseProgress.
+	t.Run("ListMyCourseProgress/AnonForbidden", func(t *testing.T) {
+		anonIA := richterv1connect.NewInteractionServiceClient(http.DefaultClient, url)
+		assertCode(t, func() error {
+			_, err := anonIA.ListMyCourseProgress(ctx, &richterv1.ListMyCourseProgressRequest{
+				Limit: 10, Offset: 0,
+			})
+			return err
+		}(), connect.CodeUnauthenticated)
+	})
+}
