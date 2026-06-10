@@ -7,6 +7,7 @@ import { CourseService, Course } from "buf/gen/richter/v1/courses_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -15,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronRightIcon, GraduationCapIcon } from "lucide-react";
+import { ChevronRightIcon, GraduationCapIcon, LockIcon } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateCourseDialog } from "@/app/admin/organizations/[slug]/courses/create-course-dialog";
@@ -117,24 +118,41 @@ export default async function DashboardCoursesPage({
                 </TableCell>
               </TableRow>
             ) : (
-              courses.map((course) => (
-                <TableRow key={course.id}>
-                  <TableCell className="font-medium">{course.title}</TableCell>
-                  <TableCell>{courseStatusBadge(course.status)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {course.createdAt
-                      ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                      : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
-                        <ChevronRightIcon className="size-4" />
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
+              courses.map((course) => {
+                const locked = !course.canAccess && !canManage;
+                return (
+                  <TableRow key={course.id} className={locked ? "opacity-60" : undefined}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        {locked && <LockIcon className="size-3.5 text-muted-foreground shrink-0" />}
+                        <span>{course.title}</span>
+                        {locked && (
+                          <Badge variant="secondary" className="text-xs">Chưa tham gia</Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>{courseStatusBadge(course.status)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {course.createdAt
+                        ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
+                        : "—"}
+                    </TableCell>
+                    <TableCell>
+                      {locked ? (
+                        <Button variant="ghost" size="sm" disabled className="opacity-40">
+                          <ChevronRightIcon className="size-4" />
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
+                            <ChevronRightIcon className="size-4" />
+                          </Link>
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

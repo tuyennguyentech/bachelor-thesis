@@ -8,7 +8,7 @@ import { CourseService, CourseModuleService, LessonService } from "buf/gen/richt
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
-import { ChevronLeftIcon, BookOpenIcon } from "lucide-react";
+import { ChevronLeftIcon, BookOpenIcon, UsersIcon, BarChart2Icon } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { EditCourseForm } from "@/app/admin/organizations/[slug]/courses/[courseId]/edit-course-form";
 import { CourseStatusSelect } from "@/app/admin/organizations/[slug]/courses/[courseId]/course-status-select";
@@ -18,6 +18,7 @@ import { ModuleActions } from "@/app/admin/organizations/[slug]/courses/[courseI
 import { AddLessonDialog } from "@/app/admin/organizations/[slug]/courses/[courseId]/modules/[moduleId]/add-lesson-dialog";
 import { LessonActions } from "@/app/admin/organizations/[slug]/courses/[courseId]/modules/[moduleId]/lesson-actions";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
+import { CourseResults } from "./course-results";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const CAN_CHANGE_STATUS = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
@@ -231,6 +232,27 @@ export default async function DashboardCourseDetailPage({
           </div>
         )}
       </div>
+
+      {/* Quick nav: members + results */}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" asChild className="gap-2">
+          <Link href={`/dashboard/organizations/${slug}/courses/${courseId}/members`}>
+            <UsersIcon className="size-4" />
+            Thành viên
+          </Link>
+        </Button>
+      </div>
+
+      {/* Kết quả học viên — chỉ manager mới thấy */}
+      {canManage && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <BarChart2Icon className="size-4 text-muted-foreground" />
+            <h2 className="font-medium">Kết quả học viên</h2>
+          </div>
+          <CourseResults courseId={course.id} token={token} />
+        </div>
+      )}
 
       {/* Danger zone */}
       {canChangeStatus && (
