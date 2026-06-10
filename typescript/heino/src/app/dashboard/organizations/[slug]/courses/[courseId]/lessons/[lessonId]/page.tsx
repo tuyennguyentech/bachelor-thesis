@@ -22,7 +22,7 @@ import {
   VideoIcon,
   PlayCircleIcon,
   SparklesIcon,
-  UsersIcon,
+  BarChart2Icon,
   EyeIcon,
   BuildingIcon,
   LogOutIcon,
@@ -305,23 +305,36 @@ export default async function LessonDetailPage({
                 <div className="flex border-b border-muted">
                   <Link
                     href="?tab=content"
-                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors ${
+                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
                       activeTab === "content"
                         ? "border-primary text-primary"
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Nội dung
+                    <VideoIcon className="size-3.5" />
+                    Bài giảng
                   </Link>
                   <Link
-                    href="?tab=progress"
-                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-2 ${
-                      activeTab === "progress"
+                    href="?tab=processing"
+                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
+                      activeTab === "processing"
                         ? "border-primary text-primary"
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Tiến độ học viên
+                    <SparklesIcon className="size-3.5" />
+                    Xử lý video
+                  </Link>
+                  <Link
+                    href="?tab=results"
+                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-2 ${
+                      activeTab === "results"
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <BarChart2Icon className="size-3.5" />
+                    Kết quả &amp; Thống kê
                     {attemptsData && attemptsData.total > 0 && (
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary font-semibold">
                         {attemptsData.total}
@@ -360,11 +373,10 @@ export default async function LessonDetailPage({
                   </div>
                 )
               ) : (
-	                // TEACHER or ADMIN VIEW:
-	                activeTab === "content" ? (
-	                  <div className="flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200">
-
-	                    {/* Top: Video Player / Preview Section */}
+                // TEACHER or ADMIN VIEW — three tabs
+                <>
+                  {/* ── Tab 1: Bài giảng (Video + Transcript) ── */}
+                  <div className={activeTab !== "content" ? "hidden" : "flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200"}>
                     <section className="w-full overflow-hidden rounded-2xl border border-border/80 bg-card/40 backdrop-blur-md shadow-xl transition-all duration-300">
                       <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3 bg-muted/15">
                         <div className="flex min-w-0 items-center gap-2">
@@ -380,8 +392,7 @@ export default async function LessonDetailPage({
                           </Button>
                         )}
                       </div>
-
-	                      {videoUrl ? (
+                      {videoUrl ? (
                         <div className="p-4 flex flex-col gap-4">
                           <VideoPlayer
                             key={`${lesson.videoStorageKey}:${videoVersion}`}
@@ -408,8 +419,13 @@ export default async function LessonDetailPage({
                         </div>
                       )}
                     </section>
+                  </div>
 
-                    {/* Bottom: AI Co-Pilot Processing Pipeline (Full-width below Video) */}
+                  {/* ── Tab 2: Xử lý video (AI pipeline) ──
+                      ALWAYS mounted (never conditionally removed) so that in-flight
+                      pipeline state (activeStep, polling timers, chunk edits) survives
+                      tab switches. Visibility is controlled by the `hidden` class only. */}
+                  <div className={activeTab !== "processing" ? "hidden" : "flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200"}>
                     <section className="rounded-2xl border border-border/80 bg-card/30 backdrop-blur-md p-5 shadow-lg transition-all duration-300">
                       <div className="mb-4 flex items-start gap-2.5">
                         <div className="rounded-lg bg-primary/10 p-2 text-primary animate-pulse">
@@ -448,18 +464,18 @@ export default async function LessonDetailPage({
                       </div>
                     </section>
                   </div>
-                ) : (
-                  /* Student progress tab content */
-                  attemptsData && (
-                    <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
+
+                  {/* ── Tab 3: Kết quả & Thống kê ── */}
+                  {activeTab === "results" && attemptsData && (
+                    <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3 animate-in fade-in duration-200">
                       <div className="flex items-center gap-2">
-                        <UsersIcon className="size-4 text-muted-foreground" />
-                        <h2 className="font-medium text-sm">Tiến độ học viên</h2>
+                        <BarChart2Icon className="size-4 text-muted-foreground" />
+                        <h2 className="font-medium text-sm">Kết quả &amp; Thống kê học viên</h2>
                       </div>
                       <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} maxAttempts={lesson.maxAttempts} />
                     </div>
-                  )
-                )
+                  )}
+                </>
               )}
             </div>
           </LessonWorkspaceShell>
