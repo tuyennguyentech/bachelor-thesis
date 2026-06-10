@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ConnectError } from "@connectrpc/connect";
+import { toUserMessage } from "@/lib/connect-error";
 import {
   AnalysisStatus,
   type ChunkInteractionConfig,
@@ -139,6 +139,7 @@ export interface UseLessonAnalysisState {
   // Task list
   lessonTasks: LessonTask[];
   activeTasks: LessonTask[];
+  connectionError: string | null;
   refreshTasks: () => Promise<void>;
   cancelTask: (taskId: string) => Promise<LessonTask | undefined>;
 
@@ -171,7 +172,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
   } = input;
 
   const router = useRouter();
-  const { tasks: lessonTasks, activeTasks, refreshTasks, startTask, cancelTask } = useLessonTasks({
+  const { tasks: lessonTasks, activeTasks, lastError: taskPollError, refreshTasks, startTask, cancelTask } = useLessonTasks({
     aiClient,
     lessonId,
     enabled: !!videoStorageKey,
@@ -391,7 +392,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
         }
       })
       .catch((err) => {
-        const msg = err instanceof ConnectError ? err.message : "Không thể bắt đầu phiên âm.";
+        const msg = toUserMessage(err, "Không thể bắt đầu phiên âm.");
         setExtractState({ phase: "error", failedAt: null, message: msg });
         toast.error(msg);
       });
@@ -416,7 +417,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
         }
       })
       .catch((err) => {
-        const msg = err instanceof ConnectError ? err.message : "Không thể bắt đầu phân đoạn.";
+        const msg = toUserMessage(err, "Không thể bắt đầu phân đoạn.");
         setChunkState({ phase: "error", failedAt: null, message: msg });
         toast.error(msg);
       });
@@ -443,7 +444,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
           }
         })
         .catch((err) => {
-          const msg = err instanceof ConnectError ? err.message : "Không thể bắt đầu tạo bài tập.";
+          const msg = toUserMessage(err, "Không thể bắt đầu tạo bài tập.");
           setGenState({ phase: "error", message: msg });
           toast.error(msg);
         });
@@ -521,6 +522,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     handleSplitChunk: chunkMutations.handleSplitChunk,
     handleMoveSegment: chunkMutations.handleMoveSegment,
     lessonTasks, activeTasks, refreshTasks, cancelTask,
+    connectionError: taskPollError ? toUserMessage(taskPollError) : null,
     globalDifficulty, setGlobalDifficulty,
     globalFocusPrompt, setGlobalFocusPrompt,
     globalKinds, setGlobalKinds,

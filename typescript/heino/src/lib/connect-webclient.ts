@@ -3,9 +3,14 @@ import { type DescService } from "@bufbuild/protobuf";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { Client, Code, ConnectError, createClient, type Interceptor } from "@connectrpc/connect";
 import { useEffect, useMemo, useRef } from "react";
+import { isTransientError } from "@/lib/connect-error";
 
 const richterBaseUrl = process.env.NEXT_PUBLIC_RICHTER_BASE_URL;
 if (!richterBaseUrl) throw new Error("NEXT_PUBLIC_RICHTER_BASE_URL must be provided");
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // ── Singleton refresh deduplication ──────────────────────────────────────────
 // Dedupes concurrent 401s from multiple simultaneous RPC calls.
@@ -42,10 +47,20 @@ export function useRichterWebClient<T extends DescService>(service: T, token?: s
       // complex; the user will see an error and can re-trigger).
       if (req.stream) return next(req);
 
-      // Unary: attempt once, then retry once after a token refresh on 401.
+      // Unary: attempt once, then retry once after a token refresh on 401,
+      // and retry once on transient errors (Unavailable, DeadlineExceeded).
       try {
         return await next(req);
       } catch (err) {
+        // Retry on transient connection errors (server down, timeout).
+        if (!req.stream && isTransientError(err)) {
+          await delay(1000);
+          try {
+            return await next(req);
+          } catch {
+            throw err; // throw original error after retry fails
+          }
+        }
         if (
           err instanceof ConnectError &&
           err.code === Code.Unauthenticated &&

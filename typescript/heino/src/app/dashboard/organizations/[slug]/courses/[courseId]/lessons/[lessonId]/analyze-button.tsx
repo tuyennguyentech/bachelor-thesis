@@ -121,6 +121,7 @@ export function AnalyzeButton({
         chunkTimings={s.chunkTimings}
         now={s.now}
         lessonTasks={s.lessonTasks}
+        connectionError={s.connectionError}
         onRefreshTasks={() => void s.refreshTasks()}
         onCancelTask={(taskId) => void s.cancelTask(taskId)}
         feedbackMode={s.feedbackMode}

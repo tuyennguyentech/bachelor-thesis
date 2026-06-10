@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ConnectError } from "@connectrpc/connect";
 import { toast } from "sonner";
+import { toUserMessage } from "@/lib/connect-error";
 import type { TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import type { AIClient } from "./use-lesson-analysis-state";
 import {
@@ -36,9 +36,7 @@ export interface UseAnalysisChunkMutationsResult {
 }
 
 function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ConnectError) return err.message;
-  if (err instanceof Error) return err.message;
-  return fallback;
+  return toUserMessage(err, fallback);
 }
 
 export function useAnalysisChunkMutations({

@@ -78,7 +78,7 @@ export function StudentLessonView({
   const [result, setResult] = useState<QuizResult | null>(previousResult);
   const [lessonInteractions, setLessonInteractions] = useState(interactions);
   const [draftGrades, setDraftGrades] = useState<Map<string, InteractionGrade>>(() => new Map());
-  const [savingResponseId, setSavingResponseId] = useState<string | null>(null);
+  const [savingResponseIds, setSavingResponseIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setLessonInteractions(interactions);
@@ -217,7 +217,11 @@ export function StudentLessonView({
 
     const response = buildAttemptResponseInput(interaction, responses.get(id));
     try {
-      setSavingResponseId(id);
+      setSavingResponseIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
       const saved = await interactionClient.saveAttemptResponse({ lessonId, response });
       if (saved.feedbackRevealed) {
         setDraftGrades((prev) => new Map(prev).set(id, {
@@ -230,13 +234,17 @@ export function StudentLessonView({
       // Best effort: final submit can still grade this response if the draft save failed.
       setError("Một câu trả lời chưa được lưu tạm thời. Hệ thống sẽ chấm lại khi nộp bài.");
     } finally {
-      setSavingResponseId((current) => (current === id ? null : current));
+      setSavingResponseIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
-  async function handleContinue(id: string) {
-    if (savingResponseId) return;
-    await saveDraftResponse(id);
+  function handleContinue(id: string) {
+    if (savingResponseIds.has(id)) return;
+    void saveDraftResponse(id);
     // Find the next pending timed interaction at the SAME timestamp (or an earlier one
     // missed somehow). Untimed (startSeconds <= 0) interactions are skipped — those are
     // auto-passed on first play and never part of a checkpoint cluster.
@@ -455,7 +463,7 @@ export function StudentLessonView({
                       setDraftGrades((prev) => new Map(prev).set(activeInteraction.id, grade));
                     }}
                   />
-                  {savingResponseId === activeInteraction.id && (
+                  {savingResponseIds.has(activeInteraction.id) && (
                     <p className="mt-3 text-xs text-muted-foreground">Đang lưu câu trả lời...</p>
                   )}
                 </div>

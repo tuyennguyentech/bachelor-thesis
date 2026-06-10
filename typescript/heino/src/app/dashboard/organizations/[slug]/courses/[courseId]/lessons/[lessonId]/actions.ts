@@ -6,14 +6,9 @@ import { AIService, type GenerateInteractionsRequest, LessonTaskKind } from "buf
 import { LessonService } from "buf/gen/richter/v1/courses_pb";
 import { createRichterClient } from "@/lib/connect-client";
 import { getSession } from "@/lib/auth";
+import { toUserMessage } from "@/lib/connect-error";
 
 export type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
-
-function toMessage(err: unknown, fallback: string): string {
-  if (err instanceof ConnectError) return err.message;
-  if (err instanceof Error) return err.message;
-  return fallback;
-}
 
 async function withLessonClient<T>(fn: (client: ReturnType<typeof createRichterClient<typeof LessonService>>) => Promise<T>): Promise<ActionResult<T>> {
   const session = await getSession();
@@ -26,7 +21,7 @@ async function withLessonClient<T>(fn: (client: ReturnType<typeof createRichterC
     if (err instanceof ConnectError && err.code === Code.Unauthenticated) {
       return { ok: false, error: "Phiên đăng nhập đã hết hạn" };
     }
-    return { ok: false, error: toMessage(err, "Không thể cập nhật bài học") };
+    return { ok: false, error: toUserMessage(err, "Không thể cập nhật bài học") };
   }
 }
 
@@ -41,7 +36,7 @@ async function withAIClient<T>(fn: (client: ReturnType<typeof createRichterClien
     if (err instanceof ConnectError && err.code === Code.Unauthenticated) {
       return { ok: false, error: "Phiên đăng nhập đã hết hạn" };
     }
-    return { ok: false, error: toMessage(err, "Không thể thao tác với máy chủ") };
+    return { ok: false, error: toUserMessage(err, "Không thể thao tác với máy chủ") };
   }
 }
 

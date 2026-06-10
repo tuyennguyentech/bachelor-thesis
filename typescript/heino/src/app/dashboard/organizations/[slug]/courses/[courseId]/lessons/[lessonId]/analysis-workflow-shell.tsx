@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, ChevronDownIcon, ChevronUpIcon, SlidersHorizontalIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, ChevronDownIcon, ChevronUpIcon, SlidersHorizontalIcon, AlertCircleIcon } from "lucide-react";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import {
   VideoProcessingStepper,
@@ -126,6 +126,7 @@ export interface AnalysisWorkflowShellProps {
 
   // Tasks
   lessonTasks: LessonTask[];
+  connectionError: string | null;
   onRefreshTasks: () => void;
   onCancelTask: (taskId: string) => void;
 
@@ -435,6 +436,18 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
           selectedKinds={props.globalKinds}
           onSelectedKindsChange={props.setGlobalKinds}
         />
+      )}
+      {props.connectionError && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <AlertCircleIcon className="size-4 shrink-0" />
+          <span className="flex-1">{props.connectionError}</span>
+          <button
+            onClick={() => void props.onRefreshTasks()}
+            className="text-xs underline hover:no-underline"
+          >
+            Thử lại
+          </button>
+        </div>
       )}
       <LessonTaskPanel
         tasks={props.lessonTasks}

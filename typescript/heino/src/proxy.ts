@@ -3,6 +3,7 @@ import {
   COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS,
   verifyAccessJwt, silentRefresh,
 } from "@/lib/refresh";
+import { isTransientError } from "@/lib/connect-error";
 
 const PROTECTED_PREFIXES = ["/admin", "/dashboard"];
 
@@ -31,22 +32,33 @@ export async function proxy(request: NextRequest) {
   // 2) No / expired access — try silent refresh.
   const refreshToken = request.cookies.get(COOKIE_REFRESH)?.value;
   if (refreshToken) {
-    const refreshed = await silentRefresh(refreshToken);
+    let refreshed: Awaited<ReturnType<typeof silentRefresh>> = null;
+    let backendDown = false;
+    try {
+      refreshed = await silentRefresh(refreshToken);
+    } catch (err: unknown) {
+      // Distinguish backend-down (ECONNREFUSED, fetch failed) from
+      // token-expired (returns null from silentRefresh). When the
+      // backend is unreachable we must NOT clear cookies and redirect
+      // to login — that looks like a session expiry to the user.
+      backendDown = isTransientError(err);
+    }
     if (refreshed) {
-      // CRITICAL: mutate request.cookies BEFORE building response headers.
-      // request.cookies.set() updates request.headers.cookie under the hood
-      // (see RequestCookies source), so passThrough() will read the rotated
-      // tokens and forward them to downstream Server Components.
       request.cookies.set(COOKIE_ACCESS, refreshed.accessToken);
       request.cookies.set(COOKIE_REFRESH, refreshed.refreshToken);
 
       const response = passThrough();
-      // Also write Set-Cookie so the browser updates its cookie jar.
       response.cookies.set(COOKIE_ACCESS, refreshed.accessToken, COOKIE_OPTS);
       response.cookies.set(COOKIE_REFRESH, refreshed.refreshToken, REFRESH_COOKIE_OPTS);
       return response;
     }
-    // fallthrough: refresh failed → clear stale cookies + redirect.
+    if (backendDown) {
+      // Backend is unreachable — let the request through so the
+      // page's error boundary can show a friendly message instead
+      // of redirecting to login (which looks like session expiry).
+      return passThrough();
+    }
+    // fallthrough: refresh returned null = token genuinely expired.
   }
 
   const loginUrl = new URL("/login", request.url);

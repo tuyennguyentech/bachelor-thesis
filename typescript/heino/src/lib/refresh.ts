@@ -6,6 +6,7 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import { JWTClaimsSchema, TokenType, type JWTClaims } from "buf/gen/richter/jwt/v1/jwt_pb";
+import { isTransientError } from "@/lib/connect-error";
 
 const richterBaseUrl = process.env.RICHTER_BASE_URL;
 if (!richterBaseUrl) throw new Error("RICHTER_BASE_URL must be provided");
@@ -60,7 +61,11 @@ export async function silentRefresh(refreshToken: string): Promise<RefreshOutcom
     const claims = await verifyAccessJwt(res.accessToken);
     if (!claims) return null;
     return { accessToken: res.accessToken, refreshToken: res.refreshToken, claims };
-  } catch {
+  } catch (err: unknown) {
+    // Re-throw connection errors so the proxy can distinguish
+    // "backend down" from "token expired" (which returns null).
+    if (isTransientError(err)) throw err;
+    // Token expired or invalid — return null.
     return null;
   }
 }

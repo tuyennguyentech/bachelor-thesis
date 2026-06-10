@@ -11,7 +11,7 @@ import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { FeedbackMode, InteractionKind, InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { uploadConfig } from "@/lib/client-config";
-import { ConnectError } from "@connectrpc/connect";
+import { toUserMessage } from "@/lib/connect-error";
 import { create } from "@bufbuild/protobuf";
 import { toast } from "sonner";
 import { type InteractionFormData, buildProtoConfig } from "./interaction-row";
@@ -207,7 +207,7 @@ export function TabExercises({
           router.refresh();
         }
       } catch (err) {
-        setAddError(err instanceof ConnectError ? err.message : "Không thể thêm câu hỏi");
+        setAddError(toUserMessage(err, "Không thể thêm câu hỏi"));
       }
     });
   }
@@ -333,7 +333,7 @@ export function TabExercises({
         }
       } catch (err) {
         if (ctrl.signal.aborted) return;
-        const msg = err instanceof ConnectError ? err.message : "Mất kết nối với máy chủ.";
+        const msg = toUserMessage(err, "Mất kết nối với máy chủ.");
         setChunkGenState(prev => ({ ...prev, [chunkId]: { phase: "error", message: msg } }));
         toast.error(`Lỗi tạo bài tập cho "${chunkSummary}"`);
       } finally {
@@ -356,7 +356,7 @@ export function TabExercises({
       router.refresh();
       toast.success("Đã xóa toàn bộ bài tập");
     } catch (err) {
-      toast.error(err instanceof ConnectError ? err.message : "Không thể xóa bài tập");
+      toast.error(toUserMessage(err, "Không thể xóa bài tập"));
     } finally {
       setDeletingScope(null);
     }
@@ -376,7 +376,7 @@ export function TabExercises({
       router.refresh();
       toast.success("Đã xóa bài tập của phân đoạn");
     } catch (err) {
-      toast.error(err instanceof ConnectError ? err.message : "Không thể xóa bài tập của phân đoạn");
+      toast.error(toUserMessage(err, "Không thể xóa bài tập của phân đoạn"));
     } finally {
       setDeletingScope(null);
     }

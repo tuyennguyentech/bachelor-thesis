@@ -31,8 +31,9 @@ type PollState = {
   tasks: LessonTask[];
   /** Wall-clock timestamp of the last successful poll. */
   lastSuccessAt: number | null;
-  /** Last error message; cleared on next success. */
-  lastError: string | null;
+  /** Last error; cleared on next success. Stored as unknown so
+   *  downstream consumers can pass it to toUserMessage(). */
+  lastError: unknown;
 };
 
 /**
@@ -89,9 +90,8 @@ function useTaskPolling({
       pendingRef.current = res.tasks;
       scheduleApply();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "polling failed";
       failuresRef.current += 1;
-      setState(prev => ({ ...prev, lastError: msg }));
+      setState(prev => ({ ...prev, lastError: err }));
     }
   }, [aiClient, enabled, lessonId, scheduleApply]);
 
