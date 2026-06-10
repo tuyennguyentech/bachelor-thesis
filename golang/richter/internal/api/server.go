@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
@@ -40,15 +39,19 @@ func NewServerSvc(i do.Injector) (s *ServerSvc, err error) {
 	p := new(http.Protocols)
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
-	s = &ServerSvc{
-		srv: &http.Server{
-			Addr:              fmt.Sprintf("%s:%d", apiCfg.Host, apiCfg.Port),
-			Handler:           v1.Mux,
-			Protocols:         p,
-			ReadHeaderTimeout: 30 * time.Second,
-			IdleTimeout:       120 * time.Second,
-		},
+	srv := &http.Server{
+		Addr:      fmt.Sprintf("%s:%d", apiCfg.Host, apiCfg.Port),
+		Handler:   v1.Mux,
+		Protocols: p,
 	}
+	// 0 = unlimited (no timeout). Production defaults come from cfg.
+	if apiCfg.ReadHeaderTimeout > 0 {
+		srv.ReadHeaderTimeout = apiCfg.ReadHeaderTimeout
+	}
+	if apiCfg.IdleTimeout > 0 {
+		srv.IdleTimeout = apiCfg.IdleTimeout
+	}
+	s = &ServerSvc{srv: srv}
 	return
 }
 
@@ -67,11 +70,15 @@ func (s *ServerSvc) Start(ctx context.Context) {
 }
 
 func (s *ServerSvc) Shutdown(ctx context.Context) error {
-	// Respect caller's deadline if any, otherwise bound shutdown at 30s so we don't hang forever.
+	// Respect caller's deadline if any, otherwise bound shutdown at the
+	// configured ShutdownTimeout so we don't hang forever. 0 = unlimited.
 	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
+		apiCfg, cfgErr := do.Invoke[*cfg.ApiCfg](internal.Injector)
+		if cfgErr == nil && apiCfg.ShutdownTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, apiCfg.ShutdownTimeout)
+			defer cancel()
+		}
 	}
 	return s.srv.Shutdown(ctx)
 }

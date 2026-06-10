@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"connectrpc.com/connect"
 	"example.com/richter/internal/db"
@@ -65,28 +64,9 @@ func (s *AISvc) requireTeacherRole(ctx context.Context, lessonID pgtype.UUID) er
 }
 
 func (s *AISvc) persistExtractError(ctx context.Context, lessonID pgtype.UUID, msg string) bool {
-	write := func(writeCtx context.Context) error {
-		return db.WithConnectionExec(s.pg, writeCtx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			_, err := q.UpsertLessonAnalysisStatus(writeCtx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: msg, Valid: true},
-			})
-			return err
-		})
-	}
-
-	if err := write(ctx); err != nil {
-		if ctx.Err() == nil {
-			s.log.ErrorContext(ctx, "ai: failed to persist transcript extraction error", "err", err)
-			return false
-		}
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if bgErr := write(bgCtx); bgErr != nil {
-			s.log.ErrorContext(bgCtx, "ai: failed to persist transcript extraction error after request cancellation", "err", bgErr)
-			return false
-		}
-	}
+	// Legacy: previously wrote to lesson_analyses table. Now that
+	// task status is derived from the tasks table, this is a no-op.
+	// Kept as a dependency wired into transcript.Service until the
+	// service interface is cleaned up.
 	return true
 }

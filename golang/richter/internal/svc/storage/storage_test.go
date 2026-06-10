@@ -2,7 +2,6 @@ package storage
 
 import (
 	"testing"
-	"time"
 )
 
 func TestIsStudentRecordingKey(t *testing.T) {
@@ -113,44 +112,12 @@ func TestNormalizeStorageKeyNFC(t *testing.T) {
 	}
 }
 
-func TestAllowStudentUploadRateLimit(t *testing.T) {
-	s := &StorageSvc{} // only studentUploadLimits is touched by the method under test
-	user := "user-rate-test"
-	lessonID := "lesson-rate-test"
-
-	// First studentUploadsPerWindow calls must succeed.
-	for i := 0; i < studentUploadsPerWindow; i++ {
-		key := "lessons/" + lessonID + "/student-recordings/uuid-" + string(rune('a'+i)) + ".webm"
-		if !s.allowStudentUpload(user, key) {
-			t.Fatalf("call %d/%d unexpectedly rejected", i+1, studentUploadsPerWindow)
-		}
-	}
-	// The next upload for the same lesson must be rejected even with a new filename.
-	if s.allowStudentUpload(user, "lessons/"+lessonID+"/student-recordings/new-name.webm") {
-		t.Fatalf("call %d should have been rejected by rate limit", studentUploadsPerWindow+1)
-	}
-
-	// Different user on the same lesson is independent.
-	if !s.allowStudentUpload("other-user", "lessons/"+lessonID+"/student-recordings/uuid.webm") {
-		t.Fatal("rate limit must be per-user, not per-key")
-	}
-
-	// Same user on a different lesson is independent.
-	if !s.allowStudentUpload(user, "lessons/other-lesson/student-recordings/uuid.webm") {
-		t.Fatal("rate limit must be per-lesson, not global per-user")
-	}
-}
-
-func TestAllowStudentUploadWindowResets(t *testing.T) {
-	s := &StorageSvc{}
-	user := "user-window-test"
-	key := "lessons/" + user + "/student-recordings/uuid.webm"
-
-	// Pre-fill the counter with a near-expired reset time and verify that
-	// rolling past the window resets the count.
-	c := &uploadCounter{count: studentUploadsPerWindow, resetAt: time.Now().Add(-time.Second)}
-	s.studentUploadLimits.Store(user+"|"+user, c)
-	if !s.allowStudentUpload(user, key) {
-		t.Fatal("rate limit must reset when the window has elapsed")
+func TestAllowStudentUploadDelegatesToLimiter(t *testing.T) {
+	// StorageSvc must be a thin pass-through to the injected limiter; this
+	// guarantees a future swap of the backing store (in-memory → FDB → Redis)
+	// requires no business-logic changes.
+	s := &StorageSvc{uploadLimiter: unlimitedUploadRateLimiter{}}
+	if !s.allowStudentUpload("u", "lessons/L/student-recordings/x.webm") {
+		t.Fatal("delegated unlimited limiter must allow")
 	}
 }

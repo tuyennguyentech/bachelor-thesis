@@ -15,11 +15,12 @@ import (
 
 type chunkingService struct {
 	geminiCfg *cfg.GeminiCfg
+	aiCfg     *cfg.AiCfg
 	log       *log.LogSvc
 }
 
-func newChunkingService(geminiCfg *cfg.GeminiCfg, logSvc *log.LogSvc) *chunkingService {
-	return &chunkingService{geminiCfg: geminiCfg, log: logSvc}
+func newChunkingService(geminiCfg *cfg.GeminiCfg, aiCfg *cfg.AiCfg, logSvc *log.LogSvc) *chunkingService {
+	return &chunkingService{geminiCfg: geminiCfg, aiCfg: aiCfg, log: logSvc}
 }
 
 // transcriptChunkRaw is the boundary-only Gemini response for a chunk.
@@ -30,9 +31,18 @@ type transcriptChunkRaw struct {
 	EndSeconds   float32 `json:"end_seconds"`
 }
 
+// aiCtx returns a child of ctx with the given timeout, or returns ctx
+// unchanged when d is 0 (unlimited). Clamps negative values to 0.
+func (s *chunkingService) aiCtx(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
+}
+
 // runGeminiChunk calls Gemini with the transcript text (no video) to determine chunk boundaries.
 func (s *chunkingService) runGeminiChunk(ctx context.Context, transcript string, segmentsJSON []byte) ([]transcriptChunkRaw, error) {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancel := s.aiCtx(ctx, s.aiCfg.ChunkingTimeout)
 	defer cancel()
 
 	client, err := newGeminiClient(ctx, s.geminiCfg)

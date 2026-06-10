@@ -12,7 +12,6 @@ import (
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ChunkProposal mirrors the JSON shape Gemini returns for one chunk.
@@ -37,35 +36,6 @@ func (s *Service) RunChunk(
 	lessonID pgtype.UUID,
 	progress ProgressFn,
 ) error {
-	if err := db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
-			LessonID: lessonID, Status: gen.LessonAnalysisStatusProcessing, ErrorMsg: pgtype.Text{},
-		})
-		return err
-	}); err != nil {
-		return err
-	}
-
-	// If we exit without setting a final status (SIGTERM/panic during
-	// the Gemini call), reset to ERROR so the user can retry.
-	chunkStatusFinalized := false
-	defer func() {
-		if chunkStatusFinalized {
-			return
-		}
-		bgCtx, bgCancel := s.AiCtx(context.Background(), s.AiCfg.BackgroundTaskTimeout)
-		defer bgCancel()
-		if _, err := db.WithConnection(s.Postgres, bgCtx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-			return q.UpsertLessonAnalysisStatus(bgCtx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: "Quá trình bị gián đoạn. Vui lòng thử lại.", Valid: true},
-			})
-		}); err != nil {
-			s.Log.ErrorContext(bgCtx, "ai: chunk cleanup defer: failed to reset stuck PROCESSING status", "err", err)
-		}
-	}()
-
 	lessonIDStr := lessonID.String()
 	transcriptText := segment.LoadTranscript(s.KV, lessonIDStr)
 	if transcriptText == "" {
@@ -84,14 +54,6 @@ func (s *Service) RunChunk(
 		chunkErr = fmt.Errorf("Gemini returned 0 chunks — transcript may be too short or model response was empty")
 	}
 	if chunkErr != nil {
-		_ = db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: chunkErr.Error(), Valid: true},
-			})
-		})
-		chunkStatusFinalized = true
 		return chunkErr
 	}
 
@@ -148,27 +110,8 @@ func (s *Service) RunChunk(
 	})
 	if saveErr != nil {
 		s.Log.ErrorContext(ctx, "ai: failed to save chunks", svc.LogAttrs("ChunkTranscriptStream", saveErr)...)
-		_ = db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: "Lỗi khi lưu đoạn nội dung: " + saveErr.Error(), Valid: true},
-			})
-		})
-		chunkStatusFinalized = true
 		return fmt.Errorf("Lỗi khi lưu đoạn nội dung: %w", saveErr)
 	}
-
-	if err := db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-			LessonID: lessonID,
-			Status:   gen.LessonAnalysisStatusChunksReady,
-			ErrorMsg: pgtype.Text{},
-		})
-	}); err != nil {
-		s.Log.ErrorContext(ctx, "ai: failed to update status to chunks_ready", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
-	}
-	chunkStatusFinalized = true
 
 	// Clear FDB transcripts for the OLD chunks we just deleted.
 	for _, id := range staleChunkIDs {

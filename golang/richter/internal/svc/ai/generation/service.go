@@ -184,29 +184,8 @@ func (s *Service) Run(
 		}
 		if !hasExistingInteractions {
 			msg := "Không tạo được bài tập nào từ các phân đoạn hiện tại. Hãy kiểm tra transcript, cấu hình loại câu hỏi hoặc thử lại."
-			if req.GetChunkId() == "" {
-				_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-					return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-						LessonID: lessonID,
-						Status:   gen.LessonAnalysisStatusError,
-						ErrorMsg: pgtype.Text{String: msg, Valid: true},
-					})
-				})
-			}
 			_ = send(richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR, msg, 0, total)
 			return nil
-		}
-	}
-
-	if req.GetChunkId() == "" {
-		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusDone,
-				ErrorMsg: pgtype.Text{},
-			})
-		}); err != nil {
-			s.log.ErrorContext(ctx, "ai: failed to mark analysis done", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
 		}
 	}
 

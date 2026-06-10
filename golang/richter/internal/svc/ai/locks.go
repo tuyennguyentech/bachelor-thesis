@@ -41,6 +41,25 @@ func (r *analysisLockRegistry) tryAcquire(key string) (*analysisLockEntry, bool)
 	return entry, true
 }
 
+// TryAcquire / Release are the exported surface used by sub-packages
+// (e.g. transcript.Service). The lowercase variants stay for in-package
+// callers that want the concrete *analysisLockEntry return.
+func (r *analysisLockRegistry) TryAcquire(key string) (any, bool) {
+	entry, ok := r.tryAcquire(key)
+	if !ok {
+		return nil, false
+	}
+	return entry, true
+}
+
+func (r *analysisLockRegistry) Release(key string, lock any) {
+	entry, ok := lock.(*analysisLockEntry)
+	if !ok {
+		return
+	}
+	r.release(key, entry)
+}
+
 func (r *analysisLockRegistry) release(key string, entry *analysisLockEntry) {
 	entry.mu.Unlock()
 	r.releaseRef(key, entry)

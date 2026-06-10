@@ -31,8 +31,13 @@ var (
 			do.Lazy(NewS3CfgSvc),
 			do.Lazy(NewGeminiCfgSvc),
 			do.Lazy(NewFdbCfgSvc),
-			do.Lazy(NewWhisperCfgSvc),
+		do.Lazy(NewWhisperCfgSvc),
 			do.Lazy(NewTTSCfgSvc),
+			do.Lazy(NewLessonTaskCfgSvc),
+			do.Lazy(NewStorageCfgSvc),
+			do.Lazy(NewAiCfgSvc),
+			do.Lazy(NewInteractionsCfgSvc),
+			do.Lazy(NewLessonsCfgSvc),
 		),
 	)
 	Injector = internal.Injector.Scope("cfg")
@@ -53,30 +58,40 @@ func init() {
 }
 
 type RichterCfg struct {
-	LogCfg     `mapstructure:"log"`
-	DbCfg      `mapstructure:"db"`
-	ApiCfg     `mapstructure:"api"`
-	JwtCfg     `mapstructure:"jwt"`
-	AuthCfg    `mapstructure:"auth"`
-	AdminCfg   `mapstructure:"admin"`
-	S3Cfg      `mapstructure:"s3"`
-	GeminiCfg  `mapstructure:"gemini"`
-	FdbCfg     `mapstructure:"fdb"`
-	WhisperCfg `mapstructure:"whisper"`
-	TTSCfg     `mapstructure:"tts"`
+	LogCfg            `mapstructure:"log"`
+	DbCfg             `mapstructure:"db"`
+	ApiCfg            `mapstructure:"api"`
+	JwtCfg            `mapstructure:"jwt"`
+	AuthCfg           `mapstructure:"auth"`
+	AdminCfg          `mapstructure:"admin"`
+	S3Cfg             `mapstructure:"s3"`
+	GeminiCfg         `mapstructure:"gemini"`
+	FdbCfg            `mapstructure:"fdb"`
+	WhisperCfg        `mapstructure:"whisper"`
+	TTSCfg            `mapstructure:"tts"`
+	LessonTaskCfg     `mapstructure:"lesson_task"`
+	StorageCfg        `mapstructure:"storage"`
+	AiCfg             `mapstructure:"ai"`
+	InteractionsCfg   `mapstructure:"interactions"`
+	LessonsCfg        `mapstructure:"lessons"`
 }
 
 func NewConfig() RichterCfg {
 	return RichterCfg{
-		LogCfg:     NewLogCfg(),
-		ApiCfg:     NewApiCfg(),
-		JwtCfg:     NewJwtCfg(),
-		AuthCfg:    NewAuthCfg(),
-		S3Cfg:      NewS3Cfg(),
-		GeminiCfg:  NewGeminiCfg(),
-		FdbCfg:     NewFdbCfg(),
-		WhisperCfg: NewWhisperCfg(),
-		TTSCfg:     NewTTSCfg(),
+		LogCfg:          NewLogCfg(),
+		ApiCfg:          NewApiCfg(),
+		JwtCfg:          NewJwtCfg(),
+		AuthCfg:         NewAuthCfg(),
+		S3Cfg:           NewS3Cfg(),
+		GeminiCfg:       NewGeminiCfg(),
+		FdbCfg:          NewFdbCfg(),
+		WhisperCfg:      NewWhisperCfg(),
+		TTSCfg:          NewTTSCfg(),
+		LessonTaskCfg:   NewLessonTaskCfg(),
+		StorageCfg:      NewStorageCfg(),
+		AiCfg:           NewAiCfg(),
+		InteractionsCfg: NewInteractionsCfg(),
+		LessonsCfg:      NewLessonsCfg(),
 	}
 }
 

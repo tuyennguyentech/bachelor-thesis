@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -81,7 +80,7 @@ func (s *AISvc) synthesiseAndEmbed(
 	if lessonID == "" {
 		return nil, fmt.Errorf("TTS: lessonID required for lesson-scoped audio key")
 	}
-	ttsCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ttsCtx, cancel := s.aiCtx(ctx, s.aiCfg.TTSRequestTimeout)
 	defer cancel()
 
 	wav, err := s.ttsClient.Synthesise(ttsCtx, text, language)

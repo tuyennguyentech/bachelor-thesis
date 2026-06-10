@@ -26,16 +26,27 @@ type audioEmbedFunc func(
 
 type interactionGenerationService struct {
 	geminiCfg  *cfg.GeminiCfg
+	aiCfg      *cfg.AiCfg
 	log        *log.LogSvc
 	embedAudio audioEmbedFunc
 }
 
 func newInteractionGenerationService(
 	geminiCfg *cfg.GeminiCfg,
+	aiCfg *cfg.AiCfg,
 	logSvc *log.LogSvc,
 	embedAudio audioEmbedFunc,
 ) *interactionGenerationService {
-	return &interactionGenerationService{geminiCfg: geminiCfg, log: logSvc, embedAudio: embedAudio}
+	return &interactionGenerationService{geminiCfg: geminiCfg, aiCfg: aiCfg, log: logSvc, embedAudio: embedAudio}
+}
+
+// aiCtx returns a child of ctx with the given timeout, or returns ctx
+// unchanged when d is 0 (unlimited). Clamps negative values to 0.
+func (s *interactionGenerationService) aiCtx(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 // runGeminiGenerateItems calls Gemini using the provided GeminiGenerator interface
@@ -184,7 +195,7 @@ func (s *interactionGenerationService) runGeminiGenerateItemsAIChoose(
 
 	prompt := buildAIChoosePrompt(chunk, transcript, totalCount, specs, difficulty, focusPrompt, lessonLanguage)
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := s.aiCtx(ctx, s.aiCfg.InteractionGenTimeout)
 	defer cancel()
 
 	model := client.GenerativeModel(s.geminiCfg.Model)

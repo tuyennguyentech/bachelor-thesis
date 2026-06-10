@@ -122,7 +122,7 @@ func (s *AISvc) doRegenerateInteraction(
 	chunkForRegen := chunk
 	chunkForRegen.QuestionCountConfig = 1
 	kindStr := svcinteractions.KindToDBString(newKind)
-	items, err := s.interactionGen.runGeminiGenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language, "", customPrompt)
+	items, err := s.generation.GenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language, "", customPrompt)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI generation failed: %w", err))
 	}
@@ -130,16 +130,7 @@ func (s *AISvc) doRegenerateInteraction(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI did not produce any output"))
 	}
 
-	item := items[0]
-	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
-		return q.ReplaceInteraction(ctx, gen.ReplaceInteractionParams{
-			ID:          interactionID,
-			Kind:        item.kindStr,
-			Prompt:      item.prompt,
-			Explanation: item.explanation,
-			Config:      item.configJSON,
-		})
-	})
+	updated, err := s.generation.ReplaceInteractionWithGeneratedItem(ctx, interactionID, items[0])
 	if err != nil {
 		return nil, svc.ConnectDBError(err)
 	}

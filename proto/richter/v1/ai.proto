@@ -94,22 +94,6 @@ enum AnalysisProgressStep {
   ANALYSIS_PROGRESS_STEP_ERROR = 6;
 }
 
-message AnalysisProgressEvent {
-  AnalysisProgressStep step = 1;
-  string message = 2;
-}
-
-// ── Step 2: Extract transcript ────────────────────────────────────────────────
-
-message ExtractTranscriptRequest {
-  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
-}
-
-message ExtractTranscriptResponse {
-  LessonAnalysis analysis = 1;
-  repeated TranscriptChunk chunks = 2;
-}
-
 // ── Step 3: Edit transcript segments ─────────────────────────────────────────
 
 message UpdateTranscriptSegmentRequest {
@@ -124,9 +108,8 @@ message UpdateTranscriptSegmentResponse {
 
 // ── Step 4: Chunk transcript ──────────────────────────────────────────────────
 
-message ChunkTranscriptRequest {
-  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
-}
+// (Removed: ChunkTranscriptRequest. The chunk step is now triggered via
+// StartLessonTask with kind = LESSON_TASK_KIND_CHUNK_TRANSCRIPT.)
 
 // ── Step 5: Edit chunks ───────────────────────────────────────────────────────
 
@@ -202,13 +185,6 @@ enum GenerateInteractionsStep {
   GENERATE_INTERACTIONS_STEP_ERROR = 3;
 }
 
-message GenerateInteractionsProgressEvent {
-  GenerateInteractionsStep step = 1;
-  string message = 2;
-  int32 chunk_index = 3;
-  int32 total_chunks = 4;
-}
-
 message GenerateInteractionsRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
   // If non-empty, generate only for this chunk.
@@ -227,6 +203,93 @@ message GenerateInteractionsRequest {
   string difficulty = 8;
   // Focus prompt focus to guide question content generation.
   string focus_prompt = 9;
+}
+
+// ── Durable lesson processing tasks ──────────────────────────────────────────
+
+enum LessonTaskKind {
+  LESSON_TASK_KIND_UNSPECIFIED = 0;
+  LESSON_TASK_KIND_EXTRACT_TRANSCRIPT = 1;
+  LESSON_TASK_KIND_CHUNK_TRANSCRIPT = 2;
+  LESSON_TASK_KIND_GENERATE_INTERACTIONS = 3;
+}
+
+enum LessonTaskStatus {
+  LESSON_TASK_STATUS_UNSPECIFIED = 0;
+  LESSON_TASK_STATUS_QUEUED = 1;
+  LESSON_TASK_STATUS_RUNNING = 2;
+  LESSON_TASK_STATUS_SUCCEEDED = 3;
+  LESSON_TASK_STATUS_FAILED = 4;
+  LESSON_TASK_STATUS_CANCELED = 5;
+}
+
+message LessonTask {
+  string id = 1;
+  string lesson_id = 2;
+  string chunk_id = 3;
+  LessonTaskKind kind = 4;
+  LessonTaskStatus status = 5;
+  string progress_step = 6;
+  int32 progress_current = 7;
+  int32 progress_total = 8;
+  string message = 9;
+  string error_msg = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+  google.protobuf.Timestamp started_at = 13;
+  google.protobuf.Timestamp finished_at = 14;
+  // Last heartbeat timestamp emitted by the worker. Used by the FE to
+  // detect tasks whose worker has crashed without updating progress.
+  // Empty if heartbeat emission is disabled or the task has not yet
+  // emitted a heartbeat.
+  google.protobuf.Timestamp last_heartbeat = 15;
+}
+
+message StartLessonTaskRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  LessonTaskKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  GenerateInteractionsRequest generate_interactions = 3;
+}
+
+message StartLessonTaskResponse {
+  LessonTask task = 1;
+}
+
+message GetLessonTaskRequest {
+  string task_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetLessonTaskResponse {
+  LessonTask task = 1;
+}
+
+message ListLessonTasksRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  bool active_only = 2;
+  int32 limit = 3 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  int32 offset = 4 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListLessonTasksResponse {
+  repeated LessonTask tasks = 1;
+}
+
+message ListAllTasksRequest {
+  bool active_only = 1;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListAllTasksResponse {
+  repeated LessonTask tasks = 1;
+}
+
+message CancelLessonTaskRequest {
+  string task_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message CancelLessonTaskResponse {
+  LessonTask task = 1;
 }
 
 // ── Chunk / lesson config update ─────────────────────────────────────────────
@@ -268,17 +331,49 @@ message GetWatchProgressResponse {
   float position_seconds = 1;
 }
 
+// ── Task input/output messages ──────────────────────────────────────────────
+// Each task type defines its own Input/Output proto. The taskqueue
+// stores these as serialized bytes in tasks.input_payload and
+// tasks.output_payload (Postgres BYTEA). Executors marshal/unmarshal
+// using proto.Marshal/proto.Unmarshal.
+
+message TranscribeTaskInput {
+  string lesson_id = 1;
+}
+
+message TranscribeTaskOutput {
+  int64 completed_at = 1;  // unix seconds
+}
+
+message ChunkTaskInput {
+  string lesson_id = 1;
+}
+
+message ChunkTaskOutput {
+  int64 completed_at = 1;
+}
+
+message QuizGenTaskInput {
+  string lesson_id = 1;
+  string chunk_id = 2;  // empty = all chunks
+  bool force_regenerate = 3;
+  repeated InteractionKind interaction_kinds = 4;
+  int32 count_per_chunk = 5;
+  GenerationStrategy strategy = 6;
+  string difficulty = 7;
+  string focus_prompt = 8;
+}
+
+message QuizGenTaskOutput {
+  int64 completed_at = 1;
+  int32 interactions = 2;  // number of interactions generated
+}
+
 service AIService {
   rpc GetLessonAnalysis(GetLessonAnalysisRequest) returns (GetLessonAnalysisResponse) {}
 
-  // Step 2: Extract transcript + fine segments from video.
-  rpc ExtractTranscriptStream(ExtractTranscriptRequest) returns (stream AnalysisProgressEvent) {}
-
   // Step 3: Edit a single transcript segment (text only; boundaries unchanged).
   rpc UpdateTranscriptSegment(UpdateTranscriptSegmentRequest) returns (UpdateTranscriptSegmentResponse) {}
-
-  // Step 4: Chunk the transcript into topical sections (text-only Gemini call, no video re-upload).
-  rpc ChunkTranscriptStream(ChunkTranscriptRequest) returns (stream AnalysisProgressEvent) {}
 
   // Step 5: Edit chunk configuration.
   rpc ListLessonTranscriptChunks(ListLessonTranscriptChunksRequest) returns (ListLessonTranscriptChunksResponse) {}
@@ -292,8 +387,14 @@ service AIService {
   rpc UpdateChunkInteractionConfig(UpdateChunkInteractionConfigRequest) returns (UpdateChunkInteractionConfigResponse) {}
   rpc UpdateLessonDefaultInteractionConfig(UpdateLessonDefaultInteractionConfigRequest) returns (UpdateLessonDefaultInteractionConfigResponse) {}
 
-  // Step 7: Generate interactions for all chunks (or one chunk); supports multi-kind + strategy.
-  rpc GenerateInteractionsStream(GenerateInteractionsRequest) returns (stream GenerateInteractionsProgressEvent) {}
+  // Durable task API used by clients to recover progress after reload/navigation.
+  // Replaces the streaming RPCs (ExtractTranscriptStream / ChunkTranscriptStream /
+  // GenerateInteractionsStream) that were removed in this revision.
+  rpc StartLessonTask(StartLessonTaskRequest) returns (StartLessonTaskResponse) {}
+  rpc GetLessonTask(GetLessonTaskRequest) returns (GetLessonTaskResponse) {}
+  rpc ListLessonTasks(ListLessonTasksRequest) returns (ListLessonTasksResponse) {}
+  rpc ListAllTasks(ListAllTasksRequest) returns (ListAllTasksResponse) {}
+  rpc CancelLessonTask(CancelLessonTaskRequest) returns (CancelLessonTaskResponse) {}
 
   // Video watch progress — stored in FoundationDB, not PostgreSQL.
   rpc UpdateWatchProgress(UpdateWatchProgressRequest) returns (UpdateWatchProgressResponse) {}

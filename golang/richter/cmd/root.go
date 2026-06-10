@@ -7,6 +7,7 @@ import (
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
 	"example.com/richter/internal/api"
+	_ "example.com/richter/internal/svc/aitasks/executors"
 	"example.com/richter/log"
 	"github.com/samber/do/v2"
 	"github.com/spf13/cobra"

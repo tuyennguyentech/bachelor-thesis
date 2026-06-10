@@ -402,7 +402,11 @@ func (s *AISvc) preflightLessonTask(
 
 func lessonTaskToProto(t taskqueue.Task) *richterv1.LessonTask {
 	message := t.Message
-	if message == "" {
+	if t.Status == string(taskqueue.StatusSucceeded) ||
+		t.Status == string(taskqueue.StatusFailed) ||
+		t.Status == string(taskqueue.StatusCancelled) {
+		message = deriveTaskMessage(t.Status)
+	} else if message == "" {
 		message = deriveTaskMessage(t.Status)
 	}
 	out := &richterv1.LessonTask{

@@ -105,10 +105,14 @@ func (s *AISvc) GetLessonAnalysis(
 	// Only load FDB transcript/segments when the transcribe step
 	// has actually succeeded. For legacy data (no tasks), check
 	// the analysis status directly.
+	//
+	// Also allow loading when chunk or quiz_gen succeeded — those
+	// downstream stages imply transcribe was completed at some
+	// point (e.g. seeded data may only have a quiz_gen task).
 	canLoadTranscript := false
 	if len(latest) > 0 {
 		for _, t := range latest {
-			if t.TaskType == "transcribe" && t.Status == string(taskqueue.StatusSucceeded) {
+			if t.Status == string(taskqueue.StatusSucceeded) {
 				canLoadTranscript = true
 				break
 			}
@@ -195,16 +199,20 @@ func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.
 	case transcribeState == string(taskqueue.StatusFailed) || chunkState == string(taskqueue.StatusFailed):
 		out.Status = gen.LessonAnalysisStatusError
 	}
-	// Any successfully completed task that produces interactions
-	// (e.g. quiz_gen) means the lesson is fully analyzed.
+	// Any successfully completed quiz_gen task means the lesson is
+	// fully analyzed — but only if no upstream stage has failed.
+	// A stale quiz_gen from a previous run must not mask a failed
+	// re-run of chunk or transcribe.
 	hasSucceededInteractions := false
+	hasFailedUpstream := transcribeState == string(taskqueue.StatusFailed) ||
+		chunkState == string(taskqueue.StatusFailed)
 	for _, t := range latest {
 		if t.TaskType == "quiz_gen" && t.Status == string(taskqueue.StatusSucceeded) {
 			hasSucceededInteractions = true
 			break
 		}
 	}
-	if hasSucceededInteractions {
+	if hasSucceededInteractions && !hasFailedUpstream {
 		out.Status = gen.LessonAnalysisStatusDone
 	}
 	return out

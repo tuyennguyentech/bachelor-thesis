@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
@@ -69,7 +68,7 @@ func (s *AISvc) buildGradingDeps(ctx context.Context, lessonID pgtype.UUID) (svc
 }
 
 func (s *AISvc) downloadAudio(ctx context.Context, objectKey string) ([]byte, error) {
-	dlCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	dlCtx, cancel := s.aiCtx(ctx, s.aiCfg.DownloadTimeout)
 	defer cancel()
 
 	const maxAudioBytes = int64(20 * 1024 * 1024) // 20 MB

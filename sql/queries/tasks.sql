@@ -1,0 +1,224 @@
+-- name: InsertTask :one
+INSERT INTO tasks (
+    id, lesson_id, chunk_id, task_type, status, input_payload, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: CountActiveTasksByUser :one
+SELECT COUNT(*) FROM tasks
+WHERE created_by = $1 AND status IN ('pending', 'inqueued', 'processing');
+
+-- name: GetTask :one
+SELECT * FROM tasks WHERE id = $1;
+
+-- name: GetTaskForUpdate :one
+SELECT * FROM tasks WHERE id = $1 FOR UPDATE;
+
+-- name: ListTasksByLesson :many
+SELECT * FROM tasks
+WHERE lesson_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: ListAllTasks :many
+SELECT * FROM tasks
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2;
+
+-- name: ListActiveTasks :many
+SELECT * FROM tasks
+WHERE status IN ('pending', 'inqueued', 'processing')
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2;
+
+-- name: ListLatestTaskPerLesson :many
+-- Returns the most recent task for each (lesson, task_type),
+-- useful for the GetLessonAnalysis derivation (status priority,
+-- latest output per pipeline stage).
+SELECT DISTINCT ON (lesson_id, task_type) *
+FROM tasks
+WHERE lesson_id = ANY($1::uuid[])
+ORDER BY lesson_id, task_type, created_at DESC;
+
+-- name: DeleteTasksForLesson :exec
+-- Test helper: removes all tasks for a lesson. Tests use this
+-- to reset state between subtests that share a lesson id.
+DELETE FROM tasks WHERE lesson_id = $1;
+
+-- name: EnqueuePendingBatch :many
+-- Scanner primitive: atomic pending -> inqueued transition. Uses
+-- FOR UPDATE SKIP LOCKED in a CTE to allow multiple scanner
+-- goroutines. The window function runs over the locked rows.
+-- Returns the rows that were transitioned.
+WITH base AS (
+    SELECT id, created_at
+    FROM tasks
+    WHERE status = 'pending'
+    ORDER BY created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT $1
+),
+ranked AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn
+    FROM base
+),
+seq AS (
+    SELECT COALESCE(MAX(queue_seq), 0) AS max_seq
+    FROM tasks WHERE status = 'inqueued'
+)
+UPDATE tasks
+SET status = 'inqueued',
+    queue_seq = (SELECT max_seq FROM seq) + ranked.rn,
+    updated_at = now()
+FROM ranked
+WHERE tasks.id = ranked.id
+RETURNING tasks.*;
+
+-- name: ReapStaleProcessingBatch :many
+-- Scanner primitive: processing + heartbeat stale -> inqueued.
+WITH base AS (
+    SELECT id, heartbeat
+    FROM tasks
+    WHERE status = 'processing' AND tasks.heartbeat < $2
+    ORDER BY tasks.heartbeat
+    FOR UPDATE SKIP LOCKED
+    LIMIT $1
+),
+ranked AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY heartbeat) AS rn
+    FROM base
+),
+seq AS (
+    SELECT COALESCE(MAX(queue_seq), 0) AS max_seq
+    FROM tasks WHERE status = 'inqueued'
+)
+UPDATE tasks
+SET status = 'inqueued',
+    worker_id = NULL,
+    heartbeat = NULL,
+    queue_seq = (SELECT max_seq FROM seq) + ranked.rn,
+    updated_at = now()
+FROM ranked
+WHERE tasks.id = ranked.id
+RETURNING tasks.*;
+
+-- name: RequeueOrphanedInqueuedBatch :many
+-- Scanner primitive: inqueued rows that have been sitting too long
+-- without being claimed. Bumps their queue_seq to the head so the
+-- worker picks them up next.
+WITH base AS (
+    SELECT id, updated_at
+    FROM tasks
+    WHERE status = 'inqueued' AND tasks.updated_at < $2
+    ORDER BY tasks.updated_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT $1
+),
+ranked AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY updated_at) AS rn
+    FROM base
+),
+seq AS (
+    SELECT COALESCE(MIN(queue_seq), 0) AS min_seq
+    FROM tasks WHERE status = 'inqueued'
+)
+UPDATE tasks
+SET queue_seq = (SELECT min_seq FROM seq) - ranked.rn,
+    updated_at = now()
+FROM ranked
+WHERE tasks.id = ranked.id
+RETURNING tasks.*;
+
+-- name: ClaimNextInqueuedTask :one
+-- Worker primitive: pick the next inqueued task, mark it processing
+-- under workerID, set heartbeat. Returns the claimed task or no-rows.
+-- The subquery + UPDATE atomic in a single statement.
+UPDATE tasks
+SET status = 'processing',
+    worker_id = $1,
+    heartbeat = now(),
+    started_at = COALESCE(started_at, now()),
+    updated_at = now()
+WHERE id = (
+    SELECT id FROM tasks
+    WHERE status = 'inqueued'
+    ORDER BY queue_seq ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING *;
+
+-- name: HeartbeatTask :execrows
+-- Worker primitive: bump heartbeat. Returns rows affected so the
+-- worker can detect stolen/cancelled tasks (affected=0).
+UPDATE tasks
+SET heartbeat = now(), updated_at = now()
+WHERE id = $1 AND worker_id = $2 AND status = 'processing';
+
+-- name: MarkSucceeded :exec
+-- Worker primitive: terminal success transition. Sets output_payload
+-- atomically with status. The WHERE clause ensures we only commit
+-- a terminal write for tasks we still own.
+UPDATE tasks
+SET status = 'succeeded',
+    output_payload = $2,
+    finished_at = now(),
+    updated_at = now(),
+    heartbeat = NULL,
+    worker_id = NULL,
+    message = ''
+WHERE id = $1 AND worker_id = $3 AND status = 'processing';
+
+-- name: MarkFailed :exec
+UPDATE tasks
+SET status = 'failed',
+    error_msg = $2,
+    finished_at = now(),
+    updated_at = now(),
+    heartbeat = NULL,
+    worker_id = NULL,
+    message = ''
+WHERE id = $1 AND worker_id = $3 AND status = 'processing';
+
+-- name: CancelTask :exec
+-- User cancel RPC. Transitions from any non-terminal status to
+-- cancelled. Heartbeat goroutine on a running task will see
+-- affected=0 on its next tick and cancel the local goroutine.
+UPDATE tasks
+SET status = 'cancelled',
+    finished_at = now(),
+    updated_at = now(),
+    worker_id = NULL,
+    heartbeat = NULL,
+    message = ''
+WHERE id = $1
+  AND status IN ('pending', 'inqueued', 'processing');
+
+-- name: ReconnectCandidates :many
+-- Worker primitive: on startup, find tasks still under our worker_id
+-- whose heartbeat is fresh enough to be ours (i.e. we just restarted
+-- and want to take them back).
+SELECT * FROM tasks
+WHERE worker_id = $1
+  AND status = 'processing'
+  AND heartbeat > $2;
+
+-- name: GetActiveTask :one
+SELECT * FROM tasks
+WHERE lesson_id = @lesson_id::uuid
+  AND task_type = @task_type
+  AND (
+    (chunk_id IS NULL AND @chunk_id::uuid IS NULL) OR
+    (chunk_id = @chunk_id::uuid)
+  )
+  AND status IN ('pending', 'inqueued', 'processing')
+LIMIT 1;
+
+-- name: UpdateTaskProgress :exec
+UPDATE tasks
+SET progress_step = $2,
+    progress_current = $3,
+    progress_total = $4,
+    message = $5,
+    updated_at = now()
+WHERE id = $1;

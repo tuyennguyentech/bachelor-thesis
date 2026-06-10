@@ -136,6 +136,32 @@ func (s *KVSvc) Delete(ns string, key tuple.Tuple) error {
 	return err
 }
 
+// Transact exposes a single FoundationDB transaction for callers that need
+// multiple small keys, secondary indexes, or compare-and-claim style updates.
+func (s *KVSvc) Transact(f func(fdb.Transaction) (any, error)) (any, error) {
+	return s.db.Transact(f)
+}
+
+// RawKey returns a non-chunked key under namespace ns. Use this only for small
+// records and index entries that must participate in caller-managed transactions.
+func (s *KVSvc) RawKey(ns string, key tuple.Tuple) fdb.Key {
+	t := tuple.Tuple{ns, "r"}
+	return append(t.Pack(), key.Pack()...)
+}
+
+// RawPrefix returns the half-open key range [begin, end) covering all keys
+// whose serialized form starts with the packed form of `key`. The ns
+// argument is informational only — the prefix is computed from `key`
+// directly, so callers can use a fully-qualified tuple such as
+// (ns, "by_lesson", lessonID) to scan a secondary index range.
+//
+// Note: this differs from RawKey, which prepends ("ns", "r") to the tuple.
+// Use RawPrefix for non-record secondary-index scans; use RawKey for
+// standalone record writes that should be visible to Get/List.
+func (s *KVSvc) RawPrefix(_ string, key tuple.Tuple) (fdb.KeyRange, error) {
+	return fdb.PrefixRange(key.Pack())
+}
+
 // ── internal helpers ──────────────────────────────────────────────────────────
 
 // metaKey stores chunk count for a logical key.

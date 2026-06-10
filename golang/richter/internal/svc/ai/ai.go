@@ -2,171 +2,17 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
-	"example.com/richter/internal/svc"
 	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// ── Step 2: ExtractTranscriptStream ──────────────────────────────────────────
-
-// progressFn is called at each analysis step; returning a non-nil error aborts the pipeline.
-type progressFn func(step richterv1.AnalysisProgressStep, msg string) error
-
-func (s *AISvc) ExtractTranscriptStream(
-	ctx context.Context,
-	req *richterv1.ExtractTranscriptRequest,
-	stream *connect.ServerStream[richterv1.AnalysisProgressEvent],
-) error {
-	lessonID, videoKey, err := s.authorizeAndLoadLesson(ctx, req.GetLessonId())
-	if err != nil {
-		return err
-	}
-	if err := s.runExtractTranscript(ctx, lessonID, videoKey, func(step richterv1.AnalysisProgressStep, msg string) error {
-		return stream.Send(&richterv1.AnalysisProgressEvent{Step: step, Message: msg})
-	}); err != nil {
-		_ = stream.Send(&richterv1.AnalysisProgressEvent{
-			Step:    richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ERROR,
-			Message: err.Error(),
-		})
-		return nil
-	}
-	return stream.Send(&richterv1.AnalysisProgressEvent{
-		Step: richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DONE,
-	})
-}
-
-func (s *AISvc) runExtractTranscript(
-	ctx context.Context,
-	lessonID pgtype.UUID,
-	videoKey string,
-	progress progressFn,
-) error {
-	// Per-lesson serialization: a double-click of "Phân tích" would otherwise
-	// race Whisper + ffmpeg + FDB writes, corrupting the chunk set. If another
-	// request is mid-analysis we return immediately so the existing run owns
-	// the pipeline; the client already shows a spinner for the first run.
-	lessonKey := lessonID.String()
-	lock, ok := analysisLocks.tryAcquire(lessonKey)
-	if !ok {
-		return fmt.Errorf("Phân tích đang được xử lý cho bài học này. Vui lòng chờ.")
-	}
-	defer analysisLocks.release(lessonKey, lock)
-
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
-			LessonID: lessonID, Status: gen.LessonAnalysisStatusProcessing, ErrorMsg: pgtype.Text{},
-		})
-		return err
-	}); err != nil {
-		return err
-	}
-
-	// If the server is killed (SIGTERM) or panics while PROCESSING, reset status to ERROR
-	// so the user can retry instead of being stuck with a spinning "Đang xử lý…".
-	statusFinalized := false
-	defer func() {
-		if statusFinalized {
-			return
-		}
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := db.WithConnection(s.pg, bgCtx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-			return q.UpsertLessonAnalysisStatus(bgCtx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: "Quá trình bị gián đoạn. Vui lòng thử lại.", Valid: true},
-			})
-		}); err != nil {
-			s.log.ErrorContext(bgCtx, "ai: cleanup defer: failed to reset stuck PROCESSING status", "err", err)
-		}
-	}()
-
-	lessonIDStr := lessonID.String()
-	// Clear stale FDB data immediately after PROCESSING is set so GetLessonAnalysis
-	// won't return transcript/segments from a previously-analyzed video.
-	_ = s.kv.Delete(kvNsLesson, tuple.Tuple{lessonIDStr, "transcript"})
-	_ = s.kv.Delete(kvNsLesson, tuple.Tuple{lessonIDStr, "segments"})
-
-	transcript, segments, extractErr := s.transcription.runWhisperAnalyze(ctx, videoKey, progress)
-	if extractErr != nil {
-		statusFinalized = s.persistExtractError(ctx, lessonID, extractErr.Error())
-		return extractErr
-	}
-
-	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_SAVING, "Đang lưu kết quả..."); err != nil {
-		s.log.WarnContext(ctx, "ai: failed to send saving progress after transcript extraction", "err", err)
-	}
-
-	// Save transcript + segments to FDB.
-	segmentsJSON, err := json.Marshal(segments)
-	if err != nil {
-		s.log.ErrorContext(ctx, "ai: failed to marshal segments", svc.LogAttrs("json.Marshal", err)...)
-		segmentsJSON = []byte("[]")
-	}
-	if transcript != "" {
-		if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonIDStr, "transcript"}, []byte(transcript)); err != nil {
-			s.log.WarnContext(ctx, "ai: FDB transcript write failed", "err", err)
-		}
-	}
-	if len(segmentsJSON) > 0 {
-		if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonIDStr, "segments"}, segmentsJSON); err != nil {
-			s.log.WarnContext(ctx, "ai: FDB segments write failed", "err", err)
-		}
-	}
-
-	// Collect chunk IDs for FDB cleanup before the PG delete cascades them away.
-	var staleChunkIDs []string
-	if existingChunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
-		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 10000, Offset: 0})
-	}); err == nil {
-		for _, c := range existingChunks {
-			staleChunkIDs = append(staleChunkIDs, c.ID.String())
-		}
-	}
-
-	// Clear stale chunks and interactions from any previous run.
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		if err := q.DeleteLessonInteractionsByLesson(ctx, lessonID); err != nil {
-			s.log.WarnContext(ctx, "ai: failed to delete stale interactions on re-extract", "err", err)
-		}
-		return q.DeleteLessonTranscriptChunks(ctx, lessonID)
-	}); err != nil {
-		s.log.WarnContext(ctx, "ai: failed to clear stale chunks on re-extract", "err", err)
-	}
-
-	// Best-effort FDB cleanup for the chunks we just deleted from PG.
-	for _, id := range staleChunkIDs {
-		_ = s.kv.Delete(kvNsChunk, tuple.Tuple{id, "transcript"})
-	}
-	finalStatus := gen.LessonAnalysisStatusTranscriptExtracted
-
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-			LessonID: lessonID,
-			Status:   finalStatus,
-			ErrorMsg: pgtype.Text{},
-		})
-	}); err != nil {
-		s.log.ErrorContext(ctx, "ai: failed to update analysis status", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
-	}
-	statusFinalized = true
-
-	return nil
-}
 
 // ── Step 3: UpdateTranscriptSegment ──────────────────────────────────────────
 
@@ -174,272 +20,7 @@ func (s *AISvc) UpdateTranscriptSegment(
 	ctx context.Context,
 	req *richterv1.UpdateTranscriptSegmentRequest,
 ) (*richterv1.UpdateTranscriptSegmentResponse, error) {
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
-		return nil, err
-	}
-
-	segmentsBytes, err := s.kv.Get(kvNsLesson, tuple.Tuple{lessonID.String(), "segments"})
-	if err != nil || len(segmentsBytes) == 0 {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no segments found — run Step 2 first"))
-	}
-
-	var segments []transcriptSegment
-	if err := json.Unmarshal(segmentsBytes, &segments); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse segments: %w", err))
-	}
-
-	idx := int(req.GetSegmentIndex())
-	if idx < 0 || idx >= len(segments) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("segment_index %d out of range [0, %d)", idx, len(segments)))
-	}
-
-	segments[idx].Text = req.GetText()
-
-	updated, err := json.Marshal(segments)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("marshal segments: %w", err))
-	}
-	if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonID.String(), "segments"}, updated); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save segments: %w", err))
-	}
-
-	// Rebuild transcript text so ChunkTranscriptStream sees the edited content.
-	var parts []string
-	for _, seg := range segments {
-		if seg.Text != "" {
-			parts = append(parts, seg.Text)
-		}
-	}
-	rebuiltTranscript := strings.Join(parts, " ")
-	if err := s.kv.Set(kvNsLesson, tuple.Tuple{lessonID.String(), "transcript"}, []byte(rebuiltTranscript)); err != nil {
-		s.log.WarnContext(ctx, "ai: failed to rebuild transcript after segment edit", "err", err)
-	}
-
-	// If chunks already exist, rebuild each chunk's FDB transcript AND its
-	// coherence score from the (now-edited) segments. Without this, the chunk
-	// transcripts shipped to Gemini for question regeneration would contain the
-	// OLD segment text and the coverage score would still reflect the old
-	// vocabulary.
-	if chunks, cerr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
-		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 10000, Offset: 0})
-	}); cerr == nil {
-		for _, c := range chunks {
-			segsInChunk := chunkSegments(segments, float32(c.StartSeconds), float32(c.EndSeconds))
-			chunkText := buildChunkTranscript(segments, float32(c.StartSeconds), float32(c.EndSeconds))
-			if chunkText != "" {
-				if err := s.kv.Set(kvNsChunk, tuple.Tuple{c.ID.String(), "transcript"}, []byte(chunkText)); err != nil {
-					s.log.WarnContext(ctx, "ai: failed to rebuild chunk transcript after segment edit",
-						"chunk_id", c.ID.String(), "err", err)
-				}
-			}
-			newCoherence := computeChunkCoherence(segsInChunk)
-			if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-				return q.UpdateChunkCoherence(ctx, gen.UpdateChunkCoherenceParams{ID: c.ID, CoherenceScore: newCoherence})
-			}); err != nil {
-				s.log.WarnContext(ctx, "ai: failed to update chunk coherence after segment edit",
-					"chunk_id", c.ID.String(), "err", err)
-			}
-		}
-	}
-
-	seg := segments[idx]
-	return &richterv1.UpdateTranscriptSegmentResponse{
-		Segment: &richterv1.TranscriptSegment{
-			StartSeconds: seg.StartSeconds,
-			EndSeconds:   seg.EndSeconds,
-			Text:         seg.Text,
-		},
-	}, nil
-}
-
-// ── Step 4: ChunkTranscriptStream ─────────────────────────────────────────────
-
-func (s *AISvc) ChunkTranscriptStream(
-	ctx context.Context,
-	req *richterv1.ChunkTranscriptRequest,
-	stream *connect.ServerStream[richterv1.AnalysisProgressEvent],
-) error {
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
-	if err != nil {
-		return err
-	}
-	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
-		return err
-	}
-
-	if err := s.runChunkTranscript(ctx, lessonID, func(step richterv1.AnalysisProgressStep, msg string) error {
-		return stream.Send(&richterv1.AnalysisProgressEvent{Step: step, Message: msg})
-	}); err != nil {
-		return err
-	}
-	return stream.Send(&richterv1.AnalysisProgressEvent{
-		Step: richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DONE,
-	})
-}
-
-func (s *AISvc) runChunkTranscript(
-	ctx context.Context,
-	lessonID pgtype.UUID,
-	progress progressFn,
-) error {
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
-			LessonID: lessonID, Status: gen.LessonAnalysisStatusProcessing, ErrorMsg: pgtype.Text{},
-		})
-		return err
-	}); err != nil {
-		return err
-	}
-
-	// Cleanup: if we exit without setting a final status (SIGTERM/panic during Gemini call),
-	// reset to ERROR so the user can retry instead of being stuck with "Đang xử lý…".
-	chunkStatusFinalized := false
-	defer func() {
-		if chunkStatusFinalized {
-			return
-		}
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := db.WithConnection(s.pg, bgCtx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-			return q.UpsertLessonAnalysisStatus(bgCtx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: "Quá trình bị gián đoạn. Vui lòng thử lại.", Valid: true},
-			})
-		}); err != nil {
-			s.log.ErrorContext(bgCtx, "ai: chunk cleanup defer: failed to reset stuck PROCESSING status", "err", err)
-		}
-	}()
-
-	transcriptBytes, err := s.kv.Get(kvNsLesson, tuple.Tuple{lessonID.String(), "transcript"})
-	if err != nil || len(transcriptBytes) == 0 {
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript found — run Step 2 (extract transcript) first"))
-	}
-
-	segmentsBytes, _ := s.kv.Get(kvNsLesson, tuple.Tuple{lessonID.String(), "segments"})
-	var allSegs []transcriptSegment
-	if len(segmentsBytes) > 0 {
-		_ = json.Unmarshal(segmentsBytes, &allSegs)
-	}
-
-	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING, "Đang phân tích nội dung để xác định đoạn..."); err != nil {
-		return err
-	}
-
-	chunks, chunkErr := s.chunking.runGeminiChunk(ctx, string(transcriptBytes), segmentsBytes)
-	if chunkErr == nil && len(chunks) == 0 {
-		chunkErr = fmt.Errorf("Gemini returned 0 chunks — transcript may be too short or model response was empty")
-	}
-	if chunkErr != nil {
-		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: chunkErr.Error(), Valid: true},
-			})
-		})
-		chunkStatusFinalized = true
-		return chunkErr
-	}
-
-	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_SAVING, "Đang lưu các đoạn..."); err != nil {
-		return err
-	}
-
-	type chunkFDBEntry struct{ id, transcript string }
-	var chunkFDBEntries []chunkFDBEntry
-	var staleChunkIDs []string
-
-	saveErr := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
-		// Delete old interactions and chunks atomically.
-		existing, err := q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 500, Offset: 0})
-		if err != nil {
-			return fmt.Errorf("list existing chunks: %w", err)
-		}
-		for _, ec := range existing {
-			staleChunkIDs = append(staleChunkIDs, ec.ID.String())
-			if err := q.DeleteLessonInteractionsByChunk(ctx, ec.ID); err != nil {
-				return fmt.Errorf("delete interactions for chunk %s: %w", ec.ID, err)
-			}
-		}
-		if err := q.DeleteLessonTranscriptChunks(ctx, lessonID); err != nil {
-			return fmt.Errorf("delete old chunks: %w", err)
-		}
-
-		for i, ch := range chunks {
-			chunkSegs := chunkSegments(allSegs, ch.StartSeconds, ch.EndSeconds)
-			coherence := computeChunkCoherence(chunkSegs)
-			dbChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
-				LessonID:            lessonID,
-				OrderIndex:          int32(i),
-				StartSeconds:        float64(ch.StartSeconds),
-				EndSeconds:          float64(ch.EndSeconds),
-				Summary:             ch.Summary,
-				QuestionCountConfig: 1,
-				CoherenceScore:      coherence,
-			})
-			if err != nil {
-				return fmt.Errorf("insert chunk %d: %w", i, err)
-			}
-			chunkText := buildChunkTranscript(allSegs, ch.StartSeconds, ch.EndSeconds)
-			if chunkText == "" {
-				chunkText = string(transcriptBytes)
-			}
-			chunkFDBEntries = append(chunkFDBEntries, chunkFDBEntry{
-				id:         dbChunk.ID.String(),
-				transcript: chunkText,
-			})
-		}
-		return nil
-	})
-	if saveErr != nil {
-		s.log.ErrorContext(ctx, "ai: failed to save chunks", svc.LogAttrs("ChunkTranscriptStream", saveErr)...)
-		// Persist the specific error message so the defer's generic "interrupted"
-		// fallback doesn't overwrite it after we return.
-		_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: "Lỗi khi lưu đoạn nội dung: " + saveErr.Error(), Valid: true},
-			})
-		})
-		chunkStatusFinalized = true
-		return fmt.Errorf("Lỗi khi lưu đoạn nội dung: %w", saveErr)
-	}
-
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-			LessonID: lessonID,
-			Status:   gen.LessonAnalysisStatusChunksReady,
-			ErrorMsg: pgtype.Text{},
-		})
-	}); err != nil {
-		s.log.ErrorContext(ctx, "ai: failed to update status to chunks_ready", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
-	}
-	chunkStatusFinalized = true
-
-	// Clear FDB transcripts for the OLD chunks that were just deleted in the tx
-	// above. Their PG rows are gone but their FDB content was previously written
-	// under their (now-orphaned) chunk_ids, which never collide with the fresh
-	// chunk ids we generate below.
-	for _, id := range staleChunkIDs {
-		_ = s.kv.Delete(kvNsChunk, tuple.Tuple{id, "transcript"})
-	}
-
-	for _, e := range chunkFDBEntries {
-		if e.transcript == "" {
-			continue
-		}
-		if err := s.kv.Set(kvNsChunk, tuple.Tuple{e.id, "transcript"}, []byte(e.transcript)); err != nil {
-			s.log.WarnContext(ctx, "ai: FDB chunk transcript write failed", "chunk_id", e.id, "err", err)
-		}
-	}
-
-	return nil
+	return s.transcript.UpdateSegment(ctx, req)
 }
 
 // ── Step 5: Chunk editing ─────────────────────────────────────────────────────
@@ -448,158 +29,24 @@ func (s *AISvc) ListLessonTranscriptChunks(
 	ctx context.Context,
 	req *richterv1.ListLessonTranscriptChunksRequest,
 ) (*richterv1.ListLessonTranscriptChunksResponse, error) {
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
-	if err != nil {
-		return nil, err
-	}
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
-		return nil, err
-	}
-
-	chunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
-		limit := req.GetLimit()
-		if limit == 0 {
-			limit = 500
-		}
-		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: limit, Offset: req.GetOffset()})
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-
-	protoChunks := make([]*richterv1.TranscriptChunk, 0, len(chunks))
-	for _, c := range chunks {
-		protoChunks = append(protoChunks, chunkToProto(c))
-	}
-	return &richterv1.ListLessonTranscriptChunksResponse{Chunks: protoChunks}, nil
+	return s.transcript.List(ctx, req)
 }
 
 func (s *AISvc) UpdateChunkConfig(
 	ctx context.Context,
 	req *richterv1.UpdateChunkConfigRequest,
 ) (*richterv1.UpdateChunkConfigResponse, error) {
-	chunkID, err := svc.ParseUUID(req.GetChunkId())
-	if err != nil {
-		return nil, err
-	}
-
-	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, chunkID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
-		return nil, err
-	}
-
-	updated, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.UpdateChunkQuestionCountConfig(ctx, gen.UpdateChunkQuestionCountConfigParams{
-			ID:                  chunkID,
-			QuestionCountConfig: req.GetQuestionCount(),
-		})
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	return &richterv1.UpdateChunkConfigResponse{Chunk: chunkToProto(updated)}, nil
+	return s.transcript.UpdateConfig(ctx, req)
 }
 
 func (s *AISvc) MergeChunks(
 	ctx context.Context,
 	req *richterv1.MergeChunksRequest,
 ) (*richterv1.MergeChunksResponse, error) {
-	keepID, err := svc.ParseUUID(req.GetKeepChunkId())
+	mergedChunk, err := s.chunkOps.Merge(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	discardID, err := svc.ParseUUID(req.GetDiscardChunkId())
-	if err != nil {
-		return nil, err
-	}
-	if keepID == discardID {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("keep and discard must be different chunks"))
-	}
-
-	keepChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, keepID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if err := s.requireTeacherRole(ctx, keepChunk.LessonID); err != nil {
-		return nil, err
-	}
-
-	discardChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, discardID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if keepChunk.LessonID != discardChunk.LessonID {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunks must belong to the same lesson"))
-	}
-
-	diff := keepChunk.OrderIndex - discardChunk.OrderIndex
-	if diff != 1 && diff != -1 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("only adjacent chunks can be merged"))
-	}
-
-	keepTranscript := s.fetchChunkTranscript(keepID.String())
-	discardTranscript := s.fetchChunkTranscript(discardID.String())
-
-	mergedStart := min(keepChunk.StartSeconds, discardChunk.StartSeconds)
-	mergedEnd := max(keepChunk.EndSeconds, discardChunk.EndSeconds)
-
-	var mergedTranscript string
-	if keepChunk.OrderIndex < discardChunk.OrderIndex {
-		mergedTranscript = keepTranscript + "\n" + discardTranscript
-	} else {
-		mergedTranscript = discardTranscript + "\n" + keepTranscript
-	}
-
-	// Write merged transcript to FDB before PG commit: keepID is known, so if PG fails the
-	// FDB entry is harmless (same key, next successful merge will overwrite).
-	if err := s.kv.Set(kvNsChunk, tuple.Tuple{keepID.String(), "transcript"}, []byte(mergedTranscript)); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("write merged transcript to FDB: %w", err))
-	}
-
-	allSegs := s.loadSegmentsFromFDB(keepChunk.LessonID.String())
-	mergedCoherence := computeChunkCoherence(chunkSegments(allSegs, float32(mergedStart), float32(mergedEnd)))
-
-	var mergedChunk gen.LessonTranscriptChunk
-	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
-		if err := q.DeleteLessonInteractionsByChunk(ctx, discardID); err != nil {
-			return fmt.Errorf("delete discard questions: %w", err)
-		}
-		if err := q.DeleteLessonTranscriptChunk(ctx, discardID); err != nil {
-			return fmt.Errorf("delete discard chunk: %w", err)
-		}
-		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
-			ID:             keepID,
-			StartSeconds:   mergedStart,
-			EndSeconds:     mergedEnd,
-			Summary:        keepChunk.Summary,
-			CoherenceScore: mergedCoherence,
-		})
-		if err != nil {
-			return fmt.Errorf("update keep chunk boundaries: %w", err)
-		}
-		mergedChunk = updated
-		return q.ReorderLessonChunks(ctx, keepChunk.LessonID)
-	}); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("merge chunks: %w", err))
-	}
-
-	_ = s.kv.Delete(kvNsChunk, tuple.Tuple{discardID.String(), "transcript"})
-
 	return &richterv1.MergeChunksResponse{MergedChunk: chunkToProto(mergedChunk)}, nil
 }
 
@@ -607,35 +54,9 @@ func (s *AISvc) DeleteChunk(
 	ctx context.Context,
 	req *richterv1.DeleteChunkRequest,
 ) (*richterv1.DeleteChunkResponse, error) {
-	chunkID, err := svc.ParseUUID(req.GetChunkId())
-	if err != nil {
+	if err := s.chunkOps.Delete(ctx, req); err != nil {
 		return nil, err
 	}
-
-	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, chunkID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
-		return nil, err
-	}
-
-	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
-		if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
-			return fmt.Errorf("delete questions: %w", err)
-		}
-		if err := q.DeleteLessonTranscriptChunk(ctx, chunkID); err != nil {
-			return fmt.Errorf("delete chunk: %w", err)
-		}
-		return q.ReorderLessonChunks(ctx, chunk.LessonID)
-	}); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete chunk: %w", err))
-	}
-
-	_ = s.kv.Delete(kvNsChunk, tuple.Tuple{chunkID.String(), "transcript"})
-
 	return &richterv1.DeleteChunkResponse{}, nil
 }
 
@@ -643,106 +64,13 @@ func (s *AISvc) SplitChunk(
 	ctx context.Context,
 	req *richterv1.SplitChunkRequest,
 ) (*richterv1.SplitChunkResponse, error) {
-	chunkID, err := svc.ParseUUID(req.GetChunkId())
+	result, err := s.chunkOps.Split(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	splitAt := float32(req.GetSplitAtSeconds())
-
-	chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, chunkID)
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("chunk not found"))
-		}
-		return nil, svc.ConnectDBError(err)
-	}
-	if err := s.requireTeacherRole(ctx, chunk.LessonID); err != nil {
-		return nil, err
-	}
-	if splitAt <= float32(chunk.StartSeconds) || splitAt >= float32(chunk.EndSeconds) {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("split_at_seconds %.1f must be within (%.1f, %.1f)", splitAt, chunk.StartSeconds, chunk.EndSeconds))
-	}
-
-	allSegs := s.loadSegmentsFromFDB(chunk.LessonID.String())
-	firstTranscript := buildChunkTranscript(allSegs, float32(chunk.StartSeconds), splitAt)
-	secondTranscript := buildChunkTranscript(allSegs, splitAt, float32(chunk.EndSeconds))
-	firstCoherence := computeChunkCoherence(chunkSegments(allSegs, float32(chunk.StartSeconds), splitAt))
-	secondCoherence := computeChunkCoherence(chunkSegments(allSegs, splitAt, float32(chunk.EndSeconds)))
-
-	type splitResult struct {
-		first       gen.LessonTranscriptChunk
-		second      gen.LessonTranscriptChunk
-		secondNewID pgtype.UUID
-	}
-	result, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (splitResult, error) {
-		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
-			ID: chunk.ID, StartSeconds: chunk.StartSeconds,
-			EndSeconds: float64(splitAt), Summary: chunk.Summary,
-			CoherenceScore: firstCoherence,
-		})
-		if err != nil {
-			return splitResult{}, svc.ConnectDBError(err)
-		}
-
-		existingChunks, err := q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: chunk.LessonID, Limit: 500, Offset: 0})
-		if err != nil {
-			return splitResult{}, svc.ConnectDBError(err)
-		}
-		maxOrder := int32(0)
-		for _, c := range existingChunks {
-			if c.OrderIndex > maxOrder {
-				maxOrder = c.OrderIndex
-			}
-		}
-		newChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
-			LessonID: chunk.LessonID, OrderIndex: maxOrder + 1,
-			StartSeconds: float64(splitAt), EndSeconds: chunk.EndSeconds,
-			Summary: chunk.Summary, QuestionCountConfig: chunk.QuestionCountConfig,
-			CoherenceScore: secondCoherence,
-		})
-		if err != nil {
-			return splitResult{}, svc.ConnectDBError(err)
-		}
-
-		if err := q.ReorderLessonChunks(ctx, chunk.LessonID); err != nil {
-			return splitResult{}, fmt.Errorf("reorder chunks after split: %w", err)
-		}
-
-		first, err := q.GetLessonTranscriptChunk(ctx, updated.ID)
-		if err != nil {
-			return splitResult{}, fmt.Errorf("re-fetch first chunk after split: %w", err)
-		}
-		second, err := q.GetLessonTranscriptChunk(ctx, newChunk.ID)
-		if err != nil {
-			return splitResult{}, fmt.Errorf("re-fetch second chunk after split: %w", err)
-		}
-		return splitResult{first: first, second: second, secondNewID: newChunk.ID}, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// FDB writes happen after PG commit so stale FDB data is never left behind on PG rollback.
-	// On failure, log a warning — FDB can be corrected on next read or re-run; PG is authoritative.
-	if firstTranscript != "" {
-		if err := s.kv.Set(kvNsChunk, tuple.Tuple{chunk.ID.String(), "transcript"}, []byte(firstTranscript)); err != nil {
-			s.log.WarnContext(ctx, "ai: SplitChunk first chunk FDB write failed",
-				"chunk_id", chunk.ID.String(), "err", err)
-		}
-	}
-	if secondTranscript != "" {
-		if err := s.kv.Set(kvNsChunk, tuple.Tuple{result.secondNewID.String(), "transcript"}, []byte(secondTranscript)); err != nil {
-			s.log.WarnContext(ctx, "ai: SplitChunk second chunk FDB write failed — transcript lost",
-				"chunk_id", result.secondNewID.String(), "err", err)
-		}
-	}
-
 	return &richterv1.SplitChunkResponse{
-		FirstChunk:  chunkToProto(result.first),
-		SecondChunk: chunkToProto(result.second),
+		FirstChunk:  chunkToProto(result.First),
+		SecondChunk: chunkToProto(result.Second),
 	}, nil
 }
 
@@ -752,111 +80,13 @@ func (s *AISvc) AdjustChunkBoundary(
 	ctx context.Context,
 	req *richterv1.AdjustChunkBoundaryRequest,
 ) (*richterv1.AdjustChunkBoundaryResponse, error) {
-	prevID, err := svc.ParseUUID(req.GetPrevChunkId())
+	result, err := s.chunkOps.AdjustBoundary(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	nextID, err := svc.ParseUUID(req.GetNextChunkId())
-	if err != nil {
-		return nil, err
-	}
-	newBoundary := float32(req.GetNewBoundarySeconds())
-
-	prevChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, prevID)
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("prev chunk not found"))
-		}
-		return nil, svc.ConnectDBError(err)
-	}
-	nextChunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-		return q.GetLessonTranscriptChunk(ctx, nextID)
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("next chunk not found"))
-		}
-		return nil, svc.ConnectDBError(err)
-	}
-	if prevChunk.LessonID != nextChunk.LessonID {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunks belong to different lessons"))
-	}
-	if prevChunk.OrderIndex+1 != nextChunk.OrderIndex {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunks are not adjacent (order_index %d and %d)", prevChunk.OrderIndex, nextChunk.OrderIndex))
-	}
-	if err := s.requireTeacherRole(ctx, prevChunk.LessonID); err != nil {
-		return nil, err
-	}
-	if newBoundary <= float32(prevChunk.StartSeconds) || newBoundary >= float32(nextChunk.EndSeconds) {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("new_boundary_seconds %.1f must be within (%.1f, %.1f)",
-				newBoundary, prevChunk.StartSeconds, nextChunk.EndSeconds))
-	}
-
-	allSegs := s.loadSegmentsFromFDB(prevChunk.LessonID.String())
-	prevTranscript := buildChunkTranscript(allSegs, float32(prevChunk.StartSeconds), newBoundary)
-	nextTranscript := buildChunkTranscript(allSegs, newBoundary, float32(nextChunk.EndSeconds))
-	prevCoherence := computeChunkCoherence(chunkSegments(allSegs, float32(prevChunk.StartSeconds), newBoundary))
-	nextCoherence := computeChunkCoherence(chunkSegments(allSegs, newBoundary, float32(nextChunk.EndSeconds)))
-
-	type boundaryResult struct {
-		prev gen.LessonTranscriptChunk
-		next gen.LessonTranscriptChunk
-	}
-	result, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (boundaryResult, error) {
-		// Re-fetch inside the transaction to guard against concurrent reorders.
-		currentPrev, err := q.GetLessonTranscriptChunk(ctx, prevID)
-		if err != nil {
-			return boundaryResult{}, svc.ConnectDBError(err)
-		}
-		currentNext, err := q.GetLessonTranscriptChunk(ctx, nextID)
-		if err != nil {
-			return boundaryResult{}, svc.ConnectDBError(err)
-		}
-		if currentPrev.OrderIndex+1 != currentNext.OrderIndex {
-			return boundaryResult{}, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("chunks are no longer adjacent — another edit may have changed their order"))
-		}
-		updPrev, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
-			ID: prevID, StartSeconds: currentPrev.StartSeconds, EndSeconds: float64(newBoundary), Summary: currentPrev.Summary,
-			CoherenceScore: prevCoherence,
-		})
-		if err != nil {
-			return boundaryResult{}, svc.ConnectDBError(err)
-		}
-		updNext, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
-			ID: nextID, StartSeconds: float64(newBoundary), EndSeconds: currentNext.EndSeconds, Summary: currentNext.Summary,
-			CoherenceScore: nextCoherence,
-		})
-		if err != nil {
-			return boundaryResult{}, svc.ConnectDBError(err)
-		}
-		return boundaryResult{prev: updPrev, next: updNext}, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// FDB writes happen after PG commit so stale FDB data is never left behind on PG rollback.
-	// On failure, log a warning — FDB can be corrected on next read or re-run; PG is authoritative.
-	if prevTranscript != "" {
-		if err := s.kv.Set(kvNsChunk, tuple.Tuple{prevID.String(), "transcript"}, []byte(prevTranscript)); err != nil {
-			s.log.WarnContext(ctx, "ai: AdjustChunkBoundary prev chunk FDB write failed",
-				"chunk_id", prevID.String(), "err", err)
-		}
-	}
-	if nextTranscript != "" {
-		if err := s.kv.Set(kvNsChunk, tuple.Tuple{nextID.String(), "transcript"}, []byte(nextTranscript)); err != nil {
-			s.log.WarnContext(ctx, "ai: AdjustChunkBoundary next chunk FDB write failed",
-				"chunk_id", nextID.String(), "err", err)
-		}
-	}
-
 	return &richterv1.AdjustChunkBoundaryResponse{
-		PrevChunk: chunkToProto(result.prev),
-		NextChunk: chunkToProto(result.next),
+		PrevChunk: chunkToProto(result.Prev),
+		NextChunk: chunkToProto(result.Next),
 	}, nil
 }
 
@@ -1050,276 +280,26 @@ type aiChooseKindSpec struct {
 }
 
 // ── Step 7: GenerateInteractionsStream ───────────────────────────────────────
+//
+// GenerateInteractionsStream was removed in this revision. The generation
+// step is now triggered via StartLessonTask with kind =
+// LESSON_TASK_KIND_GENERATE_INTERACTIONS. The underlying pipeline
+// (runGenerateInteractions below) is still used by the task worker — see
+// task_runner.go.
 
-type generateProgressFn func(event *richterv1.GenerateInteractionsProgressEvent) error
-
-func (s *AISvc) GenerateInteractionsStream(
-	ctx context.Context,
-	req *richterv1.GenerateInteractionsRequest,
-	stream *connect.ServerStream[richterv1.GenerateInteractionsProgressEvent],
-) error {
-	lessonID, err := svc.ParseUUID(req.GetLessonId())
-	if err != nil {
-		return err
-	}
-	if err := s.requireTeacherRole(ctx, lessonID); err != nil {
-		return err
-	}
-
-	return s.runGenerateInteractions(ctx, lessonID, req, func(event *richterv1.GenerateInteractionsProgressEvent) error {
-		return stream.Send(event)
-	})
-}
+// generateInteractionsProgressFn is the new typed callback used by the
+// task worker. We no longer wrap it in a *GenerateInteractionsProgressEvent
+// (the proto type was removed) — we emit each field directly.
+type generateInteractionsProgressFn func(step richterv1.GenerateInteractionsStep, msg string, chunkIndex, totalChunks int32) error
 
 func (s *AISvc) runGenerateInteractions(
 	ctx context.Context,
 	lessonID pgtype.UUID,
 	req *richterv1.GenerateInteractionsRequest,
-	send generateProgressFn,
+	send generateInteractionsProgressFn,
 ) error {
-	var chunks []gen.LessonTranscriptChunk
-
-	if req.GetChunkId() != "" {
-		chunkID, err := svc.ParseUUID(req.GetChunkId())
-		if err != nil {
-			return err
-		}
-		c, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-			return q.GetLessonTranscriptChunk(ctx, chunkID)
-		})
-		if err != nil {
-			return svc.ConnectDBError(err)
-		}
-		// Defense in depth: ensure the chunk belongs to the requested lesson.
-		if c.LessonID != lessonID {
-			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chunk does not belong to the requested lesson"))
-		}
-		chunks = []gen.LessonTranscriptChunk{c}
-	} else {
-		listed, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
-			return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 500, Offset: 0})
-		})
-		if err != nil {
-			return svc.ConnectDBError(err)
-		}
-		chunks = listed
-	}
-
-	if len(chunks) == 0 {
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript chunks found — run Step 4 (chunk transcript) first"))
-	}
-
-	// Load lesson for default_interaction_config fallback.
-	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
-		return q.GetLessonByID(ctx, lessonID)
-	})
-	if err != nil {
-		return svc.ConnectDBError(err)
-	}
-
-	total := int32(len(chunks))
-
-	// Pre-load which chunks already have interactions (skip-if-exists optimisation).
-	chunkHasInteractions := map[string]bool{}
-	if !req.GetForceRegenerate() && req.GetChunkId() == "" {
-		existingInts, intErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
-			return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{LessonID: lessonID, Limit: 5000, Offset: 0})
-		})
-		if intErr != nil {
-			s.log.WarnContext(ctx, "ai: could not load existing interactions for skip check; will attempt all chunks", "err", intErr)
-		}
-		for _, ei := range existingInts {
-			if ei.ChunkID.Valid {
-				chunkHasInteractions[ei.ChunkID.String()] = true
-			}
-		}
-	}
-
-	// Resolve request-level overrides (applied on top of per-chunk config in the loop).
-	reqKinds := req.GetInteractionKinds()
-	// Honour legacy interaction_kind field if interaction_kinds is empty.
-	if len(reqKinds) == 0 {
-		if lk := req.GetInteractionKind(); lk != richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED { //nolint:staticcheck // deprecated field
-			reqKinds = []richterv1.InteractionKind{lk}
-		}
-	}
-	reqCount := req.GetCountPerChunk()
-	reqStrategy := req.GetStrategy()
-
-	// Determine if any chunk actually needs Gemini.
-	needsGemini := req.GetForceRegenerate() || req.GetChunkId() != ""
-	if !needsGemini {
-		for _, chunk := range chunks {
-			if !chunkHasInteractions[chunk.ID.String()] {
-				needsGemini = true
-				break
-			}
-		}
-	}
-
-	var geminiClient *genai.Client
-	if needsGemini {
-		geminiClient, err = newGeminiClient(ctx, s.geminiCfg)
-		if err != nil {
-			_ = send(&richterv1.GenerateInteractionsProgressEvent{
-				Step:    richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message: err.Error(),
-			})
-			return nil
-		}
-		defer geminiClient.Close()
-	}
-
-	savedThisRun := 0
-
-	// Sequential processing — simpler, easier to debug, and one bad chunk doesn't stall others.
-	for i, chunk := range chunks {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		if !req.GetForceRegenerate() && req.GetChunkId() == "" && chunkHasInteractions[chunk.ID.String()] {
-			_ = send(&richterv1.GenerateInteractionsProgressEvent{
-				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
-				Message:     fmt.Sprintf("Đoạn %d/%d đã có bài tập, bỏ qua", i+1, total),
-				ChunkIndex:  int32(i),
-				TotalChunks: total,
-			})
-			continue
-		}
-
-		chunkTranscript := s.fetchChunkTranscript(chunk.ID.String())
-		if strings.TrimSpace(chunkTranscript) == "" {
-			s.log.WarnContext(ctx, "ai: chunk has no transcript, skipping", "chunk_id", chunk.ID.String())
-			if sendErr := send(&richterv1.GenerateInteractionsProgressEvent{
-				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message:     fmt.Sprintf("Đoạn %d/%d không có nội dung transcript, bỏ qua", i+1, total),
-				ChunkIndex:  int32(i),
-				TotalChunks: total,
-			}); sendErr != nil {
-				return nil
-			}
-			continue
-		}
-
-		// Resolve effective generation plan for this chunk.
-		plan := resolveGenerationPlan(chunk, lesson, reqKinds, reqCount, reqStrategy)
-
-		var allItems []generatedItem
-		if plan.useAIChoose {
-			items, genErr := s.interactionGen.runGeminiGenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt())
-			if genErr != nil {
-				s.log.WarnContext(ctx, "ai: AI_CHOOSE generation failed", "chunk_id", chunk.ID.String(), "err", genErr)
-			} else {
-				allItems = items
-			}
-		} else {
-			for _, kc := range plan.evenCounts {
-				handler := svcinteractions.Get(kc.kind)
-				if handler == nil {
-					s.log.WarnContext(ctx, "ai: no handler for kind, skipping", "kind", kc.kind)
-					continue
-				}
-				geminiGen, ok := handler.(svcinteractions.GeminiGenerator)
-				if !ok {
-					s.log.WarnContext(ctx, "ai: kind has no Gemini generator, skipping", "kind", kc.kind)
-					continue
-				}
-				kindStr := svcinteractions.KindToDBString(kc.kind)
-				batchSize := interactionGenerationBatchSize(kc.kind)
-				for remaining := kc.count; remaining > 0; {
-					batchCount := remaining
-					if batchCount > batchSize {
-						batchCount = batchSize
-					}
-					chunkCopy := chunk
-					chunkCopy.QuestionCountConfig = batchCount
-					items, genErr := s.interactionGen.runGeminiGenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt())
-					if genErr != nil {
-						s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "count", batchCount, "err", genErr)
-					} else {
-						allItems = append(allItems, items...)
-					}
-					remaining -= batchCount
-				}
-			}
-		}
-
-		if len(allItems) == 0 {
-			continue
-		}
-		if saved, saveErr := s.saveInteractionsForChunk(ctx, lessonID, chunk.ID, allItems); saveErr != nil {
-			s.log.ErrorContext(ctx, "ai: failed to save interactions for chunk",
-				"chunk_id", chunk.ID.String(), "err", saveErr)
-			if sendErr := send(&richterv1.GenerateInteractionsProgressEvent{
-				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message:     fmt.Sprintf("Lỗi lưu bài tập đoạn %d/%d: %s — bỏ qua, tiếp tục", i+1, total, saveErr.Error()),
-				ChunkIndex:  int32(i),
-				TotalChunks: total,
-			}); sendErr != nil {
-				return nil
-			}
-		} else {
-			savedThisRun += len(saved)
-			if sendErr := send(&richterv1.GenerateInteractionsProgressEvent{
-				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_CHUNK,
-				Message:     fmt.Sprintf("Hoàn thành đoạn %d/%d: %s (%d bài tập)", i+1, total, chunk.Summary, len(saved)),
-				ChunkIndex:  int32(i),
-				TotalChunks: total,
-			}); sendErr != nil {
-				return nil
-			}
-		}
-	}
-
-	if savedThisRun == 0 {
-		hasExistingInteractions := false
-		if req.GetChunkId() == "" {
-			existing, listErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
-				return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{LessonID: lessonID, Limit: 1, Offset: 0})
-			})
-			if listErr != nil {
-				s.log.WarnContext(ctx, "ai: failed to verify generated interactions", "err", listErr)
-			}
-			hasExistingInteractions = len(existing) > 0
-		}
-		if !hasExistingInteractions {
-			msg := "Không tạo được bài tập nào từ các phân đoạn hiện tại. Hãy kiểm tra transcript, cấu hình loại câu hỏi hoặc thử lại."
-			if req.GetChunkId() == "" {
-				_ = db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-					return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-						LessonID: lessonID,
-						Status:   gen.LessonAnalysisStatusError,
-						ErrorMsg: pgtype.Text{String: msg, Valid: true},
-					})
-				})
-			}
-			_ = send(&richterv1.GenerateInteractionsProgressEvent{
-				Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR,
-				Message:     msg,
-				TotalChunks: total,
-			})
-			return nil
-		}
-	}
-
-	if req.GetChunkId() == "" {
-		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusDone,
-				ErrorMsg: pgtype.Text{},
-			})
-		}); err != nil {
-			s.log.ErrorContext(ctx, "ai: failed to mark analysis done", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
-		}
-	}
-
-	return send(&richterv1.GenerateInteractionsProgressEvent{
-		Step:        richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_DONE,
-		TotalChunks: total,
+	return s.generation.Run(ctx, lessonID, req, func(step richterv1.GenerateInteractionsStep, msg string, chunkIndex, totalChunks int32) error {
+		return send(step, msg, chunkIndex, totalChunks)
 	})
 }
 

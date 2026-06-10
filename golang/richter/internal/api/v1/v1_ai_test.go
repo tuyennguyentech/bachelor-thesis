@@ -2410,4 +2410,150 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 			return err
 		}(), connect.CodePermissionDenied)
 	})
+
+	t.Run("TerminalTaskMessages", func(t *testing.T) {
+		adminToken := getAdminToken(t, e.url)
+		aiAdmin := richterv1connect.NewAIServiceClient(httpClientWithToken(adminToken), e.url)
+
+		pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+		tq := taskqueue.NewPostgresDB(pool)
+
+		parsedLessonID, _ := uuid.Parse(e.lessonID)
+		lessonIDpg := pgtype.UUID{Bytes: [16]byte(parsedLessonID), Valid: true}
+
+		parsedOwnerID, _ := uuid.Parse(e.ownerID)
+		ownerIDpg := pgtype.UUID{Bytes: [16]byte(parsedOwnerID), Valid: true}
+
+		// 1. Success case: message should be "Hoàn thành" and cleared in DB
+		taskIDRaw1, _ := uuid.NewV7()
+		task1ID := pgtype.UUID{Bytes: [16]byte(taskIDRaw1), Valid: true}
+		_, err := tq.CreateTask(ctx, task1ID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "transcribe", []byte("hello"))
+		if err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+		workerIDRaw1, _ := uuid.NewV7()
+		workerID1 := pgtype.UUID{Bytes: [16]byte(workerIDRaw1), Valid: true}
+		// Force state to processing with correct worker ID directly via raw SQL to avoid picking up tasks from other tests
+		err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "UPDATE tasks SET status = 'processing', worker_id = $1 WHERE id = $2", workerID1, task1ID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("failed to update status to processing: %v", err)
+		}
+		err = tq.UpdateTaskProgress(ctx, task1ID, "SAVING", 1, 10, "Đang lưu kết quả...")
+		if err != nil {
+			t.Fatalf("failed to update progress: %v", err)
+		}
+		err = tq.MarkSucceeded(ctx, task1ID, workerID1, []byte("output"))
+		if err != nil {
+			t.Fatalf("failed to mark succeeded: %v", err)
+		}
+
+		// Verify database message is empty string ''
+		dbTask1, err := tq.GetTask(ctx, task1ID)
+		if err != nil {
+			t.Fatalf("failed to get task from DB: %v", err)
+		}
+		if dbTask1.Message != "" {
+			t.Errorf("expected DB task message to be empty, got %q", dbTask1.Message)
+		}
+
+		// Verify GetLessonTask returns message="Hoàn thành"
+		res1, err := aiAdmin.GetLessonTask(ctx, &richterv1.GetLessonTaskRequest{TaskId: task1ID.String()})
+		if err != nil {
+			t.Fatalf("GetLessonTask failed: %v", err)
+		}
+		if res1.Task.Message != "Hoàn thành" {
+			t.Errorf("expected proto message to be 'Hoàn thành', got %q", res1.Task.Message)
+		}
+
+		// 2. Failed case: message should be "Thất bại" and cleared in DB
+		taskIDRaw2, _ := uuid.NewV7()
+		task2ID := pgtype.UUID{Bytes: [16]byte(taskIDRaw2), Valid: true}
+		_, err = tq.CreateTask(ctx, task2ID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "transcribe", []byte("hello"))
+		if err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+		workerIDRaw2, _ := uuid.NewV7()
+		workerID2 := pgtype.UUID{Bytes: [16]byte(workerIDRaw2), Valid: true}
+		// Force state to processing with correct worker ID directly via raw SQL
+		err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "UPDATE tasks SET status = 'processing', worker_id = $1 WHERE id = $2", workerID2, task2ID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("failed to update status to processing: %v", err)
+		}
+		err = tq.UpdateTaskProgress(ctx, task2ID, "SAVING", 1, 10, "Đang lưu kết quả...")
+		if err != nil {
+			t.Fatalf("failed to update progress: %v", err)
+		}
+		err = tq.MarkFailed(ctx, task2ID, workerID2, "some error")
+		if err != nil {
+			t.Fatalf("failed to mark failed: %v", err)
+		}
+
+		// Verify database message is empty string ''
+		dbTask2, err := tq.GetTask(ctx, task2ID)
+		if err != nil {
+			t.Fatalf("failed to get task from DB: %v", err)
+		}
+		if dbTask2.Message != "" {
+			t.Errorf("expected DB task message to be empty, got %q", dbTask2.Message)
+		}
+
+		// Verify GetLessonTask returns message="Thất bại"
+		res2, err := aiAdmin.GetLessonTask(ctx, &richterv1.GetLessonTaskRequest{TaskId: task2ID.String()})
+		if err != nil {
+			t.Fatalf("GetLessonTask failed: %v", err)
+		}
+		if res2.Task.Message != "Thất bại" {
+			t.Errorf("expected proto message to be 'Thất bại', got %q", res2.Task.Message)
+		}
+
+		// 3. Cancelled case: message should be "Đã hủy." and cleared in DB
+		taskIDRaw3, _ := uuid.NewV7()
+		task3ID := pgtype.UUID{Bytes: [16]byte(taskIDRaw3), Valid: true}
+		_, err = tq.CreateTask(ctx, task3ID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "transcribe", []byte("hello"))
+		if err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+		workerIDRaw3, _ := uuid.NewV7()
+		workerID3 := pgtype.UUID{Bytes: [16]byte(workerIDRaw3), Valid: true}
+		// Force state to processing with correct worker ID directly via raw SQL
+		err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
+			_, err := conn.Exec(ctx, "UPDATE tasks SET status = 'processing', worker_id = $1 WHERE id = $2", workerID3, task3ID)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("failed to update status to processing: %v", err)
+		}
+		err = tq.UpdateTaskProgress(ctx, task3ID, "SAVING", 1, 10, "Đang lưu kết quả...")
+		if err != nil {
+			t.Fatalf("failed to update progress: %v", err)
+		}
+		_, err = aiAdmin.CancelLessonTask(ctx, &richterv1.CancelLessonTaskRequest{TaskId: task3ID.String()})
+		if err != nil {
+			t.Fatalf("CancelLessonTask failed: %v", err)
+		}
+
+		// Verify database message is empty string ''
+		dbTask3, err := tq.GetTask(ctx, task3ID)
+		if err != nil {
+			t.Fatalf("failed to get task from DB: %v", err)
+		}
+		if dbTask3.Message != "" {
+			t.Errorf("expected DB task message to be empty, got %q", dbTask3.Message)
+		}
+
+		// Verify GetLessonTask returns message="Đã hủy."
+		res3, err := aiAdmin.GetLessonTask(ctx, &richterv1.GetLessonTaskRequest{TaskId: task3ID.String()})
+		if err != nil {
+			t.Fatalf("GetLessonTask failed: %v", err)
+		}
+		if res3.Task.Message != "Đã hủy." {
+			t.Errorf("expected proto message to be 'Đã hủy.', got %q", res3.Task.Message)
+		}
+	})
 }

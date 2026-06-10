@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -36,28 +35,12 @@ func init() {
 }
 
 type StorageSvc struct {
-	client *minio.Client
-	cfg    *cfg.S3Cfg
-	authz  *authz.AuthzSvc
-	pg     *db.PostgresSvc
-
-	// studentUploadLimits guards the student audio upload endpoint against
-	// abuse (a malicious learner spam-uploading MB of audio per request).
-	// 5 uploads per user per lesson per rolling minute. Per-process; for a
-	// multi-instance deployment the limit would scale with instance count.
-	studentUploadLimits sync.Map // map[string]*uploadCounter
+	client        *minio.Client
+	cfg           *cfg.S3Cfg
+	authz         *authz.AuthzSvc
+	pg            *db.PostgresSvc
+	uploadLimiter UploadRateLimiter
 }
-
-type uploadCounter struct {
-	mu      sync.Mutex
-	count   int
-	resetAt time.Time
-}
-
-const (
-	studentUploadsPerWindow = 5
-	studentUploadWindow     = time.Minute
-)
 
 var _ richterv1connect.StorageServiceHandler = (*StorageSvc)(nil)
 
@@ -74,6 +57,10 @@ func NewStorageSvc(i do.Injector) (*StorageSvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("PostgresSvc cannot be invoked: %w", err)
 	}
+	storageCfg, err := do.Invoke[*cfg.StorageCfg](i)
+	if err != nil {
+		return nil, fmt.Errorf("StorageCfg cannot be invoked: %w", err)
+	}
 
 	client, err := minio.New(s3cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(s3cfg.AccessKeyID, s3cfg.SecretAccessKey, ""),
@@ -83,7 +70,13 @@ func NewStorageSvc(i do.Injector) (*StorageSvc, error) {
 		return nil, fmt.Errorf("minio client init: %w", err)
 	}
 
-	return &StorageSvc{client: client, cfg: s3cfg, authz: az, pg: pg}, nil
+	return &StorageSvc{
+		client:        client,
+		cfg:           s3cfg,
+		authz:         az,
+		pg:            pg,
+		uploadLimiter: NewUploadRateLimiter(*storageCfg),
+	}, nil
 }
 
 func (s *StorageSvc) Handler() (string, http.Handler) {
@@ -297,28 +290,8 @@ func rewritePresignedURL(raw string, c *cfg.S3Cfg) string {
 }
 
 // allowStudentUpload reports whether a student may issue another presigned
-// upload for the given key. Uses a per-process rolling minute window.
+// upload for the given key. Delegates to the swappable UploadRateLimiter
+// strategy (in-memory today, FDB/Redis-ready).
 func (s *StorageSvc) allowStudentUpload(userID, key string) bool {
-	if userID == "" {
-		return true // unauthenticated case already rejected above; defensive.
-	}
-	parts := strings.SplitN(normalizeStorageKey(key), "/", 4)
-	if len(parts) < 2 || parts[1] == "" {
-		return true // malformed keys are rejected by orgIDForKey before this point.
-	}
-	bucket := userID + "|" + parts[1]
-	now := time.Now()
-	iface, _ := s.studentUploadLimits.LoadOrStore(bucket, &uploadCounter{resetAt: now.Add(studentUploadWindow)})
-	c := iface.(*uploadCounter)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if now.After(c.resetAt) {
-		c.count = 0
-		c.resetAt = now.Add(studentUploadWindow)
-	}
-	if c.count >= studentUploadsPerWindow {
-		return false
-	}
-	c.count++
-	return true
+	return s.uploadLimiter.Allow(userID, key)
 }

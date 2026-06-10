@@ -15,6 +15,13 @@ var Injector = internal.Injector.Scope("log")
 
 var Package = do.Package(
 	do.Lazy(NewLogSvc),
+	do.Lazy(func(i do.Injector) (*slog.Logger, error) {
+		logSvc, err := do.Invoke[*LogSvc](i)
+		if err != nil {
+			return nil, err
+		}
+		return &logSvc.Logger, nil
+	}),
 )
 
 type LogSvc struct {

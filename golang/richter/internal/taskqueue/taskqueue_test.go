@@ -4,6 +4,7 @@ package taskqueue
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"example.com/richter/internal/db"
 	"example.com/sql/gen"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
@@ -30,6 +32,31 @@ func (t *testExecutor) Execute(ctx context.Context, env *Env) ([]byte, error) {
 	return []byte("test-success"), nil
 }
 
+var (
+	activeControlledExecMutex sync.Mutex
+	activeControlledExec      *controlledExecutor
+)
+
+type controlledExecutor struct {
+	started chan struct{}
+	release chan struct{}
+	done    chan struct{}
+	err     error
+	output  []byte
+}
+
+func (e *controlledExecutor) Kind() string { return "controlled_task" }
+func (e *controlledExecutor) Execute(ctx context.Context, env *Env) ([]byte, error) {
+	close(e.started)
+	select {
+	case <-e.release:
+		close(e.done)
+		return e.output, e.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 var registerOnce sync.Once
 
 func setupTestRegistry(fn func(ctx context.Context, env *Env) ([]byte, error)) {
@@ -37,7 +64,47 @@ func setupTestRegistry(fn func(ctx context.Context, env *Env) ([]byte, error)) {
 		Register("test_task", func() Executor {
 			return &testExecutor{executeFunc: fn}
 		})
+		Register("controlled_task", func() Executor {
+			activeControlledExecMutex.Lock()
+			defer activeControlledExecMutex.Unlock()
+			return activeControlledExec
+		})
 	})
+}
+
+type runGroup struct {
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func newRunGroup(parent context.Context) *runGroup {
+	ctx, cancel := context.WithCancel(parent)
+	return &runGroup{
+		ctx:    ctx,
+		cancel: cancel,
+	}
+}
+
+func (rg *runGroup) StartWorker(w *Worker) {
+	rg.wg.Add(1)
+	go func() {
+		defer rg.wg.Done()
+		w.Run(rg.ctx)
+	}()
+}
+
+func (rg *runGroup) StartScanner(s *Scanner) {
+	rg.wg.Add(1)
+	go func() {
+		defer rg.wg.Done()
+		s.Run(rg.ctx)
+	}()
+}
+
+func (rg *runGroup) Close() {
+	rg.cancel()
+	rg.wg.Wait()
 }
 
 func getOrCreateTestUserAndLesson(t *testing.T, pool *db.PostgresSvc) (pgtype.UUID, pgtype.UUID) {
@@ -402,4 +469,616 @@ func TestTaskqueue_WorkerCrashAndRecovery(t *testing.T) {
 	}
 	t.Fatalf("task was not recovered and processed by worker 2 in time")
 }
+
+var (
+	stealBlocked  = make(chan struct{})
+	cancelBlocked = make(chan struct{})
+)
+
+var registerStealOnce sync.Once
+
+func setupStealRegistry() {
+	registerStealOnce.Do(func() {
+		Register("test_steal_task", func() Executor {
+			return &testExecutor{
+				executeFunc: func(ctx context.Context, env *Env) ([]byte, error) {
+					close(stealBlocked)
+					<-ctx.Done()
+					return nil, ctx.Err()
+				},
+			}
+		})
+	})
+}
+
+var registerCancelOnce sync.Once
+
+func setupCancelRegistry() {
+	registerCancelOnce.Do(func() {
+		Register("test_cancel_task", func() Executor {
+			return &testExecutor{
+				executeFunc: func(ctx context.Context, env *Env) ([]byte, error) {
+					close(cancelBlocked)
+					<-ctx.Done()
+					return nil, ctx.Err()
+				},
+			}
+		})
+	})
+}
+
+func TestTaskqueue_WorkerHeartbeatSteal(t *testing.T) {
+	setupStealRegistry()
+
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.Default()
+	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(1 * time.Second)
+
+	worker := NewWorkerRaw(tq, logger, scanner.NotifCh())
+	worker.heartbeat = 50 * time.Millisecond
+	worker.pollIdle = 50 * time.Millisecond
+
+	go scanner.Run(ctx)
+	go worker.Run(ctx)
+
+	taskIDRaw, _ := uuid.NewV7()
+	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
+	_, err := tq.CreateTask(ctx, taskID, lessonID, pgtype.UUID{}, userID, "test_steal_task", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-stealBlocked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker to claim task")
+	}
+
+	otherWorkerIDRaw, _ := uuid.NewV7()
+	otherWorkerID := pgtype.UUID{Bytes: [16]byte(otherWorkerIDRaw), Valid: true}
+	err = db.WithConnectionExec(pool, context.Background(), func(q *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(context.Background(), `
+			UPDATE tasks
+			SET worker_id = $2
+			WHERE id = $1`,
+			taskID, otherWorkerID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to update worker_id: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	task, err := tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if task.Status != string(StatusProcessing) {
+		t.Errorf("expected task status to remain processing, got %s", task.Status)
+	}
+	if task.WorkerID.Bytes != otherWorkerID.Bytes {
+		t.Errorf("expected worker_id to remain otherWorkerID, got %s", task.WorkerID.String())
+	}
+}
+
+func TestTaskqueue_WorkerCancelPropagation(t *testing.T) {
+	setupCancelRegistry()
+
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.Default()
+	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(1 * time.Second)
+
+	worker := NewWorkerRaw(tq, logger, scanner.NotifCh())
+	worker.heartbeat = 50 * time.Millisecond
+	worker.pollIdle = 50 * time.Millisecond
+
+	go scanner.Run(ctx)
+	go worker.Run(ctx)
+
+	taskIDRaw, _ := uuid.NewV7()
+	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
+	_, err := tq.CreateTask(ctx, taskID, lessonID, pgtype.UUID{}, userID, "test_cancel_task", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-cancelBlocked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker to claim task")
+	}
+
+	err = tq.MarkCancelled(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	task, err := tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusCancelled) {
+		t.Errorf("expected task status to be cancelled, got %s", task.Status)
+	}
+}
+
+func TestPostgresDB_OptimisticConcurrency(t *testing.T) {
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	ctx := context.Background()
+	taskIDRaw, _ := uuid.NewV7()
+	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
+
+	// 1. Tạo task (pending)
+	_, err := tq.CreateTask(ctx, taskID, lessonID, pgtype.UUID{}, userID, "test_task", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Đẩy sang inqueued
+	_, err = tq.EnqueuePendingBatch(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workerID1Raw, _ := uuid.NewV7()
+	workerID1 := pgtype.UUID{Bytes: [16]byte(workerID1Raw), Valid: true}
+
+	// Worker 1 claim -> status=processing, worker_id=workerID1
+	_, err = tq.ClaimNextInqueuedTask(ctx, workerID1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// --- Case 1b: Scanner đã reap đưa về inqueued, worker_id = NULL ---
+	err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(ctx, `
+			UPDATE tasks
+			SET status = 'inqueued', worker_id = NULL, heartbeat = NULL
+			WHERE id = $1`,
+			taskID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Worker 1 thức dậy cố gắng hoàn thành task thành công
+	err = tq.MarkSucceeded(ctx, taskID, workerID1, []byte("out1"))
+	if err != nil {
+		t.Errorf("MarkSucceeded should not return error, got %v", err)
+	}
+
+	// Kiểm tra: trạng thái task phải giữ nguyên là 'inqueued', worker_id phải là NULL (không bị Worker 1 ghi đè)
+	task, err := tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusInqueued) {
+		t.Errorf("expected status to remain inqueued, got %s", task.Status)
+	}
+	if task.WorkerID.Valid {
+		t.Errorf("expected worker_id to remain NULL, got %s", task.WorkerID.String())
+	}
+
+	// --- Case 2: Worker 2 đã claim -> status=processing, worker_id=workerID2 ---
+	workerID2Raw, _ := uuid.NewV7()
+	workerID2 := pgtype.UUID{Bytes: [16]byte(workerID2Raw), Valid: true}
+	_, err = tq.ClaimNextInqueuedTask(ctx, workerID2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Worker 1 thức dậy cố gắng ghi đè kết quả thất bại (MarkFailed)
+	err = tq.MarkFailed(ctx, taskID, workerID1, "error-from-worker-1")
+	if err != nil {
+		t.Errorf("MarkFailed should not return error, got %v", err)
+	}
+
+	// Kiểm tra: trạng thái task phải giữ nguyên là 'processing' của Worker 2
+	task, err = tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusProcessing) {
+		t.Errorf("expected status to remain processing, got %s", task.Status)
+	}
+	if task.WorkerID.Bytes != workerID2.Bytes {
+		t.Errorf("expected worker_id to remain workerID2, got %s", task.WorkerID.String())
+	}
+}
+
+func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
+	setupTestRegistry(nil)
+
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	exec := &controlledExecutor{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		done:    make(chan struct{}),
+		output:  []byte("success-on-late-wakeup"),
+	}
+	activeControlledExecMutex.Lock()
+	activeControlledExec = exec
+	activeControlledExecMutex.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := slog.Default()
+	worker := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker.heartbeat = 1 * time.Hour
+	worker.pollIdle = 50 * time.Millisecond
+
+	go worker.Run(ctx)
+
+	taskIDRaw, _ := uuid.NewV7()
+	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
+	_, err := tq.CreateTask(ctx, taskID, lessonID, pgtype.UUID{}, userID, "controlled_task", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tq.EnqueuePendingBatch(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-exec.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker to claim task")
+	}
+
+	task, err := tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusProcessing) {
+		t.Fatalf("expected status to be processing, got %s", task.Status)
+	}
+
+	err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(ctx, `
+			UPDATE tasks
+			SET heartbeat = $2
+			WHERE id = $1`,
+			taskID, time.Now().UTC().Add(-2*time.Hour))
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	close(exec.release)
+
+	select {
+	case <-exec.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for executor to complete")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	task, err = tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusSucceeded) {
+		t.Errorf("expected status to be succeeded, got %s", task.Status)
+	}
+	if string(task.OutputPayload) != "success-on-late-wakeup" {
+		t.Errorf("expected output to be success-on-late-wakeup, got %s", string(task.OutputPayload))
+	}
+
+	// Verify that worker 2 ignores (cannot claim) the succeeded task
+	worker2IDRaw, _ := uuid.NewV7()
+	worker2ID := pgtype.UUID{Bytes: [16]byte(worker2IDRaw), Valid: true}
+	_, err = tq.ClaimNextInqueuedTask(ctx, worker2ID)
+	if err == nil {
+		t.Error("expected worker 2 to fail claiming succeeded task, but got no error")
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("expected pgx.ErrNoRows when worker 2 claims task, got: %v", err)
+	}
+
+	// Verify that scanner ignores (cannot reap) the succeeded task
+	reaped, err := tq.ReapStaleProcessingBatch(ctx, 1, 0)
+	if err != nil {
+		t.Fatalf("ReapStaleProcessingBatch failed: %v", err)
+	}
+	if len(reaped) > 0 {
+		t.Errorf("expected 0 tasks to be reaped, got %d", len(reaped))
+	}
+
+	// Verify task status remains succeeded and worker_id is cleared as per MarkSucceeded behavior
+	finalTask, err := tq.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalTask.Status != string(StatusSucceeded) {
+		t.Errorf("expected status to remain succeeded, got %s", finalTask.Status)
+	}
+	if finalTask.WorkerID.Valid {
+		t.Errorf("expected worker_id to be cleared (NULL) after success, got %s", finalTask.WorkerID.String())
+	}
+}
+
+func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
+	setupTestRegistry(nil)
+
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	exec1 := &controlledExecutor{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		done:    make(chan struct{}),
+		output:  []byte("out1"),
+	}
+	activeControlledExecMutex.Lock()
+	activeControlledExec = exec1
+	activeControlledExecMutex.Unlock()
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+
+	logger := slog.Default()
+	worker1 := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker1.heartbeat = 1 * time.Hour
+	worker1.pollIdle = 50 * time.Millisecond
+
+	go worker1.Run(ctx1)
+
+	taskIDRaw, _ := uuid.NewV7()
+	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
+	_, err := tq.CreateTask(ctx1, taskID, lessonID, pgtype.UUID{}, userID, "controlled_task", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tq.EnqueuePendingBatch(ctx1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-exec1.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker 1 to claim task")
+	}
+
+	_, err = tq.ReapStaleProcessingBatch(ctx1, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := tq.GetTask(ctx1, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusInqueued) {
+		t.Fatalf("expected status after reap to be inqueued, got %s", task.Status)
+	}
+
+	exec2 := &controlledExecutor{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		done:    make(chan struct{}),
+		output:  []byte("success-from-worker-2"),
+	}
+	activeControlledExecMutex.Lock()
+	activeControlledExec = exec2
+	activeControlledExecMutex.Unlock()
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+
+	worker2 := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker2.heartbeat = 1 * time.Hour
+	worker2.pollIdle = 50 * time.Millisecond
+
+	go worker2.Run(ctx2)
+
+	select {
+	case <-exec2.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker 2 to claim task")
+	}
+
+	close(exec1.release)
+	select {
+	case <-exec1.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker 1 executor to finish")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	task, err = tq.GetTask(ctx1, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusProcessing) {
+		t.Errorf("expected status to remain processing, got %s", task.Status)
+	}
+	if task.WorkerID.Bytes != uuidBytes(worker2.WorkerID()) {
+		t.Errorf("expected worker_id to remain worker2's id, got %s", task.WorkerID.String())
+	}
+
+	close(exec2.release)
+	select {
+	case <-exec2.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for worker 2 executor to finish")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	task, err = tq.GetTask(ctx1, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != string(StatusSucceeded) {
+		t.Errorf("expected status to be succeeded, got %s", task.Status)
+	}
+	if string(task.OutputPayload) != "success-from-worker-2" {
+		t.Errorf("expected output to be success-from-worker-2, got %s", string(task.OutputPayload))
+	}
+}
+
+var (
+	parallelRegisterOnce     sync.Once
+	activeParallelCoordMutex sync.Mutex
+	activeParallelCoord      *parallelCoordinator
+)
+
+type parallelCoordinator struct {
+	started     chan struct{}
+	bothStarted chan struct{}
+	release     chan struct{}
+	mu          sync.Mutex
+	count       int
+}
+
+func (c *parallelCoordinator) taskStarted() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.count++
+	if c.count == 1 {
+		close(c.started)
+	} else if c.count == 2 {
+		close(c.bothStarted)
+	}
+}
+
+type parallelExecutor struct {
+	coord *parallelCoordinator
+}
+
+func (e *parallelExecutor) Kind() string { return "parallel_test_task" }
+func (e *parallelExecutor) Execute(ctx context.Context, env *Env) ([]byte, error) {
+	e.coord.taskStarted()
+	select {
+	case <-e.coord.release:
+		return []byte("success-parallel"), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestTaskqueue_TasksRunInParallel(t *testing.T) {
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	coord := &parallelCoordinator{
+		started:     make(chan struct{}),
+		bothStarted: make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+
+	activeParallelCoordMutex.Lock()
+	activeParallelCoord = coord
+	activeParallelCoordMutex.Unlock()
+
+	parallelRegisterOnce.Do(func() {
+		Register("parallel_test_task", func() Executor {
+			activeParallelCoordMutex.Lock()
+			defer activeParallelCoordMutex.Unlock()
+			return &parallelExecutor{coord: activeParallelCoord}
+		})
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 1. Create two parallel tasks
+	task1IDRaw, _ := uuid.NewV7()
+	task1ID := pgtype.UUID{Bytes: [16]byte(task1IDRaw), Valid: true}
+	_, err := tq.CreateTask(ctx, task1ID, lessonID, pgtype.UUID{}, userID, "parallel_test_task", []byte("t1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task2IDRaw, _ := uuid.NewV7()
+	task2ID := pgtype.UUID{Bytes: [16]byte(task2IDRaw), Valid: true}
+	_, err = tq.CreateTask(ctx, task2ID, lessonID, pgtype.UUID{}, userID, "parallel_test_task", []byte("t2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Enqueue both
+	_, err = tq.EnqueuePendingBatch(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Start worker
+	logger := slog.Default()
+	worker := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker.heartbeat = 1 * time.Hour
+	worker.pollIdle = 50 * time.Millisecond
+
+	go worker.Run(ctx)
+
+	// 4. Verify both tasks start running concurrently (both must hit Execute simultaneously)
+	select {
+	case <-coord.bothStarted:
+		// Success! Both tasks are running in parallel
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for tasks to run in parallel; they might be serialized")
+	}
+
+	// 5. Release them so they can complete
+	close(coord.release)
+
+	// Wait for processing to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// 6. Verify database status shows both succeeded
+	t1, err := tq.GetTask(ctx, task1ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t1.Status != string(StatusSucceeded) {
+		t.Errorf("expected task 1 to be succeeded, got %s", t1.Status)
+	}
+
+	t2, err := tq.GetTask(ctx, task2ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t2.Status != string(StatusSucceeded) {
+		t.Errorf("expected task 2 to be succeeded, got %s", t2.Status)
+	}
+}
+
+
+
 

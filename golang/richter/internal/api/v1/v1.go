@@ -5,6 +5,7 @@ import (
 
 	"example.com/richter/internal"
 	"example.com/richter/internal/svc/ai"
+	_ "example.com/richter/internal/svc/aitasks/executors"
 	"example.com/richter/internal/svc/auth"
 	"example.com/richter/internal/svc/coursemodules"
 	"example.com/richter/internal/svc/courses"

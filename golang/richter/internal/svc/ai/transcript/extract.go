@@ -6,7 +6,6 @@ import (
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
-	"example.com/richter/internal/svc"
 	"example.com/richter/internal/svc/ai/segment"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,44 +40,12 @@ func (s *Service) RunExtract(
 	}
 	defer s.Locks.Release(lessonIDStr, lock)
 
-	if err := db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
-			LessonID: lessonID, Status: gen.LessonAnalysisStatusProcessing, ErrorMsg: pgtype.Text{},
-		})
-		return err
-	}); err != nil {
-		return err
-	}
-
-	// If the server is killed (SIGTERM) or panics while PROCESSING, reset
-	// status to ERROR so the user can retry instead of being stuck with
-	// a spinning "Đang xử lý…".
-	statusFinalized := false
-	defer func() {
-		if statusFinalized {
-			return
-		}
-		bgCtx, bgCancel := s.AiCtx(context.Background(), s.AiCfg.BackgroundTaskTimeout)
-		defer bgCancel()
-		if _, err := db.WithConnection(s.Postgres, bgCtx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-			return q.UpsertLessonAnalysisStatus(bgCtx, gen.UpsertLessonAnalysisStatusParams{
-				LessonID: lessonID,
-				Status:   gen.LessonAnalysisStatusError,
-				ErrorMsg: pgtype.Text{String: "Quá trình bị gián đoạn. Vui lòng thử lại.", Valid: true},
-			})
-		}); err != nil {
-			s.Log.ErrorContext(bgCtx, "ai: cleanup defer: failed to reset stuck PROCESSING status", "err", err)
-		}
-	}()
-
-	// Clear stale FDB data immediately after PROCESSING is set so
-	// GetLessonAnalysis won't return transcript/segments from a
-	// previously-analyzed video.
+	// Clear stale FDB data immediately so GetLessonAnalysis won't
+	// return transcript/segments from a previously-analyzed video.
 	segment.DeleteLessonTranscripts(s.KV, lessonIDStr)
 
 	transcriptText, segs, extractErr := s.Transcription(ctx, videoKey, progress)
 	if extractErr != nil {
-		statusFinalized = s.PersistExtractError(ctx, lessonID, extractErr.Error())
 		return extractErr
 	}
 
@@ -124,15 +91,5 @@ func (s *Service) RunExtract(
 		_ = segment.DeleteChunkTranscript(s.KV, id)
 	}
 
-	if err := db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		return q.UpdateLessonAnalysisStatus(ctx, gen.UpdateLessonAnalysisStatusParams{
-			LessonID: lessonID,
-			Status:   gen.LessonAnalysisStatusTranscriptExtracted,
-			ErrorMsg: pgtype.Text{},
-		})
-	}); err != nil {
-		s.Log.ErrorContext(ctx, "ai: failed to update analysis status", svc.LogAttrs("UpdateLessonAnalysisStatus", err)...)
-	}
-	statusFinalized = true
 	return nil
 }
