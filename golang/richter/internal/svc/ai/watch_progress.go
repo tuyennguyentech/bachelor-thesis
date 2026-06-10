@@ -6,12 +6,8 @@ import (
 
 	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
-	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
-	"example.com/sql/gen"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func (s *AISvc) UpdateWatchProgress(
@@ -22,13 +18,7 @@ func (s *AISvc) UpdateWatchProgress(
 	if err != nil {
 		return nil, err
 	}
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	claims, err := s.authz.RequireOrgMember(ctx, orgID)
+	claims, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID)
 	if err != nil {
 		return nil, err
 	}
@@ -46,13 +36,7 @@ func (s *AISvc) GetWatchProgress(
 	if err != nil {
 		return nil, err
 	}
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	claims, err := s.authz.RequireOrgMember(ctx, orgID)
+	claims, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID)
 	if err != nil {
 		return nil, err
 	}

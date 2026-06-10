@@ -2,9 +2,7 @@ package lessons
 
 import (
 	"context"
-	"fmt"
 
-	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
@@ -56,25 +54,16 @@ func (s *LessonsSvc) GetLessonById(
 	ctx context.Context,
 	req *richterv1.GetLessonByIdRequest,
 ) (*richterv1.GetLessonByIdResponse, error) {
-	claims, err := s.authz.RequireAuthenticated(ctx)
+	lessonID, err := svc.ParseUUID(req.GetId())
 	if err != nil {
+		return nil, err
+	}
+	if _, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID); err != nil {
 		return nil, err
 	}
 	l, err := s.fetchLesson(ctx, req.GetId())
 	if err != nil {
-		if connect.CodeOf(err) == connect.CodeNotFound && claims.GetRole() != richterv1.UserRole_USER_ROLE_ADMIN {
-			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("not a member of this organization"))
-		}
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("GetLessonById", err)...)
-		return nil, err
-	}
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, l.ID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetLessonByIdResponse{Lesson: LessonToProto(l)}, nil
@@ -90,13 +79,11 @@ func (s *LessonsSvc) ListLessons(
 		return nil, err
 	}
 
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByCourseModuleID(ctx, moduleID)
-	})
+	module, err := s.fetchModule(ctx, moduleID.String())
 	if err != nil {
-		return nil, svc.ConnectDBError(err)
+		return nil, err
 	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+	if _, err := s.authz.RequireCourseMember(ctx, module.CourseID); err != nil {
 		return nil, err
 	}
 
@@ -129,12 +116,7 @@ func (s *LessonsSvc) ListLessonsByCourse(
 		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("ListLessonsByCourse.ParseUUID", err)...)
 		return nil, err
 	}
-	course, err := s.fetchCourse(ctx, courseID)
-	if err != nil {
-		s.log.ErrorContext(ctx, "lessons service failed", svc.LogAttrs("ListLessonsByCourse.fetchCourse", err)...)
-		return nil, err
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, course.OrganizationID); err != nil {
+	if _, err := s.authz.RequireCourseMember(ctx, courseID); err != nil {
 		return nil, err
 	}
 

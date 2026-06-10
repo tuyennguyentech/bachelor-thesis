@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+enum CourseRole {
+  COURSE_ROLE_UNSPECIFIED = 0;
+  COURSE_ROLE_TEACHER = 1;
+  COURSE_ROLE_STUDENT = 2;
+}
+
+message CourseMember {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  CourseRole role = 3 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  // Embedded user info (populated by list queries via JOIN — avoids separate getUserById calls)
+  string user_email = 6;
+  string user_first_name = 7;
+  string user_last_name = 8;
+}
+
+message AddCourseMemberRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  CourseRole role = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message AddCourseMemberResponse {
+  CourseMember member = 1;
+}
+
+message RemoveCourseMemberRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message RemoveCourseMemberResponse {}
+
+message ListCourseMembersRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListCourseMembersResponse {
+  repeated CourseMember members = 1;
+}
+
+message ListUserCoursesRequest {
+  string user_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListUserCoursesResponse {
+  repeated CourseMember memberships = 1;
+}
+
+service CourseMemberService {
+  rpc AddCourseMember(AddCourseMemberRequest) returns (AddCourseMemberResponse) {}
+  rpc RemoveCourseMember(RemoveCourseMemberRequest) returns (RemoveCourseMemberResponse) {}
+  rpc ListCourseMembers(ListCourseMembersRequest) returns (ListCourseMembersResponse) {}
+  rpc ListUserCourses(ListUserCoursesRequest) returns (ListUserCoursesResponse) {}
+}

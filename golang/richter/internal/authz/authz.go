@@ -189,6 +189,83 @@ func (a *AuthzSvc) RequireOrgRole(ctx context.Context, orgID pgtype.UUID, roles 
 	return nil, connect.NewError(connect.CodePermissionDenied, errors.New("insufficient organization role"))
 }
 
+// RequireCourseMember returns claims if the authenticated user may access the
+// course content (read/open lessons). Bypass rules (always allowed):
+//   - system ADMIN (USER_ROLE_ADMIN)
+//   - course owner (course.owner_id == caller)
+//   - org owner or org admin (active membership)
+//   - explicit course member (entry in course_members table)
+//
+// All other org members receive PermissionDenied.
+func (a *AuthzSvc) RequireCourseMember(ctx context.Context, courseID pgtype.UUID) (*jwtv1.JWTClaims, error) {
+	claims, err := a.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// SYS_ADMIN bypasses all checks.
+	if claims.GetRole() == richterv1.UserRole_USER_ROLE_ADMIN {
+		return claims, nil
+	}
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+	info, err := db.WithConnection(a.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.GetCourseAccessInfoByCourseIDRow, error) {
+		return q.GetCourseAccessInfoByCourseID(ctx, courseID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("course not found or access denied"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	// Course owner always passes.
+	if info.OwnerID == userID {
+		return claims, nil
+	}
+	// Org owner/admin always passes.
+	orgMember, err := db.WithConnection(a.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+		return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: info.OrganizationID,
+			UserID:         userID,
+		})
+	})
+	if err == nil && orgMember.Status == gen.MemberStatusActive {
+		if orgMember.Role == gen.OrganizationRoleOwner || orgMember.Role == gen.OrganizationRoleAdmin {
+			return claims, nil
+		}
+	}
+	// Explicit course member passes.
+	isMember, err := db.WithConnection(a.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (bool, error) {
+		return q.IsCourseMember(ctx, gen.IsCourseMemberParams{
+			CourseID: courseID,
+			UserID:   userID,
+		})
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	if isMember {
+		return claims, nil
+	}
+	return nil, connect.NewError(connect.CodePermissionDenied, errors.New("not a member of this course"))
+}
+
+// RequireCourseMemberByLesson resolves the course from the lesson and delegates
+// to RequireCourseMember.
+func (a *AuthzSvc) RequireCourseMemberByLesson(ctx context.Context, lessonID pgtype.UUID) (*jwtv1.JWTClaims, error) {
+	info, err := db.WithConnection(a.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.GetCourseAccessInfoByLessonIDRow, error) {
+		return q.GetCourseAccessInfoByLessonID(ctx, lessonID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("lesson not found or access denied"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	return a.RequireCourseMember(ctx, info.CourseID)
+}
+
 // ContextWithClaims injects JWT claims into context. Exported for use in tests.
 func ContextWithClaims(ctx context.Context, claims *jwtv1.JWTClaims) context.Context {
 	return context.WithValue(ctx, ctxKey{}, claims)

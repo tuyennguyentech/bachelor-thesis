@@ -30,15 +30,18 @@ func (s *AISvc) GetLessonAnalysis(
 		return nil, err
 	}
 
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
+	if _, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID); err != nil {
+		return nil, err
+	}
+
+	// Resolve org ID for the teacher-role check below.
+	courseInfo, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.GetCourseAccessInfoByLessonIDRow, error) {
+		return q.GetCourseAccessInfoByLessonID(ctx, lessonID)
 	})
 	if err != nil {
 		return nil, svc.ConnectDBError(err)
 	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
-		return nil, err
-	}
+	orgID := courseInfo.OrganizationID
 
 	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
 		return q.GetLessonByID(ctx, lessonID)

@@ -338,13 +338,7 @@ func (s *AISvc) CancelLessonTask(
 }
 
 func (s *AISvc) requireLessonMember(ctx context.Context, lessonID pgtype.UUID) error {
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return svc.ConnectDBError(err)
-	}
-	_, err = s.authz.RequireOrgMember(ctx, orgID)
+	_, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID)
 	return err
 }
 

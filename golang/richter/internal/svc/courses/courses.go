@@ -116,19 +116,16 @@ func (s *CoursesSvc) GetCourseById(
 	ctx context.Context,
 	req *richterv1.GetCourseByIdRequest,
 ) (*richterv1.GetCourseByIdResponse, error) {
-	claims, err := s.authz.RequireAuthenticated(ctx)
+	courseID, err := svc.ParseUUID(req.GetId())
 	if err != nil {
+		return nil, err
+	}
+	if _, err := s.authz.RequireCourseMember(ctx, courseID); err != nil {
 		return nil, err
 	}
 	course, err := s.fetchCourse(ctx, req.GetId())
 	if err != nil {
-		if connect.CodeOf(err) == connect.CodeNotFound && claims.GetRole() != richterv1.UserRole_USER_ROLE_ADMIN {
-			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("not a member of this organization"))
-		}
 		s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("GetCourseById", err)...)
-		return nil, err
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, course.OrganizationID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetCourseByIdResponse{Course: CourseToProto(course)}, nil
@@ -143,42 +140,97 @@ func (s *CoursesSvc) ListCourses(
 		s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("ListCourses.ParseUUID", err)...)
 		return nil, err
 	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+	claims, err := s.authz.RequireOrgMember(ctx, orgID)
+	if err != nil {
 		return nil, err
 	}
+	callerID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalid token subject"))
+	}
 
-	var courses []gen.Course
+	type courseWithAccess struct {
+		course    gen.Course
+		canAccess bool
+	}
+
+	var rows []courseWithAccess
 	if req.Q != nil && *req.Q != "" {
-		courses, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
-			return q.ListCoursesByOrgAndTitleFilter(ctx, gen.ListCoursesByOrgAndTitleFilterParams{
+		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndTitleFilterRow, error) {
+			return q.ListCoursesWithAccessAndTitleFilter(ctx, gen.ListCoursesWithAccessAndTitleFilterParams{
 				OrganizationID: orgID,
-				Column2:        req.GetQ(),
+				OwnerID:        callerID,
+				Column3:        req.GetQ(),
 				Limit:          req.GetLimit(),
 				Offset:         req.GetOffset(),
 			})
 		})
+		if qErr != nil {
+			err = qErr
+		} else {
+			for _, r := range result {
+				rows = append(rows, courseWithAccess{
+					course: gen.Course{
+						ID: r.ID, OrganizationID: r.OrganizationID, OwnerID: r.OwnerID,
+						Title: r.Title, Description: r.Description, Status: r.Status,
+						CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+					},
+					canAccess: r.CanAccess.Bool,
+				})
+			}
+		}
 	} else if req.StatusFilter != nil {
 		sqlStatus, statusErr := CourseStatusToSQL(req.GetStatusFilter())
 		if statusErr != nil {
 			s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("ListCourses.StatusToSQL", statusErr)...)
 			return nil, statusErr
 		}
-		courses, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
-			return q.ListCoursesByOrgAndStatus(ctx, gen.ListCoursesByOrgAndStatusParams{
+		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndStatusRow, error) {
+			return q.ListCoursesWithAccessAndStatus(ctx, gen.ListCoursesWithAccessAndStatusParams{
 				OrganizationID: orgID,
+				OwnerID:        callerID,
 				Status:         sqlStatus,
 				Limit:          req.GetLimit(),
 				Offset:         req.GetOffset(),
 			})
 		})
+		if qErr != nil {
+			err = qErr
+		} else {
+			for _, r := range result {
+				rows = append(rows, courseWithAccess{
+					course: gen.Course{
+						ID: r.ID, OrganizationID: r.OrganizationID, OwnerID: r.OwnerID,
+						Title: r.Title, Description: r.Description, Status: r.Status,
+						CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+					},
+					canAccess: r.CanAccess.Bool,
+				})
+			}
+		}
 	} else {
-		courses, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Course, error) {
-			return q.ListCoursesByOrg(ctx, gen.ListCoursesByOrgParams{
+		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessRow, error) {
+			return q.ListCoursesWithAccess(ctx, gen.ListCoursesWithAccessParams{
 				OrganizationID: orgID,
+				OwnerID:        callerID,
 				Limit:          req.GetLimit(),
 				Offset:         req.GetOffset(),
 			})
 		})
+		if qErr != nil {
+			err = qErr
+		} else {
+			for _, r := range result {
+				rows = append(rows, courseWithAccess{
+					course: gen.Course{
+						ID: r.ID, OrganizationID: r.OrganizationID, OwnerID: r.OwnerID,
+						Title: r.Title, Description: r.Description, Status: r.Status,
+						CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+					},
+					canAccess: r.CanAccess.Bool,
+				})
+			}
+		}
 	}
 	if err != nil {
 		err = svc.ConnectDBError(err)
@@ -186,9 +238,11 @@ func (s *CoursesSvc) ListCourses(
 		return nil, err
 	}
 
-	out := make([]*richterv1.Course, 0, len(courses))
-	for _, c := range courses {
-		out = append(out, CourseToProto(c))
+	out := make([]*richterv1.Course, 0, len(rows))
+	for _, r := range rows {
+		p := CourseToProto(r.course)
+		p.CanAccess = r.canAccess
+		out = append(out, p)
 	}
 	return &richterv1.ListCoursesResponse{Courses: out}, nil
 }

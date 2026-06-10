@@ -24,6 +24,9 @@ message Course {
   CourseStatus status = 6 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  // can_access is true if the requesting user may open this course's content.
+  // Populated only in ListCourses responses; absent (false) in other responses.
+  bool can_access = 9;
 }
 
 message CreateCourseRequest {

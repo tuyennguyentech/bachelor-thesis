@@ -8,6 +8,7 @@ import (
 	_ "example.com/richter/internal/svc/aitasks/executors"
 	"example.com/richter/internal/svc/auth"
 	"example.com/richter/internal/svc/coursemodules"
+	"example.com/richter/internal/svc/coursemembers"
 	"example.com/richter/internal/svc/courses"
 	"example.com/richter/internal/svc/interactions"
 	"example.com/richter/internal/svc/lessons"
@@ -55,6 +56,10 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	if err != nil {
 		return
 	}
+	courseMembersSvc, err := do.Invoke[*coursemembers.CourseMembersSvc](i)
+	if err != nil {
+		return
+	}
 	lessonsSvc, err := do.Invoke[*lessons.LessonsSvc](i)
 	if err != nil {
 		return
@@ -84,6 +89,8 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	path, handler = coursesSvc.Handler()
 	mux.Handle(path, handler)
 	path, handler = courseModulesSvc.Handler()
+	mux.Handle(path, handler)
+	path, handler = courseMembersSvc.Handler()
 	mux.Handle(path, handler)
 	path, handler = lessonsSvc.Handler()
 	mux.Handle(path, handler)
