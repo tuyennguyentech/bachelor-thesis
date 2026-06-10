@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package richter.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "example.com/buf/gen/richter/v1;richterv1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FoundationDB value records.
+//
+// The keys for these records are encoded as FoundationDB-native tuple.Tuple.
+// Only the VALUES are protobuf-encoded. Whenever you add a new FDB value
+// record, declare its message type here and use proto.Marshal / proto.Unmarshal
+// at the read/write site — never json.Marshal / json.Unmarshal.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One timestamped segment of a lesson transcript (Whisper output or
+// user-edited). Identical to TranscriptSegment above but kept in this
+// file so FDB storage has no cross-file dependency and so a future
+// segment-only schema change does not need to touch ai.proto.
+message FdbTranscriptSegment {
+  float start_seconds = 1;
+  float end_seconds = 2;
+  string text = 3;
+}
+
+// Per-lesson list of segments. Wrapper (rather than repeated at top level)
+// so we can add lesson-level fields later without breaking the schema.
+message FdbSegmentsBlob {
+  repeated FdbTranscriptSegment segments = 1;
+}
+
+// Per-lesson or per-chunk transcript text.
+message FdbTranscript {
+  string text = 1;
+  // Optional language code (BCP-47), may be empty for unlabelled transcripts.
+  string language = 2;
+}
+
+// Durable lesson processing task record. Mirrors the in-memory
+// lessonTaskRecord struct but is the FDB-canonical shape. The request
+// payload (used to rehydrate the input on resume) is stored as raw
+// protobuf bytes — never protojson.
+message FdbLessonTaskRecord {
+  string id = 1;
+  string lesson_id = 2;
+  string chunk_id = 3;
+  int32 kind = 4;
+  int32 status = 5;
+  string progress_step = 6;
+  int32 progress_current = 7;
+  int32 progress_total = 8;
+  string message = 9;
+  string error_msg = 10;
+  // Raw protobuf encoding of the per-kind request (e.g. GenerateInteractionsRequest).
+  bytes request_payload = 11;
+  string created_by = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  google.protobuf.Timestamp started_at = 15;
+  google.protobuf.Timestamp finished_at = 16;
+  // Last heartbeat timestamp emitted by the worker. Used to detect
+  // tasks whose worker has crashed without updating progress.
+  google.protobuf.Timestamp last_heartbeat = 17;
+  // Owner worker ID (random UUID per worker process). Set by ClaimAndPop
+  // when a worker takes the task; cleared by the periodic reaper when the
+  // heartbeat goes stale so another worker can reclaim. Worker IDs are
+  // used to make terminal status writes (MarkSucceeded/MarkFailed)
+  // idempotent: a worker that wakes up from a freeze sees its old ID
+  // cleared and skips marking a task another worker has already finished.
+  string worker_id = 18;
+}
+
+// Short-lived per-user cache of a freshly-graded answer, used so a
+// follow-up request from the same user can pick up the same grade
+// without re-running the model.
+message FdbTempGradeCache {
+  // Raw protobuf encoding of the per-interaction response message.
+  bytes response_payload = 1;
+  float score = 2;
+  float max_score = 3;
+  string feedback = 4;
+}

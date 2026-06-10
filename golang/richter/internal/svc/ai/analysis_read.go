@@ -8,12 +8,19 @@ import (
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
 	svcinteractions "example.com/richter/internal/svc/interactions"
+	"example.com/richter/internal/taskqueue"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// GetLessonAnalysis derives the analysis state from the tasks
+// table. When no tasks exist for the lesson (e.g. seeded data that
+// was created before the taskqueue cutover), it falls back to the
+// legacy lesson_analyses table. Transcript text and segments still
+// come from FDB. Chunks and interactions come from the existing
+// per-lesson tables.
 func (s *AISvc) GetLessonAnalysis(
 	ctx context.Context,
 	req *richterv1.GetLessonAnalysisRequest,
@@ -33,20 +40,52 @@ func (s *AISvc) GetLessonAnalysis(
 		return nil, err
 	}
 
-	analysis, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
-		return q.GetLessonAnalysis(ctx, lessonID)
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return &richterv1.GetLessonAnalysisResponse{}, nil
-		}
 		return nil, svc.ConnectDBError(err)
+	}
+
+	// Derive analysis status from the latest task per kind.
+	latest, err := s.tqDB.ListLatestTaskPerLesson(ctx, []pgtype.UUID{lessonID})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+
+	// Fallback: if no tasks exist for this lesson, read from
+	// the legacy lesson_analyses table. This covers seeded data
+	// that was created before the taskqueue cutover.
+	var analysis gen.LessonAnalysis
+	if len(latest) == 0 {
+		analysis, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
+			return q.GetLessonAnalysis(ctx, lessonID)
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// No analysis row — lesson hasn't been analyzed yet.
+				// If a video is present, return a default PENDING analysis so
+				// consumers know analysis is pending (or rather, ready to be started).
+				if lesson.VideoStorageKey.Valid && lesson.VideoStorageKey.String != "" {
+					analysis = gen.LessonAnalysis{
+						LessonID: lessonID,
+						Status:   gen.LessonAnalysisStatusPending,
+					}
+				} else {
+					return &richterv1.GetLessonAnalysisResponse{}, nil
+				}
+			} else {
+				return nil, svc.ConnectDBError(err)
+			}
+		}
+	} else {
+		analysis = deriveAnalysisFromTasks(lessonID, latest)
 	}
 
 	ints, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
 		return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{
 			LessonID: lessonID,
-			Limit:    500,
+			Limit:    s.interactionsLimit(),
 			Offset:   0,
 		})
 	})
@@ -55,7 +94,7 @@ func (s *AISvc) GetLessonAnalysis(
 	}
 
 	chunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
-		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 500, Offset: 0})
+		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: s.chunksLimit(), Offset: 0})
 	})
 	if err != nil {
 		s.log.ErrorContext(ctx, "ai: failed to list lesson chunks", svc.LogAttrs("ListLessonTranscriptChunks", err)...)
@@ -63,10 +102,30 @@ func (s *AISvc) GetLessonAnalysis(
 	normalizeGeneratedInteractionStartSeconds(ints, chunks)
 
 	lessonIDStr := lessonID.String()
-	// Don't return stale FDB data when video has been replaced (status reset to pending).
+	// Only load FDB transcript/segments when the transcribe step
+	// has actually succeeded. For legacy data (no tasks), check
+	// the analysis status directly.
+	canLoadTranscript := false
+	if len(latest) > 0 {
+		for _, t := range latest {
+			if t.TaskType == "transcribe" && t.Status == string(taskqueue.StatusSucceeded) {
+				canLoadTranscript = true
+				break
+			}
+		}
+	} else {
+		// Legacy path: load FDB data when analysis status is
+		// transcript_extracted or later.
+		switch analysis.Status {
+		case gen.LessonAnalysisStatusTranscriptExtracted,
+			gen.LessonAnalysisStatusChunksReady,
+			gen.LessonAnalysisStatusDone:
+			canLoadTranscript = true
+		}
+	}
 	var transcript string
 	var segments []transcriptSegment
-	if analysis.Status != gen.LessonAnalysisStatusPending {
+	if canLoadTranscript {
 		transcript = s.loadTranscriptFromFDB(lessonIDStr)
 		segments = s.loadSegmentsFromFDB(lessonIDStr)
 	}
@@ -86,12 +145,7 @@ func (s *AISvc) GetLessonAnalysis(
 		isTeacher = true
 	}
 
-	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
-		return q.GetLessonByID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
+
 
 	hasSubmitted := false
 	if !isTeacher {
@@ -111,4 +165,47 @@ func (s *AISvc) GetLessonAnalysis(
 		Analysis: analysisToProto(analysis, ints, strip, transcript, segments, interactionConfigFromJSON(lesson.DefaultInteractionConfig)),
 		Chunks:   protoChunks,
 	}, nil
+}
+
+// deriveAnalysisFromTasks returns a LessonAnalysis row equivalent
+// derived from the latest task per kind. The proto consumers only
+// need status (and the chunks/interactions are passed separately).
+func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.LessonAnalysis {
+	out := gen.LessonAnalysis{
+		LessonID: lessonID,
+		Status:   gen.LessonAnalysisStatusPending,
+	}
+	transcribeState := ""
+	chunkState := ""
+	for _, t := range latest {
+		switch t.TaskType {
+		case "transcribe":
+			transcribeState = t.Status
+		case "chunk":
+			chunkState = t.Status
+		}
+	}
+	switch {
+	case chunkState == string(taskqueue.StatusSucceeded):
+		out.Status = gen.LessonAnalysisStatusChunksReady
+	case transcribeState == string(taskqueue.StatusSucceeded):
+		out.Status = gen.LessonAnalysisStatusTranscriptExtracted
+	case transcribeState == string(taskqueue.StatusProcessing) || chunkState == string(taskqueue.StatusProcessing):
+		out.Status = gen.LessonAnalysisStatusPending
+	case transcribeState == string(taskqueue.StatusFailed) || chunkState == string(taskqueue.StatusFailed):
+		out.Status = gen.LessonAnalysisStatusError
+	}
+	// Any successfully completed task that produces interactions
+	// (e.g. quiz_gen) means the lesson is fully analyzed.
+	hasSucceededInteractions := false
+	for _, t := range latest {
+		if t.TaskType == "quiz_gen" && t.Status == string(taskqueue.StatusSucceeded) {
+			hasSucceededInteractions = true
+			break
+		}
+	}
+	if hasSucceededInteractions {
+		out.Status = gen.LessonAnalysisStatusDone
+	}
+	return out
 }
