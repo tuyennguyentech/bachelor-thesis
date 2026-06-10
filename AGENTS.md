@@ -21,7 +21,7 @@ Default container is `debug` (alpine/curl). Replace `<service>` with `richter`, 
 | SQL codegen | `sqlc generate` |
 | All Go tests | `go test ./...` |
 | Go integ tests | `go test -tags=integ ./...` (compose must be up) |
-| Go integ test script | `./scripts/test/golang/richter/test.sh` (spins own server) |
+| Go integ test script (BINDING) | `./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/test/golang/richter/test.sh -tags=integ -count=1 -v -run "TestXxx" -timeout 60s` — MUST run inside `container-shell.sh richter` (not raw shell) so the script sees the FDB cluster file via container DNS; the script itself sets `RICHTER_FDB_CLUSTER_FILE` to the absolute path of `./fdb.cluster` and appends `-args -config base,test`. Do NOT hand-craft `go test -tags=integ` with `RICHTER_FDB_CLUSTER_FILE` env — use the script |
 | Heino dev | `pnpm --filter heino dev` |
 | Heino build | `pnpm --filter heino build` |
 | Heino lint | `pnpm --filter heino lint` |
@@ -178,6 +178,31 @@ Never use `nohup ... &`, `cmd &`, or detached processes (orphan leaks). Before s
 When killing orphans: kill by command name (`go run ./golang/richter`, `pnpm --filter heino dev`, `next-server`), NOT by the shell that launched them. Never kill interactive `container-shell.sh bash` sessions — those belong to the user.
 
 Project preference from prior sessions: Codex/agents should not start long-running `richter` or `heino` servers unless the current user explicitly asks. For Playwright, ask the user to start `richter` with `richter.test.toml` and `heino`; then run foreground tests. Go integration script `./scripts/test/golang/richter/test.sh` manages its own server.
+
+### Foreground server pattern (BINDING)
+
+When running servers or tests, ALWAYS follow these rules:
+1. **Container shell required**: ALL servers and tests MUST run inside `container-shell.sh <service>` to be in the correct network namespace. Never run directly on host.
+2. **Foreground only**: Servers must run in foreground (not background). Use `&` with PID tracking + `trap cleanup EXIT INT TERM` to auto-kill on script exit.
+3. **Self-cleanup**: Always kill server processes when done. Track PIDs and kill on exit.
+4. **No orphan processes**: After any server/test run, verify with `ps -eo pid,args | grep -E "richter-bin|heino.*dev|next-server" | grep -v grep | grep -v conmon`.
+
+### E2E test prerequisites (BINDING)
+
+Before running E2E tests, BOTH servers must be running with test config:
+1. **Richter server**: `./scripts/setup/environment.dev/container-shell.sh richter -- go run ./golang/richter/ -c base,test` (or pre-built binary)
+2. **Heino dev server**: `./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino dev`
+3. **Wait for readiness**: Check HTTP 200/301/404 on `http://localhost:3000` before running tests
+4. **Run E2E**: `./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino test:e2e`
+5. **Cleanup**: Kill both servers after E2E completes
+
+### BE test script (BINDING)
+
+BE integration tests MUST use the existing script:
+```
+./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/test/golang/richter/test.sh -tags=integ -count=1 -timeout 600s
+```
+Do NOT hand-craft `go test -tags=integ` commands. The script handles FDB cluster file, config flags, and container namespace.
 
 ## Frontend Conventions (from past sessions)
 
