@@ -296,7 +296,9 @@ function TaskRow({
           <p className="mt-0.5 truncate text-xs opacity-90">
             {stale
               ? "Tác vụ có vẻ bị treo — worker không phản hồi. Hệ thống sẽ tự động khôi phục."
-              : (task.message || task.errorMsg || (active ? "Đang xử lý..." : ""))}
+              : (task.status === LessonTaskStatus.FAILED
+                  ? (task.errorMsg || task.message || "Thất bại")
+                  : (task.message || task.errorMsg || (active ? "Đang xử lý..." : "")))}
           </p>
           {active && !stale && (
             <div className="mt-2 flex items-center gap-2 text-xs opacity-80">
