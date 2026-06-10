@@ -90,6 +90,8 @@ export interface StudentViewProps<Config, Response> {
   kind?: InteractionKind;
   /** Optional: report a server-side or async grade back to the parent view. */
   onGrade?: (grade: InteractionGrade) => void;
+  /** Optional: called when the student replays audio; provides total replay count so far. */
+  onReplayCount?: (count: number) => void;
 }
 
 export interface EditorViewProps<Config> {

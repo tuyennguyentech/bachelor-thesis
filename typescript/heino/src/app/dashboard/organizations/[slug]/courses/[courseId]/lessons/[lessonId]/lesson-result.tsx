@@ -1,6 +1,6 @@
 "use client";
 
-import { RotateCcwIcon } from "lucide-react";
+import { ClockIcon, HeadphonesIcon, RotateCcwIcon, VideoIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
@@ -20,6 +20,15 @@ export interface QuizResult {
   }[];
 }
 
+export interface PreviewMetrics {
+  /** Per-interaction time-to-answer in ms, keyed by interaction id */
+  timeToAnswerMs: Map<string, number>;
+  /** Per-interaction replay counts (listening only), keyed by interaction id */
+  replayCounts: Map<string, number>;
+  /** Fraction (0–1) of the video watched */
+  videoWatchFraction: number;
+}
+
 interface Props {
   result: QuizResult;
   interactions: LessonInteraction[];
@@ -27,6 +36,8 @@ interface Props {
   onRetake: () => void;
   token?: string;
   maxAttempts?: number;
+  /** Present only in preview mode — shows teacher-facing reference metrics */
+  previewMetrics?: PreviewMetrics;
 }
 
 function formatScore(n: number): string {
@@ -70,7 +81,56 @@ function DonutScore({ score, total, attemptCount, maxAttempts }: { score: number
   );
 }
 
-export function LessonResult({ result, interactions, feedbackMode, onRetake, token, maxAttempts }: Props) {
+function formatMs(ms: number): string {
+  if (ms <= 0) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function PreviewMetricsPanel({ metrics, interactions }: { metrics: PreviewMetrics; interactions: LessonInteraction[] }) {
+  const pct = Math.round(metrics.videoWatchFraction * 100);
+  return (
+    <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/20 p-4 flex flex-col gap-3">
+      <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+        Chỉ số tham khảo (chế độ xem thử)
+      </p>
+
+      {/* Video watch fraction */}
+      <div className="flex items-center gap-2 text-sm">
+        <VideoIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">Xem video:</span>
+        <span className="font-medium">{pct}%</span>
+      </div>
+
+      {/* Per-interaction metrics */}
+      <div className="flex flex-col gap-1.5">
+        {interactions.map((it, idx) => {
+          const ttaMs = metrics.timeToAnswerMs.get(it.id) ?? 0;
+          const replays = metrics.replayCounts.get(it.id);
+          return (
+            <div key={it.id} className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs">
+              <span className="text-muted-foreground w-14 shrink-0">Câu {idx + 1}</span>
+              <span className="flex items-center gap-1">
+                <ClockIcon className="size-3 text-muted-foreground" />
+                <span className="text-muted-foreground">Thời gian:</span>
+                <span className="font-medium tabular-nums">{formatMs(ttaMs)}</span>
+              </span>
+              {replays !== undefined && (
+                <span className="flex items-center gap-1">
+                  <HeadphonesIcon className="size-3 text-muted-foreground" />
+                  <span className="text-muted-foreground">Nghe lại:</span>
+                  <span className="font-medium tabular-nums">{replays} lần</span>
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function LessonResult({ result, interactions, feedbackMode, onRetake, token, maxAttempts, previewMetrics }: Props) {
   const canRetake = !maxAttempts || maxAttempts <= 0 || (result.attemptCount ?? 0) < maxAttempts;
   const shouldShowDetails = feedbackMode !== FeedbackMode.HIDDEN;
 
@@ -88,6 +148,10 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
         </div>
         <DonutScore score={result.totalScore} total={result.maxScore} attemptCount={result.attemptCount} maxAttempts={maxAttempts} />
       </div>
+
+      {previewMetrics && (
+        <PreviewMetricsPanel metrics={previewMetrics} interactions={interactions} />
+      )}
 
       {shouldShowDetails && interactions.length > 0 && (
         <div className="flex flex-col rounded-md border divide-y">

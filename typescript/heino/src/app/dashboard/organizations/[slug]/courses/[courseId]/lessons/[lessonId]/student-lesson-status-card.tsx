@@ -4,7 +4,7 @@ import { InfoIcon, PlayIcon, SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { LessonInteraction, FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { LessonResult } from "./lesson-result";
-import type { QuizResult } from "./lesson-result";
+import type { QuizResult, PreviewMetrics } from "./lesson-result";
 
 interface StudentLessonStatusCardProps {
   activeInteraction: LessonInteraction | null;
@@ -20,6 +20,7 @@ interface StudentLessonStatusCardProps {
   result: QuizResult | null;
   submitted: boolean;
   token: string;
+  previewMetrics?: PreviewMetrics;
 }
 
 export function StudentLessonStatusCard({
@@ -36,6 +37,7 @@ export function StudentLessonStatusCard({
   result,
   submitted,
   token,
+  previewMetrics,
 }: StudentLessonStatusCardProps) {
   if (
     lessonInteractions.length === 0 ||
@@ -89,6 +91,7 @@ export function StudentLessonStatusCard({
           onRetake={onRetake}
           token={token}
           maxAttempts={maxAttempts}
+          previewMetrics={previewMetrics}
         />
       )}
 

@@ -18,11 +18,13 @@ export function ListeningStudentView({
   onContinue,
   hasNextInCheckpoint,
   token = "",
+  onReplayCount,
 }: StudentViewProps<ListeningConfig, ListeningResponse>) {
   const storageClient = useRichterWebClient(StorageService, token);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loadingUrl, setLoadingUrl] = useState(true);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const playCountRef = useRef(0);
 
   // Dictation state
   const [transcription, setTranscription] = useState(initialResponse?.transcription ?? "");
@@ -97,6 +99,10 @@ export function ListeningStudentView({
             controls
             className="w-full max-w-md h-10"
             data-testid="audio-player"
+            onPlay={() => {
+              playCountRef.current += 1;
+              onReplayCount?.(playCountRef.current);
+            }}
           />
         </div>
       ) : (

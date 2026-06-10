@@ -23,6 +23,7 @@ interface Props {
   lessonId?: string;
   isPreview?: boolean;
   onGrade?: (grade: InteractionGrade) => void;
+  onReplayCount?: (count: number) => void;
 }
 
 function formatTime(seconds: number) {
@@ -83,6 +84,7 @@ export function InteractionCheckpoint({
   lessonId,
   isPreview,
   onGrade,
+  onReplayCount,
 }: Props) {
   let renderer;
   try {
@@ -158,6 +160,7 @@ export function InteractionCheckpoint({
         isPreview={isPreview}
         kind={interaction.kind}
         onGrade={onGrade}
+        onReplayCount={onReplayCount}
       />
     </div>
   );

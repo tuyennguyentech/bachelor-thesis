@@ -17,6 +17,7 @@ import { LessonSidebar } from "./lesson-sidebar";
 import type { QuizResult } from "./lesson-result";
 import { InteractionCheckpoint } from "./interaction-checkpoint";
 import { buildAttemptResponseInput } from "./student-attempt-response";
+import type { PreviewMetrics } from "./lesson-result";
 import { StudentFullscreenTip } from "./student-fullscreen-tip";
 import { StudentLessonStatusCard } from "./student-lesson-status-card";
 import { useStudentFullscreen } from "./use-student-fullscreen";
@@ -65,6 +66,18 @@ export function StudentLessonView({
   const isInitialLoadRef = useRef(true);
   const [previewAttemptCount, setPreviewAttemptCount] = useState(1);
   const [playerKey, setPlayerKey] = useState(0);
+
+  // Metrics tracking refs — do NOT cause re-renders, so useRef is appropriate
+  /** Timestamp (Date.now()) when each question became active (was shown to student) */
+  const questionShownAtRef = useRef<Map<string, number>>(new Map());
+  /** Computed time-to-answer in ms per interaction id */
+  const timeToAnswerMsRef = useRef<Map<string, number>>(new Map());
+  /** Replay count per listening interaction id */
+  const replayCountsRef = useRef<Map<string, number>>(new Map());
+  /** Furthest video position (seconds) reached — for watch fraction computation */
+  const maxVideoPositionRef = useRef(initialPosition);
+
+  const [previewMetrics, setPreviewMetrics] = useState<PreviewMetrics | null>(null);
 
   // Reset initial load flag when playerKey changes (on retake)
   useEffect(() => {
@@ -126,6 +139,11 @@ export function StudentLessonView({
 
   const handleTimeUpdate = useCallback(
     (t: number) => {
+      // Track furthest position for video watch fraction (even while paused at checkpoint)
+      if (t > maxVideoPositionRef.current) {
+        maxVideoPositionRef.current = t;
+      }
+
       if (submitted || activeId) return;
 
       // If the time has changed from the initial load state, clear the initial load gate
@@ -149,6 +167,10 @@ export function StudentLessonView({
       if (hit) {
         const video = videoRef.current;
         if (video) video.pause();
+        // Record when this question was shown to the student
+        if (!questionShownAtRef.current.has(hit.id)) {
+          questionShownAtRef.current.set(hit.id, Date.now());
+        }
         setActiveId(hit.id);
       }
     },
@@ -159,9 +181,15 @@ export function StudentLessonView({
     isInitialLoadRef.current = false;
     prevTimeRef.current = videoRef.current?.currentTime ?? 0;
     // Unlock interactions with startSeconds <= 0 immediately on first play
-    const earlyIds = lessonInteractions.filter((it) => it.startSeconds <= 0).map((it) => it.id);
-    if (earlyIds.length > 0) {
-      setPassedIds((prev) => new Set([...prev, ...earlyIds]));
+    const earlyInteractions = lessonInteractions.filter((it) => it.startSeconds <= 0);
+    const now = Date.now();
+    for (const it of earlyInteractions) {
+      if (!questionShownAtRef.current.has(it.id)) {
+        questionShownAtRef.current.set(it.id, now);
+      }
+    }
+    if (earlyInteractions.length > 0) {
+      setPassedIds((prev) => new Set([...prev, ...earlyInteractions.map((it) => it.id)]));
     }
   }, [lessonInteractions]);
 
@@ -208,6 +236,14 @@ export function StudentLessonView({
     setResponses((prev) => new Map(prev).set(id, response));
   }
 
+  function recordTimeToAnswer(id: string) {
+    if (timeToAnswerMsRef.current.has(id)) return; // already recorded (e.g. called twice)
+    const shownAt = questionShownAtRef.current.get(id);
+    if (shownAt != null) {
+      timeToAnswerMsRef.current.set(id, Date.now() - shownAt);
+    }
+  }
+
   async function saveDraftResponse(id: string) {
     if (isPreview) return;
     const interaction = lessonInteractions.find((it) => it.id === id);
@@ -215,7 +251,11 @@ export function StudentLessonView({
     // Reading AFTER_EACH already calls PreviewGrade as soon as the recording is ready.
     if (interaction.kind === InteractionKind.READING && feedbackMode === FeedbackMode.AFTER_EACH) return;
 
-    const response = buildAttemptResponseInput(interaction, responses.get(id));
+    const metrics = {
+      timeToAnswerMs: timeToAnswerMsRef.current.get(id) ?? 0,
+      replayCount: replayCountsRef.current.get(id) ?? 0,
+    };
+    const response = buildAttemptResponseInput(interaction, responses.get(id), metrics);
     try {
       setSavingResponseIds((prev) => {
         const next = new Set(prev);
@@ -244,6 +284,8 @@ export function StudentLessonView({
 
   function handleContinue(id: string) {
     if (savingResponseIds.has(id)) return;
+    // Record time-to-answer before firing the async save
+    recordTimeToAnswer(id);
     void saveDraftResponse(id);
     // Find the next pending timed interaction at the SAME timestamp (or an earlier one
     // missed somehow). Untimed (startSeconds <= 0) interactions are skipped — those are
@@ -262,6 +304,10 @@ export function StudentLessonView({
       : undefined;
     setPassedIds((prev) => new Set([...prev, id]));
     if (nextInCheckpoint) {
+      // Record shown time for the next question in the cluster
+      if (!questionShownAtRef.current.has(nextInCheckpoint.id)) {
+        questionShownAtRef.current.set(nextInCheckpoint.id, Date.now());
+      }
       setActiveId(nextInCheckpoint.id);
     } else {
       setActiveId(null);
@@ -271,6 +317,10 @@ export function StudentLessonView({
 
   function handleRetake() {
     prevTimeRef.current = 0;
+    maxVideoPositionRef.current = 0;
+    questionShownAtRef.current = new Map();
+    timeToAnswerMsRef.current = new Map();
+    replayCountsRef.current = new Map();
     setPlayerKey((prev) => prev + 1);
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
@@ -285,6 +335,15 @@ export function StudentLessonView({
     setResponses(new Map());
     setActiveId(null);
     setError(null);
+    setPreviewMetrics(null);
+  }
+
+  function computeVideoWatchFraction(): number {
+    const video = videoRef.current;
+    const duration = video?.duration ?? 0;
+    if (!duration || duration <= 0) return 0;
+    const fraction = maxVideoPositionRef.current / duration;
+    return Math.min(1, Math.max(0, fraction));
   }
 
   function handleSubmit() {
@@ -292,7 +351,15 @@ export function StudentLessonView({
     setError(null);
     startTransition(async () => {
       try {
+        const videoWatchFraction = computeVideoWatchFraction();
+
         if (isPreview) {
+          // Record any remaining TTA for interactions that may have been answered without
+          // going through handleContinue (e.g. startSeconds <= 0)
+          for (const it of lessonInteractions) {
+            recordTimeToAnswer(it.id);
+          }
+
           const respList = await Promise.all(lessonInteractions.map(async (it) => {
             const localResp = responses.get(it.id) ?? null;
             const config = extractConfig(it);
@@ -333,9 +400,26 @@ export function StudentLessonView({
             attemptCount: previewAttemptCount,
             responses: respList,
           });
+          // Build preview metrics snapshot for teacher reference
+          setPreviewMetrics({
+            timeToAnswerMs: new Map(timeToAnswerMsRef.current),
+            replayCounts: new Map(replayCountsRef.current),
+            videoWatchFraction,
+          });
         } else {
-          const protoResponses = lessonInteractions.map((it) => buildAttemptResponseInput(it, responses.get(it.id)));
-          const res = await interactionClient.submitAttempt({ lessonId, responses: protoResponses });
+          const protoResponses = lessonInteractions.map((it) => buildAttemptResponseInput(
+            it,
+            responses.get(it.id),
+            {
+              timeToAnswerMs: timeToAnswerMsRef.current.get(it.id) ?? 0,
+              replayCount: replayCountsRef.current.get(it.id) ?? 0,
+            },
+          ));
+          const res = await interactionClient.submitAttempt({
+            lessonId,
+            responses: protoResponses,
+            videoWatchFraction,
+          });
           const attempt = res.attempt;
           if (attempt) {
             const freshInteractions = await aiClient
@@ -462,6 +546,9 @@ export function StudentLessonView({
                     onGrade={(grade) => {
                       setDraftGrades((prev) => new Map(prev).set(activeInteraction.id, grade));
                     }}
+                    onReplayCount={(count) => {
+                      replayCountsRef.current.set(activeInteraction.id, count);
+                    }}
                   />
                   {savingResponseIds.has(activeInteraction.id) && (
                     <p className="mt-3 text-xs text-muted-foreground">Đang lưu câu trả lời...</p>
@@ -486,6 +573,7 @@ export function StudentLessonView({
           result={result}
           submitted={submitted}
           token={token}
+          previewMetrics={isPreview && previewMetrics ? previewMetrics : undefined}
         />
       </div>
 
