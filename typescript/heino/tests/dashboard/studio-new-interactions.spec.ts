@@ -32,20 +32,6 @@ async function rpc<T = unknown>(
   return (await res.json()) as T;
 }
 
-async function cleanupInteractionsByPrompt(page: Page, lessonId: string, prompts: string[]) {
-  const list = await rpc<{ interactions: Array<{ id: string; prompt?: string }> }>(
-    page,
-    "richter.v1.InteractionService",
-    "ListLessonInteractions",
-    { lessonId, limit: 500, offset: 0 },
-  );
-  const promptSet = new Set(prompts);
-  for (const interaction of list.interactions) {
-    if (!interaction.prompt || !promptSet.has(interaction.prompt)) continue;
-    await rpc(page, "richter.v1.InteractionService", "DeleteInteraction", { interactionId: interaction.id });
-  }
-}
-
 function lessonIdFromUrl(url: string) {
   const match = url.match(/\/lessons\/([^/?#]+)/);
   if (!match) throw new Error(`Lesson id not found in URL: ${url}`);
@@ -58,10 +44,28 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
 
     const stamp = Date.now();
     let lessonUrl = "";
+    // Track interaction IDs that existed before this test so we can delete only
+    // the ones we added, regardless of whether the test passes or fails.
+    // Populated after the first openExercises() call (which sets lessonUrl).
+    let preExistingInteractionIds = new Set<string>();
     const openExercises = async () => {
-      lessonUrl = await goToSeededLesson(teacher, SEED_DSA_LESSON_BIG_O);
-      await teacher.getByTestId("workflow-step-exercises").click({ force: true });
-      await expect(teacher.getByTestId("workflow-step-exercises")).toHaveAttribute("aria-current", "step", { timeout: 5000 });
+      const rawUrl = await goToSeededLesson(teacher, SEED_DSA_LESSON_BIG_O);
+      // Strip any existing query params — goToSeededLesson returns page.url() when
+      // already on the lesson page, which may already include ?tab=processing from a
+      // previous openExercises() call. Appending ?tab=processing to such a URL would
+      // produce ?tab=processing?tab=processing, an invalid param that hides the
+      // processing tab div (activeTab !== "processing").
+      lessonUrl = rawUrl.split("?")[0];
+      // The interaction editor lives inside the ?tab=processing tab.
+      // Navigate there first so the AnalysisWorkflowShell panel is visible
+      // (non-active tabs are CSS-hidden but still mounted).
+      await teacher.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
+      // For a lesson that already has chunks/interactions, getInitialWorkflowStep()
+      // returns "exercises" on mount — no click needed (clicking during the
+      // animate-in fade causes "Element is not visible" in Firefox).
+      // Instead, wait for the exercises step to be confirmed as the active step and
+      // for the add-interaction button to be enabled (signals full React hydration).
+      await expect(teacher.getByTestId("workflow-step-exercises")).toHaveAttribute("aria-current", "step", { timeout: 15_000 });
       await expect(teacher.getByTestId("add-interaction-btn").first()).toBeEnabled({ timeout: 15000 });
     };
     const openManualForm = async (kind: InteractionKind) => {
@@ -77,6 +81,20 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
       await expect(prompt).toBeEditable({ timeout: 15000 });
       await prompt.fill(value);
     };
+
+    // ── Record pre-existing interaction IDs before creating anything ──
+    // openExercises sets lessonUrl; call it once up-front to capture the snapshot.
+    // All 5 creation steps are wrapped in try/finally so cleanup always runs —
+    // this prevents accumulated interactions from contaminating video-quiz-flow.spec.ts.
+    await openExercises();
+    const lessonId = lessonIdFromUrl(lessonUrl);
+    const snapshot = await rpc<{ interactions: Array<{ id: string }> }>(
+      teacher, "richter.v1.InteractionService", "ListLessonInteractions",
+      { lessonId, limit: 500, offset: 0 },
+    );
+    preExistingInteractionIds = new Set(snapshot.interactions.map((i) => i.id));
+
+    try {
 
     // ── STEP 1: Teacher creates Single-Choice with 3 options ──
     const scQuestion = `Single-Choice-3Opts-${stamp}`;
@@ -100,9 +118,11 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
     await form.locator('input[type="number"]').first().fill("10");
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 
-    // Wait for form to close
+    // Wait for form to close — scope to interaction-row so we don't match the same
+    // prompt text in the hidden VideoPlayer checkpoint overlay (content tab is always
+    // mounted but CSS-hidden when activeTab=processing; its span appears first in DOM).
     await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
-    await expect(teacher.getByText(scQuestion).first()).toBeVisible({ timeout: 5000 });
+    await expect(teacher.getByTestId("interaction-row").filter({ hasText: scQuestion }).first()).toBeVisible({ timeout: 5000 });
     await teacher.waitForTimeout(1000);
 
     // ── STEP 2: Teacher creates Multiple-Choice with 5 options ──
@@ -128,7 +148,7 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 
     await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
-    await expect(teacher.getByText(mcQuestion).first()).toBeVisible({ timeout: 5000 });
+    await expect(teacher.getByTestId("interaction-row").filter({ hasText: mcQuestion }).first()).toBeVisible({ timeout: 5000 });
     await teacher.waitForTimeout(1000);
 
     // ── STEP 3: Teacher creates Fill-Blank interaction ──
@@ -144,7 +164,7 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 
     await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
-    await expect(teacher.getByText(fbPrompt).first()).toBeVisible({ timeout: 5000 });
+    await expect(teacher.getByTestId("interaction-row").filter({ hasText: fbPrompt }).first()).toBeVisible({ timeout: 5000 });
 
     // ── STEP 4: Teacher creates Reading interaction ──
     const readingPrompt = `Reading-Manual-${stamp}`;
@@ -157,7 +177,7 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 
     await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
-    await expect(teacher.getByText(readingPrompt).first()).toBeVisible({ timeout: 5000 });
+    await expect(teacher.getByTestId("interaction-row").filter({ hasText: readingPrompt }).first()).toBeVisible({ timeout: 5000 });
 
     // ── STEP 5: Teacher creates Listening interaction ──
     const listeningPrompt = `Listening-Manual-${stamp}`;
@@ -179,13 +199,23 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 
     await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
-    await expect(teacher.getByText(listeningPrompt).first()).toBeVisible({ timeout: 5000 });
+    await expect(teacher.getByTestId("interaction-row").filter({ hasText: listeningPrompt }).first()).toBeVisible({ timeout: 5000 });
 
-    await cleanupInteractionsByPrompt(
-      teacher,
-      lessonIdFromUrl(lessonUrl),
-      [scQuestion, mcQuestion, fbPrompt, readingPrompt, listeningPrompt],
-    );
+    } finally {
+      // Delete every interaction that was not present before this test started.
+      // Runs on pass AND fail, preventing leftover interactions from accumulating.
+      const after = await rpc<{ interactions: Array<{ id: string }> }>(
+        teacher, "richter.v1.InteractionService", "ListLessonInteractions",
+        { lessonId, limit: 500, offset: 0 },
+      ).catch(() => ({ interactions: [] as Array<{ id: string }> }));
+      for (const interaction of after.interactions) {
+        if (preExistingInteractionIds.has(interaction.id)) continue;
+        await rpc(
+          teacher, "richter.v1.InteractionService", "DeleteInteraction",
+          { interactionId: interaction.id },
+        ).catch(() => { /* best effort — don't mask test failure */ });
+      }
+    }
   });
 
   test("student takes quiz with seeded interactions and receives scores", async ({ browser, baseURL }) => {

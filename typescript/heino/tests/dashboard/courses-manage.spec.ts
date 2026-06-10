@@ -10,7 +10,7 @@
  * be visible to admin and teacher, hidden from student.
  */
 
-import { test, expect } from "../fixtures";
+import { test, expect, SEED_DSA_COURSE_TITLE } from "../fixtures";
 
 const ORG_SLUG = "hust-cs";
 const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
@@ -252,13 +252,14 @@ test.describe("Admin course status and delete", () => {
 // ── Student cannot manage ─────────────────────────────────────────────────────
 
 test.describe("Student course detail (read-only)", () => {
-  // Uses seeded courses — no need to create one, avoids two-fixture conflict.
+  // Uses the seeded DSA course — bob is a course member so the row has a link (not a disabled button).
   test("student does not see management controls on course detail", async ({
     studentPage: page,
   }) => {
-    await page.goto(COURSES_URL);
-    // navigate to the first seeded course via the chevron link
-    const href = await page.getByRole("row").nth(1).getByRole("link").getAttribute("href");
+    // Use ?q= search so we land on the seeded course regardless of pagination order.
+    await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
+    const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
+    const href = await row.getByRole("link").first().getAttribute("href");
     await page.goto(`${href}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 

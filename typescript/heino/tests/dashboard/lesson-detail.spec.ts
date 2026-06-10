@@ -13,19 +13,92 @@
  * - Feedback modes: AFTER_SUBMIT (no reveal at checkpoint), AFTER_EACH (immediate reveal)
  */
 
+import path from "path";
 import type { Page } from "@playwright/test";
+import { createClient, type Interceptor } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-node";
+import { AuthService } from "buf/gen/richter/v1/auth_pb";
+import {
+  AIService,
+  LessonTaskKind,
+  LessonTaskStatus,
+} from "buf/gen/richter/v1/ai_pb";
 import {
   test,
   expect,
   goToSeededLesson,
   SEED_HUST_CS_SLUG as ORG_SLUG,
   SEED_DSA_LESSON_BIG_O as SEEDED_LESSON_BIG_O,
+  TEACHER_EMAIL,
+  USER_PASSWORD,
 } from "../fixtures";
 
 const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
+const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample.mp4");
 
 function uid(base: string) {
   return `${base} ${Date.now()}`;
+}
+
+function lessonIdFromUrl(rawUrl: string) {
+  const url = new URL(rawUrl, "http://caddy");
+  const parts = url.pathname.split("/").filter(Boolean);
+  return parts[parts.length - 1];
+}
+
+function rpcBaseUrl(baseURL?: string) {
+  return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
+}
+
+async function getTeacherToken(baseURL?: string) {
+  const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBaseUrl(baseURL) });
+  const auth = createClient(AuthService, transport);
+  const res = await auth.login({ email: TEACHER_EMAIL, password: USER_PASSWORD });
+  return res.accessToken;
+}
+
+function createAIClient(token: string, baseURL?: string) {
+  const authInterceptor: Interceptor = (next) => async (req) => {
+    req.header.set("Authorization", `Bearer ${token}`);
+    return next(req);
+  };
+  return createClient(AIService, createConnectTransport({
+    httpVersion: "1.1",
+    baseUrl: rpcBaseUrl(baseURL),
+    interceptors: [authInterceptor],
+  }));
+}
+
+async function createLesson(
+  page: Page,
+  courseTitle: string,
+  moduleName: string,
+  lessonTitle: string,
+): Promise<string> {
+  await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: "Khóa học" }).first().waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Tạo khóa học" }).click();
+  await page.getByLabel("Tên khóa học").fill(courseTitle);
+  await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+
+  const row = page.getByRole("row").filter({ hasText: courseTitle });
+  const courseHref = await row.getByRole("link").getAttribute("href");
+  await page.goto(`${courseHref}`, { waitUntil: "domcontentloaded" });
+
+  await page.getByRole("button", { name: "Thêm chương" }).click();
+  await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
+  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+
+  await page.getByRole("button", { name: "Thêm bài học" }).click();
+  await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
+  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+
+  const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
+  const href = await lessonRow.getByRole("link").getAttribute("href");
+  return `${href}`;
 }
 
 /** Trigger a synthetic checkpoint hit via the E2E window hook. */
@@ -150,7 +223,7 @@ test.describe("Lesson detail — teacher", () => {
   });
 
   test("shows lesson title and video upload section", async ({ teacherPage: page }) => {
-    await page.goto(lessonUrl);
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Nguồn video")).toBeVisible();
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
@@ -161,23 +234,11 @@ test.describe("Lesson detail — teacher", () => {
 
 test.describe("Lesson detail — student read-only", () => {
   test("student sees lesson but no video upload", async ({ studentPage: page }) => {
-    // Navigate to first seeded course, first lesson available
-    await page.goto(COURSES_URL);
-    const courseHref = await page.getByRole("row").nth(1).getByRole("link").getAttribute("href");
-    await page.goto(`${courseHref}`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-
-    // If there are any lesson rows, click the first one
-    const lessonLinks = page.locator("div.border a");
-    const count = await lessonLinks.count();
-    if (count === 0) {
-      // No lessons in this course — skip
-      return;
-    }
-    const href = await lessonLinks.first().getAttribute("href");
-    await page.goto(`${href}`);
+    // Navigate to the seeded DSA lesson (bob is a course member and has access)
+    await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
 
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // Student view never shows the upload section (it lives in ?tab=processing, inaccessible to students)
     await expect(page.getByText("Nguồn video")).not.toBeVisible();
     await expect(page.getByRole("button", { name: "Tải video lên" })).not.toBeVisible();
   });
@@ -212,10 +273,10 @@ test.describe("Lesson detail — progress section", () => {
 
     const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
     const href = await lessonRow.getByRole("link").getAttribute("href");
-    await page.goto(`${href}`);
+    await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByText("Tiến độ học viên")).toBeVisible();
+    await expect(page.getByTestId("lesson-attempts")).toBeVisible();
   });
 });
 
@@ -306,7 +367,9 @@ test.describe("Seeded lesson — AFTER_SUBMIT checkpoint flow", () => {
 
 test.describe("Seeded lesson with video key — teacher management section", () => {
   test("shows Thay video, technical details, and authoring workflow when lesson has video_key", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
+    // The upload section, technical details and authoring workflow are all in the processing tab
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: "Ẩn danh sách bài học" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Cấu trúc khóa học/ })).toBeVisible();
@@ -399,36 +462,90 @@ async function page_getByRole_retake(page: Page) {
 // ── Phase 1: Fill-blank interaction creation via teacher editor ───────────
 
 test.describe("Fill-blank interaction — teacher creates via editor", () => {
-  test("teacher can add a fill-blank interaction and it appears in the list", async ({ teacherPage: page }) => {
-    // Use the seeded Big-O lesson — it has a video + analysis so the Bài tập tab is visible
-    await goToSeededLesson(page, SEEDED_LESSON_BIG_O);
+  test("teacher can add a fill-blank interaction and it appears in the list", async ({ teacherPage: page, baseURL }) => {
+    // Create a fresh lesson and run the full analysis pipeline (extract + chunk)
+    // so that the exercises step is reliably enabled. Using the seeded Big-O
+    // lesson is fragile: cancelled quiz_gen tasks from other test runs cause
+    // deriveAnalysisFromTasks to return PENDING, which triggers the PENDING
+    // effect in useLessonAnalysisState to clear all client-side chunks, locking
+    // the exercises step.
+    test.setTimeout(300_000);
+
+    const url = await createLesson(
+      page,
+      uid("Khóa học Fill Blank"),
+      uid("Chương Fill Blank"),
+      uid("Bài Fill Blank"),
+    );
+    const lessonId = lessonIdFromUrl(url);
+    const token = await getTeacherToken(baseURL);
+    const ai = createAIClient(token, baseURL);
+
+    // Upload the test video and wait for the transcript button to appear.
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
+    await expect(
+      page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }),
+    ).toBeVisible({ timeout: 120_000 });
+
+    // Start EXTRACT_TRANSCRIPT via API and poll until it succeeds.
+    const extractRes = await ai.startLessonTask({ lessonId, kind: LessonTaskKind.EXTRACT_TRANSCRIPT });
+    const extractTaskId = extractRes.task?.id;
+    if (!extractTaskId) throw new Error("startLessonTask(EXTRACT_TRANSCRIPT) returned no task id");
+
+    const extractDeadline = Date.now() + 180_000;
+    let extractStatus = LessonTaskStatus.UNSPECIFIED;
+    while (Date.now() < extractDeadline) {
+      const r = await ai.getLessonTask({ taskId: extractTaskId });
+      extractStatus = r.task?.status ?? extractStatus;
+      if (extractStatus === LessonTaskStatus.SUCCEEDED || extractStatus === LessonTaskStatus.FAILED) break;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    expect(extractStatus, "EXTRACT_TRANSCRIPT task should succeed").toBe(LessonTaskStatus.SUCCEEDED);
+
+    // Start CHUNK_TRANSCRIPT via API and poll until it succeeds.
+    const chunkRes = await ai.startLessonTask({ lessonId, kind: LessonTaskKind.CHUNK_TRANSCRIPT });
+    const chunkTaskId = chunkRes.task?.id;
+    if (!chunkTaskId) throw new Error("startLessonTask(CHUNK_TRANSCRIPT) returned no task id");
+
+    const chunkDeadline = Date.now() + 60_000;
+    let chunkStatus = LessonTaskStatus.UNSPECIFIED;
+    while (Date.now() < chunkDeadline) {
+      const r = await ai.getLessonTask({ taskId: chunkTaskId });
+      chunkStatus = r.task?.status ?? chunkStatus;
+      if (chunkStatus === LessonTaskStatus.SUCCEEDED || chunkStatus === LessonTaskStatus.FAILED) break;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    expect(chunkStatus, "CHUNK_TRANSCRIPT task should succeed").toBe(LessonTaskStatus.SUCCEEDED);
+
+    // Reload the lesson page — now deriveAnalysisFromTasks returns ChunksReady
+    // (not PENDING), so the PENDING effect does NOT fire and chunks remain in
+    // client state, making the exercises step enabled.
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    // Open the "Bài tập" workflow step inside AnalyzeButton.
+    // Open the "Bài tập" workflow step.
     await page.getByTestId("workflow-step-exercises").click();
-    // After redesign: chunk-based layout, use add-interaction-btn in first chunk card
     const addBtn = page.getByTestId("add-interaction-btn").first();
-    await expect(addBtn).toBeVisible({ timeout: 5000 });
+    await expect(addBtn).toBeVisible({ timeout: 10_000 });
 
-    // Open inline add form and select "Điền đáp án" kind tab
+    // Open inline add form and select "Điền đáp án" kind tab.
     await addBtn.click();
     await page.getByRole("button", { name: "Điền đáp án" }).click();
 
-    // Fill in the prompt
+    // Fill in the prompt.
     await page.getByPlaceholder("Nhập câu hỏi...").fill("Câu điền đáp án thử nghiệm");
 
-    // Fill in template
+    // Fill in template.
     await page.getByPlaceholder(/Ví dụ.*\{\{0\}\}/).fill("Năng lượng không thể {{0}} mà chỉ chuyển hóa.");
 
-    // Fill in accepted answers for blank 0
+    // Fill in accepted answers for blank 0.
     await page.getByPlaceholder("ví dụ: tự sinh ra, được tạo ra").fill("tự sinh ra, được tạo ra");
 
-    // Leave startSeconds at 0 (no timed checkpoint) to avoid interfering with seeded MCQ checkpoints
-
-    // Save
+    // Save.
     await page.getByRole("button", { name: "Lưu" }).click();
 
-    // The fill-blank interaction should appear in the list (use first() since seeded lesson may have prior fill-blank entries from earlier test runs)
+    // The fill-blank interaction should appear in the list.
     await expect(page.getByText("Điền đáp án").first()).toBeVisible({ timeout: 5000 });
     await expect(page.getByText(/Năng lượng không thể.*\{\{0\}\}/).first()).toBeVisible();
   });

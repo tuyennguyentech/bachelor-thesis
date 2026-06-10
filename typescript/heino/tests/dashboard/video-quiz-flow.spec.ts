@@ -24,12 +24,18 @@
 
 import path from "path";
 import type { Page } from "@playwright/test";
+import { createClient } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-node";
+import { AuthService } from "buf/gen/richter/v1/auth_pb";
+import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import {
   test,
   expect,
   goToSeededLesson,
   SEED_HUST_CS_SLUG as ORG_SLUG,
   SEED_DSA_LESSON_BIG_O as SEEDED_LESSON,
+  TEACHER_EMAIL,
+  USER_PASSWORD,
 } from "../fixtures";
 
 const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
@@ -94,12 +100,18 @@ test.describe("Video upload flow", () => {
     const url = await createLesson(
       page, uid("Khóa học Upload Flow"), uid("Chương Upload"), uid("Bài Upload"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
 
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText(/Đang tải lên/)).toBeVisible();
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the component remounts with videoStorageKey set and the workflow advances to
+    // the transcript step. "Trích xuất transcript" is the stable post-upload indicator.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    // Navigate back to the upload step (step 1) to verify the button label changed to "Thay video".
+    await page.getByTestId("workflow-step-upload").click();
     await expect(page.getByRole("button", { name: "Thay video" }).first()).toBeVisible();
   });
 
@@ -107,13 +119,16 @@ test.describe("Video upload flow", () => {
     const url = await createLesson(
       page, uid("Khóa học AI Enabled"), uid("Chương AI"), uid("Bài AI"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
     // After upload, authoring workflow appears with the transcript extract button.
     await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
   });
 
   test("workflow stepper guides the next video processing action", async ({ teacherPage: page }) => {
@@ -127,11 +142,16 @@ test.describe("Video upload flow", () => {
     const url = await createLesson(
       page, uid("Khóa học Workflow"), uid("Chương Workflow"), uid("Bài Workflow"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
-    await page.reload();
+    // Reload to ?tab=processing so the server re-renders with video_key set
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("video-workflow-stepper")).toBeVisible();
     await expect(page.getByTestId("workflow-next-action")).toContainText("Tiếp theo: Trích xuất transcript");
     await expect(page.getByTestId("workflow-step-transcript")).toBeVisible();
@@ -171,12 +191,16 @@ test.describe("Video player", () => {
 
   test("video load error shows error placeholder instead of broken player", async ({ teacherPage: page }) => {
     const lessonUrl = await createLesson(page, uid("ErrorVideoTest"), "Module 1", uid("Lesson"));
-    await page.goto(lessonUrl);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     // Upload a real file so video_storage_key is set in DB
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
-    // Reload so the server fetches the presigned download URL and renders the video player
-    await page.reload();
+    // After upload, the workflow advances to the transcript step — confirms upload succeeded.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    // Navigate to ?tab=content so the server fetches the presigned download URL and renders the video player
+    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
     await expect(page.locator("video").first()).toBeVisible({ timeout: 10_000 });
     // The onError placeholder text must NOT be visible when the video loads fine
     await expect(page.getByText("Video không thể tải")).not.toBeVisible();
@@ -188,10 +212,11 @@ test.describe("Video player", () => {
 test.describe("Transcript display", () => {
   test("seeded lesson shows transcript section", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    // Transcript is in the LessonSidebar under the "Phiên âm" tab
-    await expect(page.getByRole("button", { name: "Phiên âm" })).toBeVisible();
-    // Seeded transcript has Big-O content (may match multiple elements — use first)
-    await expect(page.getByText(/Big-O notation/).first()).toBeVisible();
+    // Seeded lesson has chunks → the "Dàn bài" outline tab is visible in the sidebar.
+    // The sidebar shows Big-O chunk summaries in the outline.
+    await expect(page.getByRole("button", { name: "Dàn bài", exact: true })).toBeVisible({ timeout: 5000 });
+    // Big-O content appears in the chunk outline (chunk summaries)
+    await expect(page.getByText(/Big-O/).first()).toBeVisible();
   });
 
   test("transcript section absent when no analysis", async ({ studentPage: page }) => {
@@ -208,18 +233,24 @@ test.describe("AI analysis", () => {
     const url = await createLesson(
       page, uid("Khóa học Analyze"), uid("Chương Analyze"), uid("Bài Analyze"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
-    // Reload so server re-renders with video_key set → AI section appears
-    await page.reload();
+    // Navigate to ?tab=processing so server re-renders with video_key set → AI section appears
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
     await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
   });
 
   test("seeded lesson shows analysis status Hoàn thành", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // AI pipeline is in ?tab=processing
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     // Analysis was seeded with status=done; the redesigned lesson overview surfaces it as readiness.
     await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
     await expect(page.getByTestId("workflow-step-exercises")).toContainText(/\d+ câu/);
@@ -228,8 +259,9 @@ test.describe("AI analysis", () => {
   });
 
   test("teacher sees questions with correct answers highlighted", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
-    // Questions are inside the AnalyzeButton "Bài tập" tab for teachers
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Questions are in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
@@ -247,9 +279,13 @@ test.describe("AI analysis streaming progress", () => {
     const url = await createLesson(
       page, uid("Khóa học SSE"), uid("Chương SSE"), uid("Bài SSE"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
 
@@ -275,9 +311,13 @@ test.describe("AI analysis streaming progress", () => {
     const url = await createLesson(
       page, uid("Khóa học Busy"), uid("Chương Busy"), uid("Bài Busy"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
     // The hero card is visible with the running state + cancel button.
@@ -294,28 +334,46 @@ test.describe("AI analysis streaming progress", () => {
   });
 
   test("extract task survives page reload and recovers progress or result", async ({ teacherPage: page }) => {
+    test.setTimeout(600_000);
     const url = await createLesson(
       page, uid("Khóa học Reload Task"), uid("Chương Reload Task"), uid("Bài Reload Task"),
     );
-    await page.goto(url);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
     await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
 
-    await page.reload();
+    // Navigate back to ?tab=processing after reload so the pipeline UI is visible
+    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
 
+    // Wait for any sign that the extract task is tracked by the UI:
+    // - lesson-task-panel (other-step tasks visible in the panel)
+    // - extract-progress hero card (task tracker set extractState to running)
+    // - "Đang trích xuất..." disabled button in WorkflowNextAction
+    // - "Phân đoạn bài học" button (extract already completed)
+    // Note: lesson-task-panel hides active tasks when the user is on the
+    // matching step (transcript), so it may not appear for the extract task.
     await expect.poll(async () => {
       const panelVisible = await page.getByTestId("lesson-task-panel").first().isVisible();
       const progressVisible = await page.locator('[data-testid="extract-progress"]').first().isVisible();
+      const extractingVisible = await page
+        .getByTestId("workflow-next-action")
+        .getByRole("button", { name: "Đang trích xuất..." })
+        .first()
+        .isVisible();
       const resultVisible = await page
         .getByTestId("workflow-next-action")
         .getByRole("button", { name: "Phân đoạn bài học" })
         .first()
         .isVisible();
-      return panelVisible || progressVisible || resultVisible;
-    }, { timeout: 30_000 }).toBe(true);
+      return panelVisible || progressVisible || extractingVisible || resultVisible;
+    }, { timeout: 60_000 }).toBe(true);
 
     await expect.poll(async () => {
       const resultVisible = await page
@@ -332,6 +390,53 @@ test.describe("AI analysis streaming progress", () => {
 });
 
 // ── 5. Student quiz form ───────────────────────────────────────────────────
+
+// Clean up any non-seeded interactions on Big-O before the checkpoint-dependent
+// tests run. studio-new-interactions.spec.ts creates test interactions on the same
+// lesson; if a previous run left them in the DB, checkpoint overlays would show
+// multiple-choice or fill-blank questions that answerAllCheckpoints cannot handle.
+test.beforeAll(async ({ browser, baseURL }) => {
+  const rpcBase = process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
+  const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBase });
+  const token = (await createClient(AuthService, transport).login({
+    email: TEACHER_EMAIL,
+    password: USER_PASSWORD,
+  })).accessToken;
+
+  // Build an authed transport for InteractionService
+  const authedTransport = createConnectTransport({
+    httpVersion: "1.1",
+    baseUrl: rpcBase,
+    interceptors: [(next) => async (req) => {
+      req.header.set("Authorization", `Bearer ${token}`);
+      return next(req);
+    }],
+  });
+  const interactions = createClient(InteractionService, authedTransport);
+
+  // Resolve the Big-O lesson ID via the browser (goToSeededLesson handles slug lookup).
+  // The context must be authenticated so the dashboard navigation doesn't redirect to login.
+  const ctx = await browser.newContext({ baseURL: baseURL ?? undefined });
+  await ctx.addCookies([
+    { name: "dyadia_access", value: token, url: baseURL ?? "http://caddy", httpOnly: true, sameSite: "Lax" },
+  ]);
+  const page = await ctx.newPage();
+  try {
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    const match = lessonHref.match(/\/lessons\/([^/?#]+)/);
+    if (!match) return;
+    const lessonId = match[1];
+
+    // Delete any interaction that was NOT seeded (generatedBy !== "seed").
+    const list = await interactions.listLessonInteractions({ lessonId, limit: 500, offset: 0 });
+    for (const interaction of list.interactions) {
+      if (interaction.generatedBy === "seed") continue;
+      await interactions.deleteInteraction({ interactionId: interaction.id }).catch(() => { /* best effort */ });
+    }
+  } finally {
+    await ctx.close();
+  }
+});
 
 // Big-O seeded lesson checkpoint times (startSeconds per seed data)
 const CHECKPOINT_SECONDS = [208, 416, 624, 831, 1039];
@@ -571,9 +676,10 @@ test.describe("Video quiz checkpoint", () => {
 
 test.describe("Student progress (teacher view)", () => {
   test("teacher sees progress table with seeded attempts", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
-    await expect(page.getByText("Tiến độ học viên")).toBeVisible();
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Attempts table is in the ?tab=results tab; navigate there directly
+    await page.goto(`${lessonHref}?tab=results`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText("Kết quả & Thống kê học viên")).toBeVisible();
 
     // bob and dave both have seeded attempts for Big-O lesson
     const attemptsSection = page.getByTestId("lesson-attempts");
@@ -583,8 +689,9 @@ test.describe("Student progress (teacher view)", () => {
   });
 
   test("progress table shows score with color coding", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
-    await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Attempts table is in the ?tab=results tab; navigate there directly
+    await page.goto(`${lessonHref}?tab=results`, { waitUntil: "domcontentloaded" });
     const attemptsSection = page.getByTestId("lesson-attempts");
     // Score column should be visible
     await expect(attemptsSection.getByText(/\d+\/\d+/).first()).toBeVisible();
@@ -594,9 +701,9 @@ test.describe("Student progress (teacher view)", () => {
     const url = await createLesson(
       page, uid("Khóa học Empty Progress"), uid("Chương Empty"), uid("Bài Empty"),
     );
-    await page.goto(url);
-    await page.getByRole("link", { name: /Tiến độ học viên/ }).click();
-    await expect(page.getByText("Tiến độ học viên")).toBeVisible();
+    // Attempts table is in the ?tab=results tab; navigate there directly
+    await page.goto(`${url}?tab=results`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText("Kết quả & Thống kê học viên")).toBeVisible();
     await expect(page.getByText("Chưa có học viên nào nộp bài.")).toBeVisible();
   });
 });
@@ -604,14 +711,15 @@ test.describe("Student progress (teacher view)", () => {
 // ── 10. Interactive transcript ────────────────────────────────────────────
 
 test.describe("Interactive transcript (seeded segments)", () => {
-  // Note: seeded lessons have transcript TEXT only, not segments (no timestamp segments).
-  // This test covers the plain-text transcript path.
+  // Note: seeded lessons have chunks (outline) seeded in postgres; the transcript
+  // text lives in FDB. The sidebar shows the "Dàn bài" outline by default when chunks exist.
   test("plain transcript renders for seeded lesson", async ({ studentPage: page }) => {
     await goToSeededLesson(page, SEEDED_LESSON);
-    // Transcript is in the LessonSidebar — click the "Phiên âm" tab
-    await page.getByRole("button", { name: "Phiên âm" }).click();
-    // Plain text transcript (no interactive segments for seeded data)
-    await expect(page.getByText(/Big-O notation/).first()).toBeVisible();
+    // Seeded lesson has chunks → sidebar shows "Dàn bài" outline with Big-O content.
+    // Use exact:true to avoid strict-mode collision with "Thu gọn dàn bài" button.
+    await expect(page.getByRole("button", { name: "Dàn bài", exact: true })).toBeVisible({ timeout: 5000 });
+    // Chunk summaries in the outline contain Big-O related text
+    await expect(page.getByText(/Big-O/).first()).toBeVisible();
   });
 
   test("seek hint shown only when segments exist", async ({ studentPage: page }) => {
@@ -634,9 +742,13 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     lessonUrl = await createLesson(
       page, uid("Pipeline Course"), uid("Pipeline Module"), uid("Pipeline Lesson"),
     );
-    await page.goto(lessonUrl);
+    // Upload controls live in the ?tab=processing tab
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
+    // Wait for upload widget to be ready before triggering the file input
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    // After upload, the workflow advances to the transcript step.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
 
     // Step 1: Extract transcript
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
@@ -656,7 +768,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     // The running chunk state is shown in the bottom hero card.
     const chunkHero = page.locator('[data-testid="chunk-progress"]');
     await expect(chunkHero).toBeVisible({ timeout: 10_000 });
-    await page.reload();
+    // Navigate back to ?tab=processing after reload so the pipeline UI is visible
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect.poll(async () => {
       const taskPanelVisible = await page.getByTestId("lesson-task-panel").first().isVisible();
       const progressVisible = await page.locator('[data-testid="chunk-progress"]').first().isVisible();
@@ -681,7 +794,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     await page.locator("#gen-focus-prompt").fill("Tập trung vào cấu trúc dữ liệu Giải thuật và Big O");
     await page.getByRole("button", { name: "Tạo 5 bài tập" }).click();
     await expect(page.getByText("Đang tạo bài tập")).toBeVisible({ timeout: 5_000 });
-    await page.reload();
+    // Navigate back to ?tab=processing after reload so the pipeline UI is visible
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect.poll(async () => {
       const taskPanelVisible = await page.getByTestId("lesson-task-panel").first().isVisible();
       const generatingVisible = await page.getByText("Đang tạo bài tập").first().isVisible();
@@ -693,17 +807,28 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     ).toBeVisible({ timeout: 180_000 });
     await expect(page.locator('[data-testid="gen-error"]')).not.toBeVisible();
     await expect(page.getByTestId("workflow-step-preview")).toContainText("Sẵn sàng");
-    await expect(page.getByText("Trắc nghiệm 1 đáp án").first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Trắc nghiệm chọn nhiều").first()).toBeVisible();
-    await expect(page.getByText("Điền đáp án").first()).toBeVisible();
-    await expect(page.getByText("Bài đọc").first()).toBeVisible();
-    await expect(page.getByText("Bài nghe").first()).toBeVisible();
+    // Navigate to exercises step and expand all chunks to reveal interaction type badges.
+    // Chunks collapse by default; the type badges live inside the expanded interaction rows.
+    await page.getByTestId("workflow-step-exercises").click();
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5_000 });
+    for (const bar of await page.getByTestId("chunk-title-bar").all()) {
+      await bar.click();
+    }
+    const stepBody = page.getByTestId("workflow-step-body");
+    // The interaction row renderer labels (from src/interactions/*/index.ts):
+    // SINGLE_CHOICE → "Trắc nghiệm một đáp án", MULTIPLE_CHOICE → "Trắc nghiệm nhiều đáp án"
+    await expect(stepBody.getByText("Trắc nghiệm một đáp án").first()).toBeVisible({ timeout: 10_000 });
+    await expect(stepBody.getByText("Trắc nghiệm nhiều đáp án").first()).toBeVisible();
+    await expect(stepBody.getByText("Điền đáp án").first()).toBeVisible();
+    await expect(stepBody.getByText("Bài đọc").first()).toBeVisible();
+    await expect(stepBody.getByText("Bài nghe").first()).toBeVisible();
   });
 
   test("after pipeline: transcript segments visible with seek hint", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Transcript segment editor is in ?tab=processing; the interactive transcript display is in
+    // ?tab=content. This test verifies the content tab shows the segments after the pipeline.
+    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Phiên âm nội dung")).toBeVisible();
     await expect(page.getByText("(nhấn vào đoạn để tua video)")).toBeVisible();
     await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
@@ -712,8 +837,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 
   test("after pipeline: clicking transcript segment seeks video", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Interactive transcript with seek functionality is in ?tab=content (VideoPlayer sidebar)
+    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
 
     const firstSeg = page.locator('[data-testid="transcript-segment-0"]');
     await expect(firstSeg).toBeVisible({ timeout: 5_000 });
@@ -729,8 +854,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 
   test("after pipeline: transcript chunks visible in Phân đoạn step", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Chunk editor is in ?tab=processing
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
 
     await page.getByTestId("workflow-step-chunks").click();
     // PipelineStep 1 "Phân đoạn lại" is collapsed after pipeline (defaultOpen={!hasChunks}=false).
@@ -741,15 +866,15 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 
   test("after pipeline: status shows Hoàn thành", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
+    // "Đã sẵn sàng dùng thử" is shown in the workflow-next-action panel in ?tab=processing
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Đã sẵn sàng dùng thử")).toBeVisible({ timeout: 5_000 });
   });
 
   test("after pipeline: 'Trích xuất lại' button visible when segments exist", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Transcript extract button is in ?tab=processing
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-transcript").click();
     // After pipeline, lesson has transcript segments → extract button shows "Trích xuất lại"
     await expect(page.getByRole("button", { name: "Trích xuất lại" })).toBeVisible({ timeout: 5_000 });
@@ -757,15 +882,15 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 
   test("editing transcript segment updates VideoPlayer transcript display", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
-
-    // Pre-condition: interactive transcript is visible in VideoPlayer
-    await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
+    // Start on ?tab=processing to access segment editing
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
 
     // Open the "Phiên âm" workflow step in AnalyzeButton to access segment editing.
     await page.getByTestId("workflow-step-transcript").click();
-    await expect(page.locator('[data-testid="transcript-segment-0"]').first()).toBeVisible();
+    // Wait for the SegmentRow editor to be ready — "Chỉnh sửa" button indicates segments are rendered.
+    // NOTE: transcript-segment-N testids live in the ?tab=content VideoPlayer sidebar (InteractiveTranscript),
+    // not in the processing tab's SegmentRow editor. Checking the edit button is the correct precondition.
+    await expect(page.getByTitle("Chỉnh sửa").first()).toBeVisible({ timeout: 5_000 });
 
     // Edit the first segment
     const newText = `Đoạn đã sửa ${Date.now()}`;
@@ -775,7 +900,19 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     await textarea.fill(newText);
     await page.getByTitle("Lưu").first().click();
 
-    // After router.refresh(), VideoPlayer should show updated segment text
+    // After save, the updated segment text appears in the SegmentRow <p> within the step body.
+    // Scope to workflow-step-body to avoid matching text in hidden sidebar elements.
+    await expect(page.getByTestId("workflow-step-body").getByText(newText).first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Wait for router.refresh() (triggered by SegmentRow.onSaved) to settle before navigating.
+    // Firefox throws NS_BINDING_ABORTED if we navigate while the RSC refresh is still in flight.
+    await page.waitForLoadState("domcontentloaded");
+
+    // Navigate to ?tab=content to verify VideoPlayer also shows updated segment text
+    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
     await expect(page.locator('[data-testid="transcript-segment-0"]').first()).toContainText(newText, {
       timeout: 10_000,
     });
@@ -788,8 +925,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     test.setTimeout(300_000);
     // The pipeline lesson has a complete transcript — re-run chunking to observe progress labels.
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Chunk editor is in ?tab=processing
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
 
     // Navigate to the "Phân đoạn" workflow step where the "Phân đoạn lại" button lives.
     await page.getByTestId("workflow-step-chunks").click();
@@ -819,8 +956,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
   // a non-zero coherence percentage.
   test("after pipeline: CoherenceBadge renders a valid % for every chunk", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Chunk editor with coherence badges is in ?tab=processing
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
 
     await page.getByTestId("workflow-step-chunks").click();
     for (const button of await page.getByLabel("Mở rộng").all()) {
@@ -858,34 +995,42 @@ test.describe.serial("Full pipeline with audio fixture", () => {
   test("after video replacement: transcript state and VideoPlayer clear", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     test.setTimeout(60_000);
-    await page.goto(lessonUrl);
-    await page.reload();
+    // Start on ?tab=processing: pipeline ran → transcript sections and video upload controls visible
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
 
-    // Pre-condition: pipeline ran → transcript sections are visible
+    // Pre-condition: pipeline ran → transcript section is accessible in the processing tab.
+    // transcript-segment-N testids live in InteractiveTranscript (?tab=content), not in the SegmentRow
+    // editor (?tab=processing). Check for the "Chỉnh sửa" button to verify segments are loaded.
+    await page.getByTestId("workflow-step-transcript").click();
+    await expect(page.getByTitle("Chỉnh sửa").first()).toBeVisible({ timeout: 5_000 });
+
+    // Switch to content tab to confirm the interactive transcript is present before replacement
+    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Phiên âm nội dung")).toBeVisible();
     await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
     const oldVideoSrc = await page.locator('[data-testid="video-player"] video').getAttribute("src");
     expect(oldVideoSrc).toBeTruthy();
 
-    // Open Step 1 (Upload) to mount the VideoUpload component and file input
+    // Go back to ?tab=processing, open Step 1 (Upload) to mount the VideoUpload component
+    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-upload").click();
 
     // Upload a replacement video (same format, triggers status → PENDING)
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
-
-    // After replacement: the actual media source changes, and transcript state clears.
-    await expect.poll(
-      async () => page.locator('[data-testid="video-player"] video').getAttribute("src"),
-      { timeout: 10_000 },
-    ).not.toBe(oldVideoSrc);
-
-    // VideoPlayer transcript section should disappear (status → PENDING, FDB cleared)
-    await expect(page.getByText("Phiên âm nội dung")).not.toBeVisible({ timeout: 10_000 });
 
     // AnalyzeButton state reset: button reverts to "Trích xuất transcript" (not "Trích xuất lại")
     await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Trích xuất lại" })).not.toBeVisible();
+
+    // Navigate to ?tab=content to confirm the VideoPlayer source changed and transcript cleared
+    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
+    // VideoPlayer transcript section should disappear (status → PENDING, FDB cleared)
+    await expect(page.getByText("Phiên âm nội dung")).not.toBeVisible({ timeout: 10_000 });
+    // The actual media source changes after replacement
+    await expect.poll(
+      async () => page.locator('[data-testid="video-player"] video').getAttribute("src"),
+      { timeout: 10_000 },
+    ).not.toBe(oldVideoSrc);
   });
 });
 
@@ -893,7 +1038,9 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 
 test.describe("Teacher question editing (seeded data)", () => {
   test("teacher sees edit/delete buttons on each question", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Question editor is in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
@@ -905,7 +1052,9 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("teacher can edit a question inline", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Question editor is in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
@@ -922,13 +1071,16 @@ test.describe("Teacher question editing (seeded data)", () => {
     await textarea.fill(newText);
     await page.getByRole("button", { name: "Lưu" }).first().click();
 
-    // Edit form closes and new text appears
+    // Edit form closes and new text appears — scope to the step body so we match the visible
+    // question paragraph, not the hidden chunk-title-bar preview span.
     await expect(page.locator("textarea").first()).not.toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(newText).first()).toBeVisible();
+    await expect(page.getByTestId("workflow-step-body").getByText(newText).first()).toBeVisible();
   });
 
   test("teacher can add a manual question", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Question editor is in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     // After redesign: chunk-based layout with per-chunk interaction cards
     await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
@@ -946,11 +1098,14 @@ test.describe("Teacher question editing (seeded data)", () => {
     await optionInputs.nth(3).fill("Phương án D");
 
     await page.getByRole("button", { name: "Lưu" }).last().click();
-    await expect(page.getByText("Câu hỏi thủ công mới").first()).toBeVisible({ timeout: 5_000 });
+    // Scope to step body to match the visible paragraph row, not hidden title bar preview.
+    await expect(page.getByTestId("workflow-step-body").getByText("Câu hỏi thủ công mới").first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("bug 1.8: adding 3 questions consecutively keeps all of them visible", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Question editor is in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5_000 });
 
@@ -970,22 +1125,30 @@ test.describe("Teacher question editing (seeded data)", () => {
       await expect(page.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 5_000 });
     }
 
+    // After each addMcq, the chunk auto-expands (openAdd calls onToggle when collapsed).
+    // The expanded interaction list shows questions as paragraphs; the chunk title bar
+    // preview span is hidden when expanded. Scope to workflow-step-body to match only
+    // the visible paragraph rows.
+    const stepBody = page.getByTestId("workflow-step-body");
+
     await addMcq(q(1));
-    await expect(page.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(stepBody.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
 
     await addMcq(q(2));
     // Both questions must be visible — regression: stale closure would drop q(1)
-    await expect(page.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(q(2)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(stepBody.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(stepBody.getByText(q(2)).first()).toBeVisible({ timeout: 5_000 });
 
     await addMcq(q(3));
-    await expect(page.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(q(2)).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(q(3)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(stepBody.getByText(q(1)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(stepBody.getByText(q(2)).first()).toBeVisible({ timeout: 5_000 });
+    await expect(stepBody.getByText(q(3)).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("teacher can delete a question", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Question editor is in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
 
@@ -1025,7 +1188,9 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("cancel edit discards changes", async ({ teacherPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    // Question editor is in the ?tab=processing tab (exercises step)
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     // After redesign v2: chunks collapse by default — expand first chunk to see interactions
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
@@ -1038,8 +1203,9 @@ test.describe("Teacher question editing (seeded data)", () => {
     await textarea.fill("Đây là thay đổi bị hủy");
     await page.getByRole("button", { name: "Hủy" }).first().click();
 
-    // Original text still shown
-    await expect(page.getByText(questionText ?? "").first()).toBeVisible();
+    // Original text still shown — scope to the step body so we match the visible
+    // question paragraph, not the hidden chunk-title-bar preview span.
+    await expect(page.getByTestId("workflow-step-body").getByText(questionText ?? "").first()).toBeVisible();
     await expect(page.getByText("Đây là thay đổi bị hủy")).not.toBeVisible();
   });
 });

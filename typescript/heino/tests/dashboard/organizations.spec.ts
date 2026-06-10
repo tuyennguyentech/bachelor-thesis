@@ -1,4 +1,6 @@
-import { test, expect } from "../fixtures";
+import { test, expect, loginAs, USER_PASSWORD } from "../fixtures";
+
+const HENRY_EMAIL = "henry@dyadia.local";
 
 // alice@dyadia.local is a member of hust-cs (admin role)
 const SEED_MEMBER_ORG = "hust-cs";
@@ -136,25 +138,40 @@ test.describe("Dashboard course detail", () => {
 // ── Authenticated non-member gets 404 ─────────────────────────────────────
 //
 // henry@dyadia.local has an account but is NOT seeded as a member of hust-cs.
-// Visiting any page under /dashboard/organizations/hust-cs should return 404,
-// not redirect to /login (which would only happen for unauthenticated users).
+// Visiting any page under /dashboard/organizations/hust-cs should return a 404
+// page (rendered inline at the same URL), not redirect to /login (which would
+// only happen for unauthenticated users).
+//
+// Implementation note: getOrganizationBySlug returns PermissionDenied for
+// non-members to prevent org slug enumeration. The frontend handles
+// PermissionDenied by calling Next.js notFound(), which renders a 404 inline
+// (URL unchanged). The URL does NOT change to /unauthorized because the
+// membership check fails at the RPC layer before requireOrgMember() is reached.
 
 test.describe("Authenticated non-member cannot access org", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("Email").fill("henry@dyadia.local");
-    await page.getByLabel("Mật khẩu").fill("Password123!");
-    await page.getByRole("button", { name: "Đăng nhập" }).click();
-    await page.waitForURL(/\/(admin|dashboard)/);
+  // Use direct cookie injection (same as other fixtures) to reliably authenticate
+  // henry in the HTTP test environment. Form-based login sets cookies with
+  // Secure: true (production mode) which are not sent over HTTP, causing the
+  // proxy to treat the session as unauthenticated.
+  test.beforeEach(async ({ page, baseURL }) => {
+    await loginAs(page, HENRY_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
   });
 
+  // henry is a valid user but NOT a member of hust-cs.
+  // The backend getOrganizationBySlug returns PermissionDenied for non-members;
+  // the frontend calls notFound() → Next.js renders a 404 page at the same URL.
   test("gets 404 on org detail page", async ({ page }) => {
-    const response = await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`);
-    expect(response?.status()).toBe(404);
+    await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}`, { waitUntil: "domcontentloaded" });
+    // URL stays at the org page (Next.js notFound renders inline, no redirect)
+    await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}`));
+    // Next.js not-found page renders the custom not-found.tsx (or default 404)
+    await expect(page.getByText("404")).toBeVisible({ timeout: 5000 });
   });
 
   test("gets 404 on org courses page", async ({ page }) => {
-    const response = await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
-    expect(response?.status()).toBe(404);
+    await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`, { waitUntil: "domcontentloaded" });
+    // URL stays at the courses page (Next.js notFound renders inline, no redirect)
+    await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`));
+    await expect(page.getByText("404")).toBeVisible({ timeout: 5000 });
   });
 });

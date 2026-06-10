@@ -8,9 +8,14 @@ export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "changeme123";
 export const USER_EMAIL = process.env.USER_EMAIL ?? "alice@dyadia.local";
 export const USER_PASSWORD = process.env.USER_PASSWORD ?? "Password123!";
 export const SEED_ORG_SLUG = process.env.TEST_ORG_SLUG ?? "dyadia-demo";
-// carol is teacher in hust-cs; bob is student in hust-cs
+// carol is teacher in hust-cs; bob is student in hust-cs.
+// NOTE: bob also has admin/teacher roles in other orgs, so he is NOT a "pure"
+// student — the dashboard's student-progress section only renders for users
+// with no manage role anywhere. Use PURE_STUDENT_EMAIL (eve, student-only and
+// enrolled in the DSA course with an attempt) to exercise that feature.
 export const TEACHER_EMAIL = "carol@dyadia.local";
 export const STUDENT_EMAIL = "bob@dyadia.local";
+export const PURE_STUDENT_EMAIL = "eve@dyadia.local";
 
 const authTransports = new Map<string, ReturnType<typeof createConnectTransport>>();
 
@@ -58,6 +63,7 @@ export const test = base.extend<{
   userPage: Page;
   teacherPage: Page;
   studentPage: Page;
+  pureStudentPage: Page;
 }>({
   adminPage: async ({ page, baseURL }, use) => {
     await loginAs(page, ADMIN_EMAIL, ADMIN_PASSWORD, baseURL);
@@ -73,6 +79,10 @@ export const test = base.extend<{
   },
   studentPage: async ({ page, baseURL }, use) => {
     await loginAs(page, STUDENT_EMAIL, USER_PASSWORD, baseURL);
+    await use(page);
+  },
+  pureStudentPage: async ({ page, baseURL }, use) => {
+    await loginAs(page, PURE_STUDENT_EMAIL, USER_PASSWORD, baseURL);
     await use(page);
   },
 });

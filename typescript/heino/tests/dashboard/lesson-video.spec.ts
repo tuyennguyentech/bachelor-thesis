@@ -17,34 +17,37 @@ const DEMO_LESSON_TITLE = "Bài 1: Dyadia là gì?";
 
 async function goToLessonAsTeacher(page: Page): Promise<string> {
   const coursesUrl = `/dashboard/organizations/${ORG_SLUG}/courses`;
-  await page.goto(`${coursesUrl}?q=${encodeURIComponent(COURSE_TITLE)}`);
+  await page.goto(`${coursesUrl}?q=${encodeURIComponent(COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
   const row = page.getByRole("row").filter({ hasText: COURSE_TITLE });
   const courseHref = await row.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
-  await page.goto(courseHref);
+  await page.goto(courseHref, { waitUntil: "domcontentloaded" });
   const lessonLink = page.getByRole("link").filter({ hasText: LESSON_TITLE }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
-  await page.goto(lessonHref);
+  await page.goto(lessonHref, { waitUntil: "domcontentloaded" });
   return lessonHref;
 }
 
 async function goToLessonAsStudent(page: Page): Promise<string> {
   const coursesUrl = `/dashboard/organizations/${ORG_SLUG}/courses`;
-  await page.goto(`${coursesUrl}?q=${encodeURIComponent(COURSE_TITLE)}`);
+  await page.goto(`${coursesUrl}?q=${encodeURIComponent(COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
   const row = page.getByRole("row").filter({ hasText: COURSE_TITLE });
   const courseHref = await row.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
-  await page.goto(courseHref);
+  await page.goto(courseHref, { waitUntil: "domcontentloaded" });
   const lessonLink = page.getByRole("link").filter({ hasText: LESSON_TITLE }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
-  await page.goto(lessonHref);
+  await page.goto(lessonHref, { waitUntil: "domcontentloaded" });
   return lessonHref;
 }
 
 async function enterPreviewMode(page: Page): Promise<void> {
-  await page.getByTestId("workflow-step-preview").click();
+  // "Chế độ học viên" link is in the content tab (default tab).
+  // workflow-step-preview lives in the processing tab which is hidden by default,
+  // so we use the visible "Chế độ học viên" button in the Studio bài giảng section.
+  await page.getByRole("link", { name: "Chế độ học viên" }).click();
   await expect(page.getByText("Đang xem thử dưới dạng học viên")).toBeVisible();
 }
 
