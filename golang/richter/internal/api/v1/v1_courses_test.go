@@ -22,12 +22,13 @@ import (
 // ── shared test client struct ─────────────────────────────────────────────────
 
 type coursesTestClients struct {
-	courses richterv1connect.CourseServiceClient
-	modules richterv1connect.CourseModuleServiceClient
-	lessons richterv1connect.LessonServiceClient
-	orgs    richterv1connect.OrganizationServiceClient
-	members richterv1connect.OrganizationMemberServiceClient
-	users   richterv1connect.UserServiceClient
+	courses       richterv1connect.CourseServiceClient
+	modules       richterv1connect.CourseModuleServiceClient
+	lessons       richterv1connect.LessonServiceClient
+	orgs          richterv1connect.OrganizationServiceClient
+	members       richterv1connect.OrganizationMemberServiceClient
+	users         richterv1connect.UserServiceClient
+	courseMembers richterv1connect.CourseMemberServiceClient
 }
 
 func setupCoursesTestClients(t *testing.T) coursesTestClients {
@@ -35,12 +36,13 @@ func setupCoursesTestClients(t *testing.T) coursesTestClients {
 	url := newV1Server(t)
 	adminToken := getAdminToken(t, url)
 	return coursesTestClients{
-		courses: richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url),
-		modules: richterv1connect.NewCourseModuleServiceClient(httpClientWithToken(adminToken), url),
-		lessons: richterv1connect.NewLessonServiceClient(httpClientWithToken(adminToken), url),
-		orgs:    richterv1connect.NewOrganizationServiceClient(httpClientWithToken(adminToken), url),
-		members: richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url),
-		users:   richterv1connect.NewUserServiceClient(httpClientWithToken(adminToken), url),
+		courses:       richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url),
+		modules:       richterv1connect.NewCourseModuleServiceClient(httpClientWithToken(adminToken), url),
+		lessons:       richterv1connect.NewLessonServiceClient(httpClientWithToken(adminToken), url),
+		orgs:          richterv1connect.NewOrganizationServiceClient(httpClientWithToken(adminToken), url),
+		members:       richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url),
+		users:         richterv1connect.NewUserServiceClient(httpClientWithToken(adminToken), url),
+		courseMembers: richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(adminToken), url),
 	}
 }
 
@@ -319,6 +321,7 @@ func TestCoursesAuthz(t *testing.T) {
 	adminOrgs := richterv1connect.NewOrganizationServiceClient(httpClientWithToken(adminToken), url)
 	adminMembers := richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url)
 	adminCourses := richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url)
+	adminCourseMembers := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(adminToken), url)
 
 	anonCourses := richterv1connect.NewCourseServiceClient(http.DefaultClient, url)
 
@@ -382,6 +385,16 @@ func TestCoursesAuthz(t *testing.T) {
 		t.Fatalf("setup: create course: %v", err)
 	}
 	courseID := courseRes.Course.Id
+
+	// Enroll student in the course so GetCourseById/Student/OK passes.
+	// nonMember is intentionally NOT enrolled to keep the deny-path tests valid.
+	if _, err := adminCourseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("setup: enroll student in course: %v", err)
+	}
 
 	// --- CreateCourse ---
 	t.Run("CreateCourse", func(t *testing.T) {
@@ -714,6 +727,7 @@ func TestCourseModulesAuthz(t *testing.T) {
 	adminMembers := richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url)
 	adminCourses := richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url)
 	adminModules := richterv1connect.NewCourseModuleServiceClient(httpClientWithToken(adminToken), url)
+	adminCourseMembers := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(adminToken), url)
 	anonModules := richterv1connect.NewCourseModuleServiceClient(http.DefaultClient, url)
 
 	ownerEmail, ownerPass, ownerID := createActiveUser(t, adminUsers)
@@ -759,6 +773,17 @@ func TestCourseModulesAuthz(t *testing.T) {
 		t.Fatalf("setup: create course: %v", err)
 	}
 	courseID := courseRes.Course.Id
+
+	// Enroll student in the course so the Student/OK subtests pass.
+	// nonMember is intentionally NOT enrolled to keep the deny-path tests valid.
+	if _, err := adminCourseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("setup: enroll student in course: %v", err)
+	}
+
 	moduleID := createTestModule(t,
 		coursesTestClients{modules: adminModules},
 		courseID, 0)
@@ -1105,6 +1130,7 @@ func TestLessonsAuthz(t *testing.T) {
 	adminCourses := richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url)
 	adminModules := richterv1connect.NewCourseModuleServiceClient(httpClientWithToken(adminToken), url)
 	adminLessons := richterv1connect.NewLessonServiceClient(httpClientWithToken(adminToken), url)
+	adminCourseMembers := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(adminToken), url)
 	anonLessons := richterv1connect.NewLessonServiceClient(http.DefaultClient, url)
 
 	ownerEmail, ownerPass, ownerID := createActiveUser(t, adminUsers)
@@ -1150,6 +1176,16 @@ func TestLessonsAuthz(t *testing.T) {
 		t.Fatalf("setup: create course: %v", err)
 	}
 	courseID := courseRes.Course.Id
+
+	// Enroll student in the course so the Student/OK subtests pass.
+	// nonMember is intentionally NOT enrolled to keep the deny-path tests valid.
+	if _, err := adminCourseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("setup: enroll student in course: %v", err)
+	}
 
 	moduleRes, err := adminModules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
 		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,

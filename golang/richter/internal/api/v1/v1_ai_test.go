@@ -130,6 +130,25 @@ func setupAIEnv(t *testing.T) aiTestEnv {
 		t.Fatalf("setup: create lesson: %v", err)
 	}
 
+	// Enrol teacher + students into the course so course-scoped AI RPCs pass.
+	// (The course owner and sys-admin bypass; nonMember stays unenrolled to keep
+	// exercising the permission-denied path.)
+	adminCourseMembers := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(adminToken), url)
+	for _, m := range []struct {
+		id   string
+		role richterv1.CourseRole
+	}{
+		{teacherID, richterv1.CourseRole_COURSE_ROLE_TEACHER},
+		{studentID, richterv1.CourseRole_COURSE_ROLE_STUDENT},
+		{student2ID, richterv1.CourseRole_COURSE_ROLE_STUDENT},
+	} {
+		if _, err := adminCourseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseRes.Course.Id, UserId: m.id, Role: m.role,
+		}); err != nil {
+			t.Fatalf("setup: add course member: %v", err)
+		}
+	}
+
 	return aiTestEnv{
 		url:            url,
 		orgID:          orgID,

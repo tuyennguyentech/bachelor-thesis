@@ -24,13 +24,14 @@ import (
 // ── shared clients ────────────────────────────────────────────────────────────
 
 type interactionsTestClients struct {
-	interactions richterv1connect.InteractionServiceClient
-	courses      richterv1connect.CourseServiceClient
-	modules      richterv1connect.CourseModuleServiceClient
-	lessons      richterv1connect.LessonServiceClient
-	orgs         richterv1connect.OrganizationServiceClient
-	members      richterv1connect.OrganizationMemberServiceClient
-	users        richterv1connect.UserServiceClient
+	interactions  richterv1connect.InteractionServiceClient
+	courses       richterv1connect.CourseServiceClient
+	modules       richterv1connect.CourseModuleServiceClient
+	lessons       richterv1connect.LessonServiceClient
+	orgs          richterv1connect.OrganizationServiceClient
+	members       richterv1connect.OrganizationMemberServiceClient
+	users         richterv1connect.UserServiceClient
+	courseMembers richterv1connect.CourseMemberServiceClient
 }
 
 func setupInteractionsTestClients(t *testing.T) (interactionsTestClients, string) {
@@ -38,13 +39,14 @@ func setupInteractionsTestClients(t *testing.T) (interactionsTestClients, string
 	url := newV1Server(t)
 	adminToken := getAdminToken(t, url)
 	c := interactionsTestClients{
-		interactions: richterv1connect.NewInteractionServiceClient(httpClientWithToken(adminToken), url),
-		courses:      richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url),
-		modules:      richterv1connect.NewCourseModuleServiceClient(httpClientWithToken(adminToken), url),
-		lessons:      richterv1connect.NewLessonServiceClient(httpClientWithToken(adminToken), url),
-		orgs:         richterv1connect.NewOrganizationServiceClient(httpClientWithToken(adminToken), url),
-		members:      richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url),
-		users:        richterv1connect.NewUserServiceClient(httpClientWithToken(adminToken), url),
+		interactions:  richterv1connect.NewInteractionServiceClient(httpClientWithToken(adminToken), url),
+		courses:       richterv1connect.NewCourseServiceClient(httpClientWithToken(adminToken), url),
+		modules:       richterv1connect.NewCourseModuleServiceClient(httpClientWithToken(adminToken), url),
+		lessons:       richterv1connect.NewLessonServiceClient(httpClientWithToken(adminToken), url),
+		orgs:          richterv1connect.NewOrganizationServiceClient(httpClientWithToken(adminToken), url),
+		members:       richterv1connect.NewOrganizationMemberServiceClient(httpClientWithToken(adminToken), url),
+		users:         richterv1connect.NewUserServiceClient(httpClientWithToken(adminToken), url),
+		courseMembers: richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(adminToken), url),
 	}
 	return c, url
 }
@@ -189,6 +191,15 @@ func TestInteractionsLifecycle(t *testing.T) {
 	}
 	lessonID := lessonRes.Lesson.Id
 
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseRes.Course.Id,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
+
 	// Insert 3 interactions
 	ints := insertTestInteractions(t, lessonID, 3)
 	correct := correctAnswers(ints)
@@ -326,6 +337,15 @@ func TestManualInteractionKindMatrix(t *testing.T) {
 		t.Fatalf("create lesson: %v", err)
 	}
 	lessonID := lessonRes.Lesson.Id
+
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseRes.Course.Id,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
 
 	create := func(t *testing.T, req *richterv1.CreateManualInteractionRequest, want richterv1.InteractionKind) *richterv1.LessonInteraction {
 		t.Helper()
@@ -551,6 +571,24 @@ func TestInteractionsAuthz(t *testing.T) {
 	})
 	nonMemberEmail, nonMemberPassword, _ := createActiveUser(t, c.users)
 
+	// Enroll student and teacher in the course so their OK subtests pass.
+	// nonMember is intentionally NOT enrolled to keep the deny-path tests valid.
+	for _, m := range []struct {
+		id   string
+		role richterv1.CourseRole
+	}{
+		{studentID, richterv1.CourseRole_COURSE_ROLE_STUDENT},
+		{teacherID, richterv1.CourseRole_COURSE_ROLE_TEACHER},
+	} {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseRes.Course.Id,
+			UserId:   m.id,
+			Role:     m.role,
+		}); err != nil {
+			t.Fatalf("enroll %s in course: %v", m.id, err)
+		}
+	}
+
 	anonIA := richterv1connect.NewInteractionServiceClient(http.DefaultClient, url)
 	studentToken := getUserToken(t, url, studentEmail, studentPassword)
 	studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentToken), url)
@@ -710,6 +748,14 @@ func TestFillBlankInteractions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add student: %v", err)
 	}
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseRes.Course.Id,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
 
 	// Insert 2-blank fill_blank interaction: template "Energy cannot be {{0}}, only {{1}}."
 	fi := insertFillBlankInteraction(t, lessonID, "Energy cannot be {{0}}, only {{1}}.", []struct{ Accepted []string }{
@@ -801,6 +847,9 @@ func TestFillBlankInteractions(t *testing.T) {
 			t.Fatalf("get attempt: %v", err)
 		}
 		attempt := res.Attempt
+		if attempt == nil {
+			t.Fatal("expected attempt, got nil")
+		}
 		if len(attempt.Responses) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(attempt.Responses))
 		}
@@ -849,6 +898,15 @@ func TestListeningInteractionLifecycle(t *testing.T) {
 	moduleRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonID := lessonRes.Lesson.Id
+
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseRes.Course.Id,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
 
 	// Create LISTENING (comprehension, 2 nested MCQs)
 	createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
@@ -945,6 +1003,15 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 	moduleRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonID := lessonRes.Lesson.Id
+
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseRes.Course.Id,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
 
 	// Create READING (pronunciation mode) — new schema: passage_markdown, no nested MCQs
 	createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
@@ -1064,6 +1131,13 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("add second student: %v", err)
 		}
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseRes.Course.Id,
+			UserId:   studentID,
+			Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enroll second student in course: %v", err)
+		}
 		brokenStudentToken := getUserToken(t, url, studentEmail, studentPassword)
 		brokenStudentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(brokenStudentToken), url)
 
@@ -1130,6 +1204,15 @@ func TestPreviewGrade(t *testing.T) {
 	moduleRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{ModuleId: moduleRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0})
 	lessonID := lessonRes.Lesson.Id
+
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseRes.Course.Id,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
 
 	createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
 		LessonId:     lessonID,
@@ -1670,8 +1753,10 @@ func TestMetricsAndAnalytics(t *testing.T) {
 	ctx := context.Background()
 
 	// ── setup: org + owner + teacher + student + course + module + lesson ──
+	// testPassword() is random per call, so capture it once and reuse for login.
+	ownerPassword := testPassword()
 	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
-		Email: testEmail(), Password: testPassword(),
+		Email: testEmail(), Password: ownerPassword,
 		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
 		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
 	})
@@ -1687,16 +1772,8 @@ func TestMetricsAndAnalytics(t *testing.T) {
 		t.Fatalf("create org: %v", err)
 	}
 	orgID := orgRes.Organization.Id
-
-	// Add owner as org owner member so teacher-role RPCs work
-	_, err = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
-		OrganizationId: orgID, UserId: ownerID,
-		Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER,
-		Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
-	})
-	if err != nil {
-		t.Fatalf("add owner member: %v", err)
-	}
+	// CreateOrganization(CreatedBy: ownerID) already adds ownerID as an active
+	// owner member, so no explicit AddOrganizationMember is needed here.
 
 	studentEmail, studentPassword, studentID := createActiveUser(t, c.users)
 	_, err = c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
@@ -1715,6 +1792,15 @@ func TestMetricsAndAnalytics(t *testing.T) {
 		t.Fatalf("create course: %v", err)
 	}
 	courseID := courseRes.Course.Id
+
+	// Enroll student in the course
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enroll student in course: %v", err)
+	}
 
 	moduleRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
 		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,
@@ -1831,7 +1917,7 @@ func TestMetricsAndAnalytics(t *testing.T) {
 
 	// ── 3. ListCourseAttemptsSummary ──────────────────────────────────────────
 	t.Run("ListCourseAttemptsSummary/TeacherSeesStudent", func(t *testing.T) {
-		ownerToken := getUserToken(t, url, ownerRes.User.Email, testPassword())
+		ownerToken := getUserToken(t, url, ownerRes.User.Email, ownerPassword)
 		teacherIA3 := richterv1connect.NewInteractionServiceClient(httpClientWithToken(ownerToken), url)
 
 		res, err := teacherIA3.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{

@@ -48,7 +48,7 @@ SELECT
   la.submitted_at,
   la.attempt_count,
   la.video_watch_fraction,
-  AVG(lar.time_to_answer_ms)::float8 AS avg_time_to_answer_ms,
+  COALESCE(AVG(lar.time_to_answer_ms), 0)::float8 AS avg_time_to_answer_ms,
   u.first_name,
   u.middle_name,
   u.last_name,

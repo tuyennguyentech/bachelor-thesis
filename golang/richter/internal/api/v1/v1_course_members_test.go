@@ -173,8 +173,7 @@ func TestCourseMemberLifecycle(t *testing.T) {
 	orgID := createCMTestOrg(t, c, ownerID)
 	courseID := createCMTestCourse(t, c, orgID, ownerID)
 
-	// Add owner to org so the course owner-check queries work.
-	addOrgMember(t, c, orgID, ownerID, richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER)
+	// ownerID is already an org member (OWNER) because createCMTestOrg uses them as createdBy.
 	// Add the test member to org (student role) so they can later be added to the course.
 	addOrgMember(t, c, orgID, memberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
 
@@ -322,8 +321,8 @@ func TestCourseMemberAccessGate(t *testing.T) {
 	_ = nonMemberID
 
 	// Set up org.
+	// ownerID is already an org member (OWNER) because createCMTestOrg uses them as createdBy.
 	orgID := createCMTestOrg(t, c, ownerID)
-	addOrgMember(t, c, orgID, ownerID, richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER)
 	addOrgMember(t, c, orgID, memberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
 	addOrgMember(t, c, orgID, nonMemberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
 	addOrgMember(t, c, orgID, adminID, richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN)
@@ -429,8 +428,8 @@ func TestListCoursesCanAccess(t *testing.T) {
 	// outOfOrgEmail is not in the org at all.
 	outOfOrgEmail, outOfOrgPass, _ := createActiveUser(t, c.users)
 
+	// ownerID is already an org member (OWNER) because createCMTestOrg uses them as createdBy.
 	orgID := createCMTestOrg(t, c, ownerID)
-	addOrgMember(t, c, orgID, ownerID, richterv1.OrganizationRole_ORGANIZATION_ROLE_OWNER)
 	addOrgMember(t, c, orgID, memberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
 	addOrgMember(t, c, orgID, orgStudentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
 

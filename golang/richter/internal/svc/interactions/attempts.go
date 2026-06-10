@@ -35,13 +35,9 @@ func (s *InteractionsSvc) SubmitAttempt(
 		return nil, err
 	}
 
-	orgID, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (pgtype.UUID, error) {
-		return q.GetOrgIDByLessonID(ctx, lessonID)
-	})
-	if err != nil {
-		return nil, svc.ConnectDBError(err)
-	}
-	if _, err := s.authz.RequireOrgMember(ctx, orgID); err != nil {
+	// Course-level access: only users enrolled in the course (or org
+	// owner/admin, course owner, sys-admin) may submit attempts.
+	if _, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID); err != nil {
 		return nil, err
 	}
 
@@ -356,7 +352,7 @@ func (s *InteractionsSvc) PreviewGrade(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.authz.RequireOrgMember(ctx, target.orgID); err != nil {
+	if _, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID); err != nil {
 		return nil, err
 	}
 	if target.lesson.FeedbackMode != "after_each" {
@@ -403,7 +399,7 @@ func (s *InteractionsSvc) SaveAttemptResponse(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.authz.RequireOrgMember(ctx, target.orgID); err != nil {
+	if _, err := s.authz.RequireCourseMemberByLesson(ctx, lessonID); err != nil {
 		return nil, err
 	}
 

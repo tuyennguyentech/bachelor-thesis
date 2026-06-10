@@ -214,6 +214,9 @@ func (a *AuthzSvc) RequireCourseMember(ctx context.Context, courseID pgtype.UUID
 		return q.GetCourseAccessInfoByCourseID(ctx, courseID)
 	})
 	if err != nil {
+		// SYS_ADMIN already returned above, so only non-admins reach here.
+		// Obscure existence: a missing course is reported as a permission error
+		// rather than not-found so outsiders can't probe which courses exist.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("course not found or access denied"))
 		}
@@ -254,10 +257,22 @@ func (a *AuthzSvc) RequireCourseMember(ctx context.Context, courseID pgtype.UUID
 // RequireCourseMemberByLesson resolves the course from the lesson and delegates
 // to RequireCourseMember.
 func (a *AuthzSvc) RequireCourseMemberByLesson(ctx context.Context, lessonID pgtype.UUID) (*jwtv1.JWTClaims, error) {
+	claims, err := a.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// SYS_ADMIN bypasses the course check entirely, and we skip lesson
+	// resolution so a missing lesson surfaces as the handler's own NotFound
+	// (admins are allowed to learn that a resource does not exist).
+	if claims.GetRole() == richterv1.UserRole_USER_ROLE_ADMIN {
+		return claims, nil
+	}
 	info, err := db.WithConnection(a.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.GetCourseAccessInfoByLessonIDRow, error) {
 		return q.GetCourseAccessInfoByLessonID(ctx, lessonID)
 	})
 	if err != nil {
+		// For non-admins, obscure existence: a missing lesson is reported as a
+		// permission error so outsiders can't probe which lesson IDs exist.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("lesson not found or access denied"))
 		}
