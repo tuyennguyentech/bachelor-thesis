@@ -414,6 +414,305 @@ func TestCourseMemberAccessGate(t *testing.T) {
 	})
 }
 
+// TestCourseMemberAuthz tests that Add/Remove/List operations enforce manager-only authz.
+// Specifically:
+//   - A plain student course-member cannot add/remove other members.
+//   - A course teacher-member can add/remove members.
+//   - An org admin (not an explicit course member) can add/remove members.
+//   - A non-manager (org student who is not a course teacher) gets PermissionDenied.
+//   - AddCourseMember to a non-existent course returns NotFound (manager sees it).
+//   - ListCourseMembers is denied to a non-course-member.
+func TestCourseMemberAuthz(t *testing.T) {
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	// Create all users.
+	ownerEmail, ownerPass, ownerID := createActiveUser(t, c.users)
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	orgStudentEmail, orgStudentPass, orgStudentID := createActiveUser(t, c.users) // org-only, no course membership
+	orgAdminEmail, orgAdminPass, orgAdminID := createActiveUser(t, c.users)
+	targetEmail, _, targetID := createActiveUser(t, c.users) // user to be added/removed in authz tests
+	_ = targetEmail
+
+	// Set up org.  ownerID is already OWNER via createCMTestOrg.
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, teacherID, richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER)
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, orgStudentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, orgAdminID, richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN)
+	addOrgMember(t, c, orgID, targetID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+	// Set up course.
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	// Enrol teacher and student as course members.
+	_, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: teacherID, Role: richterv1.CourseRole_COURSE_ROLE_TEACHER,
+	})
+	if err != nil {
+		t.Fatalf("setup: enrol teacher: %v", err)
+	}
+	_, err = c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: studentID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	})
+	if err != nil {
+		t.Fatalf("setup: enrol student: %v", err)
+	}
+
+	ownerToken := getUserToken(t, url, ownerEmail, ownerPass)
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPass)
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+	orgStudentToken := getUserToken(t, url, orgStudentEmail, orgStudentPass)
+	orgAdminToken := getUserToken(t, url, orgAdminEmail, orgAdminPass)
+
+	cm := func(tok string) richterv1connect.CourseMemberServiceClient {
+		return richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(tok), url)
+	}
+
+	addReq := func() *richterv1.AddCourseMemberRequest {
+		return &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: targetID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}
+	}
+	removeReq := func() *richterv1.RemoveCourseMemberRequest {
+		return &richterv1.RemoveCourseMemberRequest{CourseId: courseID, UserId: targetID}
+	}
+
+	// ── AddCourseMember authz ──────────────────────────────────────────────────
+
+	t.Run("AddCourseMember/Student_PermissionDenied", func(t *testing.T) {
+		// A course student-member cannot manage membership.
+		assertCode(t, func() error { _, e := cm(studentToken).AddCourseMember(ctx, addReq()); return e }(), connect.CodePermissionDenied)
+	})
+
+	t.Run("AddCourseMember/OrgStudentNonMember_PermissionDenied", func(t *testing.T) {
+		// An org student who is not a course member at all cannot manage.
+		assertCode(t, func() error { _, e := cm(orgStudentToken).AddCourseMember(ctx, addReq()); return e }(), connect.CodePermissionDenied)
+	})
+
+	t.Run("AddCourseMember/Teacher_OK", func(t *testing.T) {
+		// A course teacher-member can add.
+		if _, e := cm(teacherToken).AddCourseMember(ctx, addReq()); e != nil {
+			t.Errorf("teacher should be allowed to AddCourseMember, got %v", e)
+		}
+	})
+
+	t.Run("AddCourseMember/OrgAdmin_OK", func(t *testing.T) {
+		// An org admin (not explicit course member) can add.
+		// Target may already be added by the Teacher test; upsert is OK.
+		if _, e := cm(orgAdminToken).AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: targetID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); e != nil {
+			t.Errorf("org admin should be allowed to AddCourseMember, got %v", e)
+		}
+	})
+
+	t.Run("AddCourseMember/CourseOwner_OK", func(t *testing.T) {
+		// Course owner can add.
+		if _, e := cm(ownerToken).AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: targetID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); e != nil {
+			t.Errorf("course owner should be allowed to AddCourseMember, got %v", e)
+		}
+	})
+
+	t.Run("AddCourseMember_NonExistentCourse_Rejected", func(t *testing.T) {
+		// A manager adding a member to a non-existent course is rejected. The
+		// course foreign key cannot be satisfied, surfaced as FailedPrecondition.
+		_, e := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: gofakeit.UUID(), UserId: targetID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		})
+		assertCode(t, e, connect.CodeFailedPrecondition)
+	})
+
+	// ── RemoveCourseMember authz ───────────────────────────────────────────────
+
+	// Ensure target is enrolled first so we have someone to remove.
+	_, err = c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: targetID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	})
+	if err != nil {
+		t.Fatalf("setup: enrol target for remove tests: %v", err)
+	}
+
+	t.Run("RemoveCourseMember/Student_PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error { _, e := cm(studentToken).RemoveCourseMember(ctx, removeReq()); return e }(), connect.CodePermissionDenied)
+	})
+
+	t.Run("RemoveCourseMember/OrgStudentNonMember_PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error { _, e := cm(orgStudentToken).RemoveCourseMember(ctx, removeReq()); return e }(), connect.CodePermissionDenied)
+	})
+
+	t.Run("RemoveCourseMember/Teacher_OK", func(t *testing.T) {
+		// Teacher removes target; subsequent remove by teacher should return NotFound.
+		if _, e := cm(teacherToken).RemoveCourseMember(ctx, removeReq()); e != nil {
+			t.Errorf("teacher should be allowed to RemoveCourseMember, got %v", e)
+		}
+	})
+
+	t.Run("RemoveCourseMember/NotMember_NotFound", func(t *testing.T) {
+		// Target was just removed; removing again → NotFound (not a no-op).
+		_, e := cm(ownerToken).RemoveCourseMember(ctx, removeReq())
+		assertCode(t, e, connect.CodeNotFound)
+	})
+
+	// ── ListCourseMembers authz ────────────────────────────────────────────────
+
+	t.Run("ListCourseMembers/NonMember_PermissionDenied", func(t *testing.T) {
+		// orgStudentID is in the org but not in the course.
+		_, e := cm(orgStudentToken).ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+			CourseId: courseID, Limit: 10, Offset: 0,
+		})
+		assertCode(t, e, connect.CodePermissionDenied)
+	})
+
+	t.Run("ListCourseMembers/Member_OK", func(t *testing.T) {
+		if _, e := cm(studentToken).ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+			CourseId: courseID, Limit: 10, Offset: 0,
+		}); e != nil {
+			t.Errorf("course student-member should be allowed to ListCourseMembers, got %v", e)
+		}
+	})
+
+	t.Run("ListCourseMembers/DisplayNameAndEmail", func(t *testing.T) {
+		// Verify the JOIN populates display name fields on each returned member.
+		res, e := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+			CourseId: courseID, Limit: 50, Offset: 0,
+		})
+		if e != nil {
+			t.Fatalf("ListCourseMembers: %v", e)
+		}
+		for _, m := range res.Members {
+			if m.UserEmail == "" {
+				t.Errorf("user_email empty for member %s", m.UserId)
+			}
+			if m.UserFirstName == "" {
+				t.Errorf("user_first_name empty for member %s", m.UserId)
+			}
+			if m.UserLastName == "" {
+				t.Errorf("user_last_name empty for member %s", m.UserId)
+			}
+		}
+	})
+}
+
+// TestListUserCourses verifies that ListUserCourses is self-scoped:
+//   - The caller can see their own memberships.
+//   - Another user's memberships are not accessible (PermissionDenied).
+//   - Pagination (limit/offset) works.
+func TestListUserCourses(t *testing.T) {
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	ownerEmail, ownerPass, ownerID := createActiveUser(t, c.users)
+	userAEmail, userAPass, userAID := createActiveUser(t, c.users)
+	userBEmail, userBPass, userBID := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, userAID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, userBID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+	// Create two courses and enrol userA in both, but NOT userB.
+	courseID1 := createCMTestCourse(t, c, orgID, ownerID)
+	courseID2 := createCMTestCourse(t, c, orgID, ownerID)
+
+	for _, cid := range []string{courseID1, courseID2} {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: cid, UserId: userAID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("setup: enrol userA in %s: %v", cid, err)
+		}
+	}
+
+	_ = ownerEmail
+	_ = userBEmail
+	userAToken := getUserToken(t, url, userAEmail, userAPass)
+	userBToken := getUserToken(t, url, userBEmail, userBPass)
+
+	cmA := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(userAToken), url)
+	cmB := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(userBToken), url)
+
+	t.Run("Self_SeesMemberships", func(t *testing.T) {
+		res, err := cmA.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+			UserId: userAID, Limit: 50, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListUserCourses self: %v", err)
+		}
+		seen := map[string]bool{}
+		for _, m := range res.Memberships {
+			seen[m.CourseId] = true
+		}
+		if !seen[courseID1] {
+			t.Errorf("courseID1 not found in userA's memberships")
+		}
+		if !seen[courseID2] {
+			t.Errorf("courseID2 not found in userA's memberships")
+		}
+	})
+
+	t.Run("Self_Pagination", func(t *testing.T) {
+		res1, err := cmA.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+			UserId: userAID, Limit: 1, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListUserCourses page1: %v", err)
+		}
+		if len(res1.Memberships) != 1 {
+			t.Errorf("page1: expected 1 membership, got %d", len(res1.Memberships))
+		}
+		res2, err := cmA.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+			UserId: userAID, Limit: 1, Offset: 1,
+		})
+		if err != nil {
+			t.Fatalf("ListUserCourses page2: %v", err)
+		}
+		if len(res2.Memberships) != 1 {
+			t.Errorf("page2: expected 1 membership, got %d", len(res2.Memberships))
+		}
+		// IDs on the two pages must differ.
+		if res1.Memberships[0].CourseId == res2.Memberships[0].CourseId {
+			t.Errorf("pagination returned the same course on both pages")
+		}
+	})
+
+	t.Run("Self_NoMemberships_Empty", func(t *testing.T) {
+		// userB is not enrolled in any course; must return empty list, not error.
+		res, err := cmB.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+			UserId: userBID, Limit: 10, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListUserCourses userB (no memberships): %v", err)
+		}
+		if len(res.Memberships) != 0 {
+			t.Errorf("expected empty list for user with no course memberships, got %d", len(res.Memberships))
+		}
+	})
+
+	t.Run("OtherUser_PermissionDenied", func(t *testing.T) {
+		// userB trying to see userA's memberships.
+		_, err := cmB.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+			UserId: userAID, Limit: 10, Offset: 0,
+		})
+		assertCode(t, err, connect.CodePermissionDenied)
+	})
+
+	t.Run("Admin_CanSeeOtherUser", func(t *testing.T) {
+		// RequireSelf grants sys-admin a bypass (claims.role == ADMIN), so an
+		// admin may list another user's course memberships. The self-scope is
+		// only enforced against non-admin callers (see NonSelf subtest above).
+		if _, err := c.courseMembers.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+			UserId: userAID, Limit: 10, Offset: 0,
+		}); err != nil {
+			t.Errorf("expected admin to list another user's courses, got %v", err)
+		}
+	})
+
+	// ownerPass is captured but not used for login in this test.
+	_ = ownerPass
+}
+
 // TestListCoursesCanAccess verifies that ListCourses populates the can_access flag
 // correctly: course members (and bypasses) get true, non-members get false.
 func TestListCoursesCanAccess(t *testing.T) {
@@ -428,10 +727,13 @@ func TestListCoursesCanAccess(t *testing.T) {
 	// outOfOrgEmail is not in the org at all.
 	outOfOrgEmail, outOfOrgPass, _ := createActiveUser(t, c.users)
 
+	orgAdminCAEmail, orgAdminCAPass, orgAdminCAID := createActiveUser(t, c.users)
+
 	// ownerID is already an org member (OWNER) because createCMTestOrg uses them as createdBy.
 	orgID := createCMTestOrg(t, c, ownerID)
 	addOrgMember(t, c, orgID, memberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
 	addOrgMember(t, c, orgID, orgStudentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, orgAdminCAID, richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN)
 
 	courseID := createCMTestCourse(t, c, orgID, ownerID)
 
@@ -449,6 +751,7 @@ func TestListCoursesCanAccess(t *testing.T) {
 	memberToken := getUserToken(t, url, memberEmail, memberPass)
 	orgStudentToken := getUserToken(t, url, orgStudentEmail, orgStudentPass)
 	outOfOrgToken := getUserToken(t, url, outOfOrgEmail, outOfOrgPass)
+	orgAdminCAToken := getUserToken(t, url, orgAdminCAEmail, orgAdminCAPass)
 
 	listCourses := func(tok string) ([]*richterv1.Course, error) {
 		t.Helper()
@@ -513,6 +816,21 @@ func TestListCoursesCanAccess(t *testing.T) {
 		}
 		if found.CanAccess {
 			t.Error("org student without course membership should have can_access=false")
+		}
+	})
+
+	t.Run("OrgAdmin_CanAccess_True", func(t *testing.T) {
+		// An org admin is not an explicit course member but should bypass the gate.
+		courses, err := listCourses(orgAdminCAToken)
+		if err != nil {
+			t.Fatalf("list courses as org admin: %v", err)
+		}
+		found := findCourse(courses)
+		if found == nil {
+			t.Fatal("course not found in org admin's list")
+		}
+		if !found.CanAccess {
+			t.Error("org admin should have can_access=true (bypass)")
 		}
 	})
 

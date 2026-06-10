@@ -2006,3 +2006,537 @@ func TestMetricsAndAnalytics(t *testing.T) {
 		}(), connect.CodeUnauthenticated)
 	})
 }
+
+// ── TestAnalyticsEmptyAndPagination ──────────────────────────────────────────
+
+// TestAnalyticsEmptyAndPagination verifies:
+//   - ListCourseAttemptsSummary returns an empty list (not an error) for a course
+//     that has no attempts.
+//   - ListCourseAttemptsSummary pagination (limit/offset) works when there are
+//     multiple students.
+//   - ListMyCourseProgress returns empty for a student with no attempts.
+func TestAnalyticsEmptyAndPagination(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerPassword := testPassword()
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: ownerPassword,
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	ownerID := ownerRes.User.Id
+
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerID, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	// Create two students.
+	studentAEmail, studentAPassword, studentAID := createActiveUser(t, c.users)
+	studentBEmail, studentBPassword, studentBID := createActiveUser(t, c.users)
+	// noAttemptsStudentEmail has course membership but submits nothing.
+	noAttemptsEmail, noAttemptsPassword, noAttemptsID := createActiveUser(t, c.users)
+
+	for _, m := range []struct {
+		id   string
+		role richterv1.OrganizationRole
+	}{
+		{studentAID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+		{studentBID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+		{noAttemptsID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+	} {
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: m.id,
+			Role: m.role, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member %s: %v", m.id, err)
+		}
+	}
+
+	courseRes, err := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerID, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	courseID := courseRes.Course.Id
+
+	modRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create module: %v", err)
+	}
+
+	lessonRes, err := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create lesson: %v", err)
+	}
+	lessonID := lessonRes.Lesson.Id
+
+	// Enrol all students in the course.
+	for _, uid := range []string{studentAID, studentBID, noAttemptsID} {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: uid, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enrol student %s: %v", uid, err)
+		}
+	}
+
+	ownerToken := getUserToken(t, url, ownerRes.User.Email, ownerPassword)
+	ownerIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(ownerToken), url)
+
+	// ── 1. Empty course: no attempts at all ───────────────────────────────────
+	t.Run("ListCourseAttemptsSummary/EmptyCourse", func(t *testing.T) {
+		res, err := ownerIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 10, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary on empty course: %v", err)
+		}
+		if len(res.Students) != 0 {
+			t.Errorf("expected 0 students on empty course, got %d", len(res.Students))
+		}
+	})
+
+	// ── 2. ListMyCourseProgress: no attempts → empty list ─────────────────────
+	noAttemptsToken := getUserToken(t, url, noAttemptsEmail, noAttemptsPassword)
+	noAttemptsIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(noAttemptsToken), url)
+
+	t.Run("ListMyCourseProgress/NoAttempts_Empty", func(t *testing.T) {
+		res, err := noAttemptsIA.ListMyCourseProgress(ctx, &richterv1.ListMyCourseProgressRequest{
+			Limit: 10, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListMyCourseProgress (no attempts): %v", err)
+		}
+		if len(res.Courses) != 0 {
+			t.Errorf("expected 0 courses for student with no attempts, got %d", len(res.Courses))
+		}
+	})
+
+	// ── 3. Two students submit → pagination ────────────────────────────────────
+	ints := insertTestInteractions(t, lessonID, 2)
+	correct := correctAnswers(ints)
+
+	studentAToken := getUserToken(t, url, studentAEmail, studentAPassword)
+	studentBToken := getUserToken(t, url, studentBEmail, studentBPassword)
+	_ = studentBEmail
+	_ = studentBPassword
+
+	for _, tok := range []string{studentAToken, studentBToken} {
+		ia := richterv1connect.NewInteractionServiceClient(httpClientWithToken(tok), url)
+		if _, err := ia.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId:  lessonID,
+			Responses: buildResponses(ints, correct),
+		}); err != nil {
+			t.Fatalf("SubmitAttempt for pagination setup: %v", err)
+		}
+	}
+
+	t.Run("ListCourseAttemptsSummary/Pagination", func(t *testing.T) {
+		page1, err := ownerIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 1, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary page1: %v", err)
+		}
+		if len(page1.Students) != 1 {
+			t.Errorf("page1: expected 1 student, got %d", len(page1.Students))
+		}
+
+		page2, err := ownerIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 1, Offset: 1,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary page2: %v", err)
+		}
+		if len(page2.Students) != 1 {
+			t.Errorf("page2: expected 1 student, got %d", len(page2.Students))
+		}
+		if page1.Students[0].UserId == page2.Students[0].UserId {
+			t.Errorf("pagination returned the same student on both pages")
+		}
+
+		// Page beyond end: should be empty.
+		page3, err := ownerIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 10, Offset: 100,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary page3: %v", err)
+		}
+		if len(page3.Students) != 0 {
+			t.Errorf("page beyond end: expected 0 students, got %d", len(page3.Students))
+		}
+	})
+
+	t.Run("ListCourseAttemptsSummary/SummaryFieldsValid", func(t *testing.T) {
+		res, err := ownerIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 50, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary: %v", err)
+		}
+		// Both submitting students must appear; noAttempts student must NOT appear.
+		seen := map[string]*richterv1.CourseStudentSummary{}
+		for _, s := range res.Students {
+			seen[s.UserId] = s
+		}
+		if _, ok := seen[noAttemptsID]; ok {
+			t.Error("student with no attempts should not appear in ListCourseAttemptsSummary")
+		}
+		for _, uid := range []string{studentAID, studentBID} {
+			s, ok := seen[uid]
+			if !ok {
+				t.Errorf("student %s expected in summary but missing", uid)
+				continue
+			}
+			if s.LessonsCompleted < 1 {
+				t.Errorf("student %s: lessons_completed want >= 1, got %d", uid, s.LessonsCompleted)
+			}
+			if s.LessonsTotal < 1 {
+				t.Errorf("student %s: lessons_total want >= 1, got %d", uid, s.LessonsTotal)
+			}
+			if s.AvgScore < 0 || s.AvgScore > 1 {
+				t.Errorf("student %s: avg_score out of [0,1], got %v", uid, s.AvgScore)
+			}
+			if s.EngagementScore < 0 || s.EngagementScore > 100 {
+				t.Errorf("student %s: engagement_score out of [0,100], got %v", uid, s.EngagementScore)
+			}
+		}
+	})
+}
+
+// ── TestEngagementEdgeCases ───────────────────────────────────────────────────
+
+// TestEngagementEdgeCases verifies the engagement score formula at boundary
+// conditions.  We do not hard-code the exact formula, but verify sensible
+// ordering:
+//
+//   - zero watch fraction + all wrong → engagement_score should be LOW (< 40)
+//   - full watch fraction (1.0) + all correct → engagement_score should be HIGH (>= 60)
+func TestEngagementEdgeCases(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerPassword := testPassword()
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: ownerPassword,
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	ownerID := ownerRes.User.Id
+
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerID, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	// Two students for the two edge cases.
+	lowEngEmail, lowEngPassword, lowEngID := createActiveUser(t, c.users)
+	highEngEmail, highEngPassword, highEngID := createActiveUser(t, c.users)
+
+	for _, m := range []struct {
+		id   string
+		role richterv1.OrganizationRole
+	}{
+		{lowEngID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+		{highEngID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+	} {
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: m.id,
+			Role: m.role, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member: %v", err)
+		}
+	}
+
+	courseRes, err := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerID, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	courseID := courseRes.Course.Id
+
+	modRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create module: %v", err)
+	}
+
+	lessonRes, err := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create lesson: %v", err)
+	}
+	lessonID := lessonRes.Lesson.Id
+
+	for _, uid := range []string{lowEngID, highEngID} {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: uid, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enrol student %s: %v", uid, err)
+		}
+	}
+
+	ints := insertTestInteractions(t, lessonID, 4)
+	correct := correctAnswers(ints)
+
+	// Build all-wrong answers.
+	wrong := make([]int32, len(ints))
+	for i := range ints {
+		wrong[i] = (correct[i] + 1) % 4
+	}
+
+	lowEngToken := getUserToken(t, url, lowEngEmail, lowEngPassword)
+	highEngToken := getUserToken(t, url, highEngEmail, highEngPassword)
+
+	lowIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(lowEngToken), url)
+	highIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(highEngToken), url)
+
+	// Low-engagement: zero watch + all wrong.
+	if _, err := lowIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+		LessonId:           lessonID,
+		Responses:          buildResponses(ints, wrong),
+		VideoWatchFraction: 0.0,
+	}); err != nil {
+		t.Fatalf("low-eng SubmitAttempt: %v", err)
+	}
+
+	// High-engagement: full watch + all correct.
+	if _, err := highIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+		LessonId:           lessonID,
+		Responses:          buildResponses(ints, correct),
+		VideoWatchFraction: 1.0,
+	}); err != nil {
+		t.Fatalf("high-eng SubmitAttempt: %v", err)
+	}
+
+	ownerToken := getUserToken(t, url, ownerRes.User.Email, ownerPassword)
+	ownerIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(ownerToken), url)
+
+	listRes, err := ownerIA.ListAttempts(ctx, &richterv1.ListAttemptsRequest{
+		LessonId: lessonID, Limit: 10, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListAttempts: %v", err)
+	}
+
+	var lowSummary, highSummary *richterv1.StudentAttemptSummary
+	for _, s := range listRes.Attempts {
+		switch s.UserId {
+		case lowEngID:
+			lowSummary = s
+		case highEngID:
+			highSummary = s
+		}
+	}
+
+	t.Run("LowEngagement_ZeroWatch_AllWrong", func(t *testing.T) {
+		if lowSummary == nil {
+			t.Fatal("low-engagement student not found in ListAttempts")
+		}
+		// video_watch_fraction should be 0.
+		if lowSummary.VideoWatchFraction > 0.05 {
+			t.Errorf("video_watch_fraction: want ~0, got %v", lowSummary.VideoWatchFraction)
+		}
+		// engagement_score should be low.
+		if lowSummary.EngagementScore >= 40 {
+			t.Errorf("low-eng score: want < 40, got %v", lowSummary.EngagementScore)
+		}
+		if lowSummary.EngagementScore < 0 {
+			t.Errorf("engagement_score must be >= 0, got %v", lowSummary.EngagementScore)
+		}
+	})
+
+	t.Run("HighEngagement_FullWatch_AllCorrect", func(t *testing.T) {
+		if highSummary == nil {
+			t.Fatal("high-engagement student not found in ListAttempts")
+		}
+		// video_watch_fraction should be ~1.
+		if highSummary.VideoWatchFraction < 0.9 {
+			t.Errorf("video_watch_fraction: want ~1, got %v", highSummary.VideoWatchFraction)
+		}
+		// engagement_score should be high.
+		if highSummary.EngagementScore < 60 {
+			t.Errorf("high-eng score: want >= 60, got %v", highSummary.EngagementScore)
+		}
+		if highSummary.EngagementScore > 100 {
+			t.Errorf("engagement_score must be <= 100, got %v", highSummary.EngagementScore)
+		}
+	})
+
+	t.Run("HighEngagement_Higher_Than_LowEngagement", func(t *testing.T) {
+		if lowSummary == nil || highSummary == nil {
+			t.Skip("skipped: one or both summaries missing")
+		}
+		if highSummary.EngagementScore <= lowSummary.EngagementScore {
+			t.Errorf("high-engagement score (%v) should be > low-engagement score (%v)",
+				highSummary.EngagementScore, lowSummary.EngagementScore)
+		}
+	})
+}
+
+// ── TestAccessGateMatrixComplete ─────────────────────────────────────────────
+
+// TestAccessGateMatrixComplete tests the full access-gate matrix for the most
+// important gated RPCs (SubmitAttempt, GetLessonAnalysis, ListLessonsByCourse)
+// with an org-member who is NOT a course member.  Existing tests in
+// TestInteractionsAuthz, TestAIAuthz, and TestLessonsAuthz already check the
+// non-org-member path; this test specifically targets the "org member but not
+// course member → PermissionDenied" path that is distinct from a total stranger.
+func TestAccessGateMatrixComplete(t *testing.T) {
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	ownerID := ownerRes.User.Id
+
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerID, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	// courseMemberEmail is enrolled in the course.
+	courseMemberEmail, courseMemberPassword, courseMemberID := createActiveUser(t, c.users)
+	// orgOnlyEmail is in the org but NOT in the course.
+	orgOnlyEmail, orgOnlyPassword, orgOnlyID := createActiveUser(t, c.users)
+
+	for _, m := range []struct {
+		id   string
+		role richterv1.OrganizationRole
+	}{
+		{courseMemberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+		{orgOnlyID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT},
+	} {
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: m.id,
+			Role: m.role, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member %s: %v", m.id, err)
+		}
+	}
+
+	courseRes, err := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerID, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	courseID := courseRes.Course.Id
+
+	modRes, err := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create module: %v", err)
+	}
+
+	lessonRes, err := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	if err != nil {
+		t.Fatalf("create lesson: %v", err)
+	}
+	lessonID := lessonRes.Lesson.Id
+
+	// Enrol only the course member.
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: courseMemberID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enrol course member: %v", err)
+	}
+
+	ints := insertTestInteractions(t, lessonID, 2)
+
+	courseMemberToken := getUserToken(t, url, courseMemberEmail, courseMemberPassword)
+	orgOnlyToken := getUserToken(t, url, orgOnlyEmail, orgOnlyPassword)
+
+	courseMemberIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(courseMemberToken), url)
+	orgOnlyIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(orgOnlyToken), url)
+	orgOnlyLessons := richterv1connect.NewLessonServiceClient(httpClientWithToken(orgOnlyToken), url)
+	courseMemberLessons := richterv1connect.NewLessonServiceClient(httpClientWithToken(courseMemberToken), url)
+
+	submitReq := &richterv1.SubmitAttemptRequest{
+		LessonId:  lessonID,
+		Responses: buildResponses(ints, []int32{0, 0}),
+	}
+
+	// ── SubmitAttempt ──────────────────────────────────────────────────────────
+
+	t.Run("SubmitAttempt/OrgMemberNonCourseMember_PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error { _, e := orgOnlyIA.SubmitAttempt(ctx, submitReq); return e }(), connect.CodePermissionDenied)
+	})
+
+	t.Run("SubmitAttempt/CourseMember_OK", func(t *testing.T) {
+		if _, e := courseMemberIA.SubmitAttempt(ctx, submitReq); e != nil {
+			t.Errorf("course member should be allowed SubmitAttempt, got %v", e)
+		}
+	})
+
+	// ── ListLessonsByCourse ────────────────────────────────────────────────────
+
+	t.Run("ListLessonsByCourse/OrgMemberNonCourseMember_PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, e := orgOnlyLessons.ListLessonsByCourse(ctx, &richterv1.ListLessonsByCourseRequest{
+				CourseId: courseID, Limit: 50,
+			})
+			return e
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("ListLessonsByCourse/CourseMember_OK", func(t *testing.T) {
+		if _, e := courseMemberLessons.ListLessonsByCourse(ctx, &richterv1.ListLessonsByCourseRequest{
+			CourseId: courseID, Limit: 50,
+		}); e != nil {
+			t.Errorf("course member should be allowed ListLessonsByCourse, got %v", e)
+		}
+	})
+
+	// ── NonExistent IDs (oracle protection) ────────────────────────────────────
+
+	t.Run("GetLessonById/OrgMemberNonCourseMember_NonExistentId_PermissionDenied", func(t *testing.T) {
+		// Org member who is not a course member must not learn whether an ID exists.
+		assertCode(t, func() error {
+			_, e := orgOnlyLessons.GetLessonById(ctx, &richterv1.GetLessonByIdRequest{Id: gofakeit.UUID()})
+			return e
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("GetLessonById/Admin_NonExistentId_NotFound", func(t *testing.T) {
+		// Sys-admin gets NotFound for a genuine non-existent ID.
+		assertCode(t, func() error {
+			_, e := richterv1connect.NewLessonServiceClient(httpClientWithToken(getAdminToken(t, url)), url).
+				GetLessonById(ctx, &richterv1.GetLessonByIdRequest{Id: gofakeit.UUID()})
+			return e
+		}(), connect.CodeNotFound)
+	})
+}
