@@ -105,6 +105,7 @@ func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSp
 			interactionID pgtype.UUID
 			responseJSON  []byte
 			score         float32
+			idx           int
 		}
 		var graded []gradedResp
 		for i, interaction := range interactions {
@@ -125,28 +126,48 @@ func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSp
 				score = 1.0
 				totalScore++
 			}
-			graded = append(graded, gradedResp{interaction.ID, respJSON, score})
+			graded = append(graded, gradedResp{interaction.ID, respJSON, score, i})
+		}
+
+		// Compute a deterministic VideoWatchFraction: use spec value if set,
+		// otherwise derive from score (base 0.70, +0.05 per correct answer, capped at 0.95).
+		watchFraction := a.VideoWatchFraction
+		if watchFraction == 0 {
+			watchFraction = 0.70 + 0.05*totalScore
+			if watchFraction > 0.95 {
+				watchFraction = 0.95
+			}
 		}
 
 		_, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
 			attempt, err := q.UpsertLessonAttempt(ctx, gen.UpsertLessonAttemptParams{
-				LessonID:   lessonID,
-				UserID:     user.ID,
-				TotalScore: totalScore,
-				MaxScore:   maxScore,
-				Status:     "submitted",
+				LessonID:           lessonID,
+				UserID:             user.ID,
+				TotalScore:         totalScore,
+				MaxScore:           maxScore,
+				Status:             "submitted",
+				VideoWatchFraction: pgtype.Float4{Float32: watchFraction, Valid: true},
 			})
 			if err != nil {
 				return gen.LessonAttempt{}, err
 			}
 			for _, g := range graded {
+				// Deterministic TimeToAnswerMs: 2000 + 1500 * index ms (2s – 12.5s range).
+				timeToAnswerMs := int32(2000 + 1500*g.idx)
+				// ReplayCount: 0 for most; 1 for every third question (index % 3 == 2).
+				replayCount := int32(0)
+				if g.idx%3 == 2 {
+					replayCount = 1
+				}
 				if err := q.UpsertAttemptResponse(ctx, gen.UpsertAttemptResponseParams{
-					AttemptID:     attempt.ID,
-					InteractionID: g.interactionID,
-					Response:      g.responseJSON,
-					Score:         g.score,
-					MaxScore:      1.0,
-					Feedback:      "",
+					AttemptID:      attempt.ID,
+					InteractionID:  g.interactionID,
+					Response:       g.responseJSON,
+					Score:          g.score,
+					MaxScore:       1.0,
+					Feedback:       "",
+					TimeToAnswerMs: pgtype.Int4{Int32: timeToAnswerMs, Valid: true},
+					ReplayCount:    replayCount,
 				}); err != nil {
 					return gen.LessonAttempt{}, err
 				}

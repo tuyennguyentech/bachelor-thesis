@@ -13,6 +13,7 @@ type devSeedData struct {
 	Organizations []devOrgSpec
 	OrgMembers    []devOrgMemberSpec
 	Courses       []devCourseSpec
+	CourseMembers []devCourseMemberSpec
 	Attempts      []devAttemptSpec
 	Videos        []devVideoSpec
 }
@@ -86,13 +87,21 @@ type devVideoSpec struct {
 	S3Key     string `json:"s3_key"`
 }
 
+type devCourseMemberSpec struct {
+	OrgSlug     string `json:"org_slug"`
+	CourseTitle string `json:"course_title"`
+	UserEmail   string `json:"user_email"`
+	Role        string `json:"role"`
+}
+
 type devAttemptSpec struct {
-	UserEmail   string  `json:"user_email"`
-	OrgSlug     string  `json:"org_slug"`
-	CourseTitle string  `json:"course_title"`
-	ModuleTitle string  `json:"module_title"`
-	LessonTitle string  `json:"lesson_title"`
-	Answers     []int32 `json:"answers"`
+	UserEmail          string  `json:"user_email"`
+	OrgSlug            string  `json:"org_slug"`
+	CourseTitle        string  `json:"course_title"`
+	ModuleTitle        string  `json:"module_title"`
+	LessonTitle        string  `json:"lesson_title"`
+	Answers            []int32 `json:"answers"`
+	VideoWatchFraction float32 `json:"video_watch_fraction"`
 }
 
 func parseDevData() (devSeedData, error) {
@@ -119,6 +128,9 @@ func parseDevData() (devSeedData, error) {
 			return devSeedData{}, err
 		}
 		data.Courses = append(data.Courses, courses...)
+	}
+	if err := readDevJSON("data/dev/course_members.json", &data.CourseMembers); err != nil {
+		return devSeedData{}, err
 	}
 	if err := readDevJSON("data/dev/quiz_attempts.json", &data.Attempts); err != nil {
 		return devSeedData{}, err

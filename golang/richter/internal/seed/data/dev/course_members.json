@@ -1,0 +1,20 @@
+[
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "carol@dyadia.local", "role": "teacher" },
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "bob@dyadia.local",   "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "dave@dyadia.local",  "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "eve@dyadia.local",   "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "grace@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "iris@dyadia.local",  "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cấu trúc dữ liệu và Giải thuật",       "user_email": "jack@dyadia.local",  "role": "student" },
+
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java",   "user_email": "frank@dyadia.local", "role": "teacher" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java",   "user_email": "kate@dyadia.local",  "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java",   "user_email": "liam@dyadia.local",  "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java",   "user_email": "mia@dyadia.local",   "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java",   "user_email": "noah@dyadia.local",  "role": "student" },
+
+  { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu",                        "user_email": "frank@dyadia.local", "role": "teacher" },
+  { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu",                        "user_email": "dave@dyadia.local",  "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu",                        "user_email": "eve@dyadia.local",   "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu",                        "user_email": "grace@dyadia.local", "role": "student" }
+]

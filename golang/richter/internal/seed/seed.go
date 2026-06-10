@@ -123,6 +123,7 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 		{"dev.organizations", func(ctx context.Context) error { return s.seedDevOrganizations(ctx, data.Organizations) }},
 		{"dev.org_members", func(ctx context.Context) error { return s.seedDevOrgMembers(ctx, data.OrgMembers) }},
 		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses) }},
+		{"dev.course_members", func(ctx context.Context) error { return s.seedDevCourseMembers(ctx, data.CourseMembers) }},
 		{"dev.lesson_video_keys", func(ctx context.Context) error { return s.seedDevLessonVideoKeys(ctx, data.Courses) }},
 		{"dev.attempts", func(ctx context.Context) error { return s.seedDevAttempts(ctx, data.Attempts) }},
 		{"dev.videos", func(ctx context.Context) error { return s.seedDevVideos(ctx, data.Videos) }},
