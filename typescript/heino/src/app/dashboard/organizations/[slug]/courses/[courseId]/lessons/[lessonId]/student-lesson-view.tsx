@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { InfoIcon, Maximize, PanelRightClose, PanelRightOpen, PlayIcon, SendIcon } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
@@ -11,24 +11,20 @@ import { AIService } from "buf/gen/richter/v1/ai_pb";
 import type { TranscriptSegment, TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { submitAttemptErrorMessage } from "@/interactions/_shared/connect-error-message";
 import { useRichterWebClient } from "@/lib/connect-webclient";
+import { videoPlayerConfig } from "@/lib/client-config";
 import { VideoPlayer } from "./video-player";
 import { LessonSidebar } from "./lesson-sidebar";
-import { LessonResult } from "./lesson-result";
 import type { QuizResult } from "./lesson-result";
 import { InteractionCheckpoint } from "./interaction-checkpoint";
+import { buildAttemptResponseInput } from "./student-attempt-response";
+import { StudentFullscreenTip } from "./student-fullscreen-tip";
+import { StudentLessonStatusCard } from "./student-lesson-status-card";
+import { useStudentFullscreen } from "./use-student-fullscreen";
+import { useStudentSidebarState } from "./use-student-sidebar-state";
 import { getRenderer, extractConfig, extractLocalResponse } from "@/interactions/registry";
-import type { FillBlankResponse, InteractionGrade, ListeningResponse, McqResponse, ReadingResponse } from "@/interactions/types";
+import type { InteractionGrade } from "@/interactions/types";
 
 const CHECKPOINT_EPSILON_SECONDS = 0.35;
-
-interface FullscreenExtensions {
-  webkitFullscreenElement?: Element;
-  mozFullScreenElement?: Element;
-  msFullscreenElement?: Element;
-  webkitExitFullscreen?: () => void;
-  webkitRequestFullscreen?: () => void;
-  webkitDisplayingFullscreen?: boolean;
-}
 
 interface Props {
   videoUrl: string;
@@ -67,8 +63,6 @@ export function StudentLessonView({
   const containerRef = useRef<HTMLDivElement>(null);
   const prevTimeRef = useRef(initialPosition);
   const isInitialLoadRef = useRef(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showFullscreenTip, setShowFullscreenTip] = useState(false);
   const [previewAttemptCount, setPreviewAttemptCount] = useState(1);
   const [playerKey, setPlayerKey] = useState(0);
 
@@ -90,20 +84,7 @@ export function StudentLessonView({
     setLessonInteractions(interactions);
   }, [interactions]);
 
-  // Track if sidebar is open
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("dyadia_student_sidebar_open");
-    if (saved !== null) {
-      setSidebarOpen(saved === "true");
-    }
-  }, []);
-
-  const handleToggleSidebar = (open: boolean) => {
-    setSidebarOpen(open);
-    localStorage.setItem("dyadia_student_sidebar_open", String(open));
-  };
+  const { handleToggleSidebar, sidebarOpen } = useStudentSidebarState();
 
   // Track answered interaction IDs and their local responses
   const [passedIds, setPassedIds] = useState<Set<string>>(
@@ -123,6 +104,12 @@ export function StudentLessonView({
   );
   // Which checkpoint is currently active (paused on)
   const [activeId, setActiveId] = useState<string | null>(null);
+  const {
+    isFullscreen,
+    setShowFullscreenTip,
+    showFullscreenTip,
+    toggleFullscreen,
+  } = useStudentFullscreen({ activeId, containerRef, videoRef });
 
   const allAnswered = lessonInteractions.length > 0 && passedIds.size >= lessonInteractions.length;
   const readyToSubmit = allAnswered && !submitted;
@@ -206,7 +193,7 @@ export function StudentLessonView({
     video.addEventListener("timeupdate", clampSeek);
     video.addEventListener("seeking", clampSeek);
     video.addEventListener("seeked", clampSeek);
-    const clampInterval = window.setInterval(clampSeek, 250);
+    const clampInterval = window.setInterval(clampSeek, videoPlayerConfig.seekClampIntervalMs);
     return () => {
       video.removeEventListener("timeupdate", clampSeek);
       video.removeEventListener("seeking", clampSeek);
@@ -216,213 +203,9 @@ export function StudentLessonView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-  const isNativeVideoFullscreen = () => {
-    const video = videoRef.current;
-    if (!video) return false;
-    const docExt = document as Document & FullscreenExtensions;
-    const vidExt = video as HTMLVideoElement & FullscreenExtensions;
-    return (
-      document.fullscreenElement === video ||
-      docExt.webkitFullscreenElement === video ||
-      docExt.mozFullScreenElement === video ||
-      docExt.msFullscreenElement === video ||
-      vidExt.webkitDisplayingFullscreen === true
-    );
-  };
-
-  const exitNativeVideoFullscreen = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    const vidExt = video as HTMLVideoElement & FullscreenExtensions;
-    const docExt = document as Document & FullscreenExtensions;
-    try {
-      if (typeof vidExt.webkitExitFullscreen === "function") {
-        vidExt.webkitExitFullscreen();
-      } else if (typeof document.exitFullscreen === "function") {
-        document.exitFullscreen();
-      } else if (typeof docExt.webkitExitFullscreen === "function") {
-        docExt.webkitExitFullscreen();
-      }
-    } catch {}
-  };
-
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    const container = containerRef.current;
-    const docExt = document as Document & FullscreenExtensions;
-    const contExt = container as HTMLDivElement & FullscreenExtensions;
-    if (!document.fullscreenElement && !docExt.webkitFullscreenElement) {
-      if (container.requestFullscreen) {
-        container.requestFullscreen().catch(() => {});
-      } else if (contExt.webkitRequestFullscreen) {
-        contExt.webkitRequestFullscreen();
-      }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
-      } else if (docExt.webkitExitFullscreen) {
-        docExt.webkitExitFullscreen();
-      }
-    }
-  };
-
-  // Redirect native video-only fullscreen to premium container-level fullscreen automatically
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const handleNativeFullscreenRedirect = () => {
-      if (isNativeVideoFullscreen()) {
-        exitNativeVideoFullscreen();
-        if (!isFullscreen) {
-          setShowFullscreenTip(true);
-        }
-      }
-    };
-
-    const handleWebkitBeginFullscreen = (e: Event) => {
-      e.preventDefault();
-      exitNativeVideoFullscreen();
-      if (!isFullscreen) {
-        setShowFullscreenTip(true);
-      }
-    };
-
-    document.addEventListener("fullscreenchange", handleNativeFullscreenRedirect);
-    document.addEventListener("webkitfullscreenchange", handleNativeFullscreenRedirect);
-    document.addEventListener("mozfullscreenchange", handleNativeFullscreenRedirect);
-    document.addEventListener("MSFullscreenChange", handleNativeFullscreenRedirect);
-    video.addEventListener("webkitbeginfullscreen", handleWebkitBeginFullscreen);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", handleNativeFullscreenRedirect);
-      document.removeEventListener("webkitfullscreenchange", handleNativeFullscreenRedirect);
-      document.removeEventListener("mozfullscreenchange", handleNativeFullscreenRedirect);
-      document.removeEventListener("MSFullscreenChange", handleNativeFullscreenRedirect);
-      video.removeEventListener("webkitbeginfullscreen", handleWebkitBeginFullscreen);
-    };
-  }, [videoRef, isFullscreen]);
-
-  // Exit native video fullscreen programmatically when a checkpoint triggers
-  useEffect(() => {
-    if (activeId && isNativeVideoFullscreen()) {
-      exitNativeVideoFullscreen();
-    }
-  }, [activeId]);
-
-  // Double click listener on the video element to toggle container fullscreen
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const handleDblClick = (e: MouseEvent) => {
-      e.preventDefault();
-      toggleFullscreen();
-    };
-
-    video.addEventListener("dblclick", handleDblClick);
-    return () => {
-      video.removeEventListener("dblclick", handleDblClick);
-    };
-  }, [videoRef]);
-
-  // Keydown shortcut "F" / "f" to toggle container fullscreen
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "f" || e.key === "F") {
-        const active = document.activeElement;
-        if (
-          active &&
-          (active.tagName === "INPUT" ||
-            active.tagName === "TEXTAREA" ||
-            active.hasAttribute("contenteditable"))
-        ) {
-          return;
-        }
-        e.preventDefault();
-        toggleFullscreen();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, []);
-
-  // Synchronize isFullscreen state
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === containerRef.current);
-    };
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
-    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
-    };
-  }, []);
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleAnswer(id: string, response: any) {
     setResponses((prev) => new Map(prev).set(id, response));
-  }
-
-  function buildAttemptResponseInput(it: LessonInteraction, localResp: unknown) {
-    if (it.kind === InteractionKind.MULTIPLE_CHOICE) {
-      return {
-        interactionId: it.id,
-        response: {
-          case: "mcqMultiple" as const,
-          value: { selectedIndexes: (localResp as McqResponse | undefined)?.selectedIndexes ?? [] },
-        },
-      };
-    }
-    switch (it.config.case) {
-      case "fillBlank":
-        return {
-          interactionId: it.id,
-          response: {
-            case: "fillBlank" as const,
-            value: { answers: (localResp as FillBlankResponse | undefined)?.answers ?? [] },
-          },
-        };
-      case "reading":
-        return {
-          interactionId: it.id,
-          response: {
-            case: "reading" as const,
-            value: { audioObjectKey: (localResp as ReadingResponse | undefined)?.audioObjectKey ?? "" },
-          },
-        };
-      case "listening": {
-        const r = localResp as ListeningResponse | undefined;
-        return {
-          interactionId: it.id,
-          response: {
-            case: "listening" as const,
-            value: {
-              transcription: r?.transcription ?? "",
-              comprehensionAnswers: r?.comprehensionAnswers ?? [],
-            },
-          },
-        };
-      }
-      default:
-        return {
-          interactionId: it.id,
-          response: {
-            case: "mcqSelected" as const,
-            value: (localResp as McqResponse | undefined)?.selected ?? 0,
-          },
-        };
-    }
   }
 
   async function saveDraftResponse(id: string) {
@@ -630,35 +413,13 @@ export function StudentLessonView({
 
           {/* Fullscreen Helper Tip Overlay */}
           {showFullscreenTip && (
-            <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center text-white select-none">
-              <div className="max-w-md flex flex-col items-center gap-4 animate-in fade-in zoom-in-95 duration-200">
-                <div className="size-14 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 text-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
-                  <Maximize className="size-6 animate-pulse" />
-                </div>
-                <h3 className="text-lg font-semibold tracking-tight text-white">Bật Toàn Màn Hình Có Bài Tập</h3>
-                <p className="text-sm text-zinc-300 leading-relaxed px-4">
-                  Để làm được các câu hỏi tương tác trong lúc xem video, bạn hãy sử dụng tính năng <strong>Toàn màn hình chuẩn</strong> của trình phát.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3 mt-4 w-full px-8">
-                  <Button
-                    onClick={() => {
-                      setShowFullscreenTip(false);
-                      toggleFullscreen();
-                    }}
-                    className="flex-1 bg-white hover:bg-zinc-200 text-black font-semibold rounded-full py-5 shadow-sm transition-all duration-200"
-                  >
-                    Bật ngay
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setShowFullscreenTip(false)}
-                    className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 rounded-full py-5 transition-all duration-200"
-                  >
-                    Để sau
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <StudentFullscreenTip
+              onDismiss={() => setShowFullscreenTip(false)}
+              onEnable={() => {
+                setShowFullscreenTip(false);
+                toggleFullscreen();
+              }}
+            />
           )}
           {!submitted && activeInteraction && (() => {
             // A "cluster" is all interactions sharing the same start_seconds as
@@ -703,60 +464,21 @@ export function StudentLessonView({
           })()}
         </div>
 
-        {/* State machine card */}
-        {lessonInteractions.length > 0 && ((!submitted && !activeInteraction) || readyToSubmit || (submitted && result) || error) && (
-          <div className="rounded-md border p-4 flex flex-col gap-3">
-            {/* Not started — idle tip */}
-            {!submitted && !activeInteraction && passedIds.size === 0 && (
-              <div className="rounded-md bg-muted/30 p-6 text-center">
-                <InfoIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
-                <p className="mb-1 text-base font-medium">Bài học có {lessonInteractions.length} câu hỏi tương tác</p>
-                <p className="inline-flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
-                  Video sẽ tạm dừng tại mỗi mốc để bạn trả lời. Bấm <PlayIcon className="size-3.5" /> để bắt đầu.
-                </p>
-              </div>
-            )}
-
-            {/* In progress */}
-            {!submitted && !activeInteraction && passedIds.size > 0 && !allAnswered && (
-              <p className="text-sm text-muted-foreground">
-                Đã trả lời {passedIds.size}/{lessonInteractions.length} câu — tiếp tục xem video.
-              </p>
-            )}
-
-            {/* Ready to submit */}
-            {readyToSubmit && !activeInteraction && (
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">
-                  Đã trả lời đủ {lessonInteractions.length}/{lessonInteractions.length} câu. Sẵn sàng nộp bài!
-                </p>
-                <Button
-                  size="sm"
-                  className="self-start gap-2"
-                  disabled={isPending}
-                  onClick={handleSubmit}
-                >
-                  <SendIcon className="size-4" />
-                  {isPending ? "Đang nộp…" : "Nộp bài"}
-                </Button>
-              </div>
-            )}
-
-            {/* Submitted — show result */}
-            {submitted && result && (
-              <LessonResult
-                result={result}
-                interactions={lessonInteractions}
-                feedbackMode={feedbackMode}
-                onRetake={handleRetake}
-                token={token}
-                maxAttempts={maxAttempts}
-              />
-            )}
-
-            {error && <p className="text-sm text-destructive">{error}</p>}
-          </div>
-        )}
+        <StudentLessonStatusCard
+          activeInteraction={activeInteraction}
+          error={error}
+          feedbackMode={feedbackMode}
+          isPending={isPending}
+          lessonInteractions={lessonInteractions}
+          maxAttempts={maxAttempts}
+          onRetake={handleRetake}
+          onSubmit={handleSubmit}
+          passedCount={passedIds.size}
+          readyToSubmit={readyToSubmit}
+          result={result}
+          submitted={submitted}
+          token={token}
+        />
       </div>
 
       {/* ── Right sidebar ── */}

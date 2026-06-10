@@ -5,6 +5,7 @@ import type { TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
 import { SearchIcon, CopyIcon, CheckIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { uploadConfig } from "@/lib/client-config";
 
 interface Props {
   segments: TranscriptSegment[];
@@ -31,11 +32,12 @@ const TranscriptSegmentButton = memo(
   ({ seg, isActive, searchQuery, onClick, buttonRef, index }: ButtonProps) => {
     // Dynamically highlight matching search queries inside the text
     const textContent = useMemo(() => {
-      if (!searchQuery.trim()) return seg.text;
-      const regex = new RegExp(`(${searchQuery.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")})`, "gi");
+      const query = searchQuery.trim();
+      if (!query) return seg.text;
+      const regex = new RegExp(`(${query.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")})`, "i");
       const parts = seg.text.split(regex);
       return parts.map((part, i) =>
-        regex.test(part) ? (
+        part.toLocaleLowerCase() === query.toLocaleLowerCase() ? (
           <mark key={i} className="bg-yellow-500/30 text-yellow-800 dark:bg-yellow-500/40 dark:text-yellow-200 rounded px-0.5 font-semibold">
             {part}
           </mark>
@@ -148,7 +150,7 @@ export function InteractiveTranscript({ segments, videoRef, maxHeightClass = "ma
       await navigator.clipboard.writeText(fullText);
       setCopied(true);
       toast.success("Đã copy toàn bộ transcript vào clipboard!");
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), uploadConfig.copyToastMs);
     } catch {
       toast.error("Không thể copy transcript");
     }

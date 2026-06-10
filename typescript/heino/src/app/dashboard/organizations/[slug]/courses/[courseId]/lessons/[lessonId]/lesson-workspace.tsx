@@ -21,21 +21,25 @@ import { cn } from "@/lib/utils";
 interface LessonWorkspaceShellProps {
   sidebar: ReactNode;
   children: ReactNode;
+  storageKey: string;
 }
 
-export function LessonWorkspaceShell({ sidebar, children }: LessonWorkspaceShellProps) {
+export function LessonWorkspaceShell({ sidebar, children, storageKey }: LessonWorkspaceShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem("dyadia_sidebar_open");
-    if (saved !== null) {
-      setSidebarOpen(saved === "true"); // eslint-disable-line react-hooks/set-state-in-effect
-    }
-  }, []);
+    const id = window.requestAnimationFrame(() => {
+      const saved = localStorage.getItem(storageKey);
+      if (saved !== null) {
+        setSidebarOpen(saved === "true");
+      }
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [storageKey]);
 
   const handleToggle = (open: boolean) => {
     setSidebarOpen(open);
-    localStorage.setItem("dyadia_sidebar_open", String(open));
+    localStorage.setItem(storageKey, String(open));
   };
 
   return (

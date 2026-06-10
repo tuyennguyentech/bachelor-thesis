@@ -173,31 +173,9 @@ export function ChunkSection({
           )}
 
           {interactions.length === 0 && !isAdding && !isGenerating && (
-            <div className="flex flex-col items-center gap-3 py-6 rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10">
+            <div className="flex flex-col items-center gap-2 py-6 rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10">
               <p className="text-sm text-muted-foreground">Phân đoạn này chưa có bài tập</p>
-              <div className="flex gap-2">
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="gap-1.5 rounded-lg"
-                  disabled={disabled}
-                  onClick={openGenerate}
-                >
-                  <SparklesIcon className="size-3.5" />
-                  Tạo AI
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 rounded-lg"
-                  disabled={disabled}
-                  onClick={openAdd}
-                  data-testid="add-interaction-btn"
-                >
-                  <PlusIcon className="size-3.5" />
-                  Thêm thủ công
-                </Button>
-              </div>
+              <p className="text-xs text-muted-foreground/70">Đang chờ nội dung bài tập.</p>
             </div>
           )}
 

@@ -4,6 +4,7 @@
  * 2) Preview mode: video black (but audio ok), questions appear too early
  */
 
+import { Buffer } from "node:buffer";
 import { test, expect, Page } from "../fixtures";
 import { SEED_HUST_CS_SLUG, SEED_DSA_COURSE_TITLE, SEED_DSA_LESSON_BIG_O } from "../fixtures";
 
@@ -47,6 +48,18 @@ async function enterPreviewMode(page: Page): Promise<void> {
   await expect(page.getByText("Đang xem thử dưới dạng học viên")).toBeVisible();
 }
 
+async function lessonSidebarStorageKey(page: Page, lessonHref: string): Promise<string> {
+  const accessCookie = (await page.context().cookies()).find(cookie => cookie.name === "dyadia_access");
+  if (!accessCookie) throw new Error("dyadia_access cookie not found");
+  const payload = JSON.parse(Buffer.from(accessCookie.value.split(".")[1], "base64url").toString("utf8")) as { sub?: string };
+  if (!payload.sub) throw new Error("dyadia_access cookie missing sub claim");
+
+  const parts = new URL(lessonHref, "http://caddy").pathname.split("/").filter(Boolean);
+  const courseId = parts[parts.indexOf("courses") + 1];
+  if (!courseId) throw new Error(`Course id not found in lesson href: ${lessonHref}`);
+  return `dyadia_lesson_workspace_sidebar:${payload.sub}:${courseId}`;
+}
+
 test.describe("Video Player Bug Tests", () => {
   test.describe("Lesson list sidebar", () => {
     test("collapsing and expanding the lesson list does not emit React instrumentation errors", async ({ userPage: page }) => {
@@ -70,8 +83,12 @@ test.describe("Video Player Bug Tests", () => {
       await page.goto(courseHref);
       const lessonHref = await page.getByRole("link").filter({ hasText: DEMO_LESSON_TITLE }).first().getAttribute("href");
       if (!lessonHref) throw new Error(`Lesson not found: ${DEMO_LESSON_TITLE}`);
+      const sidebarStorageKey = await lessonSidebarStorageKey(page, lessonHref);
 
-      await page.evaluate(() => localStorage.removeItem("dyadia_sidebar_open"));
+      await page.evaluate((key) => {
+        localStorage.removeItem("dyadia_sidebar_open");
+        localStorage.removeItem(key);
+      }, sidebarStorageKey);
       await page.goto(lessonHref);
       await expect(page.getByRole("heading", { name: DEMO_LESSON_TITLE })).toBeVisible({ timeout: 15000 });
       await page.getByRole("button", { name: "Ẩn danh sách bài học" }).click();
@@ -79,7 +96,7 @@ test.describe("Video Player Bug Tests", () => {
       await page.getByRole("button", { name: "Hiện danh sách bài học" }).click();
       await expect(page.getByRole("button", { name: "Ẩn danh sách bài học" })).toBeVisible();
 
-      await page.evaluate(() => localStorage.setItem("dyadia_sidebar_open", "false"));
+      await page.evaluate((key) => localStorage.setItem(key, "false"), sidebarStorageKey);
       await page.reload();
       await expect(page.getByRole("button", { name: "Hiện danh sách bài học" })).toBeVisible();
       expect(instrumentationErrors).toEqual([]);

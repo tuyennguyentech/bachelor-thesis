@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  PencilIcon, Trash2Icon, CheckIcon, Loader2Icon, RefreshCwIcon, MoreHorizontalIcon,
+  PencilIcon, Trash2Icon, CheckIcon, Loader2Icon, RefreshCwIcon, MoreHorizontalIcon, SparklesIcon,
 } from "lucide-react";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionKind, InteractionService } from "buf/gen/richter/v1/interactions_pb";
@@ -373,6 +373,19 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
           <p className="text-sm leading-relaxed">{it.prompt || (fb ? fb.template : "")}</p>
         </div>
         <div className="shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1 rounded-lg px-2 text-primary hover:text-primary hover:bg-primary/10"
+            disabled={busy}
+            onClick={() => setRegenerateOpen(true)}
+            title="AI Magic Rewrite"
+            data-testid="magic-rewrite-btn"
+          >
+            <SparklesIcon className="size-4 text-primary animate-pulse" />
+            <span className="hidden sm:inline text-xs font-semibold">AI Rewrite</span>
+          </Button>
           <Button
             type="button"
             variant="ghost"

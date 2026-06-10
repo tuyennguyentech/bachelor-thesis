@@ -13,7 +13,7 @@ import {
   LessonTaskStatus,
 } from "buf/gen/richter/v1/ai_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
-import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
+import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import { toast } from "sonner";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { analysisConfig } from "@/lib/client-config";
@@ -141,6 +141,14 @@ export interface UseLessonAnalysisState {
   activeTasks: LessonTask[];
   refreshTasks: () => Promise<void>;
   cancelTask: (taskId: string) => Promise<LessonTask | undefined>;
+
+  // Global AI Config state
+  globalDifficulty: string;
+  setGlobalDifficulty: React.Dispatch<React.SetStateAction<string>>;
+  globalFocusPrompt: string;
+  setGlobalFocusPrompt: React.Dispatch<React.SetStateAction<string>>;
+  globalKinds: InteractionKind[];
+  setGlobalKinds: React.Dispatch<React.SetStateAction<InteractionKind[]>>;
 }
 
 export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseLessonAnalysisState {
@@ -233,6 +241,17 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     orderIndex,
     title,
   });
+
+  // ── Global AI Config state ────────────────────────────────────────────────
+  const [globalDifficulty, setGlobalDifficulty] = useState<string>("medium");
+  const [globalFocusPrompt, setGlobalFocusPrompt] = useState<string>("");
+  const [globalKinds, setGlobalKinds] = useState<InteractionKind[]>([
+    InteractionKind.SINGLE_CHOICE,
+    InteractionKind.MULTIPLE_CHOICE,
+    InteractionKind.FILL_BLANK,
+    InteractionKind.READING,
+    InteractionKind.LISTENING,
+  ]);
 
   // ── Misc UI state ─────────────────────────────────────────────────────────
   const [confirmReExtract, setConfirmReExtract] = useState(false);
@@ -413,8 +432,9 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
         lessonId,
         chunkId: chunkId ?? "",
         forceRegenerate: shouldForce,
-        difficulty: difficulty ?? "",
-        focusPrompt: focusPrompt ?? "",
+        difficulty: difficulty || globalDifficulty,
+        focusPrompt: focusPrompt || globalFocusPrompt,
+        interactionKinds: globalKinds,
       })
         .then((task) => {
           if (task) {
@@ -428,7 +448,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
           toast.error(msg);
         });
     },
-    [interactionsState.length, lessonId, startTask],
+    [interactionsState.length, lessonId, startTask, globalDifficulty, globalFocusPrompt, globalKinds],
   );
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -501,5 +521,8 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     handleSplitChunk: chunkMutations.handleSplitChunk,
     handleMoveSegment: chunkMutations.handleMoveSegment,
     lessonTasks, activeTasks, refreshTasks, cancelTask,
+    globalDifficulty, setGlobalDifficulty,
+    globalFocusPrompt, setGlobalFocusPrompt,
+    globalKinds, setGlobalKinds,
   };
 }

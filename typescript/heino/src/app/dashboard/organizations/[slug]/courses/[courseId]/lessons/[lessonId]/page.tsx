@@ -247,6 +247,7 @@ export default async function LessonDetailPage({
       <div className="flex-1 min-h-0 overflow-auto p-4 lg:p-6">
         <div className="mx-auto w-full max-w-screen-2xl">
           <LessonWorkspaceShell
+            storageKey={`dyadia_lesson_workspace_sidebar:${claims.sub}:${courseId}`}
             sidebar={
               <LessonCourseSidebar
                 slug={slug}

@@ -253,18 +253,25 @@ test.describe("AI analysis streaming progress", () => {
 
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
 
-    // Progress panel appears immediately
+    // Progress panel (the bottom hero card) appears immediately.
     const panel = page.locator('[data-testid="extract-progress"]');
     await expect(panel).toBeVisible({ timeout: 5_000 });
 
-    // All 4 step labels present (Whisper-only pipeline, no Gemini in extraction)
-    await expect(panel.getByText("Tải video từ storage")).toBeVisible();
-    await expect(panel.getByText("Trích xuất âm thanh")).toBeVisible();
-    await expect(panel.getByText("Phiên âm bằng Whisper")).toBeVisible();
-    await expect(panel.getByText("Lưu kết quả")).toBeVisible();
+    // All 4 step labels present (extract pipeline). Scope to the inner
+    // strip so we don't accidentally match the hero card's own title.
+    const strip = panel.locator('[data-testid="stream-progress"]');
+    await expect(strip.getByText("Tải video từ storage")).toBeVisible();
+    await expect(strip.getByText("Trích xuất âm thanh")).toBeVisible();
+    await expect(strip.getByText("Đang phiên âm")).toBeVisible();
+    await expect(strip.getByText("Lưu kết quả")).toBeVisible();
   });
 
-  test("extract button disabled while running", async ({ teacherPage: page }) => {
+  test("extract running state surfaces in the hero card (not a duplicate CTA)", async ({ teacherPage: page }) => {
+    // The running extract state is the bottom hero card (single
+    // source of truth). The next-action panel deliberately hides its
+    // running CTA when the user is already on the matching step, so
+    // there is no redundant "Đang trích xuất..." button pointing to
+    // the step they are already viewing.
     const url = await createLesson(
       page, uid("Khóa học Busy"), uid("Chương Busy"), uid("Bài Busy"),
     );
@@ -273,9 +280,53 @@ test.describe("AI analysis streaming progress", () => {
     await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
-    const btn = page.getByRole("button", { name: "Đang trích xuất..." });
-    await expect(btn).toBeVisible({ timeout: 5_000 });
-    await expect(btn).toBeDisabled();
+    // The hero card is visible with the running state + cancel button.
+    const hero = page.locator('[data-testid="extract-progress"]');
+    await expect(hero).toBeVisible({ timeout: 5_000 });
+    await expect(hero).toContainText("Đang phiên âm");
+    await expect(hero.locator('button[data-testid="extract-progress-cancel"]')).toBeVisible();
+    // The next-action panel does NOT show the running-state "Đang
+    // trích xuất..." CTA when on the matching step.
+    const nextAction = page.getByTestId("workflow-next-action");
+    if (await nextAction.isVisible().catch(() => false)) {
+      await expect(nextAction.getByRole("button", { name: "Đang trích xuất..." })).toHaveCount(0);
+    }
+  });
+
+  test("extract task survives page reload and recovers progress or result", async ({ teacherPage: page }) => {
+    const url = await createLesson(
+      page, uid("Khóa học Reload Task"), uid("Chương Reload Task"), uid("Bài Reload Task"),
+    );
+    await page.goto(url);
+    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
+    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
+
+    await page.reload();
+
+    await expect.poll(async () => {
+      const panelVisible = await page.getByTestId("lesson-task-panel").first().isVisible();
+      const progressVisible = await page.locator('[data-testid="extract-progress"]').first().isVisible();
+      const resultVisible = await page
+        .getByTestId("workflow-next-action")
+        .getByRole("button", { name: "Phân đoạn bài học" })
+        .first()
+        .isVisible();
+      return panelVisible || progressVisible || resultVisible;
+    }, { timeout: 30_000 }).toBe(true);
+
+    await expect.poll(async () => {
+      const resultVisible = await page
+        .getByTestId("workflow-next-action")
+        .getByRole("button", { name: "Phân đoạn bài học" })
+        .first()
+        .isVisible();
+      const errorVisible = await page.locator('[data-testid="extract-error"]').first().isVisible();
+      return resultVisible || errorVisible;
+    }, { timeout: 360_000 }).toBe(true);
+    await expect(page.locator('[data-testid="extract-error"]')).not.toBeVisible();
   });
 
 });
@@ -571,11 +622,11 @@ test.describe("Interactive transcript (seeded segments)", () => {
 });
 
 // ── 4c. Full pipeline with audio fixture ─────────────────────────────────────
-// Tests in this block require: edu-sample.mp4, Whisper + Gemini running in the
+// Tests in this block require: edu-sample.mp4, AI services running in the
 // test environment. They run serially so extraction happens only once, with the
 // lesson URL shared across tests via a block-scoped variable.
 
-test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () => {
+test.describe.serial("Full pipeline with audio fixture", () => {
   let lessonUrl = "";
 
   test("pipeline: upload audio video → extract → chunk → generate questions", async ({ teacherPage: page }) => {
@@ -589,7 +640,9 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
 
     // Step 1: Extract transcript
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
-    await expect(page.getByRole("button", { name: "Đang trích xuất..." })).toBeVisible({ timeout: 5_000 });
+    // The running extract state is shown in the bottom hero card.
+    const extractHero = page.locator('[data-testid="extract-progress"]');
+    await expect(extractHero).toBeVisible({ timeout: 5_000 });
     await expect(
       page.getByTestId("workflow-next-action").getByRole("button", { name: "Phân đoạn bài học" }).or(page.locator('[data-testid="extract-error"]')),
     ).toBeVisible({ timeout: 360_000 });
@@ -600,7 +653,16 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     // Step 2: Chunk transcript
     await page.getByTestId("workflow-step-chunks").click();
     await page.getByTestId("workflow-next-action").getByRole("button", { name: "Phân đoạn bài học" }).click();
-    await expect(page.getByRole("button", { name: "Đang phân đoạn..." })).toBeVisible({ timeout: 10_000 });
+    // The running chunk state is shown in the bottom hero card.
+    const chunkHero = page.locator('[data-testid="chunk-progress"]');
+    await expect(chunkHero).toBeVisible({ timeout: 10_000 });
+    await page.reload();
+    await expect.poll(async () => {
+      const taskPanelVisible = await page.getByTestId("lesson-task-panel").first().isVisible();
+      const progressVisible = await page.locator('[data-testid="chunk-progress"]').first().isVisible();
+      const readyVisible = await page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).first().isVisible();
+      return taskPanelVisible || progressVisible || readyVisible;
+    }, { timeout: 30_000 }).toBe(true);
     await expect(
       page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')),
     ).toBeVisible({ timeout: 120_000 });
@@ -619,6 +681,13 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
     await page.locator("#gen-focus-prompt").fill("Tập trung vào cấu trúc dữ liệu Giải thuật và Big O");
     await page.getByRole("button", { name: "Tạo 5 bài tập" }).click();
     await expect(page.getByText("Đang tạo bài tập")).toBeVisible({ timeout: 5_000 });
+    await page.reload();
+    await expect.poll(async () => {
+      const taskPanelVisible = await page.getByTestId("lesson-task-panel").first().isVisible();
+      const generatingVisible = await page.getByText("Đang tạo bài tập").first().isVisible();
+      const readyVisible = await page.getByText("Đã sẵn sàng dùng thử").first().isVisible();
+      return taskPanelVisible || generatingVisible || readyVisible;
+    }, { timeout: 30_000 }).toBe(true);
     await expect(
       page.getByText("Đã sẵn sàng dùng thử").or(page.locator('[data-testid="gen-error"]')),
     ).toBeVisible({ timeout: 180_000 });
@@ -730,19 +799,23 @@ test.describe.serial("Full pipeline with audio fixture (Whisper + Gemini)", () =
 
     const chunkPanel = page.locator('[data-testid="chunk-progress"]');
     await expect(chunkPanel).toBeVisible({ timeout: 10_000 });
-    await expect(chunkPanel.getByText("Phân tích nội dung với Gemini")).toBeVisible();
+    await expect(chunkPanel.getByText("Đang phân đoạn nội dung")).toBeVisible();
     await expect(chunkPanel.getByText("Lưu các đoạn")).toBeVisible();
 
     // Wait for the re-chunk to actually finish so subsequent tests in this block
-    // see chunks (not an empty list during the in-flight ChunkTranscriptStream).
-    await expect(page.getByText("Đã sẵn sàng dùng thử").or(page.locator('[data-testid="chunk-error"]'))).toBeVisible({ timeout: 120_000 });
+    // see chunks (not an empty list during the in-flight task). Re-chunking
+    // intentionally clears generated exercises and moves the workflow to the
+    // exercise step, so the stable completion signal is the AI-create button.
+    await expect(
+      page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')),
+    ).toBeVisible({ timeout: 120_000 });
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
   });
 
   // Regression test for the Vietnamese-coherence bug: before the fix, the
   // CoherenceBadge always read 0% (or under 30%) for VN audio because the regex
   // didn't match Latin Extended Additional diacritics. This test runs after the
-  // real Whisper+Gemini pipeline and asserts that at least one chunk shows
+  // real AI pipeline and asserts that at least one chunk shows
   // a non-zero coherence percentage.
   test("after pipeline: CoherenceBadge renders a valid % for every chunk", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
@@ -929,7 +1002,9 @@ test.describe("Teacher question editing (seeded data)", () => {
     // Delete the row we just created — scoped by unique text so no seeded interaction is affected
     const row = page.getByTestId("interaction-row").filter({ hasText: deleteTarget });
     await row.getByTitle("Xóa").click();
-    await expect(page.getByText(deleteTarget)).not.toBeVisible({ timeout: 5_000 });
+    // Scope to the workflow step body to avoid matching the video player's
+    // question marker (which may still show the text briefly).
+    await expect(page.getByTestId("workflow-step-body").getByText(deleteTarget)).not.toBeVisible({ timeout: 5_000 });
   });
 
   test("student does not see edit/delete buttons", async ({ studentPage: page }) => {

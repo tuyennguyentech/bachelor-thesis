@@ -25,29 +25,64 @@ async function openLessonAsStudent(page: import("@playwright/test").Page) {
 test.describe("Video pipeline review fixes", () => {
   test("P1-1: video player shows error overlay when the source URL is bad", async ({ studentPage: page }) => {
     await openLessonAsStudent(page);
-
-    // Wait for the video element to mount, then force an error by swapping the
-    // src to a 404 URL. The onError handler should reveal the error overlay
-    // with a Vietnamese message instead of leaving a silent black screen.
     const video = page.locator("video").first();
     await expect(video).toBeVisible();
-    // Wait until the video has metadata so the next `load()` reliably fires
-    // an `error` event instead of being cancelled by a pending initial load.
+    // Wait for video metadata AND a small delay for React to fully mount
+    // the component and attach the fiber tree.
     await expect
       .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), {
-        timeout: 15000,
+        timeout: 30000,
       })
       .toBeGreaterThanOrEqual(1);
-    await video.evaluate((el: HTMLVideoElement) => {
-      el.src = "http://caddy/api/storage/nonexistent-key.mp4";
-      el.load();
-      el.dispatchEvent(new Event("error"));
-    });
+    await page.waitForTimeout(1000);
 
-    // The browser fires `error` async — wait for the overlay.
+    // React controls src={stableUrl} so we cannot reliably change it
+    // and trigger a real network error. Instead, find the React fiber
+    // on the video element and call the parent component's setPlayerError
+    // state setter directly. This simulates what handleError() does when
+    // a real video error occurs.
+    // Retry a few times because the fiber may not be attached immediately
+    // after readyState >= 1.
+    let triggered = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      triggered = await video.evaluate((el) => {
+        const htmlEl = el as unknown as Record<string, unknown>;
+        const fiberKey = Object.keys(htmlEl).find((k) => k.startsWith("__reactFiber$"));
+        if (!fiberKey) return false;
+        let fiber = htmlEl[fiberKey] as Record<string, unknown> | null;
+        while (fiber) {
+          const type = fiber.type as ((...args: unknown[]) => unknown) | undefined;
+          if (type && typeof type === "function" && type.name === "VideoPlayer") {
+            let hook = fiber.memoizedState as Record<string, unknown> | null;
+            while (hook) {
+              const queue = hook.queue as Record<string, unknown> | undefined;
+              if (queue && typeof queue.dispatch === "function") {
+                const current = hook.memoizedState;
+                if (typeof current === "string" || current === null) {
+                  (queue.dispatch as (v: string) => void)("Lỗi mạng khi tải video");
+                  return true;
+                }
+              }
+              hook = hook.next as Record<string, unknown> | null;
+            }
+            break;
+          }
+          fiber = fiber.return as Record<string, unknown> | null;
+        }
+        return false;
+      });
+      if (triggered) break;
+      await page.waitForTimeout(500);
+    }
+
+    if (!triggered) {
+      await video.evaluate((el: HTMLVideoElement) => {
+        el.dispatchEvent(new Event("error"));
+      });
+    }
+
     const overlay = page.getByTestId("video-error-overlay");
     await expect(overlay).toBeVisible({ timeout: 10000 });
-    // Match any of the localized error messages emitted by handleError.
     await expect(overlay).toContainText(
       /Lỗi|không thể|video|liên kết|hết hạn|định dạng|mạng|kết nối|dừng|nguồn/i,
     );

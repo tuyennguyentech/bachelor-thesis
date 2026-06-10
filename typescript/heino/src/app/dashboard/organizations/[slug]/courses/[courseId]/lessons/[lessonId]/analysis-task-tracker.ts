@@ -92,22 +92,22 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
 
       if (isActiveTask) {
         const currentStep = analysisStepFromTask(task);
+        // Use server startedAt for elapsed calculation so the timer
+        // survives page refreshes. Fall back to Date.now() if the
+        // timestamp is missing (shouldn't happen for active tasks).
+        const taskStartMs =
+          task.startedAt != null
+            ? Number(task.startedAt.seconds) * 1000 + Math.floor((task.startedAt.nanos ?? 0) / 1_000_000)
+            : Date.now();
         if (task.kind === LessonTaskKind.EXTRACT_TRANSCRIPT) {
           setExtractState({ phase: "running", currentStep });
-          // Track per-step timings so the ProgressStrip can show
-          // "Step 3: 45s" instead of nothing during long steps. We
-          // start the active step on first observation, mark the
-          // previous step's end on transition, and let the ticker in
-          // use-lesson-analysis-state render the live elapsed.
           if (currentStep != null) {
-            const now = Date.now();
-            setExtractTimings((prev) => updateStepTimings(prev, currentStep, now));
+            setExtractTimings((prev) => updateStepTimings(prev, currentStep, taskStartMs));
           }
         } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
           setChunkState({ phase: "running", currentStep });
           if (currentStep != null) {
-            const now = Date.now();
-            setChunkTimings((prev) => updateStepTimings(prev, currentStep, now));
+            setChunkTimings((prev) => updateStepTimings(prev, currentStep, taskStartMs));
           }
         } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
           setGenState({
@@ -130,12 +130,14 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
 
       // Mark all currently-tracked steps as ended so the ProgressStrip
       // shows the final duration for the step we ended on.
+      const taskEndMs =
+        task.finishedAt != null
+          ? Number(task.finishedAt.seconds) * 1000 + Math.floor((task.finishedAt.nanos ?? 0) / 1_000_000)
+          : Date.now();
       if (task.kind === LessonTaskKind.EXTRACT_TRANSCRIPT) {
-        const endedAt = Date.now();
-        setExtractTimings((prev) => closeStepTimings(prev, endedAt));
+        setExtractTimings((prev) => closeStepTimings(prev, taskEndMs));
       } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
-        const endedAt = Date.now();
-        setChunkTimings((prev) => closeStepTimings(prev, endedAt));
+        setChunkTimings((prev) => closeStepTimings(prev, taskEndMs));
       }
 
       if (task.status === LessonTaskStatus.SUCCEEDED) {

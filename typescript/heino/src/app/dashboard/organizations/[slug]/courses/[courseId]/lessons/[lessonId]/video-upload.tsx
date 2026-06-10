@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { LessonService } from "buf/gen/richter/v1/courses_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
+import { uploadConfig } from "@/lib/client-config";
 import {
   UploadCloudIcon,
   CheckCircleIcon,
@@ -129,7 +130,7 @@ export function VideoUpload({ lessonId, hasVideo, token }: Props) {
         const video = document.createElement("video");
         const objectUrl = URL.createObjectURL(file);
         const cleanup = () => URL.revokeObjectURL(objectUrl);
-        const timer = setTimeout(() => { cleanup(); resolve(0); }, 10_000);
+        const timer = setTimeout(() => { cleanup(); resolve(0); }, uploadConfig.uploadTimeoutMs);
         video.addEventListener("loadedmetadata", () => {
           clearTimeout(timer);
           cleanup();

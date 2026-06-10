@@ -155,27 +155,35 @@ async function createLesson(
 }
 
 test.describe("Lesson task panel", () => {
-  test("active extract task shows cancel button", async ({ teacherPage: page }) => {
+  test("active extract task shows cancel button", async ({ teacherPage: page, baseURL }) => {
     const url = await createLesson(
       page, uid("Khóa học Task Panel"), uid("Chương Task Panel"), uid("Bài Task Panel"),
     );
-    await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    const lessonId = lessonIdFromUrl(url);
+    const token = await getTeacherToken(baseURL);
+    const ai = createAIClient(token, baseURL);
 
-    // Kick off the extract.
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
-    await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
+    try {
+      await page.goto(url);
+      await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
+      await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
-    // The bottom hero card is the single source of truth for live
-    // progress on the active step — it shows title, current sub-step,
-    // live elapsed, the 4-sub-step strip, AND the cancel button. The
-    // top `lesson-task-panel` deliberately hides the active step's
-    // running task to avoid duplicating it.
-    const hero = page.locator('[data-testid="extract-progress"]');
-    const cancelBtn = hero.locator('button[data-testid="extract-progress-cancel"]');
-    await expect(cancelBtn).toBeVisible();
-    await cancelBtn.click();
+      // Kick off the extract.
+      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+      await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
+
+      // The bottom hero card is the single source of truth for live
+      // progress on the active step — it shows title, current sub-step,
+      // live elapsed, the 4-sub-step strip, AND the cancel button. The
+      // top `lesson-task-panel` deliberately hides the active step's
+      // running task to avoid duplicating it.
+      const hero = page.locator('[data-testid="extract-progress"]');
+      const cancelBtn = hero.locator('button[data-testid="extract-progress-cancel"]');
+      await expect(cancelBtn).toBeVisible();
+      await cancelBtn.click();
+    } finally {
+      await cancelActiveLessonTasks(ai, lessonId);
+    }
   });
 
   test("clicking cancel flips a running extract task to canceled", async ({ teacherPage: page }) => {
@@ -215,7 +223,7 @@ test.describe("Lesson task panel", () => {
       .toBe(true);
   });
 
-  test("UI shows a single progress surface for the active extract step (no duplicate)", async ({ teacherPage: page }) => {
+  test("UI shows a single progress surface for the active extract step (no duplicate)", async ({ teacherPage: page, baseURL }) => {
     // After the UI dedup refactor, the running extract state must
     // appear in EXACTLY one place: the bottom hero card. The top
     // `lesson-task-panel` filters the active step's running task out
@@ -225,50 +233,58 @@ test.describe("Lesson task panel", () => {
     const url = await createLesson(
       page, uid("Khóa học UI Dedup"), uid("Chương UI Dedup"), uid("Bài UI Dedup"),
     );
-    await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    const lessonId = lessonIdFromUrl(url);
+    const token = await getTeacherToken(baseURL);
+    const ai = createAIClient(token, baseURL);
 
-    // Kick off the extract.
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
-    await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 15_000 });
+    try {
+      await page.goto(url);
+      await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
+      await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
 
-    // 1) The hero card is visible with title "Đang phiên âm"
-    //    and a cancel button + live elapsed.
-    const hero = page.locator('[data-testid="extract-progress"]');
-    await expect(hero).toContainText("Đang phiên âm");
-    await expect(hero.locator('button[data-testid="extract-progress-cancel"]')).toBeVisible();
-    await expect(hero.locator('[data-testid="extract-progress-elapsed"]')).toBeVisible();
+      // Kick off the extract.
+      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+      await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 15_000 });
 
-    // 2) The top task panel does NOT show the active extract task
-    //    (avoiding the duplicate "Phiên âm video 18s [×]" row that
-    //    used to render above the bottom card).
-    const panel = page.getByTestId("lesson-task-panel");
-    if (await panel.isVisible().catch(() => false)) {
-      // If the panel exists, it must not contain an active-step
-      // running task row for the extract kind.
-      const activeRows = panel.locator('[data-testid^="lesson-task-active-row-"]');
-      await expect(activeRows).toHaveCount(0);
-      // The cancel button on the top panel is for OTHER steps' tasks
-      // (or terminal tasks); on the transcript step with an active
-      // extract task, there should be no extract-task cancel in the
-      // top panel.
-      const extractCancelInPanel = panel.locator('button[data-testid^="lesson-task-cancel-"]');
-      await expect(extractCancelInPanel).toHaveCount(0);
-    }
+      // 1) The hero card is visible with title "Đang phiên âm"
+      //    and a cancel button + live elapsed.
+      const hero = page.locator('[data-testid="extract-progress"]');
+      await expect(hero).toContainText("Đang phiên âm");
+      await expect(hero.locator('button[data-testid="extract-progress-cancel"]')).toBeVisible();
+      await expect(hero.locator('[data-testid="extract-progress-elapsed"]')).toBeVisible();
 
-    // 3) The `workflow-next-action` panel hides its running CTA when
-    //    the active step matches the running kind (transcript ↔
-    //    EXTRACT_TRANSCRIPT), so the user does not see a redundant
-    //    "Đang trích xuất..." button pointing to the step they're
-    //    already on.
-    const nextAction = page.getByTestId("workflow-next-action");
-    if (await nextAction.isVisible().catch(() => false)) {
-      await expect(nextAction).not.toContainText("Đang trích xuất");
+      // 2) The top task panel does NOT show the active extract task
+      //    (avoiding the duplicate "Phiên âm video 18s [×]" row that
+      //    used to render above the bottom card).
+      const panel = page.getByTestId("lesson-task-panel");
+      if (await panel.isVisible().catch(() => false)) {
+        // If the panel exists, it must not contain an active-step
+        // running task row for the extract kind.
+        const activeRows = panel.locator('[data-testid^="lesson-task-active-row-"]');
+        await expect(activeRows).toHaveCount(0);
+        // The cancel button on the top panel is for OTHER steps' tasks
+        // (or terminal tasks); on the transcript step with an active
+        // extract task, there should be no extract-task cancel in the
+        // top panel.
+        const extractCancelInPanel = panel.locator('button[data-testid^="lesson-task-cancel-"]');
+        await expect(extractCancelInPanel).toHaveCount(0);
+      }
+
+      // 3) The `workflow-next-action` panel hides its running CTA when
+      //    the active step matches the running kind (transcript ↔
+      //    EXTRACT_TRANSCRIPT), so the user does not see a redundant
+      //    "Đang trích xuất..." button pointing to the step they're
+      //    already on.
+      const nextAction = page.getByTestId("workflow-next-action");
+      if (await nextAction.isVisible().catch(() => false)) {
+        await expect(nextAction).not.toContainText("Đang trích xuất");
+      }
+    } finally {
+      await cancelActiveLessonTasks(ai, lessonId);
     }
   });
 
-  test("running extract stays in running state (no spurious red error)", async ({ teacherPage: page }) => {
+  test("running extract stays in running state (no spurious red error)", async ({ teacherPage: page, baseURL }) => {
     // Regression for the "running → red error → success" flicker:
     // the old syncing poller had a hard 5-minute wall-clock timeout
     // that would force the extract state to "error" even when the BE
@@ -279,19 +295,27 @@ test.describe("Lesson task panel", () => {
     const url = await createLesson(
       page, uid("Khóa học No Flicker"), uid("Chương No Flicker"), uid("Bài No Flicker"),
     );
-    await page.goto(url);
-    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+    const lessonId = lessonIdFromUrl(url);
+    const token = await getTeacherToken(baseURL);
+    const ai = createAIClient(token, baseURL);
 
-    // Kick off the extract.
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
-    const hero = page.locator('[data-testid="extract-progress"]');
-    await expect(hero).toBeVisible({ timeout: 15_000 });
-    // The error summary must NOT appear while the task is running.
-    const errorBox = page.locator('[data-testid="extract-error"]');
-    await expect(errorBox).toHaveCount(0);
-    // Sanity: the hero still shows the running state.
-    await expect(hero).toContainText("Đang phiên âm");
+    try {
+      await page.goto(url);
+      await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
+      await expect(page.getByText("Video đã được tải lên thành công")).toBeVisible({ timeout: 30_000 });
+
+      // Kick off the extract.
+      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+      const hero = page.locator('[data-testid="extract-progress"]');
+      await expect(hero).toBeVisible({ timeout: 15_000 });
+      // The error summary must NOT appear while the task is running.
+      const errorBox = page.locator('[data-testid="extract-error"]');
+      await expect(errorBox).toHaveCount(0);
+      // Sanity: the hero still shows the running state.
+      await expect(hero).toContainText("Đang phiên âm");
+    } finally {
+      await cancelActiveLessonTasks(ai, lessonId);
+    }
   });
 
   test("A. shows three parallel generate_interactions tasks for distinct chunks", async ({ teacherPage: page, baseURL }) => {

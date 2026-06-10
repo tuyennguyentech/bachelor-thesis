@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UsersIcon, BuildingIcon, LayoutDashboardIcon } from "lucide-react";
+import { UsersIcon, BuildingIcon, LayoutDashboardIcon, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/admin/users", label: "Người dùng", icon: UsersIcon },
   { href: "/admin/organizations", label: "Tổ chức", icon: BuildingIcon },
+  { href: "/admin/tasks", label: "Giám sát tác vụ", icon: Activity },
 ];
 
 export function AdminSidebar() {

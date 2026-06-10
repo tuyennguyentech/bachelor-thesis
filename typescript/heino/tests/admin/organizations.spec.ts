@@ -28,8 +28,8 @@ async function getAnyUserId(page: Page): Promise<string> {
 
 test.describe("Org list page", () => {
   test("renders table with heading and create button", async ({ adminPage: page }) => {
-    await page.goto(ORGS_URL);
-    await expect(page.getByRole("heading", { name: "Tổ chức" })).toBeVisible();
+    await page.goto(ORGS_URL, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Tổ chức", level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: CREATE_ORG_BUTTON })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Tên" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Slug" })).toBeVisible();
@@ -42,9 +42,12 @@ test.describe("Org list page", () => {
   });
 
   test("opens create-org dialog", async ({ adminPage: page }) => {
-    await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.goto(ORGS_URL, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Tổ chức", level: 1 })).toBeVisible();
+    const btn = page.getByRole("button", { name: CREATE_ORG_BUTTON });
+    await expect(btn).toBeVisible({ timeout: 10_000 });
+    await btn.click();
+    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("heading", { name: "Tạo tổ chức mới" })).toBeVisible();
   });
 
@@ -134,14 +137,18 @@ test.describe("Org detail CRUD", () => {
     orgSlug = uniqueSlug();
     const orgName = uniqueName();
 
-    await page.goto(ORGS_URL);
-    await page.getByRole("button", { name: CREATE_ORG_BUTTON }).click();
+    await page.goto(ORGS_URL, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Tổ chức", level: 1 })).toBeVisible({ timeout: 10_000 });
+    const createBtn = page.getByRole("button", { name: CREATE_ORG_BUTTON });
+    await expect(createBtn).toBeVisible({ timeout: 10_000 });
+    await createBtn.click();
     const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
     await dialog.getByLabel("Tên").fill(orgName);
     await dialog.getByLabel("Slug").fill(orgSlug);
     await dialog.getByLabel(OWNER_LABEL).fill(userId);
     await dialog.getByRole("button", { name: "Tạo" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
     await page.goto(`/admin/organizations/${orgSlug}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
