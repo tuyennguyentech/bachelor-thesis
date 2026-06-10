@@ -282,6 +282,9 @@ message ListAllTasksRequest {
 
 message ListAllTasksResponse {
   repeated LessonTask tasks = 1;
+  int64 total_active = 2;
+  int64 total_succeeded = 3;
+  int64 total_failed_or_canceled = 4;
 }
 
 message CancelLessonTaskRequest {

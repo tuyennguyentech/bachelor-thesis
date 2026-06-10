@@ -2297,6 +2297,16 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 			t.Fatal("expected at least 1 task in response")
 		}
 		
+		if res.TotalActive < 1 {
+			t.Errorf("expected TotalActive to be at least 1 (due to created pending task), got %d", res.TotalActive)
+		}
+		if res.TotalSucceeded < 0 {
+			t.Errorf("expected TotalSucceeded >= 0, got %d", res.TotalSucceeded)
+		}
+		if res.TotalFailedOrCanceled < 0 {
+			t.Errorf("expected TotalFailedOrCanceled >= 0, got %d", res.TotalFailedOrCanceled)
+		}
+		
 		found := false
 		for _, tsk := range res.Tasks {
 			if tsk.Id == task1ID.String() {

@@ -294,7 +294,19 @@ func (s *AISvc) ListAllTasks(
 		out[i] = lessonTaskToProto(t)
 	}
 
-	return &richterv1.ListAllTasksResponse{Tasks: out}, nil
+	counts, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CountTaskStatusBucketsRow, error) {
+		return q.CountTaskStatusBuckets(ctx)
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("count tasks: %w", err))
+	}
+
+	return &richterv1.ListAllTasksResponse{
+		Tasks:                 out,
+		TotalActive:           counts.Active,
+		TotalSucceeded:        counts.Succeeded,
+		TotalFailedOrCanceled: counts.FailedOrCancelled,
+	}, nil
 }
 
 func (s *AISvc) CancelLessonTask(

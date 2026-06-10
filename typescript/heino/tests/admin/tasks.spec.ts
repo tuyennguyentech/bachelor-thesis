@@ -11,8 +11,8 @@ test.describe("Admin Tasks Monitor page", () => {
     
     // Check stats cards
     await expect(page.getByText("Đang hoạt động (Toàn hệ thống)", { exact: true })).toBeVisible();
-    await expect(page.getByText("Thành công (Trang này)", { exact: true })).toBeVisible();
-    await expect(page.getByText("Thất bại / Đã huỷ (Trang này)", { exact: true })).toBeVisible();
+    await expect(page.getByText("Thành công (Toàn hệ thống)", { exact: true })).toBeVisible();
+    await expect(page.getByText("Thất bại / Đã huỷ (Toàn hệ thống)", { exact: true })).toBeVisible();
   });
 
   test("renders tasks list table", async ({ adminPage: page }) => {

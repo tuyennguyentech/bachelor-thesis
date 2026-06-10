@@ -222,3 +222,12 @@ SET progress_step = $2,
     message = $5,
     updated_at = now()
 WHERE id = $1;
+
+-- name: CountTaskStatusBuckets :one
+-- System-wide task counts grouped into the three buckets the admin monitor
+-- displays. A single round-trip replaces three separate COUNT(*) queries.
+SELECT
+  count(*) FILTER (WHERE status IN ('pending', 'inqueued', 'processing')) AS active,
+  count(*) FILTER (WHERE status = 'succeeded') AS succeeded,
+  count(*) FILTER (WHERE status IN ('failed', 'cancelled')) AS failed_or_cancelled
+FROM tasks;

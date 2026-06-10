@@ -35,8 +35,11 @@ export function TasksMonitor({ token }: { token: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [activeTotalCount, setActiveTotalCount] = useState(0);
+  const [successTotalCount, setSuccessTotalCount] = useState(0);
+  const [failedTotalCount, setFailedTotalCount] = useState(0);
 
-  const fetchTasks = useCallback(async (showRefresher = false, active = true) => {
+  const fetchTasks = useCallback(async (showRefresher = false, active = true, isInitial = false) => {
+    if (isInitial && active) setLoading(true);
     if (showRefresher && active) setRefreshing(true);
     try {
       const res = await aiClient.listAllTasks({
@@ -44,15 +47,12 @@ export function TasksMonitor({ token }: { token: string }) {
         limit: LIMIT,
         offset: (page - 1) * LIMIT,
       });
-      if (active) setTasks(res.tasks ?? []);
-
-      // Fetch active tasks across the whole system (limit 100 is enough)
-      const activeRes = await aiClient.listAllTasks({
-        activeOnly: true,
-        limit: 100,
-        offset: 0,
-      });
-      if (active) setActiveTotalCount(activeRes.tasks?.length ?? 0);
+      if (active) {
+        setTasks(res.tasks ?? []);
+        setActiveTotalCount(Number(res.totalActive ?? 0));
+        setSuccessTotalCount(Number(res.totalSucceeded ?? 0));
+        setFailedTotalCount(Number(res.totalFailedOrCanceled ?? 0));
+      }
     } catch (err) {
       console.error("Failed to fetch tasks:", err);
     } finally {
@@ -65,10 +65,10 @@ export function TasksMonitor({ token }: { token: string }) {
 
   useEffect(() => {
     let active = true;
-    fetchTasks(false, active);
+    fetchTasks(false, active, true);
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") {
-        fetchTasks(false, active);
+        fetchTasks(false, active, false);
       }
     }, 3000);
     return () => {
@@ -91,21 +91,7 @@ export function TasksMonitor({ token }: { token: string }) {
     }
   };
 
-  const activeCount = tasks.filter(
-    (t) =>
-      t.status === LessonTaskStatus.QUEUED ||
-      t.status === LessonTaskStatus.RUNNING
-  ).length;
 
-  const successCount = tasks.filter(
-    (t) => t.status === LessonTaskStatus.SUCCEEDED
-  ).length;
-
-  const failedCount = tasks.filter(
-    (t) =>
-      t.status === LessonTaskStatus.FAILED ||
-      t.status === LessonTaskStatus.CANCELED
-  ).length;
 
   const renderStatus = (status: LessonTaskStatus) => {
     switch (status) {
@@ -172,7 +158,7 @@ export function TasksMonitor({ token }: { token: string }) {
     return (
       <div className="flex flex-col gap-1 min-w-[200px] max-w-[350px]">
         {task.message && (
-          <span className="text-xs text-foreground font-medium truncate max-w-[280px]">
+          <span className="text-xs text-foreground font-medium truncate max-w-[280px]" title={task.message}>
             {task.message}
           </span>
         )}
@@ -232,23 +218,23 @@ export function TasksMonitor({ token }: { token: string }) {
 
         <Card className="bg-card border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Thành công (Trang này)</CardTitle>
+            <CardTitle className="text-sm font-medium">Thành công (Toàn hệ thống)</CardTitle>
             <CheckCircle2 className="size-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-500">{successCount}</div>
-            <p className="text-xs text-muted-foreground">Số tác vụ thành công trên trang hiện tại</p>
+            <div className="text-2xl font-bold text-emerald-500">{successTotalCount}</div>
+            <p className="text-xs text-muted-foreground">Tổng số tác vụ thành công trên toàn hệ thống</p>
           </CardContent>
         </Card>
 
         <Card className="bg-card border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Thất bại / Đã huỷ (Trang này)</CardTitle>
+            <CardTitle className="text-sm font-medium">Thất bại / Đã huỷ (Toàn hệ thống)</CardTitle>
             <XCircle className="size-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">{failedCount}</div>
-            <p className="text-xs text-muted-foreground">Số tác vụ lỗi hoặc bị huỷ trên trang hiện tại</p>
+            <div className="text-2xl font-bold text-destructive">{failedTotalCount}</div>
+            <p className="text-xs text-muted-foreground">Tổng số tác vụ lỗi hoặc bị huỷ trên toàn hệ thống</p>
           </CardContent>
         </Card>
       </div>
