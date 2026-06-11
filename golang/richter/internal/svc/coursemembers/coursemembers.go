@@ -229,6 +229,17 @@ func (s *CourseMembersSvc) CreateJoinRequest(
 		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
 	}
 
+	// Already-enrolled users don't need to request to join.
+	isMember, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (bool, error) {
+		return q.IsCourseMember(ctx, gen.IsCourseMemberParams{CourseID: courseID, UserID: userID})
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	if isMember {
+		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("already a member of this course"))
+	}
+
 	// Create or update the join request in database
 	request, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseJoinRequest, error) {
 		return q.CreateJoinRequest(ctx, gen.CreateJoinRequestParams{

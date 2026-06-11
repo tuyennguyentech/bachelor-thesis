@@ -305,7 +305,9 @@ func TestCourseMemberLifecycle(t *testing.T) {
 // ── access gate tests ─────────────────────────────────────────────────────────
 
 // TestCourseMemberAccessGate verifies that:
-//   - An org member who is NOT a course member is denied access to GetLessonById and GetCourseById.
+//   - An org member who is NOT a course member is denied content access (GetLessonById).
+//     GetCourseById is allowed for org members but reports can_access=false (so they can
+//     see course metadata / request to join, but not enter content).
 //   - An org member who IS a course member may access those endpoints.
 //   - An org admin (not an explicit course member) may access those endpoints.
 //   - The course owner may access those endpoints.
@@ -1009,3 +1011,265 @@ func TestCourseJoinRequests(t *testing.T) {
 	}
 }
 
+// TestCourseJoinRequestsAuthz verifies authorization and edge-case error codes for
+// all four join-request RPCs that were not covered by TestCourseJoinRequests:
+//
+//   - CreateJoinRequest: non-org-member → PermissionDenied
+//   - CreateJoinRequest: already a course member → AlreadyExists
+//   - CreateJoinRequest: non-existent course → NotFound
+//   - ReviewJoinRequest: caller is a plain student (non-manager) → PermissionDenied
+//   - ReviewJoinRequest: no pending request exists for the user → NotFound
+//   - ListPendingJoinRequests: caller is a non-manager → PermissionDenied
+//   - ListPendingJoinRequests: pagination (limit/offset) works correctly
+//   - GetMyJoinRequestStatus: always scoped to the caller's own sub
+func TestCourseJoinRequestsAuthz(t *testing.T) {
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	// Participants
+	_, _, ownerID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+	// outOfOrgEmail is never added to the org.
+	outOfOrgEmail, outOfOrgPass, _ := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, teacherID, richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER)
+
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	// Enrol teacher as course teacher so they can manage requests.
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   teacherID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_TEACHER,
+	}); err != nil {
+		t.Fatalf("setup: enrol teacher: %v", err)
+	}
+
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPass)
+	outOfOrgToken := getUserToken(t, url, outOfOrgEmail, outOfOrgPass)
+
+	studentCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(studentToken), url)
+	teacherCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(teacherToken), url)
+	outOfOrgCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(outOfOrgToken), url)
+
+	// ── CreateJoinRequest edge cases ──────────────────────────────────────────────
+
+	t.Run("CreateJoinRequest/NonOrgMember_PermissionDenied", func(t *testing.T) {
+		// A user who is not a member of the course's organization must be denied.
+		_, err := outOfOrgCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+			CourseId: courseID,
+		})
+		assertCode(t, err, connect.CodePermissionDenied)
+	})
+
+	t.Run("CreateJoinRequest/NonExistentCourse_NotFound", func(t *testing.T) {
+		// A valid org member requesting to join a non-existent course gets NotFound.
+		_, err := studentCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+			CourseId: gofakeit.UUID(),
+		})
+		assertCode(t, err, connect.CodeNotFound)
+	})
+
+	t.Run("CreateJoinRequest/AlreadyCourseMember_AlreadyExists", func(t *testing.T) {
+		// Enrol the student directly as a course member.
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID,
+			UserId:   studentID,
+			Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("setup: enrol student directly: %v", err)
+		}
+
+		_, err := studentCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+			CourseId: courseID,
+		})
+		assertCode(t, err, connect.CodeAlreadyExists)
+
+		// Remove the student so subsequent subtests can re-use courseID cleanly.
+		if _, err := c.courseMembers.RemoveCourseMember(ctx, &richterv1.RemoveCourseMemberRequest{
+			CourseId: courseID,
+			UserId:   studentID,
+		}); err != nil {
+			t.Fatalf("cleanup: remove student from course: %v", err)
+		}
+	})
+
+	// ── ReviewJoinRequest edge cases ──────────────────────────────────────────────
+
+	t.Run("ReviewJoinRequest/Student_PermissionDenied", func(t *testing.T) {
+		// A plain course-student (not a course manager) must not be able to review requests.
+		// First submit a join request from the student so the course_id/user_id pair exists.
+		if _, err := studentCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+			CourseId: courseID,
+		}); err != nil {
+			t.Fatalf("setup: student CreateJoinRequest: %v", err)
+		}
+
+		// Create a second user enrolled as a plain course-student to act as unauthorized reviewer.
+		reviewer2Email, reviewer2Pass, reviewer2ID := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, reviewer2ID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID,
+			UserId:   reviewer2ID,
+			Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("setup: enrol reviewer2 as student: %v", err)
+		}
+		reviewer2Token := getUserToken(t, url, reviewer2Email, reviewer2Pass)
+		reviewer2CM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(reviewer2Token), url)
+
+		_, err := reviewer2CM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+			CourseId: courseID,
+			UserId:   studentID,
+			Approve:  true,
+		})
+		assertCode(t, err, connect.CodePermissionDenied)
+
+		// Clean up: approve via teacher so studentID is enrolled for later subtests.
+		if _, err := teacherCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+			CourseId: courseID,
+			UserId:   studentID,
+			Approve:  true,
+		}); err != nil {
+			t.Fatalf("cleanup: approve student request via teacher: %v", err)
+		}
+	})
+
+	t.Run("ReviewJoinRequest/NoRequestExists_NotFound", func(t *testing.T) {
+		// Reviewing a request for a user who has no pending request returns NotFound.
+		_, _, noRequestUserID := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, noRequestUserID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+		_, err := teacherCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+			CourseId: courseID,
+			UserId:   noRequestUserID,
+			Approve:  true,
+		})
+		assertCode(t, err, connect.CodeNotFound)
+	})
+
+	// ── ListPendingJoinRequests edge cases ────────────────────────────────────────
+
+	t.Run("ListPendingJoinRequests/NonManager_PermissionDenied", func(t *testing.T) {
+		// A plain org student (not a course manager) must be denied.
+		nonMgrEmail, nonMgrPass, nonMgrID := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, nonMgrID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+		// Intentionally do NOT enrol nonMgrID as a course member — keeps them non-manager.
+		nonMgrToken := getUserToken(t, url, nonMgrEmail, nonMgrPass)
+		nonMgrCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(nonMgrToken), url)
+
+		_, err := nonMgrCM.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{
+			CourseId: courseID,
+			Limit:    10,
+			Offset:   0,
+		})
+		assertCode(t, err, connect.CodePermissionDenied)
+	})
+
+	t.Run("ListPendingJoinRequests/Pagination", func(t *testing.T) {
+		// Submit two fresh join requests and verify limit/offset pagination.
+		for i := range 2 {
+			email, pass, uid := createActiveUser(t, c.users)
+			addOrgMember(t, c, orgID, uid, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+			tok := getUserToken(t, url, email, pass)
+			cm := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(tok), url)
+			if _, err := cm.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+				CourseId: courseID,
+			}); err != nil {
+				t.Fatalf("setup: CreateJoinRequest[%d]: %v", i, err)
+			}
+		}
+
+		page1, err := teacherCM.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{
+			CourseId: courseID,
+			Limit:    1,
+			Offset:   0,
+		})
+		if err != nil {
+			t.Fatalf("ListPendingJoinRequests page1: %v", err)
+		}
+		if len(page1.Requests) != 1 {
+			t.Errorf("expected 1 pending request on page1, got %d", len(page1.Requests))
+		}
+
+		page2, err := teacherCM.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{
+			CourseId: courseID,
+			Limit:    1,
+			Offset:   1,
+		})
+		if err != nil {
+			t.Fatalf("ListPendingJoinRequests page2: %v", err)
+		}
+		if len(page2.Requests) != 1 {
+			t.Errorf("expected 1 pending request on page2, got %d", len(page2.Requests))
+		}
+
+		if page1.Requests[0].UserId == page2.Requests[0].UserId {
+			t.Errorf("pagination returned the same user on both pages")
+		}
+
+		// Each row must include the user's email (JOIN with users table).
+		for _, req := range append(page1.Requests, page2.Requests...) {
+			if req.UserEmail == "" {
+				t.Errorf("expected UserEmail populated for pending request user %s", req.UserId)
+			}
+		}
+	})
+
+	// ── GetMyJoinRequestStatus: self-scoped confirmation ──────────────────────────
+
+	t.Run("GetMyJoinRequestStatus/AlwaysReturnsCaller", func(t *testing.T) {
+		// The RPC ignores any implicit user context — it always reads claims.sub.
+		// Create a fresh student whose request status is initially absent.
+		freshEmail, freshPass, freshID := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, freshID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+		freshToken := getUserToken(t, url, freshEmail, freshPass)
+		freshCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(freshToken), url)
+
+		// No request yet — must return a nil request field, not an error.
+		res, err := freshCM.GetMyJoinRequestStatus(ctx, &richterv1.GetMyJoinRequestStatusRequest{
+			CourseId: courseID,
+		})
+		if err != nil {
+			t.Fatalf("GetMyJoinRequestStatus (no request): %v", err)
+		}
+		if res.GetRequest() != nil {
+			t.Errorf("expected nil request for user with no join request, got status %v", res.GetRequest().GetStatus())
+		}
+
+		// Submit a request.
+		if _, err := freshCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+			CourseId: courseID,
+		}); err != nil {
+			t.Fatalf("CreateJoinRequest: %v", err)
+		}
+
+		// Caller's own status must now be PENDING.
+		res2, err := freshCM.GetMyJoinRequestStatus(ctx, &richterv1.GetMyJoinRequestStatusRequest{
+			CourseId: courseID,
+		})
+		if err != nil {
+			t.Fatalf("GetMyJoinRequestStatus (after create): %v", err)
+		}
+		if res2.GetRequest().GetStatus() != richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+			t.Errorf("expected PENDING, got %v", res2.GetRequest().GetStatus())
+		}
+
+		// The teacher calling GetMyJoinRequestStatus for the same course must see their
+		// OWN status (teacher has no pending request), not freshID's status.
+		teacherStatus, err := teacherCM.GetMyJoinRequestStatus(ctx, &richterv1.GetMyJoinRequestStatusRequest{
+			CourseId: courseID,
+		})
+		if err != nil {
+			t.Fatalf("GetMyJoinRequestStatus (teacher): %v", err)
+		}
+		// Teacher was directly enrolled, never submitted a join request.
+		if teacherStatus.GetRequest() != nil {
+			t.Errorf("teacher should have no join request, got status %v", teacherStatus.GetRequest().GetStatus())
+		}
+	})
+}
