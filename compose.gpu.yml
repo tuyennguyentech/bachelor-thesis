@@ -1,0 +1,55 @@
+# GPU override for compose.yml.
+#
+# Usage (requires nvidia-container-toolkit installed on host):
+#
+#   # One-time setup: generate CDI spec for podman
+#   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+#
+#   # Set device in .env
+#   AI_DEVICE=cuda
+#
+#   # Start (or restart) AI services with GPU support
+#   podman compose -f compose.yml -f compose.gpu.yml up -d speaches piper-tts
+#
+#   # Verify GPU is used (should show the container process)
+#   nvidia-smi
+#
+# To revert to CPU-only (the safe default):
+#   AI_DEVICE=cpu
+#   podman compose up -d speaches piper-tts
+#
+# Notes:
+#   - speaches uses ghcr.io/speaches-ai/speaches:latest-cuda (pulled automatically).
+#   - piper-tts must be rebuilt: podman compose -f compose.yml -f compose.gpu.yml build piper-tts
+#   - Without nvidia-container-toolkit, the deploy.resources reservation is silently ignored
+#     by podman and the container falls back to CPU.
+#
+name: dyadia
+
+services:
+  speaches:
+    # WHISPER__COMPUTE_TYPE=float16: optimal for CUDA; the base compose.yml sets "default"
+    # which auto-selects float32 on CPU. Override here for GPU efficiency.
+    environment:
+      WHISPER__COMPUTE_TYPE: float16
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  piper-tts:
+    build:
+      args:
+        USE_CUDA_RUNTIME: "1"
+    environment:
+      PIPER_USE_CUDA: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

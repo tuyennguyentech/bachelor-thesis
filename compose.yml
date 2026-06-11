@@ -71,9 +71,15 @@ services:
     command: sh
 
   speaches:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    # AI_DEVICE selects the compute backend: "cpu" (default) or "cuda".
+    # The image tag must match: latest-cpu for CPU, latest-cuda for GPU.
+    # Set AI_DEVICE in .env and apply compose.gpu.yml for GPU device reservations.
+    image: ghcr.io/speaches-ai/speaches:latest-${AI_DEVICE:-cpu}
     environment:
-      WHISPER__INFERENCE_DEVICE: cpu
+      WHISPER__INFERENCE_DEVICE: ${AI_DEVICE:-cpu}
+      # float16 is efficient on CUDA but unsupported on CPU (falls back to float32).
+      # "default" lets CTranslate2 pick the best quantization for the active device.
+      WHISPER__COMPUTE_TYPE: default
       PRELOAD_MODELS: '["Systran/faster-whisper-small"]'
     volumes:
       - hf_hub_cache:/home/ubuntu/.cache/huggingface/hub
@@ -86,9 +92,16 @@ services:
       start_period: 60s
 
   piper-tts:
-    build: infra/piper
+    build:
+      context: infra/piper
+      # GPU build: install onnxruntime-gpu instead of onnxruntime (CPU-only).
+      # Compose.gpu.yml sets USE_CUDA_RUNTIME=1 to activate this build arg.
+      args:
+        USE_CUDA_RUNTIME: "0"
     environment:
       PIPER_MODELS_DIR: /models
+      # Set to "1" (via compose.gpu.yml) to enable CUDA inference in piper.
+      PIPER_USE_CUDA: "0"
     volumes:
       - piper_models:/models
     restart: unless-stopped

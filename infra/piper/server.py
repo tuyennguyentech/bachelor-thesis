@@ -9,6 +9,10 @@ from piper.voice import PiperVoice
 app = Flask(__name__)
 
 MODELS_DIR = os.environ.get("PIPER_MODELS_DIR", "/models")
+# Set PIPER_USE_CUDA=1 (via compose.gpu.yml + USE_CUDA_RUNTIME build arg) to enable GPU
+# inference.  Requires onnxruntime-gpu to be installed in the image.
+USE_CUDA = os.environ.get("PIPER_USE_CUDA", "0") == "1"
+
 VOICES = {
     "vi": "vi_VN-vais1000-medium",
     "en": "en_US-lessac-medium",
@@ -23,7 +27,7 @@ def _voice(lang: str) -> PiperVoice:
         if lang not in _cache:
             name = VOICES.get(lang, VOICES["vi"])
             _cache[lang] = PiperVoice.load(
-                os.path.join(MODELS_DIR, name + ".onnx"), use_cuda=False
+                os.path.join(MODELS_DIR, name + ".onnx"), use_cuda=USE_CUDA
             )
     return _cache[lang]
 
