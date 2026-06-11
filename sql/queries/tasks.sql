@@ -130,18 +130,20 @@ WHERE tasks.id = ranked.id
 RETURNING tasks.*;
 
 -- name: ClaimNextInqueuedTask :one
--- Worker primitive: pick the next inqueued task, mark it processing
--- under workerID, set heartbeat. Returns the claimed task or no-rows.
+-- Worker primitive: pick the next inqueued task whose task_type is in
+-- the caller's allowlist, mark it processing under workerID, set heartbeat.
+-- Returns the claimed task or no-rows.
 -- The subquery + UPDATE atomic in a single statement.
 UPDATE tasks
 SET status = 'processing',
-    worker_id = $1,
+    worker_id = @worker_id,
     heartbeat = now(),
     started_at = COALESCE(started_at, now()),
     updated_at = now()
 WHERE id = (
     SELECT id FROM tasks
     WHERE status = 'inqueued'
+      AND task_type = ANY(@task_types::text[])
     ORDER BY queue_seq ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1

@@ -44,6 +44,7 @@ type Worker struct {
 	heartbeatFreshFor time.Duration // heartbeat older than this => worker lost ownership
 	workers    int                // concurrency: number of worker loops, 0 = runtime.NumCPU()
 	notifCh    <-chan string       // pg_notify wake signal from Listener via Scanner
+	allowedTypes []string          // task_types this worker may claim; must be non-empty
 }
 
 // NewWorkerRaw generates a UUID v7 worker_id and returns a Worker
@@ -69,6 +70,14 @@ func NewWorkerRaw(db DB, log *slog.Logger, notifCh <-chan string) *Worker {
 
 // WorkerID returns the UUID v7 this worker was assigned.
 func (w *Worker) WorkerID() string { return w.id }
+
+// WithAllowedTypes restricts this worker to claiming only tasks whose
+// task_type is in the provided list. This MUST be called before Run.
+// Workers with an empty allowedTypes will not claim any tasks.
+func (w *Worker) WithAllowedTypes(types []string) *Worker {
+	w.allowedTypes = types
+	return w
+}
 
 // Run starts the worker pool. Blocks until ctx is done. Spawns:
 //   - 1 heartbeat goroutine
@@ -133,6 +142,13 @@ func (w *Worker) reconnect(ctx context.Context) {
 }
 
 func (w *Worker) taskLoop(ctx context.Context) {
+	if len(w.allowedTypes) == 0 {
+		// No allowed types configured — this worker must not claim any tasks.
+		// Block until ctx is cancelled so the goroutine exits cleanly.
+		w.log.WarnContext(ctx, "taskqueue.Worker: no allowedTypes configured, worker is idle")
+		<-ctx.Done()
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -140,7 +156,7 @@ func (w *Worker) taskLoop(ctx context.Context) {
 		default:
 		}
 		workerID := pgtype.UUID{Bytes: uuidBytes(w.id), Valid: true}
-		task, err := w.db.ClaimNextInqueuedTask(ctx, workerID)
+		task, err := w.db.ClaimNextInqueuedTask(ctx, workerID, w.allowedTypes)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Queue empty. Wait for either a pg_notify wake
@@ -302,6 +318,7 @@ func NewWorker(i do.Injector) (*Worker, error) {
 		return nil, fmt.Errorf("taskqueue.NewWorker: LessonTaskCfg: %w", err)
 	}
 	w := NewWorkerRaw(db, &logSvc.Logger, scanner.NotifCh())
+	w.allowedTypes = RegisteredKinds()
 	if taskCfg.Workers > 0 {
 		w.workers = taskCfg.Workers
 	}

@@ -223,9 +223,12 @@ func (p *PostgresDB) RequeueOrphanedInqueuedBatch(ctx context.Context, batchSize
 	return out, nil
 }
 
-func (p *PostgresDB) ClaimNextInqueuedTask(ctx context.Context, workerID pgtype.UUID) (Task, error) {
+func (p *PostgresDB) ClaimNextInqueuedTask(ctx context.Context, workerID pgtype.UUID, taskTypes []string) (Task, error) {
 	row, err := db.WithConnection(p.pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-		return q.ClaimNextInqueuedTask(ctx, workerID)
+		return q.ClaimNextInqueuedTask(ctx, gen.ClaimNextInqueuedTaskParams{
+			WorkerID:  workerID,
+			TaskTypes: taskTypes,
+		})
 	})
 	if err != nil {
 		return Task{}, err

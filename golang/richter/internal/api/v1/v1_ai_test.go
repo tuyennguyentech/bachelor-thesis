@@ -309,6 +309,7 @@ func insertTestTask(t *testing.T, lessonID, kind, status string) gen.Task {
 // ── TestAIAuthz ───────────────────────────────────────────────────────────────
 
 func TestAIAuthz(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -498,6 +499,7 @@ func TestAIAuthz(t *testing.T) {
 // ── TestAIWatchProgress ───────────────────────────────────────────────────────
 
 func TestAIWatchProgress(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -605,6 +607,7 @@ func TestAIWatchProgress(t *testing.T) {
 // ── TestAIChunkConfig ─────────────────────────────────────────────────────────
 
 func TestAIChunkConfig(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -803,6 +806,7 @@ func insertTestInteractionsForChunk(t *testing.T, lessonID, chunkIDStr string, c
 // TestAIStatusMapping verifies that all lesson_analysis_status enum values are
 // correctly mapped to their proto equivalents in GetLessonAnalysis.
 func TestAIStatusMapping(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -875,6 +879,7 @@ func TestAIStatusMapping(t *testing.T) {
 // values. Regression test: prior to this fix, the page's RSC payload (and the raw
 // RPC response) leaked every question's correct answer to all org members.
 func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -976,6 +981,7 @@ func TestGetLessonAnalysis_StripsCorrectAnswers(t *testing.T) {
 // AFTER_EACH → never stripped (student sees answers before submitting).
 // AFTER_SUBMIT is already covered by TestGetLessonAnalysis_StripsCorrectAnswers.
 func TestGetLessonAnalysis_FeedbackModes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	assertStripped := func(t *testing.T, its []*richterv1.LessonInteraction, wantStripped bool, label string) {
@@ -1063,6 +1069,7 @@ func TestGetLessonAnalysis_FeedbackModes(t *testing.T) {
 // TestAIGenerateInteractionsResumable verifies the skip-if-already-done logic and
 // force_regenerate override introduced for pipeline resumability.
 func TestAIGenerateInteractionsResumable(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -1100,7 +1107,7 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 				task.Status == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_CANCELED {
 				return task
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
@@ -1165,7 +1172,7 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 				final.Status == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_CANCELED {
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		// Either SUCCEEDED with a "Hoàn thành" message OR FAILED with a
 		// Gemini error. Both prove the worker attempted generation rather than
@@ -1208,7 +1215,7 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 				final.Status == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_CANCELED {
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		if strings.Contains(final.Message, "bỏ qua") || strings.Contains(final.ErrorMsg, "bỏ qua") {
 			t.Errorf("single-chunk mode must not skip (got message=%q error=%q)", final.Message, final.ErrorMsg)
@@ -1265,6 +1272,7 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 // ── TestAIFDBContent ──────────────────────────────────────────────────────────
 
 func TestAIFDBContent(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 	clearTestTasks(t, e.lessonID)
@@ -1327,6 +1335,7 @@ func TestAIFDBContent(t *testing.T) {
 // ── TestAITranscriptSegmentEditing ───────────────────────────────────────────
 
 func TestAITranscriptSegmentEditing(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -1423,6 +1432,7 @@ func TestAITranscriptSegmentEditing(t *testing.T) {
 // ── TestAIChunkOperations ─────────────────────────────────────────────────────
 
 func TestAIChunkOperations(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -1728,6 +1738,7 @@ func testUploadVideoToS3(t *testing.T, ctx context.Context, client *minio.Client
 //   - Gemini API key not set (needed for chunking and Q&A generation)
 //   - whisper.endpoint not set in richter.test.toml (needed for transcription)
 func TestAIPipelineFullFlow(t *testing.T) {
+	t.Parallel()
 	whisperCfg, err := do.Invoke[*cfg.WhisperCfg](internal.Injector)
 	if err != nil || whisperCfg.Endpoint == "" {
 		t.Skip("skipped: whisper.endpoint not configured — set whisper.endpoint in richter.test.toml")
@@ -1813,7 +1824,7 @@ func TestAIPipelineFullFlow(t *testing.T) {
 				task.Status == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_CANCELED {
 				return task
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
@@ -1994,6 +2005,7 @@ func TestAIPipelineFullFlow(t *testing.T) {
 // When status is not PENDING, FDB data must be returned.
 
 func TestGetLessonAnalysis_FDBVisibility(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 	clearTestTasks(t, e.lessonID)
@@ -2078,6 +2090,7 @@ func TestGetLessonAnalysis_FDBVisibility(t *testing.T) {
 // stale FDB transcript/segments to remain visible after same-filename replacement.
 
 func TestUpdateLessonVideo_SameKey_ResetsAnalysis(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
@@ -2129,6 +2142,7 @@ func TestUpdateLessonVideo_SameKey_ResetsAnalysis(t *testing.T) {
 // UpdateLessonDefaultInteractionConfig persist their config and are returned by
 // the appropriate read endpoints.
 func TestInteractionConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 

@@ -127,10 +127,24 @@ func getOrCreateTestUserAndLesson(t *testing.T, pool *db.PostgresSvc) (pgtype.UU
 	return userID, lessonID
 }
 
+// clearAllTasks removes only the task types created by this package's tests
+// (test_*, controlled_task, parallel_test_task). Production task types such as
+// "transcribe", "chunk", and "quiz_gen" are intentionally left untouched so
+// that this package's tests can run in parallel with internal/api/v1 tests
+// without deleting tasks those tests are waiting on.
 func clearAllTasks(t *testing.T, pool *db.PostgresSvc) {
 	t.Helper()
 	err := db.WithConnectionExec(pool, context.Background(), func(q *gen.Queries, conn *pgxpool.Conn) error {
-		_, err := conn.Exec(context.Background(), "DELETE FROM tasks")
+		_, err := conn.Exec(context.Background(), `
+			DELETE FROM tasks
+			WHERE task_type IN (
+				'test_task',
+				'controlled_task',
+				'test_recovery_task',
+				'test_steal_task',
+				'test_cancel_task',
+				'parallel_test_task'
+			)`)
 		return err
 	})
 	if err != nil {
@@ -178,7 +192,7 @@ func TestPostgresDB_TaskLifecycle(t *testing.T) {
 	// 3. ClaimNextInqueuedTask
 	workerIDRaw, _ := uuid.NewV7()
 	workerID := pgtype.UUID{Bytes: [16]byte(workerIDRaw), Valid: true}
-	claimed, err := tq.ClaimNextInqueuedTask(ctx, workerID)
+	claimed, err := tq.ClaimNextInqueuedTask(ctx, workerID, []string{"test_task"})
 	if err != nil {
 		t.Fatalf("ClaimNextInqueuedTask: %v", err)
 	}
@@ -318,7 +332,7 @@ func TestTaskqueue_WorkerLifecycle(t *testing.T) {
 	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(1 * time.Second)
 
 	// 2. Create worker
-	worker := NewWorkerRaw(tq, logger, scanner.NotifCh())
+	worker := NewWorkerRaw(tq, logger, scanner.NotifCh()).WithAllowedTypes([]string{"test_task"})
 	worker.heartbeat = 100 * time.Millisecond
 	worker.pollIdle = 100 * time.Millisecond
 
@@ -397,7 +411,7 @@ func TestTaskqueue_WorkerCrashAndRecovery(t *testing.T) {
 	logger := slog.Default()
 	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(100 * time.Millisecond)
 
-	worker1 := NewWorkerRaw(tq, logger, scanner.NotifCh())
+	worker1 := NewWorkerRaw(tq, logger, scanner.NotifCh()).WithAllowedTypes([]string{"test_recovery_task"})
 	worker1.heartbeat = 50 * time.Millisecond
 	worker1.pollIdle = 50 * time.Millisecond
 
@@ -446,7 +460,7 @@ func TestTaskqueue_WorkerCrashAndRecovery(t *testing.T) {
 	defer cancel2()
 
 	scanner2 := NewScannerRaw(tq, logger).WithInterval(50 * time.Millisecond).WithStaleAfter(100 * time.Millisecond)
-	worker2 := NewWorkerRaw(tq, logger, scanner2.NotifCh())
+	worker2 := NewWorkerRaw(tq, logger, scanner2.NotifCh()).WithAllowedTypes([]string{"test_recovery_task"})
 	worker2.heartbeat = 50 * time.Millisecond
 	worker2.pollIdle = 50 * time.Millisecond
 
@@ -521,7 +535,7 @@ func TestTaskqueue_WorkerHeartbeatSteal(t *testing.T) {
 	logger := slog.Default()
 	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(1 * time.Second)
 
-	worker := NewWorkerRaw(tq, logger, scanner.NotifCh())
+	worker := NewWorkerRaw(tq, logger, scanner.NotifCh()).WithAllowedTypes([]string{"test_steal_task"})
 	worker.heartbeat = 50 * time.Millisecond
 	worker.pollIdle = 50 * time.Millisecond
 
@@ -584,7 +598,7 @@ func TestTaskqueue_WorkerCancelPropagation(t *testing.T) {
 	logger := slog.Default()
 	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(1 * time.Second)
 
-	worker := NewWorkerRaw(tq, logger, scanner.NotifCh())
+	worker := NewWorkerRaw(tq, logger, scanner.NotifCh()).WithAllowedTypes([]string{"test_cancel_task"})
 	worker.heartbeat = 50 * time.Millisecond
 	worker.pollIdle = 50 * time.Millisecond
 
@@ -646,7 +660,7 @@ func TestPostgresDB_OptimisticConcurrency(t *testing.T) {
 	workerID1 := pgtype.UUID{Bytes: [16]byte(workerID1Raw), Valid: true}
 
 	// Worker 1 claim -> status=processing, worker_id=workerID1
-	_, err = tq.ClaimNextInqueuedTask(ctx, workerID1)
+	_, err = tq.ClaimNextInqueuedTask(ctx, workerID1, []string{"test_task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +699,7 @@ func TestPostgresDB_OptimisticConcurrency(t *testing.T) {
 	// --- Case 2: Worker 2 đã claim -> status=processing, worker_id=workerID2 ---
 	workerID2Raw, _ := uuid.NewV7()
 	workerID2 := pgtype.UUID{Bytes: [16]byte(workerID2Raw), Valid: true}
-	_, err = tq.ClaimNextInqueuedTask(ctx, workerID2)
+	_, err = tq.ClaimNextInqueuedTask(ctx, workerID2, []string{"test_task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +745,7 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 	defer cancel()
 
 	logger := slog.Default()
-	worker := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker := NewWorkerRaw(tq, logger, make(chan string, 1)).WithAllowedTypes([]string{"controlled_task"})
 	worker.heartbeat = 1 * time.Hour
 	worker.pollIdle = 50 * time.Millisecond
 
@@ -798,7 +812,7 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 	// Verify that worker 2 ignores (cannot claim) the succeeded task
 	worker2IDRaw, _ := uuid.NewV7()
 	worker2ID := pgtype.UUID{Bytes: [16]byte(worker2IDRaw), Valid: true}
-	_, err = tq.ClaimNextInqueuedTask(ctx, worker2ID)
+	_, err = tq.ClaimNextInqueuedTask(ctx, worker2ID, []string{"controlled_task"})
 	if err == nil {
 		t.Error("expected worker 2 to fail claiming succeeded task, but got no error")
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -849,7 +863,7 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	defer cancel1()
 
 	logger := slog.Default()
-	worker1 := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker1 := NewWorkerRaw(tq, logger, make(chan string, 1)).WithAllowedTypes([]string{"controlled_task"})
 	worker1.heartbeat = 1 * time.Hour
 	worker1.pollIdle = 50 * time.Millisecond
 
@@ -898,7 +912,7 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 
-	worker2 := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker2 := NewWorkerRaw(tq, logger, make(chan string, 1)).WithAllowedTypes([]string{"controlled_task"})
 	worker2.heartbeat = 1 * time.Hour
 	worker2.pollIdle = 50 * time.Millisecond
 
@@ -1041,7 +1055,7 @@ func TestTaskqueue_TasksRunInParallel(t *testing.T) {
 
 	// 3. Start worker
 	logger := slog.Default()
-	worker := NewWorkerRaw(tq, logger, make(chan string, 1))
+	worker := NewWorkerRaw(tq, logger, make(chan string, 1)).WithAllowedTypes([]string{"parallel_test_task"})
 	worker.heartbeat = 1 * time.Hour
 	worker.pollIdle = 50 * time.Millisecond
 

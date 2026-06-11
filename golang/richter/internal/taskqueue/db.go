@@ -93,10 +93,13 @@ type DB interface {
 
 	// --- Worker primitives ---
 
-	// ClaimNextInqueuedTask picks the next inqueued task, marks it
-	// processing under workerID, sets heartbeat. Returns the
-	// claimed task or no-rows (not an error).
-	ClaimNextInqueuedTask(ctx context.Context, workerID pgtype.UUID) (Task, error)
+	// ClaimNextInqueuedTask picks the next inqueued task whose task_type
+	// is in taskTypes, marks it processing under workerID, sets heartbeat.
+	// Returns the claimed task or no-rows (not an error).
+	// Workers must pass only the task types they have executors for so that
+	// workers in different packages (test vs prod) do not steal each other's
+	// tasks when they share the same Postgres database.
+	ClaimNextInqueuedTask(ctx context.Context, workerID pgtype.UUID, taskTypes []string) (Task, error)
 
 	// HeartbeatTask bumps heartbeat for the (taskID, workerID) pair
 	// IF the task is still processing under us. Returns rows
