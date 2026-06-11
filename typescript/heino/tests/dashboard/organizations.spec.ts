@@ -113,9 +113,13 @@ test.describe("Dashboard org courses", () => {
 
 test.describe("Dashboard course detail", () => {
   test("shows course title, status badge, and module list", async ({ userPage: page }) => {
-    // navigate via courses list
+    // Read the course href and navigate directly (the row chevron is a Radix
+    // Button-asChild-Link which is flaky to click in Firefox). The module list
+    // ("Nội dung (N chương)") lives in the "Bài học" tab of the course workspace.
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
-    await page.getByRole("row").nth(1).getByRole("link").click();
+    const href = await page.getByRole("row").nth(1).getByRole("link").first().getAttribute("href");
+    expect(href).toBeTruthy();
+    await page.goto(`${href}?tab=lessons`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Nội dung")).toBeVisible();
   });

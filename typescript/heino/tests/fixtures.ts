@@ -122,7 +122,8 @@ export async function goToSeededLesson(page: Page, lessonTitle: string): Promise
   const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
   const courseHref = await row.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error(`Seeded course "${SEED_DSA_COURSE_TITLE}" not found`);
-  await page.goto(courseHref, { waitUntil: "domcontentloaded" });
+  // Course workspace: lessons are in ?tab=lessons tab (not the default overview tab)
+  await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
   const lessonLink = page.getByRole("link").filter({ hasText: lessonTitle }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson link not found for "${lessonTitle}"`);

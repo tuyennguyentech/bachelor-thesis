@@ -120,9 +120,13 @@ test.describe("Dashboard — manager does not see student progress section", () 
   });
 });
 
-// ── Spec 5: Course results table (manager view on course detail) ───────────
+// ── Spec 5: Course results table (manager view on course workspace ?tab=results) ──
 
 test.describe("Course detail — Kết quả học viên section (manager view)", () => {
+  /**
+   * Navigate to the DSA course workspace results tab (?tab=results).
+   * Returns the URL landed on.
+   */
   async function goToDsaCourseDetail(page: import("@playwright/test").Page): Promise<string> {
     await page.goto(
       `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
@@ -131,13 +135,14 @@ test.describe("Course detail — Kết quả học viên section (manager view)"
     const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
     const href = await row.getByRole("link").first().getAttribute("href");
     if (!href) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" link not found`);
-    await page.goto(href, { waitUntil: "domcontentloaded" });
+    // Navigate to the results tab of the course workspace
+    await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
     return page.url();
   }
 
   test("org admin sees Kết quả học viên heading on course detail", async ({ userPage: page }) => {
     await goToDsaCourseDetail(page);
-    await expect(page.getByRole("heading", { name: SEED_DSA_COURSE_TITLE })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Kết quả học viên" })).toBeVisible();
     await expect(page.getByText("Kết quả học viên")).toBeVisible();
   });
 
@@ -195,8 +200,8 @@ test.describe("Course detail — Kết quả học viên section (manager view)"
 
   test("student does NOT see Kết quả học viên heading", async ({ studentPage: page }) => {
     await goToDsaCourseDetail(page);
-    await expect(page.getByRole("heading", { name: SEED_DSA_COURSE_TITLE })).toBeVisible();
     // canManage=false for bob as a course student → the results section is not rendered
+    // The workspace shows "no permission" message instead
     await expect(page.getByText("Kết quả học viên")).not.toBeVisible();
   });
 });

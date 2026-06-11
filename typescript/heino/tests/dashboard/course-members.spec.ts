@@ -1,19 +1,18 @@
 /**
- * E2E tests — Course members page for the seeded DSA course in hust-cs.
+ * E2E tests — Course members tab (?tab=members) for the seeded DSA course in hust-cs.
  *
  * Seed roles:
  *   alice  (userPage)    = org ADMIN  → canManage = true  → sees Thêm thành viên button
  *   carol  (teacherPage) = org TEACHER → canManage = true  → also sees Thêm thành viên button
  *   bob    (studentPage) = course STUDENT, org STUDENT role → does NOT see Thêm thành viên
  *
- * Navigation: /dashboard/organizations/hust-cs/courses/<courseId>/members
- * We reach the page by clicking through the course detail link "Thành viên".
+ * Navigation: /dashboard/organizations/hust-cs/courses/<courseId>?tab=members
+ * (Course workspace — tab-based navigation, no longer a separate /members page.)
  */
 
 import {
   test,
   expect,
-  goToSeededLesson,
   SEED_HUST_CS_SLUG,
   SEED_DSA_COURSE_TITLE,
 } from "../fixtures";
@@ -21,12 +20,11 @@ import {
 const COURSES_URL = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses`;
 
 /**
- * Navigate to the DSA course members page and return the URL.
- * Constructs the /members URL directly from the course href to avoid
- * accidentally following the sidebar "Thành viên" org-members link.
+ * Navigate to the DSA course members tab (?tab=members) and return the URL.
+ * Constructs the workspace URL directly from the course href found in the courses list.
  */
 async function goToCourseMembersPage(page: import("@playwright/test").Page): Promise<string> {
-  // Navigate to the DSA course detail page via ?q= search
+  // Navigate to courses list via ?q= search to find the seeded DSA course
   await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`, {
     waitUntil: "domcontentloaded",
   });
@@ -34,9 +32,8 @@ async function goToCourseMembersPage(page: import("@playwright/test").Page): Pro
   const courseHref = await row.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" not found in course list`);
 
-  // Construct the course members URL directly from the course href to avoid
-  // picking up the sidebar "Thành viên" org-members nav link.
-  const membersUrl = courseHref.replace(/\/$/, "") + "/members";
+  // Navigate to the members tab of the course workspace
+  const membersUrl = courseHref.replace(/\/$/, "") + "?tab=members";
   await page.goto(membersUrl, { waitUntil: "domcontentloaded" });
   return page.url();
 }

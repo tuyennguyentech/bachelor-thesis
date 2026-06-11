@@ -62,17 +62,20 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("course detail shows management sections for teacher", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    // Overview tab: Thông tin chung + Trạng thái
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Thông tin chung")).toBeVisible();
     await expect(page.getByText("Trạng thái")).toBeVisible();
-    await expect(page.getByText("Nội dung")).toBeVisible();
     // teacher cannot change status or delete
     await expect(page.locator("[data-slot='select-trigger']")).not.toBeVisible();
     await expect(page.getByText("Xóa khóa học")).not.toBeVisible();
+    // Lessons tab: Nội dung section
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Nội dung/ })).toBeVisible();
   });
 
   test("edits course title", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     const newTitle = uid("Tên Sửa Giáo viên E2E");
     const titleInput = page.getByLabel("Tên khóa học");
     await titleInput.clear();
@@ -82,7 +85,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("adds a module", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Thêm chương" }).click();
     const moduleName = uid("Chương Giáo viên E2E");
     await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
@@ -92,7 +95,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("renames a module", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
     const moduleName = uid("Chương Đổi Tên E2E");
     await page.getByRole("button", { name: "Thêm chương" }).click();
     await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
@@ -113,7 +116,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("deletes a module", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
     const moduleName = uid("Chương Xóa E2E");
     await page.getByRole("button", { name: "Thêm chương" }).click();
     await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
@@ -130,7 +133,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("adds a lesson to a module", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
     const moduleName = uid("Chương Bài học E2E");
     await page.getByRole("button", { name: "Thêm chương" }).click();
     await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
@@ -146,7 +149,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("edits a lesson", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
     const moduleName = uid("Chương Sửa Bài học E2E");
     await page.getByRole("button", { name: "Thêm chương" }).click();
     await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
@@ -172,7 +175,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("deletes a lesson", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=lessons`, { waitUntil: "domcontentloaded" });
     const moduleName = uid("Chương Xóa Bài học E2E");
     await page.getByRole("button", { name: "Thêm chương" }).click();
     await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
@@ -195,7 +198,7 @@ test.describe("Teacher course lifecycle", () => {
   });
 
   test("teacher cannot delete course", async ({ teacherPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Xóa khóa học")).not.toBeVisible();
   });
 });
@@ -222,25 +225,25 @@ test.describe("Admin course status and delete", () => {
   });
 
   test("admin sees status select and delete button", async ({ userPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     await expect(page.locator("[data-slot='select-trigger']")).toBeVisible();
     await expect(page.getByText("Xóa khóa học")).toBeVisible();
   });
 
   test("changes course status to published and persists after reload", async ({ userPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     const statusTrigger = page.locator("[data-slot='select-trigger']");
     await statusTrigger.click();
     await page.getByRole("option", { name: "Đã xuất bản" }).click();
     await expect(statusTrigger).toContainText("Đã xuất bản");
     // wait for the server action to finish (select re-enables when transition completes)
     await expect(statusTrigger).not.toBeDisabled();
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     await expect(page.locator("[data-slot='select-trigger']")).toContainText("Đã xuất bản");
   });
 
   test("deletes course and redirects to courses list", async ({ userPage: page }) => {
-    await page.goto(courseUrl);
+    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Xóa" }).click();
     await expect(page.getByRole("alertdialog")).toBeVisible();
     await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
@@ -260,13 +263,16 @@ test.describe("Student course detail (read-only)", () => {
     await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
     const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
     const href = await row.getByRole("link").first().getAttribute("href");
-    await page.goto(`${href}`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    // student should NOT see management controls
+    // Overview tab: no management controls
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Thông tin chung")).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "Thêm chương" })).not.toBeVisible();
     await expect(page.getByText("Xóa khóa học")).not.toBeVisible();
+
+    // Lessons tab: content visible but no Thêm chương button
+    await page.goto(`${href}?tab=lessons`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("button", { name: "Thêm chương" })).not.toBeVisible();
     // content section is still visible (read-only) — use heading role to avoid strict-mode match
     await expect(page.getByRole("heading", { name: /Nội dung/ })).toBeVisible();
   });
