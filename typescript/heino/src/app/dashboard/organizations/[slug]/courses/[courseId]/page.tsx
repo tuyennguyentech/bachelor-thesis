@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { CourseService, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
+import { CourseService, CourseModuleService, LessonService, type CourseModule, type Lesson } from "buf/gen/richter/v1/courses_pb";
 import { CourseMemberService, CourseRole, type CourseMember } from "buf/gen/richter/v1/course_members_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -42,6 +42,8 @@ import { CourseResults } from "./course-results";
 import { AddCourseMemberDialog } from "./add-course-member-dialog";
 import { CourseMemberActionsMenu } from "./course-member-actions-menu";
 import { CourseWorkspaceSidebar, type CourseTab } from "./course-workspace";
+import { CourseLockScreen } from "./course-lock-screen";
+import { JoinRequestsTab } from "./join-requests-tab";
 
 const CAN_MANAGE_ORG_ROLES = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const CAN_CHANGE_STATUS = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
@@ -65,7 +67,7 @@ export default async function CourseWorkspacePage({
   const { slug, courseId } = await params;
   const sp = await searchParams;
   const rawTab = (Array.isArray(sp.tab) ? sp.tab[0] : sp.tab) ?? "overview";
-  const activeTab: CourseTab = (["overview", "lessons", "members", "results"] as CourseTab[]).includes(rawTab as CourseTab)
+  const activeTab: CourseTab = (["overview", "lessons", "members", "results", "join-requests"] as CourseTab[]).includes(rawTab as CourseTab)
     ? (rawTab as CourseTab)
     : "overview";
 
@@ -106,27 +108,46 @@ export default async function CourseWorkspacePage({
   const isCourseOwner = course.ownerId === claims.sub;
   const canManage = canManageViaOrg || isCourseOwner;
 
-  // ── Fetch modules + lessons (always needed for sidebar Bài học tab) ────────
-  const moduleClient = createRichterClient(CourseModuleService, token);
-  const lessonClient = createRichterClient(LessonService, token);
-
-  const [{ modules }, { lessons: allLessons }] = await Promise.all([
-    moduleClient.listCourseModules({ courseId: course.id, limit: 500, offset: 0 }),
-    lessonClient.listLessonsByCourse({ courseId: course.id, limit: 500, offset: 0 }),
-  ]);
-
-  const lessonsByModule = new Map<string, typeof allLessons>();
-  for (const l of allLessons) {
-    const arr = lessonsByModule.get(l.moduleId) ?? [];
-    arr.push(l);
-    lessonsByModule.set(l.moduleId, arr);
+  // ── Fetch my join request status if locked ──────────────────────────────────
+  let joinRequest = null;
+  if (!course.canAccess && !canManage) {
+    const memberClient = createRichterClient(CourseMemberService, token);
+    try {
+      const res = await memberClient.getMyJoinRequestStatus({ courseId: course.id });
+      joinRequest = res.request ?? null;
+    } catch (err) {
+      console.error("Failed to fetch join request status:", err);
+    }
   }
-  const modulesWithLessons = modules.map((m) => ({ ...m, lessons: lessonsByModule.get(m.id) ?? [] }));
+
+  // ── Fetch modules + lessons (always needed for sidebar, only if having access) ────────
+  let modulesWithLessons: (CourseModule & { lessons: Lesson[] })[] = [];
+  if (course.canAccess || canManage) {
+    const moduleClient = createRichterClient(CourseModuleService, token);
+    const lessonClient = createRichterClient(LessonService, token);
+
+    try {
+      const [{ modules }, { lessons: allLessons }] = await Promise.all([
+        moduleClient.listCourseModules({ courseId: course.id, limit: 500, offset: 0 }),
+        lessonClient.listLessonsByCourse({ courseId: course.id, limit: 500, offset: 0 }),
+      ]);
+
+      const lessonsByModule = new Map<string, typeof allLessons>();
+      for (const l of allLessons) {
+        const arr = lessonsByModule.get(l.moduleId) ?? [];
+        arr.push(l);
+        lessonsByModule.set(l.moduleId, arr);
+      }
+      modulesWithLessons = modules.map((m) => ({ ...m, lessons: lessonsByModule.get(m.id) ?? [] }));
+    } catch (err) {
+      console.error("Failed to fetch modules and lessons:", err);
+    }
+  }
 
   // ── Fetch members (tab=members) ────────────────────────────────────────────
   let members: CourseMember[] = [];
   let membersHasNext = false;
-  if (activeTab === "members") {
+  if (activeTab === "members" && (course.canAccess || canManage)) {
     const memberClient = createRichterClient(CourseMemberService, token);
     try {
       const res = await memberClient.listCourseMembers({
@@ -139,6 +160,22 @@ export default async function CourseWorkspacePage({
       members = [];
     }
     membersHasNext = members.length === MEMBERS_LIMIT;
+  }
+
+  // ── Fetch pending join requests (tab=join-requests) ───────────────────────
+  let pendingRequests: any[] = [];
+  if (activeTab === "join-requests" && canManage) {
+    const memberClient = createRichterClient(CourseMemberService, token);
+    try {
+      const res = await memberClient.listPendingJoinRequests({
+        courseId: course.id,
+        limit: 100,
+        offset: 0,
+      });
+      pendingRequests = res.requests ?? [];
+    } catch (err) {
+      console.error("Failed to fetch pending requests:", err);
+    }
   }
 
   const redirectAfterDelete = `/dashboard/organizations/${slug}/courses`;
@@ -189,44 +226,74 @@ export default async function CourseWorkspacePage({
       </header>
 
       {/* ── Body: sidebar + main ── */}
-      <div className="flex flex-1 min-h-0 overflow-hidden bg-background">
-        <CourseWorkspaceSidebar
-          slug={slug}
-          courseId={courseId}
-          courseTitle={course.title}
-          activeTab={activeTab}
-          canManage={canManage}
-        />
+      {(!course.canAccess && !canManage) ? (
+        <main className="flex-1 min-w-0 overflow-auto bg-background">
+          <CourseLockScreen
+            slug={slug}
+            courseId={courseId}
+            courseTitle={course.title}
+            courseDescription={course.description}
+            joinRequest={joinRequest}
+          />
+        </main>
+      ) : (
+        <div className="flex flex-1 min-h-0 overflow-hidden bg-background">
+          <CourseWorkspaceSidebar
+            slug={slug}
+            courseId={courseId}
+            courseTitle={course.title}
+            activeTab={activeTab}
+            canManage={canManage}
+          />
 
-        <main className="flex-1 min-w-0 overflow-auto p-4 lg:p-6 bg-background">
+          <main className="flex-1 min-w-0 overflow-auto p-4 lg:p-6 bg-background">
 
-          {/* ── Tab: Tổng quan ── */}
-          {activeTab === "overview" && (
-            <div className="flex flex-col gap-6 max-w-3xl">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex flex-col gap-1">
-                  <h1 className="text-xl font-semibold">{course.title}</h1>
-                  {course.description && (
-                    <p className="text-sm text-muted-foreground">{course.description}</p>
-                  )}
-                </div>
-                {courseStatusBadge(course.status)}
-              </div>
-
-              {canManage && (
-                <>
-                  <div className="rounded-md border p-4 flex flex-col gap-4 bg-background">
-                    <h2 className="font-medium">Thông tin chung</h2>
-                    <EditCourseForm
-                      key={`${course.title}|${course.description}`}
-                      courseId={course.id}
-                      slug={slug}
-                      title={course.title}
-                      description={course.description}
-                      token={token}
-                    />
+            {/* ── Tab: Tổng quan ── */}
+            {activeTab === "overview" && (
+              <div className="flex flex-col gap-6 max-w-screen-2xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-1">
+                    <h1 className="text-xl font-semibold">{course.title}</h1>
+                    {course.description && (
+                      <p className="text-sm text-muted-foreground">{course.description}</p>
+                    )}
                   </div>
+                  {courseStatusBadge(course.status)}
+                </div>
 
+                {canManage && (
+                  <>
+                    <div className="rounded-md border p-4 flex flex-col gap-4 bg-background">
+                      <h2 className="font-medium">Thông tin chung</h2>
+                      <EditCourseForm
+                        key={`${course.title}|${course.description}`}
+                        courseId={course.id}
+                        slug={slug}
+                        title={course.title}
+                        description={course.description}
+                        token={token}
+                      />
+                    </div>
+
+                    <div className="rounded-md border p-4 flex items-center justify-between gap-4 bg-background">
+                      <div>
+                        <h2 className="font-medium">Trạng thái</h2>
+                        <p className="text-sm text-muted-foreground">
+                          Ngày tạo:{" "}
+                          {course.createdAt
+                            ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
+                            : "—"}
+                        </p>
+                      </div>
+                      {canChangeStatus
+                        ? <CourseStatusSelect courseId={course.id} slug={slug} currentStatus={course.status} token={token} />
+                        : courseStatusBadge(course.status)
+                      }
+                    </div>
+                  </>
+                )}
+
+                {!canManage && (
                   <div className="rounded-md border p-4 flex items-center justify-between gap-4 bg-background">
                     <div>
                       <h2 className="font-medium">Trạng thái</h2>
@@ -237,247 +304,246 @@ export default async function CourseWorkspacePage({
                           : "—"}
                       </p>
                     </div>
-                    {canChangeStatus
-                      ? <CourseStatusSelect courseId={course.id} slug={slug} currentStatus={course.status} token={token} />
-                      : courseStatusBadge(course.status)
-                    }
+                    {courseStatusBadge(course.status)}
                   </div>
-                </>
-              )}
+                )}
 
-              {!canManage && (
-                <div className="rounded-md border p-4 flex items-center justify-between gap-4 bg-background">
-                  <div>
-                    <h2 className="font-medium">Trạng thái</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Ngày tạo:{" "}
-                      {course.createdAt
-                        ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                        : "—"}
-                    </p>
+                {/* Danger zone — only for owner/admin */}
+                {canChangeStatus && (
+                  <div className="rounded-md border border-destructive/30 p-4 flex items-center justify-between bg-background">
+                    <div>
+                      <p className="font-medium text-sm">Xóa khóa học</p>
+                      <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
+                    </div>
+                    <DeleteCourseButton
+                      courseId={course.id}
+                      slug={slug}
+                      redirectTo={redirectAfterDelete}
+                      token={token}
+                    />
                   </div>
-                  {courseStatusBadge(course.status)}
-                </div>
-              )}
-
-              {/* Danger zone — only for owner/admin */}
-              {canChangeStatus && (
-                <div className="rounded-md border border-destructive/30 p-4 flex items-center justify-between bg-background">
-                  <div>
-                    <p className="font-medium text-sm">Xóa khóa học</p>
-                    <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
-                  </div>
-                  <DeleteCourseButton
-                    courseId={course.id}
-                    slug={slug}
-                    redirectTo={redirectAfterDelete}
-                    token={token}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Tab: Bài học ── */}
-          {activeTab === "lessons" && (
-            <div className="flex flex-col gap-4 max-w-3xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <BookOpenIcon className="size-4 text-muted-foreground" />
-                  <h1 className="font-semibold">
-                    Nội dung ({modulesWithLessons.length} chương)
-                  </h1>
-                </div>
-                {canManage && (
-                  <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modules.length} token={token} />
                 )}
               </div>
+            )}
 
-              {modulesWithLessons.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">
-                  {canManage ? "Chưa có chương nào. Thêm chương đầu tiên để bắt đầu." : "Chưa có nội dung."}
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {modulesWithLessons.map((m, mi) => (
-                    <div key={m.id} className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between px-2 py-1.5 rounded-md bg-muted/50">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground font-mono w-6">{mi + 1}.</span>
-                          <span className="text-sm font-semibold">{m.title}</span>
-                          <span className="text-xs text-muted-foreground ml-1">
-                            {m.lessons.length} bài
-                          </span>
-                        </div>
-                        {canManage && (
-                          <ModuleActions
-                            id={m.id}
-                            courseId={courseId}
-                            slug={slug}
-                            title={m.title}
-                            orderIndex={m.orderIndex}
-                            token={token}
-                          />
-                        )}
-                      </div>
+            {/* ── Tab: Bài học ── */}
+            {activeTab === "lessons" && (
+              <div className="flex flex-col gap-4 max-w-screen-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BookOpenIcon className="size-4 text-muted-foreground" />
+                    <h1 className="font-semibold">
+                      Nội dung ({modulesWithLessons.length} chương)
+                    </h1>
+                  </div>
+                  {canManage && (
+                    <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modulesWithLessons.length} token={token} />
+                  )}
+                </div>
 
-                      {m.lessons.map((lesson, li) => (
-                        <div
-                          key={lesson.id}
-                          className="flex items-center justify-between px-4 py-2 ml-4 rounded-md border bg-background"
-                        >
-                          <Link
-                            href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
-                            className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80"
-                          >
-                            <span className="text-sm text-muted-foreground font-mono w-6">{li + 1}.</span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-sm truncate">{lesson.title}</span>
-                              {lesson.description && (
-                                <span className="text-xs text-muted-foreground truncate">{lesson.description}</span>
-                              )}
-                            </div>
-                          </Link>
+                {modulesWithLessons.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    {canManage ? "Chưa có chương nào. Thêm chương đầu tiên để bắt đầu." : "Chưa có nội dung."}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {modulesWithLessons.map((m, mi) => (
+                      <div key={m.id} className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between px-2 py-1.5 rounded-md bg-muted/50">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground font-mono w-6">{mi + 1}.</span>
+                            <span className="text-sm font-semibold">{m.title}</span>
+                            <span className="text-xs text-muted-foreground ml-1">
+                              {m.lessons.length} bài
+                            </span>
+                          </div>
                           {canManage && (
-                            <LessonActions
-                              id={lesson.id}
-                              moduleId={m.id}
+                            <ModuleActions
+                              id={m.id}
                               courseId={courseId}
                               slug={slug}
-                              title={lesson.title}
-                              description={lesson.description}
-                              orderIndex={lesson.orderIndex}
+                              title={m.title}
+                              orderIndex={m.orderIndex}
                               token={token}
                             />
                           )}
                         </div>
-                      ))}
 
-                      {canManage && (
-                        <div className="ml-4 mt-0.5">
-                          <AddLessonDialog
-                            moduleId={m.id}
-                            courseId={courseId}
-                            slug={slug}
-                            nextOrder={m.lessons.length}
-                            token={token}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Tab: Thành viên ── */}
-          {activeTab === "members" && (
-            <div className="flex flex-col gap-4 max-w-3xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <UsersIcon className="size-4 text-muted-foreground" />
-                  <h1 className="font-semibold">Thành viên khóa học</h1>
-                </div>
-                {canManage && (
-                  <AddCourseMemberDialog courseId={course.id} token={token} />
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground -mt-2">
-                Danh sách người dùng đang tham gia khóa học &ldquo;{course.title}&rdquo;.
-              </p>
-
-              <div className="rounded-md border bg-background">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Thành viên</TableHead>
-                      <TableHead>Vai trò</TableHead>
-                      <TableHead>Ngày tham gia</TableHead>
-                      {canManage && <TableHead className="w-12" />}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {members.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={canManage ? 4 : 3} className="p-0">
-                          <EmptyState
-                            icon={<UsersIcon className="size-5" />}
-                            title="Chưa có thành viên"
-                            description={
-                              canManage
-                                ? "Thêm thành viên để phân quyền học hoặc dạy trong khóa học này."
-                                : "Khóa học này chưa có thành viên khác."
-                            }
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      members.map((m) => {
-                        const displayName =
-                          `${m.userFirstName} ${m.userLastName}`.trim() || m.userId;
-                        return (
-                          <TableRow key={m.userId}>
-                            <TableCell>
-                              <div className="flex flex-col gap-0.5">
-                                <span className="text-sm font-medium">{displayName}</span>
-                                {m.userEmail && (
-                                  <span className="text-xs text-muted-foreground">{m.userEmail}</span>
+                        {m.lessons.map((lesson, li) => (
+                          <div
+                            key={lesson.id}
+                            className="flex items-center justify-between px-4 py-2 ml-4 rounded-md border bg-background"
+                          >
+                            <Link
+                              href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
+                              className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80"
+                            >
+                              <span className="text-sm text-muted-foreground font-mono w-6">{li + 1}.</span>
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-sm truncate">{lesson.title}</span>
+                                {lesson.description && (
+                                  <span className="text-xs text-muted-foreground truncate">{lesson.description}</span>
                                 )}
                               </div>
-                            </TableCell>
-                            <TableCell>{courseRoleBadge(m.role)}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {m.createdAt
-                                ? new Date(Number(m.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                                : "—"}
-                            </TableCell>
+                            </Link>
                             {canManage && (
-                              <TableCell>
-                                <CourseMemberActionsMenu
-                                  courseId={m.courseId}
-                                  userId={m.userId}
-                                  displayName={displayName}
-                                  token={token}
-                                />
-                              </TableCell>
+                              <LessonActions
+                                id={lesson.id}
+                                moduleId={m.id}
+                                courseId={courseId}
+                                slug={slug}
+                                title={lesson.title}
+                                description={lesson.description}
+                                orderIndex={lesson.orderIndex}
+                                token={token}
+                              />
                             )}
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
+                          </div>
+                        ))}
+
+                        {canManage && (
+                          <div className="ml-4 mt-0.5">
+                            <AddLessonDialog
+                              moduleId={m.id}
+                              courseId={courseId}
+                              slug={slug}
+                              nextOrder={m.lessons.length}
+                              token={token}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+            )}
 
-              <Pagination
-                page={membersPage}
-                hasNext={membersHasNext}
-                buildHref={(p) =>
-                  `/dashboard/organizations/${slug}/courses/${courseId}?tab=members&page=${p}`
-                }
-              />
-            </div>
-          )}
-
-          {/* ── Tab: Kết quả học tập ── */}
-          {activeTab === "results" && (
-            <div className="flex flex-col gap-4 max-w-4xl">
-              {canManage ? (
-                <>
-                  <h1 className="font-semibold">Kết quả học viên</h1>
-                  <CourseResults courseId={course.id} token={token} />
-                </>
-              ) : (
-                <div className="rounded-md border p-6 text-center text-sm text-muted-foreground bg-background">
-                  Bạn không có quyền xem kết quả học tập của khóa học này.
+            {/* ── Tab: Thành viên ── */}
+            {activeTab === "members" && (
+              <div className="flex flex-col gap-4 max-w-screen-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <UsersIcon className="size-4 text-muted-foreground" />
+                    <h1 className="font-semibold">Thành viên khóa học</h1>
+                  </div>
+                  {canManage && (
+                    <AddCourseMemberDialog courseId={course.id} token={token} />
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+                <p className="text-sm text-muted-foreground -mt-2">
+                  Danh sách người dùng đang tham gia khóa học &ldquo;{course.title}&rdquo;.
+                </p>
 
-        </main>
-      </div>
+                <div className="rounded-md border bg-background">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Thành viên</TableHead>
+                        <TableHead>Vai trò</TableHead>
+                        <TableHead>Ngày tham gia</TableHead>
+                        {canManage && <TableHead className="w-12" />}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {members.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={canManage ? 4 : 3} className="p-0">
+                            <EmptyState
+                              icon={<UsersIcon className="size-5" />}
+                              title="Chưa có thành viên"
+                              description={
+                                canManage
+                                  ? "Thêm thành viên để phân quyền học hoặc dạy trong khóa học này."
+                                  : "Khóa học này chưa có thành viên khác."
+                              }
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        members.map((m) => {
+                          const displayName =
+                            `${m.userFirstName} ${m.userLastName}`.trim() || m.userId;
+                          return (
+                            <TableRow key={m.userId}>
+                              <TableCell>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-sm font-medium">{displayName}</span>
+                                  {m.userEmail && (
+                                    <span className="text-xs text-muted-foreground">{m.userEmail}</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>{courseRoleBadge(m.role)}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {m.createdAt
+                                  ? new Date(Number(m.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
+                                  : "—"}
+                              </TableCell>
+                              {canManage && (
+                                <TableCell>
+                                  <CourseMemberActionsMenu
+                                    courseId={m.courseId}
+                                    userId={m.userId}
+                                    displayName={displayName}
+                                    token={token}
+                                  />
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <Pagination
+                  page={membersPage}
+                  hasNext={membersHasNext}
+                  buildHref={(p) =>
+                    `/dashboard/organizations/${slug}/courses/${courseId}?tab=members&page=${p}`
+                  }
+                />
+              </div>
+            )}
+
+            {/* ── Tab: Duyệt yêu cầu ── */}
+            {activeTab === "join-requests" && (
+              <div className="flex flex-col gap-4 max-w-screen-2xl">
+                {canManage ? (
+                  <JoinRequestsTab
+                    slug={slug}
+                    courseId={course.id}
+                    requests={pendingRequests}
+                  />
+                ) : (
+                  <div className="rounded-md border p-6 text-center text-sm text-muted-foreground bg-background">
+                    Bạn không có quyền duyệt yêu cầu của khóa học này.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Tab: Kết quả học tập ── */}
+            {activeTab === "results" && (
+              <div className="flex flex-col gap-4 max-w-screen-2xl">
+                {canManage ? (
+                  <>
+                    <h1 className="font-semibold">Kết quả học viên</h1>
+                    <CourseResults courseId={course.id} token={token} />
+                  </>
+                ) : (
+                  <div className="rounded-md border p-6 text-center text-sm text-muted-foreground bg-background">
+                    Bạn không có quyền xem kết quả học tập của khóa học này.
+                  </div>
+                )}
+              </div>
+            )}
+
+          </main>
+        </div>
+      )}
     </div>
   );
 }

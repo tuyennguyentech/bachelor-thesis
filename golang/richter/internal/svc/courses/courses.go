@@ -2,6 +2,7 @@ package courses
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -120,16 +121,37 @@ func (s *CoursesSvc) GetCourseById(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.authz.RequireCourseMember(ctx, courseID); err != nil {
-		return nil, err
-	}
 	course, err := s.fetchCourse(ctx, req.GetId())
 	if err != nil {
+		// Oracle protection: non-admin must not learn whether an ID exists
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			if claims, authErr := s.authz.RequireAuthenticated(ctx); authErr == nil {
+				if claims.GetRole() == richterv1.UserRole_USER_ROLE_ADMIN {
+					return nil, err
+				}
+			}
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("course not found or access denied"))
+		}
 		s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("GetCourseById", err)...)
 		return nil, err
 	}
-	return &richterv1.GetCourseByIdResponse{Course: CourseToProto(course)}, nil
+	// Verify that the caller belongs to the organization
+	if _, err := s.authz.RequireOrgMember(ctx, course.OrganizationID); err != nil {
+		return nil, err
+	}
+
+	// Determine if the user is a course member or has bypass access
+	canAccess := false
+	if _, err := s.authz.RequireCourseMember(ctx, courseID); err == nil {
+		canAccess = true
+	}
+
+	courseProto := CourseToProto(course)
+	courseProto.CanAccess = canAccess
+
+	return &richterv1.GetCourseByIdResponse{Course: courseProto}, nil
 }
+
 
 func (s *CoursesSvc) ListCourses(
 	ctx context.Context,

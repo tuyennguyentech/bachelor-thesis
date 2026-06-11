@@ -9,11 +9,12 @@ import {
   BarChart2Icon,
   ChevronLeftIcon,
   GraduationCapIcon,
+  UserCheckIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type CourseTab = "overview" | "lessons" | "members" | "results";
+export type CourseTab = "overview" | "lessons" | "members" | "results" | "join-requests";
 
 interface CourseWorkspaceShellProps {
   slug: string;
@@ -35,6 +36,7 @@ const TAB_ITEMS: TabItem[] = [
   { id: "overview", label: "Tổng quan", icon: LayoutDashboardIcon, managerOnly: false },
   { id: "lessons", label: "Bài học", icon: BookOpenIcon, managerOnly: false },
   { id: "members", label: "Thành viên", icon: UsersIcon, managerOnly: false },
+  { id: "join-requests", label: "Duyệt yêu cầu", icon: UserCheckIcon, managerOnly: true },
   { id: "results", label: "Kết quả học tập", icon: BarChart2Icon, managerOnly: true },
 ];
 

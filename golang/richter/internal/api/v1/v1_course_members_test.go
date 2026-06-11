@@ -360,9 +360,14 @@ func TestCourseMemberAccessGate(t *testing.T) {
 		assertCode(t, err, connect.CodePermissionDenied)
 	})
 
-	t.Run("NonMember_GetCourseById_Denied", func(t *testing.T) {
-		_, err := courses(nonMemberToken).GetCourseById(ctx, &richterv1.GetCourseByIdRequest{Id: courseID})
-		assertCode(t, err, connect.CodePermissionDenied)
+	t.Run("NonMember_GetCourseById_AllowedWithNoAccess", func(t *testing.T) {
+		res, err := courses(nonMemberToken).GetCourseById(ctx, &richterv1.GetCourseByIdRequest{Id: courseID})
+		if err != nil {
+			t.Fatalf("org member should be allowed to GetCourseById, got %v", err)
+		}
+		if res.Course.CanAccess {
+			t.Errorf("expected CanAccess to be false for non-course member")
+		}
 	})
 
 	t.Run("CourseMember_GetLessonById_Allowed", func(t *testing.T) {
@@ -840,3 +845,167 @@ func TestListCoursesCanAccess(t *testing.T) {
 		assertCode(t, err, connect.CodePermissionDenied)
 	})
 }
+
+func TestCourseJoinRequests(t *testing.T) {
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	// Create participants.
+	_, _, ownerID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, teacherID, richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER)
+
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	// Enroll teacher as a course teacher so they can manage requests
+	_, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   teacherID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_TEACHER,
+	})
+	if err != nil {
+		t.Fatalf("setup: add course teacher: %v", err)
+	}
+
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+	teacherToken := getUserToken(t, url, teacherEmail, teacherPass)
+
+	studentCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(studentToken), url)
+	teacherCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(teacherToken), url)
+
+	// 1. Get initial status - should be empty/nil (or unspecified)
+	statusRes, err := studentCM.GetMyJoinRequestStatus(ctx, &richterv1.GetMyJoinRequestStatusRequest{
+		CourseId: courseID,
+	})
+	if err != nil {
+		t.Fatalf("GetMyJoinRequestStatus: %v", err)
+	}
+	if statusRes.GetRequest() != nil && statusRes.GetRequest().Status != richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_UNSPECIFIED {
+		t.Errorf("expected no request status or unspecified status, got %v", statusRes.GetRequest().Status)
+	}
+
+	// 2. Submit join request
+	createRes, err := studentCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+		CourseId: courseID,
+	})
+	if err != nil {
+		t.Fatalf("CreateJoinRequest: %v", err)
+	}
+	if createRes.GetRequest().Status != richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		t.Errorf("expected status PENDING, got %v", createRes.GetRequest().Status)
+	}
+
+	// 3. Get status again - should be pending
+	statusRes2, err := studentCM.GetMyJoinRequestStatus(ctx, &richterv1.GetMyJoinRequestStatusRequest{
+		CourseId: courseID,
+	})
+	if err != nil {
+		t.Fatalf("GetMyJoinRequestStatus: %v", err)
+	}
+	if statusRes2.GetRequest().GetStatus() != richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		t.Errorf("expected status PENDING, got %v", statusRes2.GetRequest().GetStatus())
+	}
+
+	// 4. List pending requests as teacher
+	listRes, err := teacherCM.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{
+		CourseId: courseID,
+		Limit:    10,
+		Offset:   0,
+	})
+	if err != nil {
+		t.Fatalf("ListPendingJoinRequests: %v", err)
+	}
+	found := false
+	for _, req := range listRes.GetRequests() {
+		if req.UserId == studentID {
+			found = true
+			if req.UserEmail != studentEmail {
+				t.Errorf("expected email %s, got %s", studentEmail, req.UserEmail)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected to find student %s in pending requests", studentID)
+	}
+
+	// 5. Review and approve request
+	_, err = teacherCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Approve:  true,
+	})
+	if err != nil {
+		t.Fatalf("ReviewJoinRequest: %v", err)
+	}
+
+	// 6. Verify that the student is now a course member
+	coursesClient := richterv1connect.NewCourseServiceClient(httpClientWithToken(studentToken), url)
+	getCourseRes, err := coursesClient.GetCourseById(ctx, &richterv1.GetCourseByIdRequest{Id: courseID})
+	if err != nil {
+		t.Fatalf("GetCourseById: %v", err)
+	}
+	if !getCourseRes.GetCourse().GetCanAccess() {
+		t.Errorf("expected course member to have can_access = true")
+	}
+
+	// 7. Test rejection flow for a second student
+	student2Email, student2Pass, student2ID := createActiveUser(t, c.users)
+	addOrgMember(t, c, orgID, student2ID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	student2Token := getUserToken(t, url, student2Email, student2Pass)
+	student2CM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(student2Token), url)
+
+	// Create request for student 2
+	_, err = student2CM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+		CourseId: courseID,
+	})
+	if err != nil {
+		t.Fatalf("student2 CreateJoinRequest: %v", err)
+	}
+
+	// Reject request
+	_, err = teacherCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+		CourseId: courseID,
+		UserId:   student2ID,
+		Approve:  false,
+	})
+	if err != nil {
+		t.Fatalf("ReviewJoinRequest reject: %v", err)
+	}
+
+	// Verify status is rejected
+	statusRes3, err := student2CM.GetMyJoinRequestStatus(ctx, &richterv1.GetMyJoinRequestStatusRequest{
+		CourseId: courseID,
+	})
+	if err != nil {
+		t.Fatalf("GetMyJoinRequestStatus student2: %v", err)
+	}
+	if statusRes3.GetRequest().GetStatus() != richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED {
+		t.Errorf("expected status REJECTED, got %v", statusRes3.GetRequest().GetStatus())
+	}
+
+	// Verify student 2 has no course access
+	student2CoursesClient := richterv1connect.NewCourseServiceClient(httpClientWithToken(student2Token), url)
+	getCourseRes2, err := student2CoursesClient.GetCourseById(ctx, &richterv1.GetCourseByIdRequest{Id: courseID})
+	if err != nil {
+		t.Fatalf("GetCourseById student2: %v", err)
+	}
+	if getCourseRes2.GetCourse().GetCanAccess() {
+		t.Error("expected rejected student to have can_access = false")
+	}
+
+	// Re-submit request after rejection
+	createRes2, err := student2CM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+		CourseId: courseID,
+	})
+	if err != nil {
+		t.Fatalf("student2 Re-CreateJoinRequest: %v", err)
+	}
+	if createRes2.GetRequest().Status != richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		t.Errorf("expected re-request status PENDING, got %v", createRes2.GetRequest().Status)
+	}
+}
+

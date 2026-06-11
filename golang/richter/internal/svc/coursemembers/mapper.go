@@ -53,3 +53,40 @@ func CourseRoleToSQL(role richterv1.CourseRole) (gen.CourseRole, error) {
 		return "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid course role: %s", role.String()))
 	}
 }
+
+func JoinRequestStatusToProto(status gen.JoinRequestStatus) richterv1.JoinRequestStatus {
+	switch status {
+	case gen.JoinRequestStatusPending:
+		return richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING
+	case gen.JoinRequestStatusApproved:
+		return richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED
+	case gen.JoinRequestStatusRejected:
+		return richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED
+	default:
+		return richterv1.JoinRequestStatus_JOIN_REQUEST_STATUS_UNSPECIFIED
+	}
+}
+
+func JoinRequestToProto(r gen.CourseJoinRequest) *richterv1.CourseJoinRequest {
+	return &richterv1.CourseJoinRequest{
+		CourseId:  r.CourseID.String(),
+		UserId:    r.UserID.String(),
+		Status:    JoinRequestStatusToProto(r.Status),
+		CreatedAt: svc.TimestampToProto(r.CreatedAt),
+		UpdatedAt: svc.TimestampToProto(r.UpdatedAt),
+	}
+}
+
+func JoinRequestRowToProto(r gen.ListPendingJoinRequestsRow) *richterv1.CourseJoinRequest {
+	return &richterv1.CourseJoinRequest{
+		CourseId:      r.CourseID.String(),
+		UserId:        r.UserID.String(),
+		Status:        JoinRequestStatusToProto(r.Status),
+		CreatedAt:     svc.TimestampToProto(r.CreatedAt),
+		UpdatedAt:     svc.TimestampToProto(r.UpdatedAt),
+		UserEmail:     r.UserEmail,
+		UserFirstName: r.UserFirstName,
+		UserLastName:  r.UserLastName,
+	}
+}
+

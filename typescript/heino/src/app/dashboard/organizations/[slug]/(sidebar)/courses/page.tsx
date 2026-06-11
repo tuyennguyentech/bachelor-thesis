@@ -119,14 +119,14 @@ export default async function DashboardCoursesPage({
               </TableRow>
             ) : (
               courses.map((course) => {
-                const locked = !course.canAccess && !canManage;
+                const notEnrolled = !course.canAccess && !canManage;
                 return (
-                  <TableRow key={course.id} className={locked ? "opacity-60" : undefined}>
+                  <TableRow key={course.id} className={notEnrolled ? "opacity-90 hover:opacity-100" : undefined}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        {locked && <LockIcon className="size-3.5 text-muted-foreground shrink-0" />}
+                        {notEnrolled && <LockIcon className="size-3.5 text-muted-foreground shrink-0" />}
                         <span>{course.title}</span>
-                        {locked && (
+                        {notEnrolled && (
                           <Badge variant="secondary" className="text-xs">Chưa tham gia</Badge>
                         )}
                       </div>
@@ -138,19 +138,14 @@ export default async function DashboardCoursesPage({
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      {locked ? (
-                        <Button variant="ghost" size="sm" disabled className="opacity-40">
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
                           <ChevronRightIcon className="size-4" />
-                        </Button>
-                      ) : (
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
-                            <ChevronRightIcon className="size-4" />
-                          </Link>
-                        </Button>
-                      )}
+                        </Link>
+                      </Button>
                     </TableCell>
                   </TableRow>
+
                 );
               })
             )}

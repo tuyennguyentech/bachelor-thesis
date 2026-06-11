@@ -199,6 +199,183 @@ func (s *CourseMembersSvc) ListUserCourses(
 	return &richterv1.ListUserCoursesResponse{Memberships: out}, nil
 }
 
+func (s *CourseMembersSvc) CreateJoinRequest(
+	ctx context.Context,
+	req *richterv1.CreateJoinRequestRequest,
+) (*richterv1.CreateJoinRequestResponse, error) {
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+	// Fetch the course to find its organization
+	course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
+		return q.GetCourseByID(ctx, courseID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("course not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+
+	// Verify that the caller belongs to the organization
+	claims, err := s.authz.RequireOrgMember(ctx, course.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+
+	// Create or update the join request in database
+	request, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseJoinRequest, error) {
+		return q.CreateJoinRequest(ctx, gen.CreateJoinRequestParams{
+			CourseID: courseID,
+			UserID:   userID,
+		})
+	})
+	if err != nil {
+		err = svc.ConnectDBError(err)
+		s.log.ErrorContext(ctx, "course_members service failed", svc.LogAttrs("CreateJoinRequest", err)...)
+		return nil, err
+	}
+
+	return &richterv1.CreateJoinRequestResponse{
+		Request: JoinRequestToProto(request),
+	}, nil
+}
+
+func (s *CourseMembersSvc) ReviewJoinRequest(
+	ctx context.Context,
+	req *richterv1.ReviewJoinRequestRequest,
+) (*richterv1.ReviewJoinRequestResponse, error) {
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCourseManager(ctx, courseID); err != nil {
+		return nil, err
+	}
+	userID, err := svc.ParseUUID(req.GetUserId())
+	if err != nil {
+		return nil, err
+	}
+
+	var status gen.JoinRequestStatus
+	if req.GetApprove() {
+		status = gen.JoinRequestStatusApproved
+	} else {
+		status = gen.JoinRequestStatusRejected
+	}
+
+	err = db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, tx pgx.Tx) error {
+		// Update status
+		_, err := q.ReviewJoinRequest(ctx, gen.ReviewJoinRequestParams{
+			CourseID: courseID,
+			UserID:   userID,
+			Status:   status,
+		})
+		if err != nil {
+			return err
+		}
+
+		if req.GetApprove() {
+			// Add to course_members
+			_, err = q.AddCourseMember(ctx, gen.AddCourseMemberParams{
+				CourseID: courseID,
+				UserID:   userID,
+				Role:     gen.CourseRoleStudent,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		err = svc.ConnectDBError(err)
+		s.log.ErrorContext(ctx, "course_members service failed", svc.LogAttrs("ReviewJoinRequest", err)...)
+		return nil, err
+	}
+
+	return &richterv1.ReviewJoinRequestResponse{}, nil
+}
+
+func (s *CourseMembersSvc) ListPendingJoinRequests(
+	ctx context.Context,
+	req *richterv1.ListPendingJoinRequestsRequest,
+) (*richterv1.ListPendingJoinRequestsResponse, error) {
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCourseManager(ctx, courseID); err != nil {
+		return nil, err
+	}
+
+	requests, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListPendingJoinRequestsRow, error) {
+		return q.ListPendingJoinRequests(ctx, gen.ListPendingJoinRequestsParams{
+			CourseID: courseID,
+			Limit:    req.GetLimit(),
+			Offset:   req.GetOffset(),
+		})
+	})
+	if err != nil {
+		err = svc.ConnectDBError(err)
+		s.log.ErrorContext(ctx, "course_members service failed", svc.LogAttrs("ListPendingJoinRequests", err)...)
+		return nil, err
+	}
+
+	out := make([]*richterv1.CourseJoinRequest, 0, len(requests))
+	for _, r := range requests {
+		out = append(out, JoinRequestRowToProto(r))
+	}
+
+	return &richterv1.ListPendingJoinRequestsResponse{
+		Requests: out,
+	}, nil
+}
+
+func (s *CourseMembersSvc) GetMyJoinRequestStatus(
+	ctx context.Context,
+	req *richterv1.GetMyJoinRequestStatusRequest,
+) (*richterv1.GetMyJoinRequestStatusResponse, error) {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+
+	request, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseJoinRequest, error) {
+		return q.GetJoinRequest(ctx, gen.GetJoinRequestParams{
+			CourseID: courseID,
+			UserID:   userID,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &richterv1.GetMyJoinRequestStatusResponse{Request: nil}, nil
+		}
+		err = svc.ConnectDBError(err)
+		s.log.ErrorContext(ctx, "course_members service failed", svc.LogAttrs("GetMyJoinRequestStatus", err)...)
+		return nil, err
+	}
+
+	return &richterv1.GetMyJoinRequestStatusResponse{
+		Request: JoinRequestToProto(request),
+	}, nil
+}
+
 // requireCourseManager checks if the caller may manage course members:
 // sys admin, course owner, org owner/admin, or a course teacher.
 func (s *CourseMembersSvc) requireCourseManager(ctx context.Context, courseID pgtype.UUID) error {

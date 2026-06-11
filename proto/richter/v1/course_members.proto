@@ -69,9 +69,71 @@ message ListUserCoursesResponse {
   repeated CourseMember memberships = 1;
 }
 
+enum JoinRequestStatus {
+  JOIN_REQUEST_STATUS_UNSPECIFIED = 0;
+  JOIN_REQUEST_STATUS_PENDING = 1;
+  JOIN_REQUEST_STATUS_APPROVED = 2;
+  JOIN_REQUEST_STATUS_REJECTED = 3;
+}
+
+message CourseJoinRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  JoinRequestStatus status = 3 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  string user_email = 6;
+  string user_first_name = 7;
+  string user_last_name = 8;
+}
+
+message CreateJoinRequestRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message CreateJoinRequestResponse {
+  CourseJoinRequest request = 1;
+}
+
+message ReviewJoinRequestRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.uuid = true];
+  bool approve = 3;
+}
+
+message ReviewJoinRequestResponse {}
+
+message ListPendingJoinRequestsRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 100
+  }];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListPendingJoinRequestsResponse {
+  repeated CourseJoinRequest requests = 1;
+}
+
+message GetMyJoinRequestStatusRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetMyJoinRequestStatusResponse {
+  optional CourseJoinRequest request = 1;
+}
+
 service CourseMemberService {
   rpc AddCourseMember(AddCourseMemberRequest) returns (AddCourseMemberResponse) {}
   rpc RemoveCourseMember(RemoveCourseMemberRequest) returns (RemoveCourseMemberResponse) {}
   rpc ListCourseMembers(ListCourseMembersRequest) returns (ListCourseMembersResponse) {}
   rpc ListUserCourses(ListUserCoursesRequest) returns (ListUserCoursesResponse) {}
+
+  // Join Requests
+  rpc CreateJoinRequest(CreateJoinRequestRequest) returns (CreateJoinRequestResponse) {}
+  rpc ReviewJoinRequest(ReviewJoinRequestRequest) returns (ReviewJoinRequestResponse) {}
+  rpc ListPendingJoinRequests(ListPendingJoinRequestsRequest) returns (ListPendingJoinRequestsResponse) {}
+  rpc GetMyJoinRequestStatus(GetMyJoinRequestStatusRequest) returns (GetMyJoinRequestStatusResponse) {}
 }
+
