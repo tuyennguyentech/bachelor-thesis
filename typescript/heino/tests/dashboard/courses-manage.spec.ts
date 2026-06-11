@@ -51,11 +51,12 @@ test.describe("Teacher course lifecycle", () => {
     await page.getByLabel("Tên khóa học").fill(courseTitle);
     await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
-    await expect(page.getByRole("cell", { name: courseTitle })).toBeVisible();
-
-    const row = page.getByRole("row").filter({ hasText: courseTitle });
-    // read href from the chevron link (Firefox asChild+Link can be flaky with click-navigate)
-    const href = await row.getByRole("link").getAttribute("href");
+    // The new course appears as a card in "Khóa học của bạn"; search by title to
+    // avoid pagination hiding the freshly created course.
+    await page.goto(`${COURSES_URL}?q=${encodeURIComponent(courseTitle)}`, { waitUntil: "domcontentloaded" });
+    const card = page.locator('[data-slot="card"]').filter({ hasText: courseTitle }).first();
+    await expect(card).toBeVisible();
+    const href = await card.getByRole("link").first().getAttribute("href");
     courseUrl = `${href}`;
     await page.goto(courseUrl);
     await expect(page.getByRole("heading", { name: courseTitle })).toBeVisible();
@@ -215,10 +216,12 @@ test.describe("Admin course status and delete", () => {
     await page.getByLabel("Tên khóa học").fill(courseTitle);
     await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
-    await expect(page.getByRole("cell", { name: courseTitle })).toBeVisible();
-
-    const row = page.getByRole("row").filter({ hasText: courseTitle });
-    const href = await row.getByRole("link").getAttribute("href");
+    // The new course appears as a card in "Khóa học của bạn"; search by title to
+    // avoid pagination hiding the freshly created course.
+    await page.goto(`${COURSES_URL}?q=${encodeURIComponent(courseTitle)}`, { waitUntil: "domcontentloaded" });
+    const card = page.locator('[data-slot="card"]').filter({ hasText: courseTitle }).first();
+    await expect(card).toBeVisible();
+    const href = await card.getByRole("link").first().getAttribute("href");
     courseUrl = `${href}`;
     await page.goto(courseUrl);
     await expect(page.getByRole("heading", { name: courseTitle })).toBeVisible();
@@ -261,8 +264,8 @@ test.describe("Student course detail (read-only)", () => {
   }) => {
     // Use ?q= search so we land on the seeded course regardless of pagination order.
     await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
-    const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
-    const href = await row.getByRole("link").first().getAttribute("href");
+    const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+    const href = await card.getByRole("link").first().getAttribute("href");
 
     // Overview tab: no management controls
     await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });

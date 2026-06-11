@@ -28,12 +28,12 @@ async function goToCourseMembersPage(page: import("@playwright/test").Page): Pro
   await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`, {
     waitUntil: "domcontentloaded",
   });
-  const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
+  const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+  const courseHref = await card.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" not found in course list`);
 
   // Navigate to the members tab of the course workspace
-  const membersUrl = courseHref.replace(/\/$/, "") + "?tab=members";
+  const membersUrl = courseHref.split("?")[0].replace(/\/$/, "") + "?tab=members";
   await page.goto(membersUrl, { waitUntil: "domcontentloaded" });
   return page.url();
 }

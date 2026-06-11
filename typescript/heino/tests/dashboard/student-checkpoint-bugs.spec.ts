@@ -54,10 +54,11 @@ interface LessonRef {
 // its URL + id. We avoid hard-coding UUIDs because seed UUIDs are non-stable.
 async function findRecurrenceLesson(page: Page): Promise<LessonRef> {
   await page.goto("/dashboard/organizations/hust-cs/courses?q=Cấu+trúc+dữ+liệu");
-  const row = page.getByRole("row").filter({ hasText: "Cấu trúc dữ liệu" });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
+  const card = page.locator('[data-slot="card"]').filter({ hasText: "Cấu trúc dữ liệu" }).first();
+  const courseHref = await card.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error("Course link not found");
-  await page.goto(courseHref);
+  // Lesson links live under the "Bài học" tab of the course workspace, not the default overview tab.
+  await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
   const lessonLink = page.getByRole("link").filter({ hasText: SEEDED_LESSON_TITLE }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson link not found for "${SEEDED_LESSON_TITLE}"`);

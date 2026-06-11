@@ -12,10 +12,11 @@ const LESSON_TITLE = SEED_DSA_LESSON_BIG_O;
 
 async function openLessonAsStudent(page: import("@playwright/test").Page) {
   await page.goto(`/dashboard/organizations/${ORG_SLUG}/courses?q=${encodeURIComponent(COURSE_TITLE)}`);
-  const row = page.getByRole("row").filter({ hasText: COURSE_TITLE });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
+  const card = page.locator('[data-slot="card"]').filter({ hasText: COURSE_TITLE }).first();
+  const courseHref = await card.getByRole("link").first().getAttribute("href");
   if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
-  await page.goto(courseHref);
+  // Lesson links live under the "Bài học" tab of the course workspace, not the default overview tab.
+  await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
   const lessonHref = await page.getByRole("link").filter({ hasText: LESSON_TITLE }).first().getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
   await page.goto(lessonHref);

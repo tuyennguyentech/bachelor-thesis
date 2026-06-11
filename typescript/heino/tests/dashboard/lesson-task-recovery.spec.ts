@@ -29,6 +29,14 @@ import {
   type TranscriptChunk,
 } from "buf/gen/richter/v1/ai_pb";
 import {
+  CourseService,
+  CourseModuleService,
+  LessonService,
+} from "buf/gen/richter/v1/courses_pb";
+import {
+  OrganizationService,
+} from "buf/gen/richter/v1/organizations_pb";
+import {
   test,
   expect,
   SEED_HUST_CS_SLUG,
@@ -39,7 +47,7 @@ import {
 } from "../fixtures";
 
 const COURSES_URL = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses`;
-const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample.mp4");
+const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
 
 /**
  * Module-level registry of lesson IDs created by tests that start
@@ -56,23 +64,32 @@ function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
 }
 
-async function getTeacherToken(baseURL?: string) {
+async function getTeacherAuth(baseURL?: string) {
   const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBaseUrl(baseURL) });
   const auth = createClient(AuthService, transport);
   const res = await auth.login({ email: TEACHER_EMAIL, password: USER_PASSWORD });
-  return res.accessToken;
+  return { token: res.accessToken, userId: res.user?.id ?? "" };
 }
 
-function createAIClient(token: string, baseURL?: string) {
+async function getTeacherToken(baseURL?: string) {
+  const { token } = await getTeacherAuth(baseURL);
+  return token;
+}
+
+function createAuthedTransport(token: string, baseURL?: string) {
   const authInterceptor: Interceptor = (next) => async (req) => {
     req.header.set("Authorization", `Bearer ${token}`);
     return next(req);
   };
-  return createClient(AIService, createConnectTransport({
+  return createConnectTransport({
     httpVersion: "1.1",
     baseUrl: rpcBaseUrl(baseURL),
     interceptors: [authInterceptor],
-  }));
+  });
+}
+
+function createAIClient(token: string, baseURL?: string) {
+  return createClient(AIService, createAuthedTransport(token, baseURL));
 }
 
 function lessonIdFromUrl(rawUrl: string) {
@@ -194,40 +211,57 @@ async function cancelAllCreatedLessonTasks(ai: ReturnType<typeof createAIClient>
   );
 }
 
+/**
+ * Creates a fresh course → module → lesson via the richter API (no UI scraping).
+ * Returns the lesson URL: `/dashboard/organizations/hust-cs/courses/${courseId}/lessons/${lessonId}`
+ *
+ * Carol (TEACHER_EMAIL) is a teacher in hust-cs so she can CreateCourse and
+ * automatically becomes the course OWNER → full access for all subsequent calls.
+ */
 async function createLesson(
-  page: Page,
+  _page: Page,
   courseTitle: string,
   moduleName: string,
   lessonTitle: string,
+  baseURL?: string,
 ): Promise<string> {
-  // Use domcontentloaded + explicit wait for the courses heading
-  // before interacting. The default "load" wait can race the
-  // previous frame in Firefox (NS_BINDING_ABORTED) when this
-  // function is called back-to-back for two parallel tests.
-  await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "Khóa học" }).first().waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Tạo khóa học" }).click();
-  await page.getByLabel("Tên khóa học").fill(courseTitle);
-  await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const { token, userId } = await getTeacherAuth(baseURL);
+  const transport = createAuthedTransport(token, baseURL);
 
-  const row = page.getByRole("row").filter({ hasText: courseTitle });
-  const courseHref = await row.getByRole("link").getAttribute("href");
-  await page.goto(`${courseHref}`, { waitUntil: "domcontentloaded" });
+  const orgClient = createClient(OrganizationService, transport);
+  const orgRes = await orgClient.getOrganizationBySlug({ slug: SEED_HUST_CS_SLUG });
+  const orgId = orgRes.organization?.id;
+  if (!orgId) throw new Error("createLesson: could not resolve hust-cs org id");
 
-  await page.getByRole("button", { name: "Thêm chương" }).click();
-  await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
-  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const courseClient = createClient(CourseService, transport);
+  const courseRes = await courseClient.createCourse({
+    organizationId: orgId,
+    ownerId: userId,
+    title: courseTitle,
+  });
+  const courseId = courseRes.course?.id;
+  if (!courseId) throw new Error("createLesson: createCourse returned no id");
 
-  await page.getByRole("button", { name: "Thêm bài học" }).click();
-  await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
-  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const moduleClient = createClient(CourseModuleService, transport);
+  const moduleRes = await moduleClient.createCourseModule({
+    courseId,
+    title: moduleName,
+    orderIndex: 0,
+  });
+  const moduleId = moduleRes.module?.id;
+  if (!moduleId) throw new Error("createLesson: createCourseModule returned no id");
 
-  const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
-  const href = await lessonRow.getByRole("link").getAttribute("href");
-  return `${href}`;
+  const lessonClient = createClient(LessonService, transport);
+  const lessonRes = await lessonClient.createLesson({
+    moduleId,
+    title: lessonTitle,
+    description: "",
+    orderIndex: 0,
+  });
+  const lessonId = lessonRes.lesson?.id;
+  if (!lessonId) throw new Error("createLesson: createLesson returned no id");
+
+  return `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}/lessons/${lessonId}`;
 }
 
 test.describe("Lesson task panel", () => {

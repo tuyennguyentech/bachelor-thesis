@@ -59,7 +59,15 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
       // The interaction editor lives inside the ?tab=processing tab.
       // Navigate there first so the AnalysisWorkflowShell panel is visible
       // (non-active tabs are CSS-hidden but still mounted).
-      await teacher.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
+      // On repeat calls the teacher may already be on this exact URL, and the processing
+      // tab normalizes its URL client-side; Firefox aborts such navigations with
+      // NS_BINDING_ABORTED. The page still settles, so swallow that specific error and
+      // let the assertions below verify the processing tab is actually active.
+      try {
+        await teacher.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
+      } catch (err) {
+        if (!String(err).includes("NS_BINDING_ABORTED")) throw err;
+      }
       // For a lesson that already has chunks/interactions, getInitialWorkflowStep()
       // returns "exercises" on mount — no click needed (clicking during the
       // animate-in fade causes "Element is not visible" in Firefox).

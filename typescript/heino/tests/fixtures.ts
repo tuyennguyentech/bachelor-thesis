@@ -119,8 +119,9 @@ export async function goToSeededLesson(page: Page, lessonTitle: string): Promise
     return page.url();
   }
 
-  const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
+  // Courses page redesigned to cards — find by card text then read the "Quản lý"/"Vào học" link href
+  const courseCard = page.locator("[data-slot='card'], .group").filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+  const courseHref = await courseCard.getByRole("link").last().getAttribute("href");
   if (!courseHref) throw new Error(`Seeded course "${SEED_DSA_COURSE_TITLE}" not found`);
   // Course workspace: lessons are in ?tab=lessons tab (not the default overview tab)
   await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });

@@ -79,17 +79,16 @@ test.describe("Dashboard org courses", () => {
 
   test("shows courses heading and table columns", async ({ userPage: page }) => {
     await page.goto(COURSES_URL);
-    await expect(page.getByRole("heading", { name: "Khóa học" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Tên khóa học" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Trạng thái" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
+    // Courses render as cards; alice (admin of hust-cs) sees her courses under "Khóa học của bạn"
+    await expect(page.getByRole("heading", { name: "Khóa học của bạn" })).toBeVisible();
   });
 
   test("shows seeded courses for hust-cs", async ({ userPage: page }) => {
     await page.goto(COURSES_URL);
-    // hust-cs has seeded courses — at least one row should exist
-    const rows = page.getByRole("row");
-    const count = await rows.count();
-    expect(count).toBeGreaterThan(1);
+    // hust-cs has seeded courses — at least one course card should render
+    const cards = page.locator('[data-slot="card"]');
+    expect(await cards.count()).toBeGreaterThan(0);
   });
 
   test("back button navigates to org detail", async ({ userPage: page }) => {
@@ -103,10 +102,12 @@ test.describe("Dashboard org courses", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("course row links to course detail", async ({ userPage: page }) => {
+  test("course card links to course detail", async ({ userPage: page }) => {
     await page.goto(COURSES_URL);
-    // click the first chevron link in the table (first data row)
-    await page.getByRole("row").nth(1).getByRole("link").click();
+    // read the first course card's link href and navigate (Radix asChild+Link is flaky to click in Firefox)
+    const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
+    expect(href).toBeTruthy();
+    await page.goto(href!);
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses/`));
   });
 });
@@ -117,7 +118,7 @@ test.describe("Dashboard course detail", () => {
     // Button-asChild-Link which is flaky to click in Firefox). The module list
     // ("Nội dung (N chương)") lives in the "Bài học" tab of the course workspace.
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
-    const href = await page.getByRole("row").nth(1).getByRole("link").first().getAttribute("href");
+    const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
     expect(href).toBeTruthy();
     await page.goto(`${href}?tab=lessons`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -126,8 +127,10 @@ test.describe("Dashboard course detail", () => {
 
   test("back button navigates to courses list", async ({ userPage: page }) => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
-    await page.getByRole("row").nth(1).getByRole("link").click();
-    await page.getByRole("link", { name: "Khóa học" }).click();
+    const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
+    await page.goto(href!);
+    // The course workspace sidebar has a "Danh sách khóa học" back link
+    await page.getByRole("link", { name: "Danh sách khóa học" }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses$`));
   });
 

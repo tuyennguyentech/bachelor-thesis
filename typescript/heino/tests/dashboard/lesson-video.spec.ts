@@ -15,13 +15,15 @@ const DEMO_ORG_SLUG = "dyadia-demo";
 const DEMO_COURSE_TITLE = "Giới thiệu về Dyadia";
 const DEMO_LESSON_TITLE = "Bài 1: Dyadia là gì?";
 
-async function goToLessonAsTeacher(page: Page): Promise<string> {
+async function goToLessonByRole(page: Page): Promise<string> {
+  // Courses page redesigned to cards — find by card text then navigate via the entry link
   const coursesUrl = `/dashboard/organizations/${ORG_SLUG}/courses`;
   await page.goto(`${coursesUrl}?q=${encodeURIComponent(COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
-  const row = page.getByRole("row").filter({ hasText: COURSE_TITLE });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
+  const courseCard = page.locator("[data-slot='card'], .group").filter({ hasText: COURSE_TITLE }).first();
+  const courseHref = await courseCard.getByRole("link").last().getAttribute("href");
   if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
-  await page.goto(courseHref, { waitUntil: "domcontentloaded" });
+  // Course workspace: lessons are in ?tab=lessons tab
+  await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
   const lessonLink = page.getByRole("link").filter({ hasText: LESSON_TITLE }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
@@ -29,18 +31,12 @@ async function goToLessonAsTeacher(page: Page): Promise<string> {
   return lessonHref;
 }
 
+async function goToLessonAsTeacher(page: Page): Promise<string> {
+  return goToLessonByRole(page);
+}
+
 async function goToLessonAsStudent(page: Page): Promise<string> {
-  const coursesUrl = `/dashboard/organizations/${ORG_SLUG}/courses`;
-  await page.goto(`${coursesUrl}?q=${encodeURIComponent(COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
-  const row = page.getByRole("row").filter({ hasText: COURSE_TITLE });
-  const courseHref = await row.getByRole("link").first().getAttribute("href");
-  if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
-  await page.goto(courseHref, { waitUntil: "domcontentloaded" });
-  const lessonLink = page.getByRole("link").filter({ hasText: LESSON_TITLE }).first();
-  const lessonHref = await lessonLink.getAttribute("href");
-  if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
-  await page.goto(lessonHref, { waitUntil: "domcontentloaded" });
-  return lessonHref;
+  return goToLessonByRole(page);
 }
 
 async function enterPreviewMode(page: Page): Promise<void> {
@@ -79,11 +75,12 @@ test.describe("Video Player Bug Tests", () => {
         }
       });
 
-      await page.goto(`/dashboard/organizations/${DEMO_ORG_SLUG}/courses?q=${encodeURIComponent(DEMO_COURSE_TITLE)}`);
-      const row = page.getByRole("row").filter({ hasText: DEMO_COURSE_TITLE });
-      const courseHref = await row.getByRole("link").first().getAttribute("href");
+      await page.goto(`/dashboard/organizations/${DEMO_ORG_SLUG}/courses?q=${encodeURIComponent(DEMO_COURSE_TITLE)}`, { waitUntil: "domcontentloaded" });
+      const demoCard = page.locator("[data-slot='card'], .group").filter({ hasText: DEMO_COURSE_TITLE }).first();
+      const courseHref = await demoCard.getByRole("link").last().getAttribute("href");
       if (!courseHref) throw new Error(`Course not found: ${DEMO_COURSE_TITLE}`);
-      await page.goto(courseHref);
+      // Course workspace: lessons are in ?tab=lessons tab
+      await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
       const lessonHref = await page.getByRole("link").filter({ hasText: DEMO_LESSON_TITLE }).first().getAttribute("href");
       if (!lessonHref) throw new Error(`Lesson not found: ${DEMO_LESSON_TITLE}`);
       const sidebarStorageKey = await lessonSidebarStorageKey(page, lessonHref);

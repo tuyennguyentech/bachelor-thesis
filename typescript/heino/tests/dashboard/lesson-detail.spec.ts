@@ -24,6 +24,14 @@ import {
   LessonTaskStatus,
 } from "buf/gen/richter/v1/ai_pb";
 import {
+  CourseService,
+  CourseModuleService,
+  LessonService,
+} from "buf/gen/richter/v1/courses_pb";
+import {
+  OrganizationService,
+} from "buf/gen/richter/v1/organizations_pb";
+import {
   test,
   expect,
   goToSeededLesson,
@@ -33,8 +41,7 @@ import {
   USER_PASSWORD,
 } from "../fixtures";
 
-const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
-const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample.mp4");
+const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
 
 function uid(base: string) {
   return `${base} ${Date.now()}`;
@@ -50,55 +57,82 @@ function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
 }
 
-async function getTeacherToken(baseURL?: string) {
+async function getTeacherAuth(baseURL?: string) {
   const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBaseUrl(baseURL) });
   const auth = createClient(AuthService, transport);
   const res = await auth.login({ email: TEACHER_EMAIL, password: USER_PASSWORD });
-  return res.accessToken;
+  return { token: res.accessToken, userId: res.user?.id ?? "" };
 }
 
-function createAIClient(token: string, baseURL?: string) {
+async function getTeacherToken(baseURL?: string) {
+  const { token } = await getTeacherAuth(baseURL);
+  return token;
+}
+
+function createAuthedTransport(token: string, baseURL?: string) {
   const authInterceptor: Interceptor = (next) => async (req) => {
     req.header.set("Authorization", `Bearer ${token}`);
     return next(req);
   };
-  return createClient(AIService, createConnectTransport({
+  return createConnectTransport({
     httpVersion: "1.1",
     baseUrl: rpcBaseUrl(baseURL),
     interceptors: [authInterceptor],
-  }));
+  });
 }
 
+function createAIClient(token: string, baseURL?: string) {
+  return createClient(AIService, createAuthedTransport(token, baseURL));
+}
+
+/**
+ * Creates a fresh course → module → lesson via the richter API (no UI scraping).
+ * Returns the lesson URL: `/dashboard/organizations/${ORG_SLUG}/courses/${courseId}/lessons/${lessonId}`
+ */
 async function createLesson(
-  page: Page,
+  _page: Page,
   courseTitle: string,
   moduleName: string,
   lessonTitle: string,
+  baseURL?: string,
 ): Promise<string> {
-  await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "Khóa học" }).first().waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Tạo khóa học" }).click();
-  await page.getByLabel("Tên khóa học").fill(courseTitle);
-  await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const { token, userId } = await getTeacherAuth(baseURL);
+  const transport = createAuthedTransport(token, baseURL);
 
-  const row = page.getByRole("row").filter({ hasText: courseTitle });
-  const courseHref = await row.getByRole("link").getAttribute("href");
-  await page.goto(`${courseHref}`, { waitUntil: "domcontentloaded" });
+  const orgClient = createClient(OrganizationService, transport);
+  const orgRes = await orgClient.getOrganizationBySlug({ slug: ORG_SLUG });
+  const orgId = orgRes.organization?.id;
+  if (!orgId) throw new Error("createLesson: could not resolve org id");
 
-  await page.getByRole("button", { name: "Thêm chương" }).click();
-  await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
-  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const courseClient = createClient(CourseService, transport);
+  const courseRes = await courseClient.createCourse({
+    organizationId: orgId,
+    ownerId: userId,
+    title: courseTitle,
+  });
+  const courseId = courseRes.course?.id;
+  if (!courseId) throw new Error("createLesson: createCourse returned no id");
 
-  await page.getByRole("button", { name: "Thêm bài học" }).click();
-  await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
-  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const moduleClient = createClient(CourseModuleService, transport);
+  const moduleRes = await moduleClient.createCourseModule({
+    courseId,
+    title: moduleName,
+    orderIndex: 0,
+  });
+  const moduleId = moduleRes.module?.id;
+  if (!moduleId) throw new Error("createLesson: createCourseModule returned no id");
 
-  const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
-  const href = await lessonRow.getByRole("link").getAttribute("href");
-  return `${href}`;
+  const lessonClient = createClient(LessonService, transport);
+  const lessonRes = await lessonClient.createLesson({
+    moduleId,
+    title: lessonTitle,
+    description: "",
+    orderIndex: 0,
+  });
+  const lessonId = lessonRes.lesson?.id;
+  if (!lessonId) throw new Error("createLesson: createLesson returned no id");
+
+  return `/dashboard/organizations/${ORG_SLUG}/courses/${courseId}/lessons/${lessonId}`;
 }
 
 /** Trigger a synthetic checkpoint hit via the E2E window hook. */
@@ -153,37 +187,14 @@ test.describe("Lesson row is a link to lesson detail", () => {
   });
 
   test("clicking a lesson row navigates to lesson detail page", async ({ teacherPage: page }) => {
-    const courseTitle = uid("Khóa học Bài học Link E2E");
-    await page.goto(COURSES_URL);
-    await page.getByRole("button", { name: "Tạo khóa học" }).click();
-    await page.getByLabel("Tên khóa học").fill(courseTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const row = page.getByRole("row").filter({ hasText: courseTitle });
-    const href = await row.getByRole("link").getAttribute("href");
-    const courseUrl = `${href}`;
-    await page.goto(courseUrl);
-
-    // Add module
-    await page.getByRole("button", { name: "Thêm chương" }).click();
-    const moduleName = uid("Chương Link E2E");
-    await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
-    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    // Add lesson
     const lessonTitle = uid("Bài học Link E2E");
-    await page.getByRole("button", { name: "Thêm bài học" }).click();
-    await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    // Click the lesson row link — read href to avoid flaky Firefox navigation
-    const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
-    const lessonHref = await lessonRow.getByRole("link").getAttribute("href");
-    await page.goto(`${lessonHref}`);
-
+    const lessonUrl = await createLesson(
+      page,
+      uid("Khóa học Bài học Link E2E"),
+      uid("Chương Link E2E"),
+      lessonTitle,
+    );
+    await page.goto(lessonUrl, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: lessonTitle })).toBeVisible();
   });
 });
@@ -194,32 +205,12 @@ test.describe("Lesson detail — teacher", () => {
   let lessonUrl: string;
 
   test.beforeEach(async ({ teacherPage: page }) => {
-    const courseTitle = uid("Khóa học Giáo viên Bài học E2E");
-    await page.goto(COURSES_URL);
-    await page.getByRole("button", { name: "Tạo khóa học" }).click();
-    await page.getByLabel("Tên khóa học").fill(courseTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const row = page.getByRole("row").filter({ hasText: courseTitle });
-    const courseHref = await row.getByRole("link").getAttribute("href");
-    await page.goto(`${courseHref}`);
-
-    const moduleName = uid("Chương E2E");
-    await page.getByRole("button", { name: "Thêm chương" }).click();
-    await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
-    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const lessonTitle = uid("Bài học E2E");
-    await page.getByRole("button", { name: "Thêm bài học" }).click();
-    await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
-    const href = await lessonRow.getByRole("link").getAttribute("href");
-    lessonUrl = `${href}`;
+    lessonUrl = await createLesson(
+      page,
+      uid("Khóa học Giáo viên Bài học E2E"),
+      uid("Chương E2E"),
+      uid("Bài học E2E"),
+    );
   });
 
   test("shows lesson title and video upload section", async ({ teacherPage: page }) => {
@@ -248,32 +239,13 @@ test.describe("Lesson detail — student read-only", () => {
 
 test.describe("Lesson detail — progress section", () => {
   test("teacher sees student progress section", async ({ teacherPage: page }) => {
-    const courseTitle = uid("Khóa học Tiến độ E2E");
-    await page.goto(COURSES_URL);
-    await page.getByRole("button", { name: "Tạo khóa học" }).click();
-    await page.getByLabel("Tên khóa học").fill(courseTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const row = page.getByRole("row").filter({ hasText: courseTitle });
-    const courseHref = await row.getByRole("link").getAttribute("href");
-    await page.goto(`${courseHref}`);
-
-    const moduleName = uid("Chương Tiến độ E2E");
-    await page.getByRole("button", { name: "Thêm chương" }).click();
-    await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
-    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const lessonTitle = uid("Bài Tiến độ E2E");
-    await page.getByRole("button", { name: "Thêm bài học" }).click();
-    await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
-    const href = await lessonRow.getByRole("link").getAttribute("href");
-    await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
+    const lessonUrl = await createLesson(
+      page,
+      uid("Khóa học Tiến độ E2E"),
+      uid("Chương Tiến độ E2E"),
+      uid("Bài Tiến độ E2E"),
+    );
+    await page.goto(`${lessonUrl}?tab=results`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByTestId("lesson-attempts")).toBeVisible();

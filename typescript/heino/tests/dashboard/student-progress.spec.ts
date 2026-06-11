@@ -132,8 +132,8 @@ test.describe("Course detail — Kết quả học viên section (manager view)"
       `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
       { waitUntil: "domcontentloaded" },
     );
-    const row = page.getByRole("row").filter({ hasText: SEED_DSA_COURSE_TITLE });
-    const href = await row.getByRole("link").first().getAttribute("href");
+    const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+    const href = await card.getByRole("link").first().getAttribute("href");
     if (!href) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" link not found`);
     // Navigate to the results tab of the course workspace
     await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });

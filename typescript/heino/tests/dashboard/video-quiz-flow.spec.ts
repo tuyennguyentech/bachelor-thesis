@@ -24,10 +24,18 @@
 
 import path from "path";
 import type { Page } from "@playwright/test";
-import { createClient } from "@connectrpc/connect";
+import { createClient, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
+import {
+  CourseService,
+  CourseModuleService,
+  LessonService,
+} from "buf/gen/richter/v1/courses_pb";
+import {
+  OrganizationService,
+} from "buf/gen/richter/v1/organizations_pb";
 import {
   test,
   expect,
@@ -38,12 +46,15 @@ import {
   USER_PASSWORD,
 } from "../fixtures";
 
-const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
 const TEST_VIDEO = path.join(__dirname, "../fixtures/test-video.mp4");
-const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample.mp4");
+const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
 
 function uid(base: string) {
   return `${base} ${Date.now()}`;
+}
+
+function rpcBaseUrl(baseURL?: string) {
+  return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
 }
 
 async function ensureRetakeState(page: Page) {
@@ -53,36 +64,67 @@ async function ensureRetakeState(page: Page) {
   }
 }
 
-/** Creates a fresh course → module → lesson, returns the lesson URL. */
+/** Creates a fresh course → module → lesson via the richter API. Returns the lesson URL. */
 async function createLesson(
-  page: Page,
+  _page: Page,
   courseTitle: string,
   moduleName: string,
   lessonTitle: string,
+  baseURL?: string,
 ): Promise<string> {
-  await page.goto(COURSES_URL);
-  await page.getByRole("button", { name: "Tạo khóa học" }).click();
-  await page.getByLabel("Tên khóa học").fill(courseTitle);
-  await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const rpcBase = rpcBaseUrl(baseURL);
+  const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBase });
+  const authRes = await createClient(AuthService, transport).login({
+    email: TEACHER_EMAIL,
+    password: USER_PASSWORD,
+  });
+  const token = authRes.accessToken;
+  const userId = authRes.user?.id ?? "";
 
-  const row = page.getByRole("row").filter({ hasText: courseTitle });
-  const courseHref = await row.getByRole("link").getAttribute("href");
-  await page.goto(`${courseHref}`);
+  const authInterceptor: Interceptor = (next) => async (req) => {
+    req.header.set("Authorization", `Bearer ${token}`);
+    return next(req);
+  };
+  const authedTransport = createConnectTransport({
+    httpVersion: "1.1",
+    baseUrl: rpcBase,
+    interceptors: [authInterceptor],
+  });
 
-  await page.getByRole("button", { name: "Thêm chương" }).click();
-  await page.getByRole("dialog").getByPlaceholder("VD: Chương 1: Giới thiệu").fill(moduleName);
-  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const orgClient = createClient(OrganizationService, authedTransport);
+  const orgRes = await orgClient.getOrganizationBySlug({ slug: ORG_SLUG });
+  const orgId = orgRes.organization?.id;
+  if (!orgId) throw new Error("createLesson: could not resolve org id");
 
-  await page.getByRole("button", { name: "Thêm bài học" }).click();
-  await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
-  await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const courseClient = createClient(CourseService, authedTransport);
+  const courseRes = await courseClient.createCourse({
+    organizationId: orgId,
+    ownerId: userId,
+    title: courseTitle,
+  });
+  const courseId = courseRes.course?.id;
+  if (!courseId) throw new Error("createLesson: createCourse returned no id");
 
-  const lessonRow = page.locator("div.border").filter({ hasText: lessonTitle }).last();
-  const href = await lessonRow.getByRole("link").getAttribute("href");
-  return `${href}`;
+  const moduleClient = createClient(CourseModuleService, authedTransport);
+  const moduleRes = await moduleClient.createCourseModule({
+    courseId,
+    title: moduleName,
+    orderIndex: 0,
+  });
+  const moduleId = moduleRes.module?.id;
+  if (!moduleId) throw new Error("createLesson: createCourseModule returned no id");
+
+  const lessonClient = createClient(LessonService, authedTransport);
+  const lessonRes = await lessonClient.createLesson({
+    moduleId,
+    title: lessonTitle,
+    description: "",
+    orderIndex: 0,
+  });
+  const lessonId = lessonRes.lesson?.id;
+  if (!lessonId) throw new Error("createLesson: createLesson returned no id");
+
+  return `/dashboard/organizations/${ORG_SLUG}/courses/${courseId}/lessons/${lessonId}`;
 }
 
 /** Wait for React hydration to register the checkpoint test hook, then fire it. */
