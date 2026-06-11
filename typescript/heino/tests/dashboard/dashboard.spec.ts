@@ -99,18 +99,9 @@ test.describe("Dashboard home", () => {
     await expect(firstRecent).toContainText("Trang chính · Hồ sơ");
   });
 
-  test("recent access records admin pages only for admin dashboard users", async ({ adminPage: page }) => {
-    await page.context().clearCookies({ name: "dyadia_recent_access" });
-
-    await page.goto("/admin/users");
-    await expect(page.getByRole("heading", { name: "Người dùng" })).toBeVisible();
-    await waitForRecentAccess(page, "admin-users", "Người dùng");
-
+  test("admin visiting /dashboard is redirected to /admin", async ({ adminPage: page }) => {
     await page.goto("/dashboard");
-    const recentSection = page.locator("section").filter({ has: page.getByRole("heading", { name: "Truy cập gần đây" }) });
-    const firstRecent = recentSection.getByRole("link", { name: /Mở lại/ }).first();
-    await expect(firstRecent).toContainText("Người dùng");
-    await expect(firstRecent).toContainText("Admin · Người dùng");
+    await expect(page).toHaveURL(/\/admin/);
   });
 
   test("recent access is isolated between accounts in the same browser", async ({ page, baseURL }) => {
