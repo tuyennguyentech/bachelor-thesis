@@ -155,7 +155,7 @@ export default async function DashboardCoursesPage({
                         </Badge>
                         <Button size="sm" className="gap-1.5 transition-all group-hover:translate-x-0.5" asChild>
                           <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
-                            Vào học
+                            {canManage ? "Quản lý" : "Vào học"}
                             <ArrowRightIcon className="size-3.5" />
                           </Link>
                         </Button>
