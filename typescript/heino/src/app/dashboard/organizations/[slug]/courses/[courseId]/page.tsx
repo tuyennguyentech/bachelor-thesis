@@ -24,6 +24,8 @@ import {
   ChevronLeftIcon,
   BookOpenIcon,
   UsersIcon,
+  ClockIcon,
+  GraduationCapIcon,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { logout } from "@/app/actions/auth";
@@ -122,15 +124,19 @@ export default async function CourseWorkspacePage({
 
   // ── Fetch modules + lessons (always needed for sidebar, only if having access) ────────
   let modulesWithLessons: (CourseModule & { lessons: Lesson[] })[] = [];
+  let totalMembersCount = 0;
   if (course.canAccess || canManage) {
     const moduleClient = createRichterClient(CourseModuleService, token);
     const lessonClient = createRichterClient(LessonService, token);
+    const memberClient = createRichterClient(CourseMemberService, token);
 
     try {
-      const [{ modules }, { lessons: allLessons }] = await Promise.all([
+      const [{ modules }, { lessons: allLessons }, { members: courseMembers }] = await Promise.all([
         moduleClient.listCourseModules({ courseId: course.id, limit: 500, offset: 0 }),
         lessonClient.listLessonsByCourse({ courseId: course.id, limit: 500, offset: 0 }),
+        memberClient.listCourseMembers({ courseId: course.id, limit: 500, offset: 0 }).catch(() => ({ members: [] })),
       ]);
+      totalMembersCount = courseMembers?.length || 0;
 
       const lessonsByModule = new Map<string, typeof allLessons>();
       for (const l of allLessons) {
@@ -259,6 +265,61 @@ export default async function CourseWorkspacePage({
                     )}
                   </div>
                   {courseStatusBadge(course.status)}
+                </div>
+
+                {/* ── COURSE STATISTICS GRID ── */}
+                <div className="grid gap-4 grid-cols-2 md:grid-cols-4 bg-muted/20 p-4 rounded-xl border">
+                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <BookOpenIcon className="size-4 text-blue-500" />
+                      <span className="text-xs font-medium">Chương học</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold tracking-tight text-foreground">{modulesWithLessons.length}</span>
+                      <span className="text-xs text-muted-foreground">chương</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <GraduationCapIcon className="size-4 text-emerald-500" />
+                      <span className="text-xs font-medium">Bài học</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold tracking-tight text-foreground">
+                        {modulesWithLessons.reduce((acc, m) => acc + m.lessons.length, 0)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">bài học</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <ClockIcon className="size-4 text-indigo-500" />
+                      <span className="text-xs font-medium">Thời lượng video</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold tracking-tight text-foreground">
+                        {Math.round(
+                          modulesWithLessons.reduce(
+                            (acc, m) =>
+                              acc +
+                              m.lessons.reduce((sum, l) => sum + (l.durationSeconds || 0), 0),
+                            0
+                          ) / 60
+                        )}
+                      </span>
+                      <span className="text-xs text-muted-foreground">phút</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <UsersIcon className="size-4 text-amber-500" />
+                      <span className="text-xs font-medium">Thành viên</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold tracking-tight text-foreground">{totalMembersCount}</span>
+                      <span className="text-xs text-muted-foreground font-normal">người</span>
+                    </div>
+                  </div>
                 </div>
 
                 {canManage && (

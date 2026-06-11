@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { CourseService, Course } from "buf/gen/richter/v1/courses_pb";
+import { CourseService, Course, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
@@ -16,13 +16,14 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
-import { GraduationCapIcon, LockIcon, ArrowRightIcon, BookOpenIcon } from "lucide-react";
+import { GraduationCapIcon, LockIcon, ArrowRightIcon, BookOpenIcon, SearchIcon } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateCourseDialog } from "@/app/admin/organizations/[slug]/courses/create-course-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
+import { Input } from "@/components/ui/input";
 
 const LIMIT = 20;
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
@@ -71,6 +72,28 @@ export default async function DashboardCoursesPage({
   }
   const hasNext = courses.length === LIMIT;
 
+  // Fetch modules and lessons count for each course
+  const courseDetails = await Promise.all(
+    courses.map(async (c) => {
+      const moduleClient = createRichterClient(CourseModuleService, token);
+      const lessonClient = createRichterClient(LessonService, token);
+      try {
+        const [{ modules }, { lessons }] = await Promise.all([
+          moduleClient.listCourseModules({ courseId: c.id, limit: 100, offset: 0 }),
+          lessonClient.listLessonsByCourse({ courseId: c.id, limit: 100, offset: 0 })
+        ]);
+        return {
+          courseId: c.id,
+          modulesCount: modules.length,
+          lessonsCount: lessons.length
+        };
+      } catch {
+        return { courseId: c.id, modulesCount: 0, lessonsCount: 0 };
+      }
+    })
+  );
+  const detailsMap = new Map(courseDetails.map((d) => [d.courseId, d]));
+
   const accessibleCourses = courses.filter((c) => c.canAccess || canManage);
   const lockedCourses = courses.filter((c) => !c.canAccess && !canManage);
 
@@ -94,6 +117,33 @@ export default async function DashboardCoursesPage({
         description={`Danh sách khóa học trong tổ chức ${org.name}.`}
         actions={canManage && <CreateCourseDialog organizationId={org.id} slug={slug} token={token} userId={claims.sub} />}
       />
+
+      {/* ── SEARCH BAR ── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-card p-4 rounded-lg border">
+        <form method="GET" className="flex items-center gap-2 w-full sm:max-w-sm">
+          <div className="relative w-full">
+            <SearchIcon className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="search"
+              name="q"
+              placeholder="Tìm kiếm khóa học..."
+              defaultValue={q || ""}
+              className="pl-9 h-9"
+            />
+          </div>
+          <Button type="submit" size="sm" variant="secondary">Tìm</Button>
+          {q && (
+            <Button variant="ghost" size="sm" asChild>
+              <Link href={`/dashboard/organizations/${slug}/courses`}>Xóa</Link>
+            </Button>
+          )}
+        </form>
+        {q && (
+          <div className="text-xs text-muted-foreground">
+            Kết quả tìm kiếm cho: &ldquo;<span className="font-medium text-foreground">{q}</span>&rdquo;
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-col gap-8">
         {courses.length === 0 ? (
@@ -140,13 +190,27 @@ export default async function DashboardCoursesPage({
                         </CardDescription>
                       </CardHeader>
                       
-                      <CardContent className="py-2 text-xs text-muted-foreground flex items-center justify-between">
-                        <span>Ngày tạo:</span>
-                        <span>
-                          {course.createdAt
-                            ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                            : "—"}
-                        </span>
+                      <CardContent className="py-2 text-xs text-muted-foreground flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <span>Chương học:</span>
+                          <span className="font-medium text-foreground">
+                            {detailsMap.get(course.id)?.modulesCount || 0} chương
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Bài học:</span>
+                          <span className="font-medium text-foreground">
+                            {detailsMap.get(course.id)?.lessonsCount || 0} bài
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-muted-foreground/80">
+                          <span>Ngày tạo:</span>
+                          <span>
+                            {course.createdAt
+                              ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
+                              : "—"}
+                          </span>
+                        </div>
                       </CardContent>
                       
                       <CardFooter className="pt-4 border-t bg-muted/20 flex items-center justify-between">
@@ -198,13 +262,27 @@ export default async function DashboardCoursesPage({
                         </CardDescription>
                       </CardHeader>
                       
-                      <CardContent className="py-2 text-xs text-muted-foreground/60 flex items-center justify-between">
-                        <span>Ngày tạo:</span>
-                        <span>
-                          {course.createdAt
-                            ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                            : "—"}
-                        </span>
+                      <CardContent className="py-2 text-xs text-muted-foreground/60 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <span>Chương học:</span>
+                          <span className="font-medium text-foreground/80">
+                            {detailsMap.get(course.id)?.modulesCount || 0} chương
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Bài học:</span>
+                          <span className="font-medium text-foreground/80">
+                            {detailsMap.get(course.id)?.lessonsCount || 0} bài
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Ngày tạo:</span>
+                          <span>
+                            {course.createdAt
+                              ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
+                              : "—"}
+                          </span>
+                        </div>
                       </CardContent>
                       
                       <CardFooter className="pt-4 border-t bg-muted/10 flex items-center justify-between">
