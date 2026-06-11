@@ -415,6 +415,12 @@ export default async function LessonDetailPage({
                             </div>
                             <p className="text-sm font-semibold text-foreground/90">Chưa có video. Tải video lên để bắt đầu tạo nội dung.</p>
                             <p className="text-xs text-muted-foreground max-w-[280px]">Vui lòng tải video lên ở Bước 1 của quy trình phía dưới để bắt đầu thiết kế bài học.</p>
+                            <Button asChild variant="default" size="sm" className="gap-1.5 mt-1">
+                              <Link href="?tab=processing">
+                                <SparklesIcon className="size-3.5" />
+                                Tải lên & xử lý video
+                              </Link>
+                            </Button>
                           </div>
                         </div>
                       )}

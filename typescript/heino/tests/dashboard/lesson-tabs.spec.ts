@@ -15,6 +15,7 @@ import {
   expect,
   goToSeededLesson,
   SEED_DSA_LESSON_BIG_O,
+  SEED_DSA_LESSON_RECURRENCE,
 } from "../fixtures";
 
 // ── Tab strip is present for manager roles ─────────────────────────────────
@@ -145,6 +146,24 @@ test.describe("Lesson tab — Kết quả & Thống kê (results)", () => {
     // lesson-attempts section to avoid matching hidden "Học viên" text elsewhere on the page.
     await expect(attemptsSection.getByText("Học viên").first()).toBeVisible();
     await expect(attemptsSection.getByText("Điểm").first()).toBeVisible();
+  });
+});
+
+// ── Tab 1: no-video placeholder shows upload shortcut button ──────────────
+
+test.describe("Lesson tab — Bài giảng, no-video placeholder", () => {
+  test("shows 'Tải lên & xử lý video' button linking to ?tab=processing when lesson has no video", async ({ teacherPage: page }) => {
+    // SEED_DSA_LESSON_RECURRENCE has no video_key in seed data → no-video placeholder renders
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_RECURRENCE);
+    await page.goto(`${lessonHref}?tab=content`, { waitUntil: "domcontentloaded" });
+
+    // The button must be visible inside the no-video placeholder
+    const uploadBtn = page.getByRole("link", { name: /Tải lên.*xử lý video/i });
+    await expect(uploadBtn).toBeVisible();
+
+    // The link href must contain tab=processing (not a full navigation check — just href)
+    const href = await uploadBtn.getAttribute("href");
+    expect(href).toContain("tab=processing");
   });
 });
 
