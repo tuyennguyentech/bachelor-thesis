@@ -10,6 +10,7 @@ import {
   type Course,
   type Lesson,
 } from "buf/gen/richter/v1/courses_pb";
+import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
   ArrowRightIcon,
@@ -17,8 +18,10 @@ import {
   CalendarIcon,
   GraduationCapIcon,
   PlusIcon,
+  LockIcon,
 } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
+import { Badge } from "@/components/ui/badge";
 
 const COURSE_LIMIT = 8;
 const LESSONS_PER_COURSE = 5;
@@ -52,7 +55,9 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
   }
   if (!org) notFound();
 
-  await requireOrgMember(org.id);
+  const { member } = await requireOrgMember(org.id);
+  const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
+  const canManage = CAN_MANAGE.includes(member.role);
 
   const courseClient = createRichterClient(CourseService, token);
   const lessonClient = createRichterClient(LessonService, token);
@@ -146,24 +151,37 @@ export default async function OrgDetailPage({ params }: { params: Promise<{ slug
               </p>
             ) : (
               <div className="divide-y">
-                {courses.map((course) => (
-                  <Link
-                    key={course.id}
-                    href={`/dashboard/organizations/${slug}/courses/${course.id}`}
-                    className="grid gap-3 px-4 py-3 transition-colors hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_auto]"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{course.title}</p>
-                      {course.description && (
-                        <p className="truncate text-xs text-muted-foreground">{course.description}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 md:justify-end">
-                      {courseStatusBadge(course.status)}
-                      <ArrowRightIcon className="size-3.5 text-muted-foreground" />
-                    </div>
-                  </Link>
-                ))}
+                {courses.map((course) => {
+                  const notEnrolled = !course.canAccess && !canManage;
+                  return (
+                    <Link
+                      key={course.id}
+                      href={`/dashboard/organizations/${slug}/courses/${course.id}`}
+                      className={`grid gap-3 px-4 py-3 transition-all hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_auto] ${
+                        notEnrolled ? "opacity-75 bg-muted/5" : ""
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          {notEnrolled && <LockIcon className="size-3.5 text-muted-foreground shrink-0" />}
+                          <p className="truncate text-sm font-medium">{course.title}</p>
+                          {notEnrolled && (
+                            <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 py-0.5">
+                              Chưa tham gia
+                            </Badge>
+                          )}
+                        </div>
+                        {course.description && (
+                          <p className="truncate text-xs text-muted-foreground mt-0.5">{course.description}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 md:justify-end">
+                        {courseStatusBadge(course.status)}
+                        <ArrowRightIcon className="size-3.5 text-muted-foreground" />
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>
