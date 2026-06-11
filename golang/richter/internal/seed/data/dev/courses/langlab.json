@@ -1,0 +1,256 @@
+[
+  {
+    "org_slug": "langlab",
+    "owner_email": "linh@dyadia.local",
+    "title": "Ngữ học ứng dụng: Phân tích ngôn ngữ học",
+    "description": "Khám phá các phương pháp phân tích ngôn ngữ học ứng dụng trong bối cảnh hiện đại: ngữ âm, ngữ pháp, ngữ nghĩa và ngữ dụng học.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Ngữ âm học (Phonetics)",
+        "lessons": [
+          {
+            "title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
+            "description": "Bảng chữ cái ngữ âm quốc tế (IPA), cách phiên âm và hệ thống âm vị tiếng Việt 6 thanh điệu.",
+            "analysis": {
+              "transcript": "Ngữ âm học (Phonetics) là ngành nghiên cứu âm thanh ngôn ngữ. Có ba nhánh chính: ngữ âm học cấu âm (articulatory), ngữ âm học âm học (acoustic) và ngữ âm học thính giác (auditory).\n\nBảng ký hiệu ngữ âm quốc tế IPA (International Phonetic Alphabet) gồm các ký hiệu chuẩn hóa để phiên âm mọi ngôn ngữ. Tiếng Việt có 6 thanh điệu: ngang (a), huyền (à), sắc (á), hỏi (ả), ngã (ã), nặng (ạ). Mỗi thanh điệu mang giá trị khu biệt nghĩa.\n\nÂm vị (phoneme) là đơn vị âm thanh nhỏ nhất có thể phân biệt nghĩa. Ví dụ: 'bàn' và 'màn' khác nhau ở âm vị đầu /b/ và /m/.\n\nTiếng Việt có hệ thống thanh điệu phức tạp với 6 mức và 2 loại thanh (bằng và trắc). Điều này tạo ra sự phong phú nhưng cũng là thách thức lớn với người học ngoại ngữ.",
+              "chunks": [
+                {"start_seconds": 0, "end_seconds": 300, "summary": "Giới thiệu ngữ âm học và IPA"},
+                {"start_seconds": 300, "end_seconds": 600, "summary": "Hệ thống 6 thanh điệu tiếng Việt"},
+                {"start_seconds": 600, "end_seconds": 900, "summary": "Âm vị và cặp tối thiểu (minimal pairs)"}
+              ],
+              "questions": [
+                {
+                  "question_text": "Ngữ âm học (Phonetics) nghiên cứu gì?",
+                  "options": [
+                    "Quy tắc ngữ pháp câu",
+                    "Âm thanh ngôn ngữ của con người",
+                    "Nghĩa của từ và câu",
+                    "Cách sử dụng ngôn ngữ trong giao tiếp"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Ngữ âm học nghiên cứu âm thanh ngôn ngữ — cả cách tạo ra, truyền đi và tiếp nhận âm thanh.",
+                  "start_seconds": 150
+                },
+                {
+                  "question_text": "Tiếng Việt có bao nhiêu thanh điệu?",
+                  "options": [
+                    "4",
+                    "5",
+                    "6",
+                    "8"
+                  ],
+                  "correct_answer": 2,
+                  "explanation": "Tiếng Việt có 6 thanh điệu: ngang, huyền, sắc, hỏi, ngã, nặng. Mỗi thanh có giá trị phân biệt nghĩa.",
+                  "start_seconds": 350
+                },
+                {
+                  "question_text": "Âm vị (phoneme) là gì?",
+                  "options": [
+                    "Đơn vị nghĩa nhỏ nhất trong ngôn ngữ",
+                    "Đơn vị âm thanh nhỏ nhất có thể phân biệt nghĩa",
+                    "Một từ ngữ âm",
+                    "Một câu trong ngôn ngữ học"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Âm vị (phoneme) là đơn vị âm thanh nhỏ nhất có khả năng phân biệt nghĩa — ví dụ /b/ và /m/ phân biệt 'bàn' và 'màn'.",
+                  "start_seconds": 650
+                }
+              ]
+            }
+          },
+          {
+            "title": "Bài 2: Ngữ điệu và nhịp điệu trong tiếng Anh",
+            "description": "Stress pattern, intonation curves và connected speech: linking, assimilation, elision."
+          },
+          {
+            "title": "Bài 3: Lỗi phát âm phổ biến của người Việt học tiếng Anh",
+            "description": "Phân tích contrastive analysis: phụ âm cuối, vowel length, các âm không có trong tiếng Việt."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Ngữ pháp học (Syntax & Morphology)",
+        "lessons": [
+          {
+            "title": "Bài 1: Cấu trúc cụm từ và câu (Phrase Structure)",
+            "description": "NP, VP, PP, AP — phân tích cây cú pháp (parse tree) và cách áp dụng vào giảng dạy."
+          },
+          {
+            "title": "Bài 2: Hình vị học (Morphology) — từ và từ tố",
+            "description": "Từ tố gốc (root), tiền tố/hậu tố (prefix/suffix), từ ghép và cơ chế tạo từ mới."
+          },
+          {
+            "title": "Bài 3: So sánh loại hình ngôn ngữ",
+            "description": "Ngôn ngữ biến cách (inflectional), đơn lập (isolating), chắp dính (agglutinative) — ví dụ và so sánh."
+          }
+        ]
+      },
+      {
+        "title": "Chương 3: Ngữ nghĩa và Ngữ dụng",
+        "lessons": [
+          {
+            "title": "Bài 1: Ngữ nghĩa học (Semantics) — nghĩa từ và câu",
+            "description": "Denotation vs connotation, đồng nghĩa, trái nghĩa, đa nghĩa và homonymy."
+          },
+          {
+            "title": "Bài 2: Ngữ dụng học (Pragmatics) — ngôn ngữ trong ngữ cảnh",
+            "description": "Speech act theory, implicature, politeness, context và inference."
+          },
+          {
+            "title": "Bài 3: Phân tích diễn ngôn (Discourse Analysis)",
+            "description": "Coherence, cohesion, genre analysis và ứng dụng vào dạy đọc hiểu."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "langlab",
+    "owner_email": "thu@dyadia.local",
+    "title": "Phương pháp dạy tiếng Anh giao tiếp (CLT)",
+    "description": "Communicative Language Teaching: thiết kế hoạt động, kỹ thuật luyện nghe-nói, xây dựng syllabus và đánh giá năng lực giao tiếp.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Nền tảng CLT",
+        "lessons": [
+          {
+            "title": "Bài 1: Từ Grammar-Translation đến CLT — lịch sử phương pháp",
+            "description": "Tổng quan các phương pháp dạy ngoại ngữ: GT, Direct Method, Audio-Lingual, CLT và TBLT."
+          },
+          {
+            "title": "Bài 2: Nguyên tắc CLT và vai trò giáo viên/học sinh",
+            "description": "Giáo viên là người tạo điều kiện (facilitator), học sinh là trung tâm, giao tiếp thực có nghĩa."
+          },
+          {
+            "title": "Bài 3: Thiết kế hoạt động giao tiếp (communicative activities)",
+            "description": "Information gap, role-play, simulation, problem-solving tasks và task-based activities."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Kỹ năng nghe-nói",
+        "lessons": [
+          {
+            "title": "Bài 1: Dạy kỹ năng nghe (Teaching Listening)",
+            "description": "Pre-listening, while-listening, post-listening; authentic materials vs graded materials."
+          },
+          {
+            "title": "Bài 2: Dạy kỹ năng nói — fluency vs accuracy",
+            "description": "Fluency activities, accuracy drills, error correction strategies và khi nào dùng cái nào."
+          },
+          {
+            "title": "Bài 3: Pronunciation teaching trong CLT",
+            "description": "Intelligibility principle, segmental vs suprasegmental, tích hợp phát âm vào bài học giao tiếp."
+          }
+        ]
+      },
+      {
+        "title": "Chương 3: Đánh giá năng lực giao tiếp",
+        "lessons": [
+          {
+            "title": "Bài 1: Khung tham chiếu CEFR (A1–C2)",
+            "description": "Hệ thống 6 bậc CEFR, can-do statements và ứng dụng vào lớp học."
+          },
+          {
+            "title": "Bài 2: Kiểm tra nói và nghe — design và marking rubric",
+            "description": "Thiết kế bài kiểm tra giao tiếp, tiêu chí chấm điểm, peer assessment."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "langlab",
+    "owner_email": "linh@dyadia.local",
+    "title": "Tiếng Anh học thuật (Academic English Writing)",
+    "description": "Phát triển kỹ năng viết học thuật tiếng Anh từ paragraph đến academic essay: thesis statement, argumentation, citation và paraphrasing.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Paragraph Writing",
+        "lessons": [
+          {
+            "title": "Bài 1: Cấu trúc đoạn văn học thuật",
+            "description": "Topic sentence, supporting sentences, concluding sentence và unity/coherence."
+          },
+          {
+            "title": "Bài 2: Cohesive devices và transition words",
+            "description": "Linking words: addition, contrast, cause-effect, example — cách dùng chính xác."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Essay Writing",
+        "lessons": [
+          {
+            "title": "Bài 1: Thesis statement và outline",
+            "description": "Cách viết thesis statement mạnh, xây dựng outline 5 đoạn và biến thể."
+          },
+          {
+            "title": "Bài 2: Argumentative Essay",
+            "description": "Claim, evidence, reasoning; counter-argument và refutation; tránh fallacies."
+          },
+          {
+            "title": "Bài 3: Citation và Academic Integrity",
+            "description": "APA 7th edition, in-text citation, reference list, paraphrasing và tránh plagiarism."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "langlab",
+    "owner_email": "duc@dyadia.local",
+    "title": "Nghiên cứu ngôn ngữ xã hội học (Sociolinguistics)",
+    "description": "Nghiên cứu mối quan hệ giữa ngôn ngữ và xã hội: phương ngữ, đa ngữ, kế hoạch hóa ngôn ngữ và biến đổi ngôn ngữ.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Biến thể ngôn ngữ",
+        "lessons": [
+          {
+            "title": "Bài 1: Phương ngữ và sociolect",
+            "description": "Regional dialects, social dialects, idiolect và dialect continuum."
+          },
+          {
+            "title": "Bài 2: Diglossia và code-switching",
+            "description": "Tình huống ngôn ngữ song song, chuyển đổi mã và lý do xã hội."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Ngôn ngữ và bản sắc",
+        "lessons": [
+          {
+            "title": "Bài 1: Ngôn ngữ, giới tính và quyền lực",
+            "description": "Gendered language, power dynamics, language in political discourse."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "langlab",
+    "owner_email": "thu@dyadia.local",
+    "title": "Nhập môn dịch thuật (Introduction to Translation)",
+    "description": "Lý thuyết và thực hành dịch thuật: các lý thuyết nền, dịch văn học, dịch thương mại và dịch máy (MT/NMT).",
+    "status": "archived",
+    "modules": [
+      {
+        "title": "Chương 1: Lý thuyết dịch thuật",
+        "lessons": [
+          {
+            "title": "Bài 1: Equivalence và translation shifts",
+            "description": "Formal vs dynamic equivalence (Nida), translation shifts: structural, level, unit."
+          },
+          {
+            "title": "Bài 2: Dịch máy thống kê và NMT",
+            "description": "SMT (phrase-based), NMT (attention transformer) và khi nào post-edit cho hiệu quả."
+          }
+        ]
+      }
+    ]
+  }
+]

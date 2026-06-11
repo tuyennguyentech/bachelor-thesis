@@ -4,5 +4,7 @@
   { "slug": "open-learn",       "name": "Open Learning Hub",     "creator_email": "dave@dyadia.local"  },
   { "slug": "ai-research",      "name": "AI Research Group",     "creator_email": "bob@dyadia.local"   },
   { "slug": "web-dev-bootcamp", "name": "Web Dev Bootcamp",      "creator_email": "grace@dyadia.local" },
-  { "slug": "math-club",        "name": "Math Club",             "creator_email": "henry@dyadia.local" }
+  { "slug": "math-club",        "name": "Math Club",             "creator_email": "henry@dyadia.local" },
+  { "slug": "langlab",          "name": "Language & Linguistics Lab", "creator_email": "linh@dyadia.local" },
+  { "slug": "startup-hub",      "name": "Startup & Entrepreneurship Hub", "creator_email": "minh@dyadia.local" }
 ]

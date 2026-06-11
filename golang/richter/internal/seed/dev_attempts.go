@@ -99,34 +99,75 @@ func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSp
 			continue
 		}
 
-		// Grade each answer against the MCQ config
+		// Grade each answer by interaction kind so that seed attempt scores are
+		// realistic.  MCQ is graded by correct_answer matching; fill_blank and
+		// listening are scored 0 (no real answer available in seed); reading is
+		// scored 0 (no audio recording in seed).
 		var totalScore, maxScore float32
 		type gradedResp struct {
 			interactionID pgtype.UUID
 			responseJSON  []byte
 			score         float32
+			maxScore      float32
 			idx           int
 		}
 		var graded []gradedResp
 		for i, interaction := range interactions {
-			maxScore += 1.0
-			var cfg struct {
-				CorrectAnswer int `json:"correct_answer"`
+			var iScore, iMaxScore float32
+			var respJSON []byte
+
+			switch interaction.Kind {
+			case "mcq", "single_choice", "multiple_choice":
+				iMaxScore = 1.0
+				var cfg struct {
+					CorrectAnswer int `json:"correct_answer"`
+				}
+				_ = json.Unmarshal(interaction.Config, &cfg)
+				selected := -1
+				if i < len(a.Answers) {
+					selected = int(a.Answers[i])
+				}
+				respJSON, _ = json.Marshal(struct {
+					Selected int `json:"selected"`
+				}{Selected: selected})
+				if selected == cfg.CorrectAnswer {
+					iScore = 1.0
+				}
+
+			case "fill_blank":
+				// Seed doesn't supply fill-blank answers; score 0/1 (unanswered).
+				iMaxScore = 1.0
+				iScore = 0
+				respJSON, _ = json.Marshal(struct {
+					Answers []string `json:"answers"`
+				}{Answers: []string{}})
+
+			case "listening":
+				// Seed doesn't supply listening answers; score 0/1 (unanswered).
+				iMaxScore = 1.0
+				iScore = 0
+				respJSON, _ = json.Marshal(struct {
+					ComprehensionAnswers []int32 `json:"comprehension_answers"`
+				}{ComprehensionAnswers: []int32{}})
+
+			case "reading":
+				// Seed doesn't supply audio recordings; score 0/1 (no submission).
+				iMaxScore = 1.0
+				iScore = 0
+				respJSON, _ = json.Marshal(struct {
+					AudioObjectKey string `json:"audio_object_key"`
+				}{AudioObjectKey: ""})
+
+			default:
+				// Unknown kind: skip to avoid breaking seed on new interaction types.
+				continue
 			}
-			_ = json.Unmarshal(interaction.Config, &cfg)
-			selected := -1
-			if i < len(a.Answers) {
-				selected = int(a.Answers[i])
+
+			maxScore += iMaxScore
+			if iScore > 0 {
+				totalScore += iScore
 			}
-			respJSON, _ := json.Marshal(struct {
-				Selected int `json:"selected"`
-			}{Selected: selected})
-			score := float32(0)
-			if selected == cfg.CorrectAnswer {
-				score = 1.0
-				totalScore++
-			}
-			graded = append(graded, gradedResp{interaction.ID, respJSON, score, i})
+			graded = append(graded, gradedResp{interaction.ID, respJSON, iScore, iMaxScore, i})
 		}
 
 		// Compute a deterministic VideoWatchFraction: use spec value if set,
@@ -164,7 +205,7 @@ func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSp
 					InteractionID:  g.interactionID,
 					Response:       g.responseJSON,
 					Score:          g.score,
-					MaxScore:       1.0,
+					MaxScore:       g.maxScore,
 					Feedback:       "",
 					TimeToAnswerMs: pgtype.Int4{Int32: timeToAnswerMs, Valid: true},
 					ReplayCount:    replayCount,

@@ -94,5 +94,106 @@
     "module_title": "Chương 1: Nền tảng Java",
     "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
     "answers": [0, 1, 2, 1, 1]
+  },
+
+  {
+    "user_email": "an@dyadia.local",
+    "org_slug": "langlab",
+    "course_title": "Ngữ học ứng dụng: Phân tích ngôn ngữ học",
+    "module_title": "Chương 1: Ngữ âm học (Phonetics)",
+    "lesson_title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
+    "answers": [1, 2, 1],
+    "video_watch_fraction": 0.95
+  },
+  {
+    "user_email": "hang@dyadia.local",
+    "org_slug": "langlab",
+    "course_title": "Ngữ học ứng dụng: Phân tích ngôn ngữ học",
+    "module_title": "Chương 1: Ngữ âm học (Phonetics)",
+    "lesson_title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
+    "answers": [1, 2, 0],
+    "video_watch_fraction": 0.80
+  },
+  {
+    "user_email": "long@dyadia.local",
+    "org_slug": "langlab",
+    "course_title": "Ngữ học ứng dụng: Phân tích ngôn ngữ học",
+    "module_title": "Chương 1: Ngữ âm học (Phonetics)",
+    "lesson_title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
+    "answers": [0, 2, 1],
+    "video_watch_fraction": 0.60
+  },
+  {
+    "user_email": "phuong@dyadia.local",
+    "org_slug": "langlab",
+    "course_title": "Ngữ học ứng dụng: Phân tích ngôn ngữ học",
+    "module_title": "Chương 1: Ngữ âm học (Phonetics)",
+    "lesson_title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
+    "answers": [1, 2, 1],
+    "video_watch_fraction": 1.0
+  },
+  {
+    "user_email": "nam@dyadia.local",
+    "org_slug": "langlab",
+    "course_title": "Ngữ học ứng dụng: Phân tích ngôn ngữ học",
+    "module_title": "Chương 1: Ngữ âm học (Phonetics)",
+    "lesson_title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
+    "answers": [0, 0, 1],
+    "video_watch_fraction": 0.45
+  },
+
+  {
+    "user_email": "an@dyadia.local",
+    "org_slug": "startup-hub",
+    "course_title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "module_title": "Chương 1: Tư duy Lean Startup",
+    "lesson_title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+    "answers": [1, 1, 2],
+    "video_watch_fraction": 0.90
+  },
+  {
+    "user_email": "hang@dyadia.local",
+    "org_slug": "startup-hub",
+    "course_title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "module_title": "Chương 1: Tư duy Lean Startup",
+    "lesson_title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+    "answers": [1, 1, 2],
+    "video_watch_fraction": 1.0
+  },
+  {
+    "user_email": "nam@dyadia.local",
+    "org_slug": "startup-hub",
+    "course_title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "module_title": "Chương 1: Tư duy Lean Startup",
+    "lesson_title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+    "answers": [0, 1, 0],
+    "video_watch_fraction": 0.55
+  },
+  {
+    "user_email": "tung@dyadia.local",
+    "org_slug": "startup-hub",
+    "course_title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "module_title": "Chương 1: Tư duy Lean Startup",
+    "lesson_title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+    "answers": [1, 0, 2],
+    "video_watch_fraction": 0.72
+  },
+  {
+    "user_email": "mai@dyadia.local",
+    "org_slug": "startup-hub",
+    "course_title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "module_title": "Chương 1: Tư duy Lean Startup",
+    "lesson_title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+    "answers": [1, 1, 2],
+    "video_watch_fraction": 0.95
+  },
+  {
+    "user_email": "long@dyadia.local",
+    "org_slug": "startup-hub",
+    "course_title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "module_title": "Chương 1: Tư duy Lean Startup",
+    "lesson_title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+    "answers": [0, 0, 0],
+    "video_watch_fraction": 0.20
   }
 ]

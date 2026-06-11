@@ -1,0 +1,268 @@
+[
+  {
+    "org_slug": "startup-hub",
+    "owner_email": "minh@dyadia.local",
+    "title": "Khởi nghiệp tinh gọn (Lean Startup)",
+    "description": "Áp dụng phương pháp Lean Startup của Eric Ries: Build-Measure-Learn loop, MVP, validated learning và pivot vs persevere.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Tư duy Lean Startup",
+        "lessons": [
+          {
+            "title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
+            "description": "Ba bước của vòng lặp tinh gọn, cách rút ngắn chu kỳ và tại sao tốc độ học quan trọng hơn tốc độ xây dựng.",
+            "analysis": {
+              "transcript": "Lean Startup là phương pháp khởi nghiệp do Eric Ries phát triển, lấy cảm hứng từ Lean Manufacturing (Toyota). Triết lý cốt lõi: loại bỏ lãng phí trong quá trình xây dựng sản phẩm bằng cách học liên tục và nhanh nhất có thể.\n\nVòng lặp Build-Measure-Learn gồm 3 bước:\n1. BUILD: Xây dựng MVP (Minimum Viable Product) — phiên bản tối thiểu nhất có thể kiểm chứng giả thuyết.\n2. MEASURE: Đo lường phản hồi thực tế của khách hàng bằng các chỉ số đúng (actionable metrics, không phải vanity metrics).\n3. LEARN: Rút ra validated learning — quyết định pivot (thay đổi hướng) hay persevere (tiếp tục).\n\nMVP không phải sản phẩm tệ nhất, mà là cách nhanh nhất để kiểm chứng giả thuyết quan trọng nhất. Ví dụ nổi tiếng: Dropbox dùng video demo trước khi xây dựng; Zappos mua giày từ cửa hàng và ship cho khách trước khi có kho.\n\nVanity metrics (số lượt download, page views) dễ tăng nhưng không cho biết sản phẩm có đang tạo giá trị không. Actionable metrics (activation rate, retention, revenue) thực sự phản ánh sức khỏe kinh doanh.",
+              "chunks": [
+                {"start_seconds": 0, "end_seconds": 400, "summary": "Lean Startup là gì và nguồn gốc từ Toyota"},
+                {"start_seconds": 400, "end_seconds": 800, "summary": "MVP và các ví dụ nổi tiếng"},
+                {"start_seconds": 800, "end_seconds": 1200, "summary": "Vanity metrics vs Actionable metrics"}
+              ],
+              "questions": [
+                {
+                  "question_text": "MVP (Minimum Viable Product) trong Lean Startup có mục đích gì?",
+                  "options": [
+                    "Ra mắt sản phẩm hoàn chỉnh với chi phí thấp nhất",
+                    "Kiểm chứng giả thuyết quan trọng nhất nhanh nhất có thể",
+                    "Tạo sản phẩm tệ nhất để thấy khách hàng phàn nàn gì",
+                    "Thu hút nhà đầu tư bằng prototype đơn giản"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "MVP là cách nhanh nhất để kiểm chứng giả thuyết cốt lõi về nhu cầu khách hàng — không phải sản phẩm tệ hay hoàn chỉnh.",
+                  "start_seconds": 200
+                },
+                {
+                  "question_text": "Dropbox đã làm gì như một MVP?",
+                  "options": [
+                    "Ra mắt beta cho 100 người dùng nội bộ",
+                    "Tạo video demo sản phẩm để kiểm tra nhu cầu trước khi xây dựng",
+                    "Cho dùng thử miễn phí 30 ngày",
+                    "Tung ra phiên bản mobile trước desktop"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Dropbox tạo một video demo mô tả sản phẩm — danh sách chờ từ 5,000 lên 75,000 người trong một đêm, chứng minh có nhu cầu mà không cần xây dựng sản phẩm.",
+                  "start_seconds": 500
+                },
+                {
+                  "question_text": "Đâu là ví dụ về 'actionable metric' thay vì 'vanity metric'?",
+                  "options": [
+                    "Tổng số lượt tải app",
+                    "Số lượt page view mỗi tháng",
+                    "Retention rate sau 30 ngày (D30 retention)",
+                    "Số followers trên mạng xã hội"
+                  ],
+                  "correct_answer": 2,
+                  "explanation": "Retention rate D30 là actionable metric — nó cho biết sản phẩm có giữ được người dùng không. Vanity metrics như page views hay downloads dễ tăng nhưng không phản ánh giá trị thực.",
+                  "start_seconds": 850
+                }
+              ]
+            }
+          },
+          {
+            "title": "Bài 2: Pivot vs Persevere — khi nào thay đổi hướng?",
+            "description": "Các loại pivot (zoom-in, zoom-out, customer segment, platform, business model), dấu hiệu cần pivot và cạm bẫy pivot quá sớm."
+          },
+          {
+            "title": "Bài 3: Validated Learning và giả thuyết kinh doanh",
+            "description": "Cách viết leap-of-faith assumptions, thiết kế experiment để kiểm chứng, phân biệt learning từ data và learning từ cảm tính."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Customer Discovery",
+        "lessons": [
+          {
+            "title": "Bài 1: Phỏng vấn khách hàng — The Mom Test",
+            "description": "Nguyên tắc phỏng vấn không leading: hỏi về quá khứ thay vì tương lai, facts thay vì opinions."
+          },
+          {
+            "title": "Bài 2: Jobs-to-be-Done Framework",
+            "description": "Người mua không mua sản phẩm, họ 'hire' sản phẩm để làm một 'job'. Phân tích functional, emotional và social jobs."
+          },
+          {
+            "title": "Bài 3: Xây dựng Persona và Customer Journey Map",
+            "description": "Từ data phỏng vấn đến persona có hành vi, mục tiêu và pain points; mapping journey và điểm cần cải thiện."
+          }
+        ]
+      },
+      {
+        "title": "Chương 3: Growth và Traction",
+        "lessons": [
+          {
+            "title": "Bài 1: 19 kênh traction (Bullseye Framework)",
+            "description": "Phân loại 19 kênh tăng trưởng của Traction book; cách dùng Bullseye Framework để ưu tiên kênh phù hợp nhất."
+          },
+          {
+            "title": "Bài 2: Growth Loops vs Funnel",
+            "description": "Tại sao growth loop (viral, content, paid) bền vững hơn funnel; thiết kế và đo lường loop."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "startup-hub",
+    "owner_email": "duc@dyadia.local",
+    "title": "Mô hình kinh doanh và Canvas",
+    "description": "Từ ý tưởng đến mô hình kinh doanh khả thi: Business Model Canvas, Value Proposition Canvas và chiến lược định giá.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Business Model Canvas (BMC)",
+        "lessons": [
+          {
+            "title": "Bài 1: 9 khối xây dựng của BMC",
+            "description": "Customer Segments, Value Proposition, Channels, Customer Relationships, Revenue Streams, Key Resources, Key Activities, Key Partners, Cost Structure."
+          },
+          {
+            "title": "Bài 2: Phân tích các mô hình kinh doanh nổi tiếng qua BMC",
+            "description": "Case study: Airbnb, Spotify, Grab — phân tích và rút ra bài học cho startup mới."
+          },
+          {
+            "title": "Bài 3: Value Proposition Canvas",
+            "description": "Customer Jobs, Pains, Gains vs Products/Services, Pain Relievers, Gain Creators — cách tìm Product-Market Fit."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Chiến lược định giá",
+        "lessons": [
+          {
+            "title": "Bài 1: Cost-based vs Value-based pricing",
+            "description": "Tại sao cost-plus thường sai; willingness-to-pay, price elasticity và packaging strategy."
+          },
+          {
+            "title": "Bài 2: Freemium, Subscription và Marketplace pricing",
+            "description": "Khi nào dùng freemium, tỷ lệ conversion target, marketplace commission và platform pricing strategy."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "startup-hub",
+    "owner_email": "phuong@dyadia.local",
+    "title": "Gọi vốn đầu tư mạo hiểm (Venture Capital Fundraising)",
+    "description": "Hiểu hệ sinh thái VC, chuẩn bị pitch deck thuyết phục, term sheet, cap table và quá trình due diligence.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: Hệ sinh thái đầu tư",
+        "lessons": [
+          {
+            "title": "Bài 1: Các giai đoạn gọi vốn — Pre-seed đến Series C+",
+            "description": "Pre-seed, Seed, Series A/B/C — tiêu chí, số tiền điển hình, valuations và investor profile."
+          },
+          {
+            "title": "Bài 2: Angel investors, VC funds và corporate VC",
+            "description": "Sự khác biệt, cách tiếp cận, what they look for và điều kiện phù hợp với từng loại."
+          },
+          {
+            "title": "Bài 3: Hệ sinh thái startup Đông Nam Á và Việt Nam",
+            "description": "Các VC lớn trong khu vực: Do Ventures, Monk's Hill, Sequoia SEA; xu hướng 2024-2025."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Pitch Deck và Fundraising Process",
+        "lessons": [
+          {
+            "title": "Bài 1: Cấu trúc Pitch Deck 10 slides (Sequoia format)",
+            "description": "Problem, Solution, Market Size, Product, Traction, Team, Business Model, Competition, Financials, Ask."
+          },
+          {
+            "title": "Bài 2: Term Sheet và Cap Table cơ bản",
+            "description": "Pre-money/post-money valuation, dilution, liquidation preference, pro-rata rights, anti-dilution."
+          },
+          {
+            "title": "Bài 3: Quy trình due diligence",
+            "description": "Investor DD checklist, data room, legal structure, IP ownership và cách chuẩn bị."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "startup-hub",
+    "owner_email": "minh@dyadia.local",
+    "title": "Quản lý sản phẩm công nghệ (Product Management)",
+    "description": "Vai trò Product Manager trong startup và scale-up: roadmap, prioritization frameworks, OKRs, working with engineering và design.",
+    "status": "published",
+    "modules": [
+      {
+        "title": "Chương 1: PM Fundamentals",
+        "lessons": [
+          {
+            "title": "Bài 1: PM là gì và không phải gì — CEO of the Product?",
+            "description": "Vai trò PM: discovery, delivery, strategy; sự khác biệt giữa PM ở startup, scale-up và big tech."
+          },
+          {
+            "title": "Bài 2: OKRs — Objectives and Key Results",
+            "description": "Cách viết OKR hiệu quả, phân biệt output vs outcome, cascade OKRs từ company xuống team."
+          },
+          {
+            "title": "Bài 3: Product Roadmap — Now/Next/Later",
+            "description": "Roadmap không phải project plan; format Now/Next/Later, theme-based roadmap và cách communicate."
+          },
+          {
+            "title": "Bài 4: Prioritization Frameworks — RICE, MoSCoW, ICE",
+            "description": "RICE score: Reach × Impact × Confidence / Effort; MoSCoW; ICE score và khi nào dùng framework nào."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Discovery và Delivery",
+        "lessons": [
+          {
+            "title": "Bài 1: Continuous Discovery — Teresa Torres",
+            "description": "Opportunity solution tree, weekly customer interviews, assumption testing và kết nối discovery với delivery."
+          },
+          {
+            "title": "Bài 2: Working với Engineering — Agile Scrum trong thực tế",
+            "description": "Cách PM viết PRD, acceptance criteria, và quản lý technical debt trong backlog."
+          },
+          {
+            "title": "Bài 3: Product Analytics — North Star Metric",
+            "description": "Chọn North Star Metric, input metrics, Retention Cohort Analysis và khi nào A/B test."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "org_slug": "startup-hub",
+    "owner_email": "phuong@dyadia.local",
+    "title": "Marketing tăng trưởng (Growth Marketing)",
+    "description": "Chiến lược marketing cho startup giai đoạn early-stage: content marketing, SEO, paid acquisition, email marketing và referral.",
+    "status": "draft",
+    "modules": [
+      {
+        "title": "Chương 1: Acquisition",
+        "lessons": [
+          {
+            "title": "Bài 1: SEO kỹ thuật cho startup",
+            "description": "Keyword research, on-page SEO, technical SEO (Core Web Vitals) và link building với ngân sách nhỏ."
+          },
+          {
+            "title": "Bài 2: Paid acquisition — Google Ads và Facebook Ads",
+            "description": "Campaign structure, audience targeting, creative testing, CAC và ROAS optimization."
+          },
+          {
+            "title": "Bài 3: Content Marketing và Inbound",
+            "description": "Buyer persona, content calendar, distribution strategy và measuring content ROI."
+          }
+        ]
+      },
+      {
+        "title": "Chương 2: Retention và Revenue",
+        "lessons": [
+          {
+            "title": "Bài 1: Email Marketing và Lifecycle Automation",
+            "description": "Onboarding sequence, drip campaigns, segmentation và A/B testing email."
+          }
+        ]
+      }
+    ]
+  }
+]
