@@ -16,8 +16,11 @@ func TestReadingGradeStub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if score != 1.0 || max != 1.0 {
-		t.Errorf("stub grade: want 1/1, got %v/%v", score, max)
+	// No grading deps / no submitted audio → no credit. (Previously this
+	// returned a free 1/1, which inflated scores when AI grading was
+	// unavailable or the student submitted nothing.)
+	if score != 0.0 || max != 1.0 {
+		t.Errorf("stub grade: want 0/1, got %v/%v", score, max)
 	}
 }
 

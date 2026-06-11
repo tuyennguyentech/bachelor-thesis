@@ -51,6 +51,26 @@ type AiCfg struct {
 	// (rely on worker count only). Recommended: 1 for the default
 	// speaches deployment since it serializes model inference.
 	WhisperMaxConcurrent int `mapstructure:"whisper_max_concurrent"`
+	// PipelineTimeout is the total wall-clock budget for the full
+	// extract pipeline (download + ffmpeg + Whisper). It wraps the
+	// outer context of runWhisperAnalyze so a hung ffmpeg or Whisper
+	// call cannot block a worker indefinitely past the sum of the
+	// per-stage timeouts. 0 = unlimited (rely on per-stage timeouts
+	// only). A generous value — e.g. DownloadTimeout +
+	// AudioExtractTimeout + WhisperRequestTimeout + 5m buffer — is
+	// appropriate for large videos.
+	PipelineTimeout time.Duration `mapstructure:"pipeline_timeout"`
+	// MaxVideoBytes caps the video file size that the download step
+	// will accept. Uploads larger than this are rejected with a clear
+	// error message so workers fail fast instead of spending download
+	// + ffmpeg time on files they cannot process. 0 = use default
+	// (2 GB). Override via env RICHTER_AI_MAX_VIDEO_BYTES.
+	MaxVideoBytes int64 `mapstructure:"max_video_bytes"`
+	// TempDir is the directory used for video and audio temp files
+	// during transcription. Ops can point this at a dedicated,
+	// size-bounded volume to avoid filling the system /tmp. Empty
+	// string = os.TempDir() (system default).
+	TempDir string `mapstructure:"temp_dir"`
 	// ChunkingTimeout caps a single chunking pass (LLM call). 0 =
 	// unlimited.
 	ChunkingTimeout time.Duration `mapstructure:"chunking_timeout"`
@@ -78,6 +98,12 @@ type AiCfg struct {
 	ListLimitLessonOps int `mapstructure:"list_limit_lesson_ops"`
 }
 
+// DefaultMaxVideoBytes is the default cap for video file downloads (2 GB).
+// Used by the transcription service when AiCfg.MaxVideoBytes is 0.
+// Ops should override via [ai] max_video_bytes in richter.*.toml or
+// RICHTER_AI_MAX_VIDEO_BYTES for deployment-specific limits.
+const DefaultMaxVideoBytes = int64(2 * 1024 * 1024 * 1024) // 2 GB
+
 func NewAiCfg() AiCfg {
 	return AiCfg{
 		WhisperClientTimeout:         10 * time.Minute,
@@ -89,14 +115,23 @@ func NewAiCfg() AiCfg {
 		WhisperRequestTimeout:        10 * time.Minute,
 		WhisperProgressInterval:      20 * time.Second,
 		WhisperMaxConcurrent:         1,
-		ChunkingTimeout:              3 * time.Minute,
-		InteractionGenTimeout:        2 * time.Minute,
-		TTSRequestTimeout:            2 * time.Minute,
-		GradingTimeout:               25 * time.Second,
-		BackgroundTaskTimeout:        5 * time.Second,
-		ListLimitChunks:              500,
-		ListLimitInteractions:        5000,
-		ListLimitLessonOps:           10000,
+		// PipelineTimeout: generous budget = DownloadTimeout +
+		// AudioExtractTimeout + WhisperRequestTimeout + 5 min buffer.
+		// Default is 33 minutes — enough for a 2 GB / 90-min video on
+		// a slow link while still bounding hung workers.
+		PipelineTimeout: 33 * time.Minute,
+		// MaxVideoBytes: 0 means "use defaultMaxVideoBytes (2 GB)".
+		// Set a positive value to override.
+		MaxVideoBytes:         0,
+		TempDir:               "",
+		ChunkingTimeout:       3 * time.Minute,
+		InteractionGenTimeout: 2 * time.Minute,
+		TTSRequestTimeout:     2 * time.Minute,
+		GradingTimeout:        25 * time.Second,
+		BackgroundTaskTimeout: 5 * time.Second,
+		ListLimitChunks:       500,
+		ListLimitInteractions: 5000,
+		ListLimitLessonOps:    10000,
 	}
 }
 

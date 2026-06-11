@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,13 +72,20 @@ func TestWhisperSem_BlocksExcessConcurrentCalls(t *testing.T) {
 			whisper.Endpoint = endpoint
 			svc := newTranscriptionService(nil, nil, &whisper, &ai)
 
+			// whisperTranscribe now streams the WAV from a temp file path
+			// (no longer takes an in-memory []byte), so write a dummy file.
+			audioPath := filepath.Join(t.TempDir(), "audio.wav")
+			if err := os.WriteFile(audioPath, []byte("audio"), 0o600); err != nil {
+				t.Fatalf("write temp audio: %v", err)
+			}
+
 			var wg sync.WaitGroup
 			wg.Add(tc.parallelism)
 			start := time.Now()
 			for i := 0; i < tc.parallelism; i++ {
 				go func() {
 					defer wg.Done()
-					_, _, err := svc.whisperTranscribe(context.Background(), []byte("audio"))
+					_, _, err := svc.whisperTranscribe(context.Background(), audioPath)
 					if err != nil {
 						t.Errorf("whisperTranscribe: %v", err)
 					}
@@ -119,10 +128,15 @@ func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
 	whisper.Endpoint = strings.TrimPrefix(srv.URL, "http://")
 	svc := newTranscriptionService(nil, nil, &whisper, &ai)
 
+	audioPath := filepath.Join(t.TempDir(), "audio.wav")
+	if err := os.WriteFile(audioPath, []byte("a"), 0o600); err != nil {
+		t.Fatalf("write temp audio: %v", err)
+	}
+
 	// Saturate the slot.
 	saturationDone := make(chan struct{})
 	go func() {
-		_, _, _ = svc.whisperTranscribe(context.Background(), []byte("a"))
+		_, _, _ = svc.whisperTranscribe(context.Background(), audioPath)
 		close(saturationDone)
 	}()
 	// Give the first request a moment to enter the semaphore.
@@ -138,7 +152,7 @@ func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	_, _, err := svc.whisperTranscribe(ctx, []byte("b"))
+	_, _, err := svc.whisperTranscribe(ctx, audioPath)
 	waitElapsed := time.Since(waitStart)
 	if err == nil {
 		t.Fatal("expected error from cancelled-ctx whisper, got nil")

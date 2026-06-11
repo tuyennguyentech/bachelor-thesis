@@ -71,11 +71,29 @@ func newTranscriptionService(s3client *minio.Client, s3cfg *cfg.S3Cfg, whisperCf
 	return s
 }
 
+// maxVideoBytes returns the effective video size cap from config.
+// A zero/negative config value falls back to the 2 GB default.
+func (s *transcriptionService) maxVideoBytes() int64 {
+	if s.aiCfg.MaxVideoBytes > 0 {
+		return s.aiCfg.MaxVideoBytes
+	}
+	return cfg.DefaultMaxVideoBytes
+}
+
+// tempDir returns the directory to use for temp files. Empty config
+// value falls back to os.TempDir() (the system default).
+func (s *transcriptionService) tempDir() string {
+	if s.aiCfg.TempDir != "" {
+		return s.aiCfg.TempDir
+	}
+	return os.TempDir()
+}
+
 func (s *transcriptionService) downloadVideo(ctx context.Context, storageKey string) (string, string, error) {
 	s3ctx, s3cancel := s.aiCtx(ctx, s.aiCfg.DownloadTimeout)
 	defer s3cancel()
 
-	const maxVideoBytes = int64(500 * 1024 * 1024) // 500 MB
+	maxBytes := s.maxVideoBytes()
 
 	ext := "mp4"
 	mimeType := "video/mp4"
@@ -92,7 +110,7 @@ func (s *transcriptionService) downloadVideo(ctx context.Context, storageKey str
 		}
 	}
 
-	videoTmp, err := os.CreateTemp("", "richter-video-*."+ext)
+	videoTmp, err := os.CreateTemp(s.tempDir(), "richter-video-*."+ext)
 	if err != nil {
 		return "", "", fmt.Errorf("create temp video file: %w", err)
 	}
@@ -111,16 +129,16 @@ func (s *transcriptionService) downloadVideo(ctx context.Context, storageKey str
 	// loaded up to 500 MB into RAM before handing it to ffmpeg, which could OOM
 	// the server under concurrent analyses. LimitReader caps writes so a
 	// malicious or truncated file can never balloon the temp file beyond the cap.
-	written, err := io.Copy(videoTmp, io.LimitReader(obj, maxVideoBytes+1))
+	written, err := io.Copy(videoTmp, io.LimitReader(obj, maxBytes+1))
 	_ = videoTmp.Close()
 	_ = obj.Close()
 	if err != nil {
 		cleanup()
 		return "", "", fmt.Errorf("stream video to temp: %w", err)
 	}
-	if written > maxVideoBytes {
+	if written > maxBytes {
 		cleanup()
-		return "", "", fmt.Errorf("video file exceeds maximum size of 500 MB")
+		return "", "", fmt.Errorf("video file exceeds maximum allowed size of %d bytes", maxBytes)
 	}
 	return videoPath, mimeType, nil
 }
@@ -128,14 +146,17 @@ func (s *transcriptionService) downloadVideo(ctx context.Context, storageKey str
 // extractAudio runs ffmpeg to extract 16kHz mono WAV audio from a video file path.
 // The caller owns the input video file; we only own the output WAV. WAV is written
 // to a temp file because ffmpeg requires seekable output for correct size headers.
-func extractAudio(ctx context.Context, videoPath string) ([]byte, error) {
-	audioTmp, err := os.CreateTemp("", "richter-audio-*.wav")
+//
+// IMPORTANT: the caller is responsible for removing the returned temp file via
+// defer os.Remove(audioPath) once it is no longer needed. The file is NOT removed
+// here so it can be streamed directly into the Whisper request without a copy.
+func extractAudio(ctx context.Context, videoPath, tempDir string) (audioPath string, err error) {
+	audioTmp, err := os.CreateTemp(tempDir, "richter-audio-*.wav")
 	if err != nil {
-		return nil, fmt.Errorf("create temp wav file: %w", err)
+		return "", fmt.Errorf("create temp wav file: %w", err)
 	}
-	audioPath := audioTmp.Name()
+	audioPath = audioTmp.Name()
 	audioTmp.Close()
-	defer os.Remove(audioPath)
 
 	cmd := exec.CommandContext(ctx,
 		"ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -150,14 +171,17 @@ func extractAudio(ctx context.Context, videoPath string) ([]byte, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ffmpeg extract audio: %w: %s", err, stderr.String())
+		_ = os.Remove(audioPath)
+		return "", fmt.Errorf("ffmpeg extract audio: %w: %s", err, stderr.String())
 	}
-	return os.ReadFile(audioPath)
+	return audioPath, nil
 }
 
-// whisperTranscribe sends audio bytes to the faster-whisper-server and returns
-// the full transcript text along with fine-grained segment timestamps.
-func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioBytes []byte) (string, []transcriptSegment, error) {
+// whisperTranscribe streams the WAV audio at audioPath to the faster-whisper-server
+// and returns the full transcript text along with fine-grained segment timestamps.
+// The audio is streamed directly from the temp file via io.Pipe so no full copy of
+// the WAV data is held in memory at any time.
+func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath string) (string, []transcriptSegment, error) {
 	if s.whisperSem != nil {
 		// Acquire a Whisper slot. If the parent ctx is cancelled while
 		// we wait, release the would-be slot and bail.
@@ -168,34 +192,64 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioBytes
 			return "", nil, ctx.Err()
 		}
 	}
-	body := &bytes.Buffer{}
-	w := multipart.NewWriter(body)
 
-	// Set Content-Type to audio/wav so speaches can detect the format correctly.
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", `form-data; name="file"; filename="audio.wav"`)
-	h.Set("Content-Type", "audio/wav")
-	fw, err := w.CreatePart(h)
-	if err != nil {
-		return "", nil, fmt.Errorf("create file part: %w", err)
-	}
-	if _, err := fw.Write(audioBytes); err != nil {
-		return "", nil, fmt.Errorf("write audio bytes: %w", err)
-	}
-	if err := w.WriteField("model", s.whisperCfg.Model); err != nil {
-		return "", nil, fmt.Errorf("write model field: %w", err)
-	}
-	if err := w.WriteField("response_format", "verbose_json"); err != nil {
-		return "", nil, fmt.Errorf("write response_format: %w", err)
-	}
-	if err := w.WriteField("timestamp_granularities[]", "segment"); err != nil {
-		return "", nil, fmt.Errorf("write timestamp_granularities: %w", err)
-	}
-	w.Close()
+	// Build the multipart body with a pipe so the WAV bytes flow directly
+	// from disk into the HTTP request without being buffered in RAM.
+	pr, pw := io.Pipe()
+	w := multipart.NewWriter(pw)
+
+	go func() {
+		var writeErr error
+		defer func() {
+			// Always close the multipart writer and pipe writer so the
+			// HTTP client unblocks even if we return early on error.
+			if closeErr := w.Close(); closeErr != nil && writeErr == nil {
+				writeErr = closeErr
+			}
+			pw.CloseWithError(writeErr)
+		}()
+
+		// Set Content-Type to audio/wav so speaches can detect the format correctly.
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", `form-data; name="file"; filename="audio.wav"`)
+		h.Set("Content-Type", "audio/wav")
+		fw, err := w.CreatePart(h)
+		if err != nil {
+			writeErr = fmt.Errorf("create file part: %w", err)
+			return
+		}
+
+		audioFile, err := os.Open(audioPath)
+		if err != nil {
+			writeErr = fmt.Errorf("open audio temp file: %w", err)
+			return
+		}
+		defer audioFile.Close()
+
+		if _, err := io.Copy(fw, audioFile); err != nil {
+			writeErr = fmt.Errorf("stream audio to multipart: %w", err)
+			return
+		}
+
+		if err := w.WriteField("model", s.whisperCfg.Model); err != nil {
+			writeErr = fmt.Errorf("write model field: %w", err)
+			return
+		}
+		if err := w.WriteField("response_format", "verbose_json"); err != nil {
+			writeErr = fmt.Errorf("write response_format: %w", err)
+			return
+		}
+		if err := w.WriteField("timestamp_granularities[]", "segment"); err != nil {
+			writeErr = fmt.Errorf("write timestamp_granularities: %w", err)
+			return
+		}
+	}()
 
 	url := "http://" + s.whisperCfg.Endpoint + "/v1/audio/transcriptions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, pr)
 	if err != nil {
+		// Drain the pipe so the goroutine can exit cleanly.
+		_ = pw.CloseWithError(err)
 		return "", nil, fmt.Errorf("build whisper request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", w.FormDataContentType())
@@ -247,12 +301,23 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioBytes
 
 // runWhisperAnalyze is the Whisper-based replacement for runGeminiAnalyze.
 // Pipeline: download video -> ffmpeg extract audio -> Whisper transcription.
+//
+// A per-pipeline wall-clock deadline is applied around the full pipeline via
+// aiCfg.PipelineTimeout so that a hung ffmpeg or Whisper call cannot block a
+// worker indefinitely beyond the sum of the per-stage budgets.
 func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey string, progress transcript.ProgressFn) (transcript string, segments []transcriptSegment, err error) {
+	// Wrap the entire pipeline in an outer deadline so hung sub-stages
+	// (slow ffmpeg, unresponsive Whisper) are reaped within a predictable
+	// wall-clock budget. Per-stage contexts are derived from this one, so
+	// they will fire first if their individual budgets are shorter.
+	pipeCtx, pipeCancel := s.aiCtx(ctx, s.aiCfg.PipelineTimeout)
+	defer pipeCancel()
+
 	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_DOWNLOADING,
 		"Đang tải video từ storage..."); err != nil {
 		return "", nil, err
 	}
-	videoPath, _, dlErr := s.downloadVideo(ctx, storageKey)
+	videoPath, _, dlErr := s.downloadVideo(pipeCtx, storageKey)
 	if dlErr != nil {
 		return "", nil, dlErr
 	}
@@ -262,12 +327,15 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 		"Đang trích xuất âm thanh..."); err != nil {
 		return "", nil, err
 	}
-	audioCtx, audioCancel := s.aiCtx(ctx, s.aiCfg.AudioExtractTimeout)
+	audioCtx, audioCancel := s.aiCtx(pipeCtx, s.aiCfg.AudioExtractTimeout)
 	defer audioCancel()
-	audioBytes, audioErr := extractAudio(audioCtx, videoPath)
+	// extractAudio returns the path of the temp WAV file. The caller
+	// (this function) is responsible for removing it once Whisper is done.
+	audioPath, audioErr := extractAudio(audioCtx, videoPath, s.tempDir())
 	if audioErr != nil {
 		return "", nil, fmt.Errorf("extract audio: %w", audioErr)
 	}
+	defer os.Remove(audioPath)
 
 	// Emit "Phiên âm bằng Whisper (chờ máy chủ...)" first. The actual
 	// elapsed time is filled in by the heartbeat loop below.
@@ -275,7 +343,7 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 		"Đang phiên âm bằng Whisper — chờ máy chủ xử lý..."); err != nil {
 		return "", nil, err
 	}
-	whisperCtx, whisperCancel := s.aiCtx(ctx, s.aiCfg.WhisperRequestTimeout)
+	whisperCtx, whisperCancel := s.aiCtx(pipeCtx, s.aiCfg.WhisperRequestTimeout)
 	defer whisperCancel()
 
 	type whisperResult struct {
@@ -286,7 +354,7 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 	resultCh := make(chan whisperResult, 1)
 	whisperStart := time.Now()
 	go func() {
-		transcript, segments, err := s.whisperTranscribe(whisperCtx, audioBytes)
+		transcript, segments, err := s.whisperTranscribe(whisperCtx, audioPath)
 		resultCh <- whisperResult{transcript: transcript, segments: segments, err: err}
 	}()
 
@@ -310,9 +378,9 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 				whisperCancel()
 				return "", nil, err
 			}
-		case <-ctx.Done():
+		case <-pipeCtx.Done():
 			whisperCancel()
-			return "", nil, ctx.Err()
+			return "", nil, pipeCtx.Err()
 		}
 	}
 

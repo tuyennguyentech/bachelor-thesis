@@ -220,9 +220,17 @@ func buildAIChoosePrompt(
 	fmt.Fprintf(&customInstructions, "%s\n", strongLanguageInstruction(lessonLanguage))
 
 	return fmt.Sprintf(
-		`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d bài tập để kiểm tra hiểu biết của học sinh.
+		`Bạn là chuyên gia thiết kế câu hỏi giáo dục. Nhiệm vụ: tạo %d bài tập CHẤT LƯỢNG CAO từ đoạn bài giảng dưới đây.
 
-%sVới mỗi bài tập, chọn loại phù hợp nhất từ các loại cho phép:
+MỤC TIÊU: Mỗi bài tập phải đo lường HIỂU BIẾT THỰC SỰ — không chỉ nhớ từ ngữ. Người học phải suy nghĩ, không thể đoán mò.
+
+TIÊU CHÍ CHẤT LƯỢNG (bắt buộc):
+1. BÁM SÁT NỘI DUNG: câu hỏi/bài tập phải xuất phát từ ý tưởng CỐT LÕI của đoạn — không phải chi tiết ngoại vi.
+2. YÊU CẦU SUY LUẬN: hỏi về nguyên nhân, hệ quả, so sánh, ứng dụng — không chỉ tái hiện định nghĩa nguyên văn.
+3. PHÂN BIỆT RÕ: người học biết kiến thức phải trả lời đúng; người chưa học không thể đoán mò.
+4. explanation HỮU ÍCH: giải thích liên hệ lại với khái niệm trong bài.
+
+%sVới mỗi bài tập, chọn loại PHÙ HỢP NHẤT với nội dung muốn kiểm tra từ các loại cho phép:
 %s
 Đoạn nội dung (%.1f - %.1f giây):
 %s

@@ -30,6 +30,8 @@ func taskTypeFromKind(k richterv1.LessonTaskKind) (string, error) {
 		return "chunk", nil
 	case richterv1.LessonTaskKind_LESSON_TASK_KIND_GENERATE_INTERACTIONS:
 		return "quiz_gen", nil
+	case richterv1.LessonTaskKind_LESSON_TASK_KIND_RUN_PIPELINE:
+		return "pipeline_run", nil
 	default:
 		return "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unsupported task kind"))
 	}
@@ -79,6 +81,24 @@ func lessonTaskInputForKind(k richterv1.LessonTaskKind, req *richterv1.StartLess
 			return nil, "", connect.NewError(connect.CodeInternal, fmt.Errorf("marshal quiz_gen input: %w", err))
 		}
 		return out, "Đã đưa tác vụ tạo bài tập vào hàng đợi.", nil
+	case richterv1.LessonTaskKind_LESSON_TASK_KIND_RUN_PIPELINE:
+		genReq := req.GetGenerateInteractions()
+		in := &richterv1.PipelineRunTaskInput{
+			LessonId: req.GetLessonId(),
+		}
+		if genReq != nil {
+			in.InteractionKinds = genReq.GetInteractionKinds()
+			in.CountPerChunk = genReq.GetCountPerChunk()
+			in.Strategy = genReq.GetStrategy()
+			in.Difficulty = genReq.GetDifficulty()
+			in.FocusPrompt = genReq.GetFocusPrompt()
+			in.ForceRegenerate = genReq.GetForceRegenerate()
+		}
+		out, err := proto.Marshal(in)
+		if err != nil {
+			return nil, "", connect.NewError(connect.CodeInternal, fmt.Errorf("marshal pipeline_run input: %w", err))
+		}
+		return out, "Đã đưa tác vụ chạy toàn bộ quy trình vào hàng đợi.", nil
 	}
 	return nil, "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unsupported task kind"))
 }
@@ -400,6 +420,11 @@ func (s *AISvc) preflightLessonTask(
 		if len(chunks) == 0 {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript chunks found — run Step 4 (chunk transcript) first"))
 		}
+	case richterv1.LessonTaskKind_LESSON_TASK_KIND_RUN_PIPELINE:
+		// Only requirement: lesson must have a video_storage_key (same as EXTRACT).
+		if _, _, err := s.authorizeAndLoadLesson(ctx, lessonID.String()); err != nil {
+			return err
+		}
 	default:
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unsupported task kind"))
 	}
@@ -460,6 +485,8 @@ func taskTypeToProtoKind(t string) richterv1.LessonTaskKind {
 		return richterv1.LessonTaskKind_LESSON_TASK_KIND_CHUNK_TRANSCRIPT
 	case "quiz_gen":
 		return richterv1.LessonTaskKind_LESSON_TASK_KIND_GENERATE_INTERACTIONS
+	case "pipeline_run":
+		return richterv1.LessonTaskKind_LESSON_TASK_KIND_RUN_PIPELINE
 	}
 	return richterv1.LessonTaskKind_LESSON_TASK_KIND_UNSPECIFIED
 }

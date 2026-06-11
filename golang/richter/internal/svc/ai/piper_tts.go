@@ -54,9 +54,16 @@ func (c *PiperTTSClient) Synthesise(ctx context.Context, text, language string) 
 		return nil, fmt.Errorf("piper-tts: status %d: %s", resp.StatusCode, string(body))
 	}
 
-	wav, err := io.ReadAll(resp.Body)
+	// Cap the TTS response at 5 MB. Piper's WAV output for a typical
+	// lesson interaction (a few sentences) is well under 1 MB; the cap
+	// prevents a misconfigured or misbehaving TTS server from OOM-ing richter.
+	const maxTTSResponseBytes = 5 << 20
+	wav, err := io.ReadAll(io.LimitReader(resp.Body, maxTTSResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("piper-tts: read body: %w", err)
+	}
+	if int64(len(wav)) > maxTTSResponseBytes {
+		return nil, fmt.Errorf("piper-tts: response exceeds %d bytes", maxTTSResponseBytes)
 	}
 	if len(wav) == 0 {
 		return nil, fmt.Errorf("piper-tts: empty response body")

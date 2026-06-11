@@ -1,13 +1,23 @@
 -- name: ListCourseAttemptsSummary :many
 -- Returns per-student aggregate metrics for students who have at least one
 -- lesson_attempt in any lesson belonging to the given course.
+--
+-- response_rate = total responses submitted / total interactions available across
+-- all attempted lessons.  A student who answered every question scores 1.0;
+-- a student who skipped all interactions scores 0.0.
+--
+-- lessons_attempted = distinct lessons with any attempt (was previously called
+-- "lessons_completed" which was semantically incorrect).
+-- lessons_completed  = distinct lessons where the student's score >= 50 % of max.
 SELECT
   u.id                                        AS user_id,
   u.first_name,
   u.middle_name,
   u.last_name,
   u.email,
-  COUNT(DISTINCT la.lesson_id)::int           AS lessons_completed,
+  -- lessons_completed: lessons with score >= 50 % of max_score
+  COUNT(DISTINCT CASE WHEN la.max_score > 0 AND la.total_score >= la.max_score * 0.5
+        THEN la.lesson_id END)::int           AS lessons_completed,
   (
     SELECT COUNT(*)::int
     FROM lessons l2
@@ -20,9 +30,14 @@ SELECT
   )::float8                                   AS avg_score,
   COALESCE(AVG(la.video_watch_fraction), 0)::float8 AS avg_video_watch_fraction,
   COALESCE(AVG(lar_agg.avg_time_to_answer_ms), 0)::float8 AS avg_time_to_answer_ms,
-  (
-    COUNT(DISTINCT CASE WHEN lar_agg.response_count > 0 THEN la.lesson_id END)::float8
-    / NULLIF(COUNT(DISTINCT la.lesson_id), 0)
+  -- response_rate: interactions answered / interactions available
+  -- Computes the fraction of available lesson interactions that were actually
+  -- answered, averaged across all attempted lessons.  This correctly reflects
+  -- whether a student engaged with the quiz content (was always 1.0 before this fix).
+  COALESCE(
+    SUM(lar_agg.response_count)::float8
+    / NULLIF(SUM(li_agg.total_interactions), 0),
+    0
   )::float8                                   AS response_rate,
   MAX(la.submitted_at)                        AS last_active
 FROM lesson_attempts la
@@ -36,6 +51,11 @@ LEFT JOIN LATERAL (
   FROM lesson_attempt_responses lar
   WHERE lar.attempt_id = la.id
 ) lar_agg ON true
+LEFT JOIN LATERAL (
+  SELECT COUNT(*)::float8 AS total_interactions
+  FROM lesson_interactions li
+  WHERE li.lesson_id = la.lesson_id
+) li_agg ON true
 WHERE cm.course_id = $1
 GROUP BY u.id, u.first_name, u.middle_name, u.last_name, u.email
 ORDER BY last_active DESC NULLS LAST

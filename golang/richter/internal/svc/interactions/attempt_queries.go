@@ -132,13 +132,17 @@ func (s *InteractionsSvc) ListAttempts(
 		if r.VideoWatchFraction.Valid {
 			watchFrac = float64(r.VideoWatchFraction.Float32)
 		}
-		// response_rate for lesson-level summary: we don't have total_interactions
-		// directly here so we pass watch=watch, rate=1 (all graded), score=score/max.
+		// response_rate: actual responses submitted / total interactions available.
+		// Both fields are now returned by the ListLessonAttempts query.
+		responseRate := float64(0)
+		if r.TotalInteractions > 0 {
+			responseRate = float64(r.ResponseCount) / float64(r.TotalInteractions)
+		}
 		scoreFrac := float64(0)
 		if r.MaxScore > 0 {
 			scoreFrac = float64(r.TotalScore) / float64(r.MaxScore)
 		}
-		eng := computeEngagementScore(watchFrac, 1.0, scoreFrac)
+		eng := computeEngagementScore(watchFrac, responseRate, scoreFrac)
 		summaries = append(summaries, &richterv1.StudentAttemptSummary{
 			UserId:             r.UserID.String(),
 			DisplayName:        name,

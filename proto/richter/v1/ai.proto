@@ -212,6 +212,8 @@ enum LessonTaskKind {
   LESSON_TASK_KIND_EXTRACT_TRANSCRIPT = 1;
   LESSON_TASK_KIND_CHUNK_TRANSCRIPT = 2;
   LESSON_TASK_KIND_GENERATE_INTERACTIONS = 3;
+  // One-shot pipeline: transcribe → chunk → quiz_gen in a single task.
+  LESSON_TASK_KIND_RUN_PIPELINE = 4;
 }
 
 enum LessonTaskStatus {
@@ -368,6 +370,24 @@ message QuizGenTaskInput {
 }
 
 message QuizGenTaskOutput {
+  int64 completed_at = 1;
+  int32 interactions = 2;  // number of interactions generated
+}
+
+// Input/output for the one-shot pipeline task (kind=RUN_PIPELINE).
+// Runs transcribe → chunk → quiz_gen sequentially in a single durable task.
+message PipelineRunTaskInput {
+  string lesson_id = 1;
+  // Exercise generation config (mirrors QuizGenTaskInput fields).
+  repeated InteractionKind interaction_kinds = 2;
+  int32 count_per_chunk = 3;
+  GenerationStrategy strategy = 4;
+  string difficulty = 5;
+  string focus_prompt = 6;
+  bool force_regenerate = 7;
+}
+
+message PipelineRunTaskOutput {
   int64 completed_at = 1;
   int32 interactions = 2;  // number of interactions generated
 }

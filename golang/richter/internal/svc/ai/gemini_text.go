@@ -71,25 +71,30 @@ func buildTextOnlyGradingPrompt(language, question, studentAnswer, expectedAnswe
 		langName = "Tiếng Anh (English)"
 	}
 
-	return fmt.Sprintf(`Bạn là một giám khảo giáo dục chuyên nghiệp. Nhiệm vụ của bạn là đánh giá câu trả lời của học sinh so với đáp án mong đợi dưới đây.
+	return fmt.Sprintf(`Bạn là giám khảo giáo dục chuyên nghiệp. Chấm điểm câu trả lời của học sinh theo NGHĨA — không phải so khớp từng chữ.
 
-Ngôn ngữ của bài học: %s
+Ngôn ngữ bài học: %s
 
-[BỐI CẢNH/CÂU HỎI]:
+[BỐI CẢNH / CÂU HỎI]:
 %s
 
-[ĐÁP ÁN ĐÚNG/ĐÁP ÁN MONG ĐỢI]:
+[ĐÁP ÁN THAM CHIẾU]:
 %s
 
 [CÂU TRẢ LỜI CỦA HỌC SINH]:
 %s
 
-YÊU CẦU CHẤM ĐIỂM:
-1. Đánh giá tính chính xác về mặt NGỮ NGHĨA.
-2. Nếu câu trả lời của học sinh diễn đạt hoàn toàn trùng khớp hoặc là một từ/cụm từ đồng nghĩa hoàn hảo, mang ý nghĩa tương đương và phù hợp tuyệt đối với ngữ cảnh câu hỏi, hãy chấm 1.0 điểm.
-3. Cho phép bỏ qua các lỗi nhỏ về dấu câu, lỗi viết hoa/viết thường, hoặc khoảng trắng dư thừa.
-4. Đối với bài tập điền từ (fill-blank) hoặc bài tập nghe chính tả: Hãy cực kỳ linh hoạt với từ đồng nghĩa (ví dụ: "chạy" và "vận hành", "computer" và "máy tính", "bố" và "ba"). Nếu học sinh điền từ có nghĩa tương đương, hãy cho điểm tối đa (1.0).
-5. Trả về điểm số trong khoảng [0.0, 1.0] và phản hồi nhận xét (feedback) ngắn gọn, súc tích bằng ngôn ngữ: %s.
+RUBRIC CHẤM ĐIỂM [0.0 – 1.0]:
+- 1.0 = Hoàn toàn đúng về nghĩa: câu trả lời nắm được khái niệm cốt lõi, dù diễn đạt khác từ ngữ, dùng từ đồng nghĩa, viết tắt chấp nhận được, hoặc có lỗi chính tả / hoa thường nhỏ không ảnh hưởng nghĩa.
+- 0.7–0.9 = Đúng một phần: hiểu đúng ý chính nhưng thiếu một chi tiết quan trọng, hoặc diễn đạt mơ hồ, hoặc dùng thuật ngữ gần đúng.
+- 0.3–0.6 = Có liên quan nhưng sai đáng kể: nhận ra chủ đề nhưng hiểu sai khái niệm, hoặc trả lời một phần rất nhỏ.
+- 0.0–0.2 = Sai hoàn toàn hoặc không liên quan: hiểu nhầm hoàn toàn, câu trả lời ngoài chủ đề, hoặc để trống.
 
-Hãy trả về JSON khớp với schema yêu cầu.`, langName, question, expectedAnswer, studentAnswer, langName)
+QUY TẮC:
+- Chú trọng NGỮ NGHĨA, không phải cú pháp hay từ ngữ cụ thể.
+- Với fill-blank / dictation: chấp nhận từ đồng nghĩa chuẩn (ví dụ: "bubble sort" ↔ "sắp xếp nổi bọt", "O(n)" ↔ "tuyến tính"), viết hoa/thường không quan trọng.
+- Không trừ điểm vì lỗi chính tả nhỏ hoặc thiếu dấu câu.
+- feedback: 1–2 câu ngắn gọn, KHUYẾN KHÍCH, bằng %s. Nếu đúng: xác nhận và củng cố. Nếu sai/thiếu: chỉ ra cụ thể điểm nào cần cải thiện (không chỉ nói "sai").
+
+Trả về JSON theo schema yêu cầu.`, langName, question, expectedAnswer, studentAnswer, langName)
 }

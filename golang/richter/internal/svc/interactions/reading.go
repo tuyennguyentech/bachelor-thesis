@@ -31,9 +31,19 @@ func (h *readingHandler) Kind() richterv1.InteractionKind {
 	return richterv1.InteractionKind_INTERACTION_KIND_READING
 }
 
-func (h *readingHandler) Grade(_, _ []byte) (score, maxScore float32, feedback string, err error) {
+func (h *readingHandler) Grade(_, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
 	// Fallback when GradingDeps not available (unit tests, missing AI config).
-	return 1, 1, "", nil
+	// Return score=0 (not 1) so that the fallback path does not award a perfect
+	// score for an ungraded submission — callers should see a no-submission result.
+	var resp readingResponseJSON
+	if len(responseJSON) > 0 {
+		_ = json.Unmarshal(responseJSON, &resp)
+	}
+	if strings.TrimSpace(resp.AudioObjectKey) == "" {
+		return 0, 1, "Chưa có bản ghi âm.", nil
+	}
+	// Audio key present but no AI context to grade: pending credit.
+	return 0, 1, "Chưa chấm điểm — hệ thống AI chưa được cấu hình.", nil
 }
 
 // GradeWithContext implements ContextualGrader — used by SubmitAttempt when AISvc is wired.
@@ -192,7 +202,22 @@ func (h *readingHandler) GeminiSchema() string {
 }
 
 func (h *readingHandler) GeminiPromptHint() string {
-	return `Tạo bài đọc âm thanh có mục tiêu học tập rõ ràng, bám vào transcript. Với mode "pronunciation": viết đoạn văn 50-150 từ tự đủ ngữ cảnh để học viên đọc to, tránh câu rời rạc hoặc quá chung chung. Với mode "open_answer": viết đoạn văn ngữ cảnh, một câu hỏi mở cụ thể về đoạn đó, VÀ expected_answer ngắn gọn dùng để chấm điểm nội dung.`
+	return `Tạo bài đọc (reading) có giá trị học tập rõ ràng — không chỉ tái hiện lại câu từ transcript.
+
+Chọn mode phù hợp:
+
+MODE "open_answer" (ĐƯỢC ƯU TIÊN khi đoạn transcript có nội dung phong phú):
+- passage_markdown: đoạn văn 80–200 từ trình bày khái niệm/lý thuyết từ bài giảng, viết lại ở dạng mạch lạc (không copy nguyên văn transcript nếu transcript là lời nói tự nhiên). Được phép dùng markdown đơn giản (in đậm thuật ngữ, gạch đầu dòng).
+- question: câu hỏi đọc hiểu YÊU CẦU TƯ DUY, ví dụ: "Theo đoạn văn, điểm khác biệt chính giữa X và Y là gì?", "Giải thích bằng lời của bạn tại sao …", "Liệt kê 2 ví dụ được đề cập và giải thích vai trò của chúng."
+- expected_answer: câu trả lời mẫu ngắn gọn (1–3 câu), đủ để hệ thống AI chấm điểm ngữ nghĩa (không phải đáp án duy nhất — phục vụ tham chiếu).
+- CẤM: câu hỏi mà câu trả lời được nhìn thấy ngay lập tức khi đọc lướt passage.
+
+MODE "pronunciation" (dùng khi đoạn transcript chứa nhiều thuật ngữ kỹ thuật hoặc cấu trúc ngôn ngữ cần luyện phát âm):
+- passage_markdown: đoạn văn 60–150 từ, mật độ thuật ngữ vừa phải, câu đa dạng về độ dài và cấu trúc để thử thách khả năng đọc.
+- question và expected_answer: để trống (không cần cho pronunciation mode).
+
+prompt: hướng dẫn rõ cho người học (ví dụ: "Đọc to đoạn văn sau:" hoặc "Đọc đoạn văn và trả lời câu hỏi bằng giọng nói:").
+explanation: giải thích mục tiêu học tập của bài đọc này (ví dụ: thuật ngữ nào cần nắm, khái niệm gì được kiểm tra).`
 }
 
 func (h *readingHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {

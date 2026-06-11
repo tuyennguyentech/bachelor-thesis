@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/google/generative-ai-go/genai"
@@ -22,8 +23,22 @@ type AudioGradingResult struct {
 }
 
 func (s *gradingService) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question, expectedAnswer string) (*AudioGradingResult, error) {
-	// 1. Call Whisper to transcribe the audio.
-	transcript, _, werr := s.transcription.whisperTranscribe(ctx, audioMP3)
+	// 1. Write the student audio bytes to a temp file so we can stream it
+	// into the Whisper multipart request without holding a second copy in RAM.
+	audioTmp, err := os.CreateTemp("", "richter-grade-audio-*")
+	if err != nil {
+		return nil, fmt.Errorf("gemini audio grade: create temp audio file: %w", err)
+	}
+	audioTmpPath := audioTmp.Name()
+	defer os.Remove(audioTmpPath)
+	if _, err := audioTmp.Write(audioMP3); err != nil {
+		audioTmp.Close()
+		return nil, fmt.Errorf("gemini audio grade: write temp audio file: %w", err)
+	}
+	audioTmp.Close()
+
+	// 2. Call Whisper to transcribe the audio.
+	transcript, _, werr := s.transcription.whisperTranscribe(ctx, audioTmpPath)
 	if werr != nil {
 		return nil, fmt.Errorf("gemini audio grade: whisper transcription: %w", werr)
 	}
@@ -77,60 +92,60 @@ func buildTextGradingPrompt(language, passageMarkdown, question, expectedAnswer,
 
 	if language == "en" {
 		if isOpenAnswer {
-			sb.WriteString("You are an English language teacher. Grade this student's spoken answer based on the provided transcription of their audio.\n\n")
+			sb.WriteString("You are a professional language assessor. Grade this student's spoken response based on the transcription of their audio recording.\n\n")
 			sb.WriteString("Context passage:\n")
 			sb.WriteString(passageMarkdown)
-			sb.WriteString("\n\nQuestion: ")
+			sb.WriteString("\n\nQuestion asked: ")
 			sb.WriteString(question)
 			if strings.TrimSpace(expectedAnswer) != "" {
-				sb.WriteString("\n\nExpected answer (gold reference): ")
+				sb.WriteString("\n\nReference answer (not the only correct phrasing): ")
 				sb.WriteString(expectedAnswer)
 			}
 			sb.WriteString("\n\nStudent's transcribed answer: ")
 			sb.WriteString(transcript)
-			sb.WriteString("\n\nEvaluate the student's response:\n")
-			sb.WriteString("1. Rate pronunciation/clarity quality: 0.0 = very poor/unclear, 1.0 = excellent/clear (pronunciation_score). Note: since you are reading a transcript, base this on how coherent and clear the transcription is compared to natural spoken English.\n")
-			sb.WriteString("2. Rate content correctness against the expected answer if provided, otherwise against the passage: 0.0 = wrong/irrelevant, 1.0 = fully correct (content_score)\n")
-			sb.WriteString("3. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
+			sb.WriteString("\n\nScoring rubric:\n")
+			sb.WriteString("pronunciation_score [0.0–1.0]: Assess delivery clarity and fluency from the transcription quality. 1.0 = coherent, natural-sounding transcript that matches expected English; 0.5 = partially intelligible with noticeable gaps; 0.0 = transcript is incoherent or completely off-topic.\n")
+			sb.WriteString("content_score [0.0–1.0]: Assess whether the student's answer addresses the question correctly based on MEANING, not exact words. 1.0 = captures the core concept correctly, possibly with different phrasing or synonyms; 0.5–0.8 = partially correct or missing one key point; 0.0 = wrong or irrelevant. If no reference answer is provided, grade against the passage content.\n")
+			sb.WriteString("feedback: 1–2 sentences in English. Be specific and encouraging: confirm what was right, or name exactly what concept was missed (do not just say 'wrong').\n")
 		} else {
-			sb.WriteString("You are an English language teacher. Grade this student's reading aloud exercise based on the provided transcription of their audio.\n\n")
-			sb.WriteString("The student was asked to read this passage aloud:\n")
+			sb.WriteString("You are a professional language assessor. Grade this student's read-aloud exercise based on the transcription of their audio recording.\n\n")
+			sb.WriteString("Target passage the student was asked to read:\n")
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nStudent's transcribed reading: ")
 			sb.WriteString(transcript)
-			sb.WriteString("\n\nEvaluate the student's reading:\n")
-			sb.WriteString("1. Rate pronunciation/accuracy quality: 0.0 = very poor/does not match the passage, 1.0 = excellent/matches the passage perfectly (pronunciation_score). Base this on how well the transcription matches the target passage (missing words, extra words, or replaced words should lower the score).\n")
-			sb.WriteString("2. Set content_score to 0 (not applicable for reading aloud)\n")
-			sb.WriteString("3. Write short, encouraging feedback in English (1-2 sentences) (feedback)\n")
+			sb.WriteString("\n\nScoring rubric:\n")
+			sb.WriteString("pronunciation_score [0.0–1.0]: Compare the transcription against the target passage word-by-word. 1.0 = transcript closely matches the passage (minor articles/conjunctions may differ); deduct proportionally for missing content words, substituted key terms, or completely skipped sentences. 0.0 = transcript bears no resemblance to the passage.\n")
+			sb.WriteString("content_score: set to 0 (not applicable for read-aloud).\n")
+			sb.WriteString("feedback: 1–2 sentences in English. Highlight specific words or phrases that were read well or that differed from the passage; be encouraging.\n")
 		}
 	} else {
 		// Vietnamese
 		if isOpenAnswer {
-			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm câu trả lời nói của học sinh dựa trên bản ghi phiên âm từ giọng nói của học sinh.\n\n")
+			sb.WriteString("Bạn là giám khảo ngôn ngữ chuyên nghiệp. Chấm điểm câu trả lời nói của học sinh dựa trên bản ghi phiên âm từ giọng nói.\n\n")
 			sb.WriteString("Đoạn văn ngữ cảnh:\n")
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nCâu hỏi: ")
 			sb.WriteString(question)
 			if strings.TrimSpace(expectedAnswer) != "" {
-				sb.WriteString("\n\nĐáp án mẫu (tham chiếu): ")
+				sb.WriteString("\n\nĐáp án tham chiếu (không phải cách diễn đạt duy nhất đúng): ")
 				sb.WriteString(expectedAnswer)
 			}
 			sb.WriteString("\n\nBản ghi phiên âm câu trả lời của học sinh: ")
 			sb.WriteString(transcript)
-			sb.WriteString("\n\nĐánh giá câu trả lời của học sinh:\n")
-			sb.WriteString("1. Đánh giá chất lượng phát âm/độ rõ ràng: 0.0 = rất kém/không rõ ràng, 1.0 = xuất sắc/rõ ràng (pronunciation_score). Chấm điểm dựa trên độ mạch lạc và chuẩn xác của văn bản phiên âm.\n")
-			sb.WriteString("2. Đánh giá mức độ đúng của nội dung so với đáp án mẫu (nếu có), nếu không thì so với đoạn văn: 0.0 = sai/không liên quan, 1.0 = hoàn toàn đúng (content_score)\n")
-			sb.WriteString("3. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
+			sb.WriteString("\n\nRubric chấm điểm:\n")
+			sb.WriteString("pronunciation_score [0.0–1.0]: Đánh giá độ rõ ràng và mạch lạc của phần nói dựa trên chất lượng phiên âm. 1.0 = phiên âm mạch lạc, tự nhiên, phù hợp tiếng Việt chuẩn; 0.5 = hiểu được nhưng có khoảng trống hoặc câu chưa hoàn chỉnh; 0.0 = phiên âm không rõ nghĩa.\n")
+			sb.WriteString("content_score [0.0–1.0]: Đánh giá mức độ trả lời ĐÚNG VỀ NGỮ NGHĨA — không yêu cầu trùng từng chữ với đáp án tham chiếu. 1.0 = nắm đúng khái niệm cốt lõi, dù diễn đạt khác; 0.5–0.8 = đúng một phần hoặc thiếu một điểm quan trọng; 0.0 = sai hoàn toàn hoặc không liên quan. Nếu không có đáp án tham chiếu, chấm dựa trên nội dung đoạn văn.\n")
+			sb.WriteString("feedback: 1–2 câu tiếng Việt, KHUYẾN KHÍCH và CỤ THỂ: xác nhận điểm đúng hoặc chỉ rõ khái niệm nào còn thiếu/sai (không chỉ nói 'chưa đúng').\n")
 		} else {
-			sb.WriteString("Bạn là giáo viên tiếng Việt. Hãy chấm điểm bài đọc to của học sinh dựa trên bản ghi phiên âm từ giọng nói của học sinh.\n\n")
-			sb.WriteString("Học sinh được yêu cầu đọc to đoạn văn sau:\n")
+			sb.WriteString("Bạn là giám khảo ngôn ngữ chuyên nghiệp. Chấm điểm bài đọc to của học sinh dựa trên bản ghi phiên âm từ giọng nói.\n\n")
+			sb.WriteString("Đoạn văn học sinh được yêu cầu đọc to:\n")
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nBản ghi phiên âm bài đọc của học sinh: ")
 			sb.WriteString(transcript)
-			sb.WriteString("\n\nĐánh giá bài đọc của học sinh:\n")
-			sb.WriteString("1. Đánh giá chất lượng phát âm/độ chính xác: 0.0 = rất kém/không khớp với đoạn văn, 1.0 = xuất sắc/khớp hoàn toàn với đoạn văn (pronunciation_score). Điểm số dựa trên việc so sánh bản ghi phiên âm với đoạn văn mẫu (các từ bị thiếu, từ thừa hoặc từ bị đọc sai khiến phiên âm khác đi sẽ làm giảm điểm).\n")
-			sb.WriteString("2. Đặt content_score = 0 (không áp dụng cho bài đọc to)\n")
-			sb.WriteString("3. Viết nhận xét ngắn gọn, khuyến khích bằng tiếng Việt (1-2 câu) (feedback)\n")
+			sb.WriteString("\n\nRubric chấm điểm:\n")
+			sb.WriteString("pronunciation_score [0.0–1.0]: So sánh phiên âm với đoạn văn gốc theo từng từ nội dung. 1.0 = phiên âm khớp chặt với đoạn văn (có thể bỏ sót mạo từ/liên từ nhỏ); trừ điểm tỷ lệ cho từ nội dung bị thiếu, bị đọc sai, hoặc câu bị bỏ qua hoàn toàn. 0.0 = phiên âm không giống đoạn văn.\n")
+			sb.WriteString("content_score: đặt = 0 (không áp dụng cho bài đọc to).\n")
+			sb.WriteString("feedback: 1–2 câu tiếng Việt, KHUYẾN KHÍCH. Nêu cụ thể từ/câu được đọc tốt hoặc cần cải thiện; không chỉ nhận xét chung chung.\n")
 		}
 	}
 	return sb.String()

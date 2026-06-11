@@ -79,6 +79,19 @@ whisper_progress_interval      = "20s"
 # under parallel transcribe (most common cause of "timeout awaiting
 # response headers" failures). 0 = unlimited.
 whisper_max_concurrent         = 1
+# Total wall-clock budget for the full extract pipeline
+# (download + ffmpeg + Whisper). Guards against hung sub-stages.
+# 0 = unlimited (rely on per-stage timeouts only).
+# Default: generous 33 min = DownloadTimeout + AudioExtractTimeout +
+# WhisperRequestTimeout + 5 min buffer.
+pipeline_timeout               = "33m"
+# Maximum video file size accepted at download time.
+# 0 = use built-in default (2 GB). Override for smaller deployments.
+# E.g. 536870912 = 512 MB; 2147483648 = 2 GB.
+max_video_bytes                = 0
+# Directory for video/audio temp files. Empty = os.TempDir() (system
+# default /tmp). Point at a dedicated volume for large-video workloads.
+temp_dir                       = ""
 chunking_timeout               = "3m"
 interaction_gen_timeout        = "2m"
 tts_request_timeout            = "2m"

@@ -140,7 +140,19 @@ func (h *singleChoiceHandler) GeminiSchema() string {
 }
 
 func (h *singleChoiceHandler) GeminiPromptHint() string {
-	return "Tạo câu hỏi trắc nghiệm một đáp án lựa chọn đúng (Single Choice). Có từ 2 đến 6 phương án đáp án tự do."
+	return `Tạo câu hỏi trắc nghiệm một đáp án (Single Choice) kiểm tra HIỂU BIẾT KHÁI NIỆM — không phải ghi nhớ máy móc.
+
+NGUYÊN TẮC VIẾT CÂU HỎI:
+- Hỏi về ý nghĩa, ứng dụng, so sánh, hoặc hệ quả của khái niệm — không hỏi định nghĩa nguyên văn.
+- Ví dụ TỐT: "Khi nào nên dùng binary search thay vì linear search?", "Điều gì xảy ra với độ phức tạp thời gian của bubble sort khi mảng đã được sắp xếp?"
+- Ví dụ XẤU: "Bubble sort là gì?" (quá đơn giản, chỉ cần nhớ định nghĩa).
+
+NGUYÊN TẮC VIẾT ĐÁP ÁN:
+- 4 phương án (tối đa 6). Tất cả phương án sai phải hợp lý và có liên quan đến chủ đề — không được vô nghĩa hay hiển nhiên sai.
+- Đáp án sai nên phản ánh các hiểu lầm phổ biến hoặc sự nhầm lẫn giữa các khái niệm gần nhau.
+- Không có phương án "Tất cả các đáp án trên" hay "Không có đáp án nào đúng".
+
+explanation: giải thích TẠI SAO đáp án đúng là đúng và TẠI SAO các đáp án sai bị loại (1–3 câu).`
 }
 
 func (h *singleChoiceHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
@@ -327,7 +339,15 @@ func (h *multipleChoiceHandler) GeminiSchema() string {
 }
 
 func (h *multipleChoiceHandler) GeminiPromptHint() string {
-	return "Tạo câu hỏi trắc nghiệm chọn nhiều đáp án đúng (Multiple Choice). Cho phép chọn từ 1 đến nhiều đáp án đúng, có từ 2 đến 6 phương án đáp án tự do."
+	return `Tạo câu hỏi trắc nghiệm CHỌN NHIỀU ĐÁP ÁN (Multiple Choice) — PHẢI có từ 2 đáp án đúng trở lên để phân biệt với single choice.
+
+NGUYÊN TẮC:
+- Câu hỏi nên yêu cầu liệt kê (ví dụ: "Những đặc điểm nào SAU ĐÂY đúng về X?", "Thuật toán nào có độ phức tạp O(n log n)? [Chọn tất cả đúng]").
+- 4–6 phương án; 2–4 phương án đúng. Thông báo rõ trong question rằng có thể chọn nhiều (ví dụ: "Chọn TẤT CẢ đáp án đúng").
+- Đáp án sai phải hợp lý, không hiển nhiên.
+- Tránh câu hỏi mà chỉ có 1 đáp án đúng — dùng single_choice cho trường hợp đó.
+
+explanation: giải thích từng đáp án đúng/sai, tại sao mỗi lựa chọn đúng hoặc sai.`
 }
 
 func (h *multipleChoiceHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {

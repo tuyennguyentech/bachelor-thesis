@@ -8,7 +8,7 @@ ON CONFLICT (user_id, lesson_id) DO UPDATE SET
   attempt_count = COALESCE(lesson_attempts.attempt_count, 0) + 1,
   submitted_at = now(),
   started_at = COALESCE(lesson_attempts.started_at, now()),
-  video_watch_fraction = EXCLUDED.video_watch_fraction
+  video_watch_fraction = GREATEST(COALESCE(lesson_attempts.video_watch_fraction, 0), EXCLUDED.video_watch_fraction)
 RETURNING *;
 
 -- name: GetMyLessonAttempt :one
@@ -52,7 +52,11 @@ SELECT
   u.first_name,
   u.middle_name,
   u.last_name,
-  u.email
+  u.email,
+  -- responses submitted by this student for this attempt
+  COUNT(lar.interaction_id)::int                   AS response_count,
+  -- total interactions available in the lesson (for real response_rate computation)
+  (SELECT COUNT(*)::int FROM lesson_interactions li WHERE li.lesson_id = la.lesson_id) AS total_interactions
 FROM lesson_attempts la
 JOIN users u ON u.id = la.user_id
 LEFT JOIN lesson_attempt_responses lar ON lar.attempt_id = la.id

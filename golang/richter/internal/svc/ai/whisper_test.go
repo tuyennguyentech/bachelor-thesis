@@ -36,9 +36,15 @@ func TestExtractAudioFromMP4(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	audioBytes, err := extractAudio(ctx, tmp.Name())
+	// extractAudio now streams to a temp WAV file and returns its path.
+	audioPath, err := extractAudio(ctx, tmp.Name(), t.TempDir())
 	if err != nil {
 		t.Fatalf("extractAudio: %v", err)
+	}
+	defer os.Remove(audioPath)
+	audioBytes, err := os.ReadFile(audioPath)
+	if err != nil {
+		t.Fatalf("read extracted audio: %v", err)
 	}
 
 	if len(audioBytes) < 44 {

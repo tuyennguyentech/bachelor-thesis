@@ -280,7 +280,20 @@ func (h *listeningHandler) GeminiSchema() string {
 }
 
 func (h *listeningHandler) GeminiPromptHint() string {
-	return `Tạo bài nghe dạng comprehension (hiểu nội dung). Trả về audio_source_text là một đoạn giảng ngắn, tự đủ ngữ cảnh, khoảng 50-100 từ để đọc to thành audio TTS. Tạo 2-4 câu hỏi MCQ bám sát các ý cụ thể trong audio_source_text; mỗi câu hỏi phải có trường question rõ nghĩa, không được chỉ trả về các lựa chọn đáp án.`
+	return `Tạo bài nghe hiểu (listening comprehension) đòi hỏi người học xử lý và suy luận thông tin — không phải nghe lại một câu rồi chọn đáp án hiển nhiên.
+
+audio_source_text (đoạn nghe):
+- Viết đoạn giảng TỰ ĐỦ NGỮ CẢNH, khoảng 60–100 từ, trình bày một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang) từ nội dung transcript.
+- Đoạn phải chứa đủ thông tin để trả lời tất cả câu hỏi phía dưới — không phụ thuộc vào kiến thức bên ngoài.
+- Viết bằng văn phong tự nhiên, mạch lạc (không phải danh sách bullet).
+
+Câu hỏi (2–4 câu, phân loại theo mức độ tư duy):
+- ÍT NHẤT 1 câu hỏi YÊU CẦU SUY LUẬN hoặc TỔNG HỢP: "Mục đích chính của … là gì?", "Tại sao tác giả nói …?", "Điều gì sẽ xảy ra nếu …?"
+- ÍT NHẤT 1 câu hỏi về CHI TIẾT CỤ THỂ không thể đoán nếu không nghe: con số, tên riêng, mối quan hệ nhân quả được nêu trong đoạn.
+- CẤM: câu hỏi mà câu trả lời được lặp lại nguyên văn trong đoạn nghe (tránh echo). CẤM câu hỏi hiển nhiên chỉ cần đọc lướt.
+- Mỗi câu hỏi: 4 lựa chọn, chỉ 1 đúng. Các đáp án sai phải hợp lý (không phải vô nghĩa).
+- prompt: mô tả ngắn gọn nội dung đoạn nghe và yêu cầu người học (ví dụ: "Nghe đoạn giảng về [chủ đề] và trả lời các câu hỏi sau:").
+- explanation: giải thích câu trả lời đúng và lý do các đáp án sai bị loại.`
 }
 
 func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {

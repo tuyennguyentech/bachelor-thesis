@@ -274,7 +274,21 @@ func (h *fillBlankHandler) GeminiSchema() string {
 }
 
 func (h *fillBlankHandler) GeminiPromptHint() string {
-	return `Tạo câu điền khuyết (fill-blank). Template dùng {{0}}, {{1}}, ... làm chỗ trống. Mỗi chỗ trống cần ít nhất 1 đáp án chấp nhận được (1-3 từ). Chọn các từ khóa quan trọng về khái niệm. Mặc định case_sensitive=false.`
+	return `Tạo câu điền khuyết (fill-blank) thực sự thử thách hiểu biết khái niệm.
+
+NGUYÊN TẮC CHỌN TỪ CẦN ĐIỀN:
+- Chọn TỪ KHÓA THEN CHỐT mang ý nghĩa khái niệm cốt lõi của đoạn giảng (thuật ngữ chuyên môn, định nghĩa, nguyên lý). KHÔNG chọn giới từ, mạo từ, liên từ, hoặc từ ngẫu nhiên.
+- Câu template sau khi bỏ chỗ trống phải cung cấp đủ ngữ cảnh để người học suy luận ra câu trả lời từ hiểu biết — KHÔNG phải chỉ ghi nhớ máy móc một từ ngẫu nhiên.
+- Ví dụ TỐT: "Thuật toán {{0}} sắp xếp mảng bằng cách so sánh từng cặp phần tử liền kề và hoán đổi chúng nếu sai thứ tự." (→ "bubble sort")
+- Ví dụ XẤU: "Bubble sort là một {{0}} sắp xếp." (→ "thuật toán" — quá dễ, không đo hiểu biết)
+
+ĐỊNH DẠNG:
+- Template dùng {{0}}, {{1}}, ... cho chỗ trống. Tối đa 2 chỗ trống mỗi câu.
+- Mỗi chỗ trống: 1–3 từ, cung cấp 1–3 cách diễn đạt tương đương trong mảng accepted (từ đồng nghĩa, viết tắt phổ biến).
+- Trường hint (tuỳ chọn): gợi ý ngắn không tiết lộ đáp án (ví dụ: "2 từ", "thuật ngữ tiếng Anh").
+- Mặc định case_sensitive=false.
+- prompt: câu hỏi/hướng dẫn rõ ràng cho người học (ví dụ: "Điền thuật ngữ còn thiếu vào câu sau:").
+- explanation: giải thích tại sao đó là đáp án đúng, liên hệ lại với khái niệm trong bài giảng.`
 }
 
 func (h *fillBlankHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
