@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ClockIcon, HeadphonesIcon, RotateCcwIcon, VideoIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -38,6 +39,10 @@ interface Props {
   maxAttempts?: number;
   /** Present only in preview mode — shows teacher-facing reference metrics */
   previewMetrics?: PreviewMetrics;
+  /** Href to the next lesson, if any. When set, the result header shows a "Bài tiếp theo →" CTA. */
+  nextLessonHref?: string;
+  /** Href back to the course overview page. */
+  courseHref?: string;
 }
 
 function formatScore(n: number): string {
@@ -46,25 +51,25 @@ function formatScore(n: number): string {
 
 function DonutScore({ score, total, attemptCount, maxAttempts }: { score: number; total: number; attemptCount?: number; maxAttempts?: number }) {
   const pct = total > 0 ? Math.round((score / total) * 100) : 0;
-  const r = 26;
+  const r = 52;
   const circ = 2 * Math.PI * r;
   const filled = (pct / 100) * circ;
   const color = pct >= 80 ? "#22c55e" : pct >= 50 ? "#f59e0b" : "#ef4444";
 
   return (
     <div className="flex items-center gap-3">
-      <svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label={`Điểm: ${pct}%`}>
-        <title>Điểm: {pct}%</title>
-        <circle cx="32" cy="32" r={r} fill="none" stroke="currentColor" strokeWidth="6" className="text-muted/40" />
+      <svg width="128" height="128" viewBox="0 0 128 128" role="img" aria-label={`Điểm: ${pct}%`}>
+        <title>{`Điểm: ${pct}%`}</title>
+        <circle cx="64" cy="64" r={r} fill="none" stroke="currentColor" strokeWidth="8" className="text-muted/40" />
         <circle
-          cx="32" cy="32" r={r} fill="none"
-          stroke={color} strokeWidth="6"
+          cx="64" cy="64" r={r} fill="none"
+          stroke={color} strokeWidth="8"
           strokeDasharray={`${filled} ${circ - filled}`}
           strokeLinecap="round"
-          transform="rotate(-90 32 32)"
+          transform="rotate(-90 64 64)"
         />
-        <text x="32" y="36" textAnchor="middle" fontSize="12" fontWeight="600" fill="currentColor" className="text-foreground">
-          {pct}%
+        <text x="64" y="72" textAnchor="middle" fontSize="20" fontWeight="600" fill="currentColor" className="text-foreground">
+          {`${pct}%`}
         </text>
       </svg>
       <div className="flex flex-col">
@@ -131,15 +136,27 @@ function PreviewMetricsPanel({ metrics, interactions }: { metrics: PreviewMetric
   );
 }
 
-export function LessonResult({ result, interactions, feedbackMode, onRetake, token, maxAttempts, previewMetrics }: Props) {
+export function LessonResult({ result, interactions, feedbackMode, onRetake, token, maxAttempts, previewMetrics, nextLessonHref, courseHref }: Props) {
   const canRetake = !maxAttempts || maxAttempts <= 0 || (result.attemptCount ?? 0) < maxAttempts;
   const shouldShowDetails = feedbackMode !== FeedbackMode.HIDDEN;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-md border bg-muted/30 p-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">🎯 Kết quả</span>
+      <div className="rounded-md border bg-muted/30 p-4 flex flex-col items-center gap-4 text-center">
+        <span className="self-start text-sm font-medium">🎯 Kết quả</span>
+        <DonutScore score={result.totalScore} total={result.maxScore} attemptCount={result.attemptCount} maxAttempts={maxAttempts} />
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {nextLessonHref ? (
+            <Button asChild className="gap-1.5">
+              <Link href={nextLessonHref}>Bài tiếp theo →</Link>
+            </Button>
+          ) : courseHref ? (
+            <Button asChild variant="secondary" className="gap-1.5">
+              <Link href={courseHref}>Về trang khóa học</Link>
+            </Button>
+          ) : (
+            <Button variant="secondary" className="gap-1.5">Về trang khóa học</Button>
+          )}
           {canRetake ? (
             <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={onRetake}>
               <RotateCcwIcon className="size-3.5" />
@@ -147,7 +164,6 @@ export function LessonResult({ result, interactions, feedbackMode, onRetake, tok
             </Button>
           ) : null}
         </div>
-        <DonutScore score={result.totalScore} total={result.maxScore} attemptCount={result.attemptCount} maxAttempts={maxAttempts} />
       </div>
 
       {previewMetrics && (

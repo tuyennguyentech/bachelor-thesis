@@ -30,6 +30,8 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
 
   if (!user) notFound();
 
+  const isSelf = claims.sub === user.id;
+
   return (
     <div className="mx-auto max-w-2xl flex flex-col gap-6">
       <RecentAccessRecorder
@@ -84,13 +86,16 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
           </div>
           <div className="space-y-1.5">
             <p className="text-sm text-muted-foreground">Vai trò</p>
-            <InlineRoleSelect userId={user.id} currentRole={user.role} token={token} />
+            <InlineRoleSelect userId={user.id} currentRole={user.role} token={token} disabled={isSelf} />
           </div>
           <div className="space-y-1.5">
             <p className="text-sm text-muted-foreground">Trạng thái</p>
-            <InlineStatusSelect userId={user.id} currentStatus={user.status} token={token} />
+            <InlineStatusSelect userId={user.id} currentStatus={user.status} token={token} disabled={isSelf} />
           </div>
         </div>
+        {isSelf && (
+          <p className="text-xs text-muted-foreground">Không thể thay đổi tài khoản đang đăng nhập.</p>
+        )}
       </div>
 
       <div className="rounded-md border p-4 flex flex-col gap-4">
@@ -101,9 +106,13 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
       <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 flex items-center justify-between">
         <div>
           <p className="font-medium text-sm">Xóa người dùng</p>
-          <p className="text-xs text-muted-foreground">Hành động này không thể hoàn tác</p>
+          <p className="text-xs text-muted-foreground">
+            {isSelf
+              ? "Không thể thay đổi tài khoản đang đăng nhập."
+              : "Hành động này không thể hoàn tác"}
+          </p>
         </div>
-        <DeleteUserButton userId={user.id} token={token} />
+        {!isSelf && <DeleteUserButton userId={user.id} token={token} />}
       </div>
     </div>
   );

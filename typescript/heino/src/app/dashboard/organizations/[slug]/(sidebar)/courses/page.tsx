@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { CourseService, Course, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
+import { CourseService, Course, CourseStatus, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
+import { InteractionService, MyCourseProgress } from "buf/gen/richter/v1/interactions_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,7 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
-import { GraduationCapIcon, LockIcon, ArrowRightIcon, BookOpenIcon, SearchIcon } from "lucide-react";
+import { GraduationCapIcon, LockIcon, ArrowRightIcon, BookOpenIcon, SearchIcon, AlertTriangleIcon } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateCourseDialog } from "@/app/admin/organizations/[slug]/courses/create-course-dialog";
@@ -59,18 +60,38 @@ export default async function DashboardCoursesPage({
 
   const courseClient = createRichterClient(CourseService, token);
   let courses: Course[] = [];
+  let coursesError = false;
   try {
     const res = await courseClient.listCourses({
       organizationId: org.id,
       limit: LIMIT,
       offset,
+      // Non-managers must never see/paginate drafts; exclude them server-side
+      // so LIMIT counts only visible courses (otherwise a page of drafts renders empty).
+      excludeDrafts: !canManage,
       ...(q ? { q } : {}),
     });
     courses = res.courses ?? [];
   } catch {
+    coursesError = true;
     courses = [];
   }
   const hasNext = courses.length === LIMIT;
+
+  // ── Student progress: completed-lesson count per course (non-managers only) ──
+  const progressMap = new Map<string, MyCourseProgress>();
+  if (!canManage) {
+    try {
+      const interactionClient = createRichterClient(InteractionService, token);
+      const { courses: progress } = await interactionClient.listMyCourseProgress({
+        limit: 200,
+        offset: 0,
+      });
+      for (const p of progress) progressMap.set(p.courseId, p);
+    } catch {
+      // Progress is non-critical; fall back to no progress bars.
+    }
+  }
 
   // Fetch modules and lessons count for each course
   const courseDetails = await Promise.all(
@@ -84,18 +105,22 @@ export default async function DashboardCoursesPage({
         ]);
         return {
           courseId: c.id,
-          modulesCount: modules.length,
-          lessonsCount: lessons.length
+          modulesCount: modules.length as number | undefined,
+          lessonsCount: lessons.length as number | undefined
         };
       } catch {
-        return { courseId: c.id, modulesCount: 0, lessonsCount: 0 };
+        return { courseId: c.id, modulesCount: undefined, lessonsCount: undefined };
       }
     })
   );
   const detailsMap = new Map(courseDetails.map((d) => [d.courseId, d]));
 
-  const accessibleCourses = courses.filter((c) => c.canAccess || canManage);
-  const lockedCourses = courses.filter((c) => !c.canAccess && !canManage);
+  // Plain members must not see authoring drafts; managers see everything.
+  const visibleCourses = canManage
+    ? courses
+    : courses.filter((c) => c.status !== CourseStatus.DRAFT);
+  const accessibleCourses = visibleCourses.filter((c) => c.canAccess || canManage);
+  const lockedCourses = visibleCourses.filter((c) => !c.canAccess && !canManage);
 
   return (
     <div className="flex flex-col gap-4">
@@ -146,7 +171,15 @@ export default async function DashboardCoursesPage({
       </div>
 
       <div className="flex flex-col gap-8">
-        {courses.length === 0 ? (
+        {coursesError ? (
+          <div className="rounded-md border bg-card">
+            <EmptyState
+              icon={<AlertTriangleIcon className="size-5 text-destructive" />}
+              title="Không thể tải danh sách khóa học"
+              description="Đã xảy ra lỗi khi tải khóa học. Vui lòng thử lại sau."
+            />
+          </div>
+        ) : courses.length === 0 ? (
           <div className="rounded-md border bg-card">
             <EmptyState
               icon={<GraduationCapIcon className="size-5" />}
@@ -171,61 +204,73 @@ export default async function DashboardCoursesPage({
                   </Badge>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {accessibleCourses.map((course) => (
+                  {accessibleCourses.map((course) => {
+                    const details = detailsMap.get(course.id);
+                    const progress = progressMap.get(course.id);
+                    const lessonsDone = progress?.lessonsDone ?? 0;
+                    const lessonsTotal = progress?.lessonsTotal ?? 0;
+                    const progressPct = lessonsTotal > 0 ? Math.round((lessonsDone / lessonsTotal) * 100) : 0;
+                    return (
                     <Card key={course.id} className="group relative flex flex-col justify-between border bg-card transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-primary/50">
                       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500" />
-                      
+
                       <CardHeader className="pt-6">
                         <div className="flex items-start justify-between gap-2">
                           <div className="rounded-md bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400">
                             <BookOpenIcon className="size-5" />
                           </div>
-                          {courseStatusBadge(course.status)}
+                          {canManage && courseStatusBadge(course.status)}
                         </div>
                         <CardTitle className="mt-4 text-base font-semibold group-hover:text-primary transition-colors line-clamp-1">
                           {course.title}
                         </CardTitle>
-                        <CardDescription className="line-clamp-2 min-h-[2.5rem] mt-1 text-xs">
+                        <CardDescription className="line-clamp-2 min-h-8 mt-1 text-xs">
                           {course.description || "Chưa có mô tả cho khóa học này."}
                         </CardDescription>
                       </CardHeader>
-                      
+
                       <CardContent className="py-2 text-xs text-muted-foreground flex flex-col gap-1.5">
                         <div className="flex items-center justify-between">
                           <span>Chương học:</span>
                           <span className="font-medium text-foreground">
-                            {detailsMap.get(course.id)?.modulesCount || 0} chương
+                            {details?.modulesCount === undefined ? "—" : `${details.modulesCount} chương`}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Bài học:</span>
                           <span className="font-medium text-foreground">
-                            {detailsMap.get(course.id)?.lessonsCount || 0} bài
+                            {details?.lessonsCount === undefined ? "—" : `${details.lessonsCount} bài`}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between text-muted-foreground/80">
-                          <span>Ngày tạo:</span>
-                          <span>
-                            {course.createdAt
-                              ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                              : "—"}
-                          </span>
-                        </div>
+                        {!canManage && (
+                          <div className="flex flex-col gap-1 pt-0.5">
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-blue-600 transition-all"
+                                style={{ width: `${progressPct}%` }}
+                              />
+                            </div>
+                            <span className="text-muted-foreground/80">
+                              {lessonsDone}/{lessonsTotal} bài hoàn thành
+                            </span>
+                          </div>
+                        )}
                       </CardContent>
-                      
+
                       <CardFooter className="pt-4 border-t bg-muted/20 flex items-center justify-between">
                         <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 font-medium">
                           Đang tham gia
                         </Badge>
                         <Button size="sm" className="gap-1.5 transition-all group-hover:translate-x-0.5" asChild>
                           <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
-                            {canManage ? "Quản lý" : "Vào học"}
+                            {canManage ? "Quản lý" : lessonsDone > 0 ? "Tiếp tục học" : "Vào học"}
                             <ArrowRightIcon className="size-3.5" />
                           </Link>
                         </Button>
                       </CardFooter>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -257,30 +302,22 @@ export default async function DashboardCoursesPage({
                         <CardTitle className="mt-4 text-base font-semibold text-muted-foreground line-clamp-1">
                           {course.title}
                         </CardTitle>
-                        <CardDescription className="line-clamp-2 min-h-[2.5rem] mt-1 text-xs text-muted-foreground/75">
+                        <CardDescription className="line-clamp-2 min-h-8 mt-1 text-xs text-muted-foreground/75">
                           {course.description || "Chưa có mô tả cho khóa học này."}
                         </CardDescription>
                       </CardHeader>
-                      
+
                       <CardContent className="py-2 text-xs text-muted-foreground/60 flex flex-col gap-1.5">
                         <div className="flex items-center justify-between">
                           <span>Chương học:</span>
                           <span className="font-medium text-foreground/80">
-                            {detailsMap.get(course.id)?.modulesCount || 0} chương
+                            {detailsMap.get(course.id)?.modulesCount === undefined ? "—" : `${detailsMap.get(course.id)!.modulesCount} chương`}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Bài học:</span>
                           <span className="font-medium text-foreground/80">
-                            {detailsMap.get(course.id)?.lessonsCount || 0} bài
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>Ngày tạo:</span>
-                          <span>
-                            {course.createdAt
-                              ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                              : "—"}
+                            {detailsMap.get(course.id)?.lessonsCount === undefined ? "—" : `${detailsMap.get(course.id)!.lessonsCount} bài`}
                           </span>
                         </div>
                       </CardContent>

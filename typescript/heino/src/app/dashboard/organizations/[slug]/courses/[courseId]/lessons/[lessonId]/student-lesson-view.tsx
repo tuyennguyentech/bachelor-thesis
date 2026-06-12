@@ -3,7 +3,9 @@
 import { useRef, useState, useCallback, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { VisuallyHidden } from "radix-ui";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
@@ -42,6 +44,7 @@ interface Props {
   feedbackMode: FeedbackMode;
   isPreview: boolean;
   maxAttempts?: number;
+  nextLessonHref?: string;
 }
 
 export function StudentLessonView({
@@ -58,6 +61,7 @@ export function StudentLessonView({
   feedbackMode,
   isPreview,
   maxAttempts,
+  nextLessonHref,
 }: Props) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -470,6 +474,46 @@ export function StudentLessonView({
 
   const hasSidebar = chunks.length > 0 || segments.length > 0 || !!transcript;
 
+  // Shared checkpoint body, rendered either inside the fullscreen in-video
+  // overlay or inside the (non-fullscreen) centered Dialog. `index`/`total`
+  // label the active question's position within its cluster.
+  function renderCheckpoint(index: number, total: number) {
+    if (!activeInteraction) return null;
+    return (
+      <>
+        <InteractionCheckpoint
+          interaction={activeInteraction}
+          index={index}
+          total={total}
+          feedbackMode={feedbackMode}
+          initialResponse={responses.get(activeInteraction.id) ?? null}
+          locked={submitted}
+          onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
+          onContinue={() => handleContinue(activeInteraction.id)}
+          hasNextInCheckpoint={lessonInteractions.some(
+            (it) =>
+              it.id !== activeInteraction.id &&
+              !passedIds.has(it.id) &&
+              it.startSeconds > 0 &&
+              it.startSeconds <= activeInteraction.startSeconds,
+          )}
+          token={token}
+          lessonId={lessonId}
+          isPreview={isPreview}
+          onGrade={(grade) => {
+            setDraftGrades((prev) => new Map(prev).set(activeInteraction.id, grade));
+          }}
+          onReplayCount={(count) => {
+            replayCountsRef.current.set(activeInteraction.id, count);
+          }}
+        />
+        {savingResponseIds.has(activeInteraction.id) && (
+          <p className="mt-3 text-xs text-muted-foreground">Đang lưu câu trả lời...</p>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className={hasSidebar && sidebarOpen ? "grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6" : "grid grid-cols-1 gap-6"}>
       {/* ── Left / main column ── */}
@@ -528,10 +572,9 @@ export function StudentLessonView({
               }}
             />
           )}
-          {!submitted && activeInteraction && (() => {
-            // A "cluster" is all interactions sharing the same start_seconds as
-            // the active one (the video paused for a batch at one timestamp).
-            // We label questions by their position within this cluster.
+          {/* Fullscreen path only: a portalled Dialog would hide behind a
+              fullscreened element, so keep the in-video overlay when fullscreen. */}
+          {!submitted && activeInteraction && isFullscreen && (() => {
             const cluster = lessonInteractions
               .filter((it) => it.startSeconds === activeInteraction.startSeconds)
               .sort((a, b) => a.orderIndex - b.orderIndex);
@@ -539,40 +582,38 @@ export function StudentLessonView({
             return (
               <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 md:p-8 overflow-y-auto text-foreground animate-in fade-in duration-200">
                 <div className="w-full h-full bg-card p-6 md:p-8 overflow-y-auto flex flex-col justify-between rounded-none border-none">
-                  <InteractionCheckpoint
-                    interaction={activeInteraction}
-                    index={clusterIndex}
-                    total={cluster.length}
-                    feedbackMode={feedbackMode}
-                    initialResponse={responses.get(activeInteraction.id) ?? null}
-                    locked={submitted}
-                    onAnswer={(r) => handleAnswer(activeInteraction.id, r)}
-                    onContinue={() => handleContinue(activeInteraction.id)}
-                    hasNextInCheckpoint={lessonInteractions.some(
-                      (it) =>
-                        it.id !== activeInteraction.id &&
-                        !passedIds.has(it.id) &&
-                        it.startSeconds > 0 &&
-                        it.startSeconds <= activeInteraction.startSeconds,
-                    )}
-                    token={token}
-                    lessonId={lessonId}
-                    isPreview={isPreview}
-                    onGrade={(grade) => {
-                      setDraftGrades((prev) => new Map(prev).set(activeInteraction.id, grade));
-                    }}
-                    onReplayCount={(count) => {
-                      replayCountsRef.current.set(activeInteraction.id, count);
-                    }}
-                  />
-                  {savingResponseIds.has(activeInteraction.id) && (
-                    <p className="mt-3 text-xs text-muted-foreground">Đang lưu câu trả lời...</p>
-                  )}
+                  {renderCheckpoint(clusterIndex, cluster.length)}
                 </div>
               </div>
             );
           })()}
         </div>
+
+        {/* Non-fullscreen path: render the checkpoint inside a centered modal. */}
+        {!submitted && activeInteraction && !isFullscreen && (() => {
+          const cluster = lessonInteractions
+            .filter((it) => it.startSeconds === activeInteraction.startSeconds)
+            .sort((a, b) => a.orderIndex - b.orderIndex);
+          const clusterIndex = cluster.findIndex((it) => it.id === activeInteraction.id) + 1;
+          return (
+            <Dialog open>
+              <DialogContent
+                showCloseButton={false}
+                className="w-full h-full backdrop-blur-md max-w-4xl overflow-y-auto"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}
+              >
+                <VisuallyHidden.Root>
+                  <DialogTitle>Câu hỏi tương tác</DialogTitle>
+                </VisuallyHidden.Root>
+                <div className="flex h-full flex-col justify-between">
+                  {renderCheckpoint(clusterIndex, cluster.length)}
+                </div>
+              </DialogContent>
+            </Dialog>
+          );
+        })()}
 
         <StudentLessonStatusCard
           activeInteraction={activeInteraction}
@@ -589,6 +630,7 @@ export function StudentLessonView({
           submitted={submitted}
           token={token}
           previewMetrics={isPreview && previewMetrics ? previewMetrics : undefined}
+          nextLessonHref={nextLessonHref}
         />
       </div>
 

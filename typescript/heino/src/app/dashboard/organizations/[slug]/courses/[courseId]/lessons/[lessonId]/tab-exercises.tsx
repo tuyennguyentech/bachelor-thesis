@@ -28,6 +28,20 @@ import {
 import { type GenRunState as GenPhase } from "./use-lesson-analysis-state";
 import { GenerateExercisesDialog } from "./generate-exercises-dialog";
 import { fromConfig, toKindsList, totalQuantity, type KindQuantities } from "./kind-quantity-grid";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+type PendingDelete =
+  | { scope: "lesson"; count: number }
+  | { scope: "chunk"; chunkId: string; chunkTitle: string; count: number };
 
 interface Props {
   lessonId: string;
@@ -150,6 +164,7 @@ export function TabExercises({
   const [openGenerateChunkIds, setOpenGenerateChunkIds] = useState<Set<string>>(new Set());
   const [chunkGenState, setChunkGenState] = useState<Record<string, ChunkGenPhase>>({});
   const [deletingScope, setDeletingScope] = useState<"lesson" | string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
 
   useEffect(() => {
     const chunkAbortControllers = chunkAbortRefs.current;
@@ -344,31 +359,44 @@ export function TabExercises({
     })();
   }
 
-  async function handleDeleteLessonInteractions() {
+  function requestDeleteLessonInteractions() {
     if (interactionsRef.current.length === 0 || deletingScope) return;
-    const ok = window.confirm("Xóa toàn bộ bài tập của bài học này? Hành động này không thể hoàn tác.");
-    if (!ok) return;
-
-    setDeletingScope("lesson");
-    try {
-      await interactionClient.deleteLessonInteractions({ lessonId });
-      updateInteractions([]);
-      router.refresh();
-      toast.success("Đã xóa toàn bộ bài tập");
-    } catch (err) {
-      toast.error(toUserMessage(err, "Không thể xóa bài tập"));
-    } finally {
-      setDeletingScope(null);
-    }
+    setPendingDelete({ scope: "lesson", count: interactionsRef.current.length });
   }
 
-  async function handleDeleteChunkInteractions(chunkId: string) {
+  function requestDeleteChunkInteractions(chunkId: string) {
     const chunkInteractions = interactionsRef.current.filter((it) => it.chunkId === chunkId);
     if (chunkInteractions.length === 0 || deletingScope) return;
     const chunkTitle = localChunks.find((c) => c.id === chunkId)?.summary ?? "phân đoạn này";
-    const ok = window.confirm(`Xóa ${chunkInteractions.length} bài tập trong "${chunkTitle}"? Hành động này không thể hoàn tác.`);
-    if (!ok) return;
+    setPendingDelete({
+      scope: "chunk",
+      chunkId,
+      chunkTitle,
+      count: chunkInteractions.length,
+    });
+  }
 
+  async function confirmPendingDelete() {
+    if (!pendingDelete || deletingScope) return;
+    const target = pendingDelete;
+    setPendingDelete(null);
+
+    if (target.scope === "lesson") {
+      setDeletingScope("lesson");
+      try {
+        await interactionClient.deleteLessonInteractions({ lessonId });
+        updateInteractions([]);
+        router.refresh();
+        toast.success("Đã xóa toàn bộ bài tập");
+      } catch (err) {
+        toast.error(toUserMessage(err, "Không thể xóa bài tập"));
+      } finally {
+        setDeletingScope(null);
+      }
+      return;
+    }
+
+    const { chunkId } = target;
     setDeletingScope(chunkId);
     try {
       await interactionClient.deleteLessonInteractions({ lessonId, chunkId });
@@ -404,7 +432,7 @@ export function TabExercises({
         interactionsCount={interactions.length}
         isBusy={isActuallyBusy}
         isGenerating={isGenerating}
-        onDeleteAll={handleDeleteLessonInteractions}
+        onDeleteAll={requestDeleteLessonInteractions}
         onFeedbackModeChange={onFeedbackModeChange}
         onOpenGenerate={() => setGenDialogOpen(true)}
         savingFeedback={savingFeedback}
@@ -458,7 +486,7 @@ export function TabExercises({
           );
           router.refresh();
         }}
-        onDeleteAllInChunk={handleDeleteChunkInteractions}
+        onDeleteAllInChunk={requestDeleteChunkInteractions}
         onGenerate={handleChunkGenerate}
         onOpenAdd={handleOpenAdd}
         onOpenGenerate={handleOpenGenerate}
@@ -489,6 +517,37 @@ export function TabExercises({
           onGenerate={handleGenDialogGenerate}
         />
       )}
+
+      {/* ── Delete confirmation ── */}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDelete?.scope === "chunk"
+                ? "Xóa bài tập của phân đoạn?"
+                : "Xóa toàn bộ bài tập?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete?.scope === "chunk"
+                ? `Xóa ${pendingDelete.count} bài tập trong "${pendingDelete.chunkTitle}"? Hành động này không thể hoàn tác.`
+                : pendingDelete?.scope === "lesson"
+                  ? `Xóa toàn bộ ${pendingDelete.count} bài tập của bài học này? Hành động này không thể hoàn tác.`
+                  : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmPendingDelete}>
+              Xóa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

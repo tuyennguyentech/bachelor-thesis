@@ -18,7 +18,7 @@ import { AddMemberDialog } from "@/app/admin/organizations/[slug]/members/add-me
 import { MemberActionsMenu } from "@/app/admin/organizations/[slug]/members/member-actions-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { UsersIcon } from "lucide-react";
+import { UsersIcon, AlertTriangleIcon } from "lucide-react";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 
 const LIMIT = 50;
@@ -54,6 +54,7 @@ export default async function DashboardMembersPage({
 
   const memberClient = createRichterClient(OrganizationMemberService, token);
   let members: OrganizationMember[] = [];
+  let loadFailed = false;
   try {
     const res = await memberClient.listOrganizationMembers({
       organizationId: org.id,
@@ -62,7 +63,7 @@ export default async function DashboardMembersPage({
     });
     members = res.members ?? [];
   } catch {
-    members = [];
+    loadFailed = true;
   }
   const hasNext = members.length === LIMIT;
 
@@ -99,7 +100,17 @@ export default async function DashboardMembersPage({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {members.length === 0 ? (
+            {loadFailed ? (
+              <TableRow>
+                <TableCell colSpan={canManage ? 5 : 4} className="p-0">
+                  <EmptyState
+                    icon={<AlertTriangleIcon className="size-5" />}
+                    title="Không tải được danh sách thành viên"
+                    description="Đã xảy ra lỗi khi tải dữ liệu. Vui lòng tải lại trang hoặc thử lại sau."
+                  />
+                </TableCell>
+              </TableRow>
+            ) : members.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 5 : 4} className="p-0">
                   <EmptyState

@@ -45,15 +45,15 @@ export function LessonWorkspaceShell({ sidebar, children, storageKey }: LessonWo
   return (
     <div
       className={cn(
-        "grid gap-4 xl:min-h-[calc(100svh-7rem)]",
+        "grid gap-4 lg:min-h-[calc(100svh-7rem)]",
         sidebarOpen
-          ? "xl:grid-cols-[320px_minmax(0,1fr)]"
-          : "xl:grid-cols-[56px_minmax(0,1fr)]",
+          ? "lg:grid-cols-[320px_minmax(0,1fr)]"
+          : "lg:grid-cols-[56px_minmax(0,1fr)]",
       )}
     >
       <aside
         className={cn(
-          "relative overflow-hidden rounded-xl border border-border/80 bg-card/70 backdrop-blur-md shadow-sm transition-all duration-300 outline-none",
+          "relative hidden lg:block lg:order-none overflow-hidden rounded-xl border border-border/80 bg-card/70 backdrop-blur-md shadow-sm transition-all duration-300 outline-none",
           sidebarOpen ? "" : "hover:bg-muted/40 hover:border-primary/30 select-none"
         )}
       >
@@ -186,7 +186,7 @@ export function LessonCourseSidebar({
                           "text-xs truncate transition-colors",
                           active ? "font-semibold text-primary" : "font-medium text-foreground/85 group-hover:text-foreground"
                         )}>
-                          Bài {lesson.orderIndex + 1}: {lesson.title}
+                          Bài {lesson.orderIndex + 1}: {lesson.title.replace(/^Bài\s*\d+\s*[:.\-]\s*/i, "")}
                         </span>
 
                         {/* Subtitle with duration and status */}

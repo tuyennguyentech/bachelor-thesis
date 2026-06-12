@@ -25,6 +25,7 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { UserStatus } from "buf/gen/richter/v1/users_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { UserService } from "buf/gen/richter/v1/users_pb";
+import { toast } from "sonner";
 
 interface UserActionsMenuProps {
   userId: string;
@@ -59,8 +60,12 @@ export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuPr
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await userClient.updateUserStatus({ id: userId, status: UserStatus.DISABLED });
-                  router.refresh();
+                  try {
+                    await userClient.updateUserStatus({ id: userId, status: UserStatus.DISABLED });
+                    router.refresh();
+                  } catch {
+                    toast.error("Thao tác thất bại");
+                  }
                 })
               }
             >
@@ -70,8 +75,12 @@ export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuPr
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await userClient.updateUserStatus({ id: userId, status: UserStatus.ACTIVE });
-                  router.refresh();
+                  try {
+                    await userClient.updateUserStatus({ id: userId, status: UserStatus.ACTIVE });
+                    router.refresh();
+                  } catch {
+                    toast.error("Thao tác thất bại");
+                  }
                 })
               }
             >
@@ -81,8 +90,12 @@ export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuPr
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await userClient.updateUserStatus({ id: userId, status: UserStatus.ACTIVE });
-                  router.refresh();
+                  try {
+                    await userClient.updateUserStatus({ id: userId, status: UserStatus.ACTIVE });
+                    router.refresh();
+                  } catch {
+                    toast.error("Thao tác thất bại");
+                  }
                 })
               }
             >
@@ -110,9 +123,14 @@ export function UserActionsMenu({ userId, userStatus, token }: UserActionsMenuPr
           <AlertDialogFooter>
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               onClick={() => startTransition(async () => {
-                await userClient.deleteUser({ id: userId });
-                router.push("/admin/users");
+                try {
+                  await userClient.deleteUser({ id: userId });
+                  router.refresh();
+                } catch {
+                  toast.error("Thao tác thất bại");
+                }
               })}
             >
               Xóa

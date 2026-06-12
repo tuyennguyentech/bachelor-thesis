@@ -6,7 +6,7 @@ import { AlertTriangleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toUserMessage } from "@/lib/connect-error";
 
-export default function DashboardError({
+export default function AdminError({
   error,
   reset,
 }: {
@@ -14,7 +14,7 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[DashboardError]", error);
+    console.error("[AdminError]", error);
   }, [error]);
 
   const message = toUserMessage(error);
@@ -28,7 +28,7 @@ export default function DashboardError({
         <div className="flex items-center justify-center gap-2">
           <Button onClick={reset}>Thử lại</Button>
           <Button variant="outline" asChild>
-            <Link href="/dashboard">Về trang chính</Link>
+            <Link href="/admin">Về trang quản trị</Link>
           </Button>
         </div>
       </div>

@@ -38,6 +38,28 @@ import { LessonCourseSidebar, LessonWorkspaceShell } from "./lesson-workspace";
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const COURSE_NAV_LIMIT = 100;
 
+const VALID_TABS = ["content", "processing", "results"];
+
+/**
+ * Normalise the `?tab=` query param. Maps the legacy `"exercises"` tab to
+ * `"processing"`, and falls back to `"content"` for any unknown value so an
+ * invalid tab never renders a blank body.
+ */
+function normalizeTab(raw: string | undefined): string {
+  if (raw === "exercises") return "processing";
+  if (raw && VALID_TABS.includes(raw)) return raw;
+  return "content";
+}
+
+/**
+ * Append `#t=0.1` to a presigned video URL so the browser renders the first
+ * frame as a poster instead of a black box. Only applied when the URL has no
+ * existing `#` fragment (presigned URLs put their query in the search string).
+ */
+function withFirstFramePoster(url: string): string {
+  return url.includes("#") ? url : `${url}#t=0.1`;
+}
+
 async function getVideoUrl(key: string, token: string): Promise<string | null> {
   try {
     const client = createRichterClient(StorageService, token);
@@ -81,7 +103,7 @@ export default async function LessonDetailPage({
   const sp = await searchParams;
   const isPreview = sp.preview === "1" && canManage;
   const effectiveCanManage = canManage && !isPreview;
-  const activeTab = (sp.tab as string) || "content";
+  const activeTab = normalizeTab(typeof sp.tab === "string" ? sp.tab : undefined);
 
   const courseClient = createRichterClient(CourseService, token);
   let course;
@@ -197,6 +219,23 @@ export default async function LessonDetailPage({
         })),
       }
     : null;
+
+  // Compute the href to the lesson following the current one, walking the
+  // course in display order (modules by orderIndex, then lessons by orderIndex).
+  // `undefined` when the current lesson is the last in the course.
+  const orderedLessons = [...courseModules]
+    .sort((a, b) => a.orderIndex - b.orderIndex)
+    .flatMap((m) =>
+      courseLessons
+        .filter((l) => l.moduleId === m.id)
+        .sort((a, b) => a.orderIndex - b.orderIndex),
+    );
+  const currentIndex = orderedLessons.findIndex((l) => l.id === lessonId);
+  const nextLesson =
+    currentIndex >= 0 ? orderedLessons[currentIndex + 1] : undefined;
+  const nextLessonHref = nextLesson
+    ? `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${nextLesson.id}`
+    : undefined;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -350,8 +389,9 @@ export default async function LessonDetailPage({
                 videoUrl ? (
                   <StudentLessonView
                     key={`${isPreview ? "preview" : "student"}:${lesson.videoStorageKey}:${videoVersion}`}
-                    videoUrl={videoUrl}
+                    videoUrl={withFirstFramePoster(videoUrl)}
                     videoStorageKey={lesson.videoStorageKey || undefined}
+                    nextLessonHref={nextLessonHref}
                     segments={analysis?.transcriptSegments ?? []}
                     transcript={analysis?.transcript ?? ""}
                     chunks={initialChunks}
@@ -396,7 +436,7 @@ export default async function LessonDetailPage({
                         <div className="p-4 flex flex-col gap-4">
                           <VideoPlayer
                             key={`${lesson.videoStorageKey}:${videoVersion}`}
-                            videoUrl={videoUrl}
+                            videoUrl={withFirstFramePoster(videoUrl)}
                             segments={analysis?.transcriptSegments ?? []}
                             transcript={analysis?.transcript ?? ""}
                             lessonId={lessonId}

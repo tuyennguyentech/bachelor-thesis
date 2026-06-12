@@ -51,10 +51,38 @@ export function CourseWorkspaceSidebar({
   const orgCoursesHref = `/dashboard/organizations/${slug}/courses`;
 
   return (
-    <aside
-      className="w-[260px] shrink-0 flex flex-col border-r bg-card/40 overflow-y-auto"
-      aria-label="Course workspace sidebar"
-    >
+    <>
+      {/* Mobile: horizontal scrollable tab strip (below md) */}
+      <nav
+        className="flex w-full min-w-0 shrink-0 basis-full gap-1 overflow-x-auto border-b px-2 md:hidden"
+        aria-label="Course tabs"
+      >
+        {visibleTabs.map(({ id, label, icon: Icon }) => {
+          const active = activeTab === id;
+          return (
+            <Link
+              key={id}
+              href={`?tab=${id}`}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors",
+                active
+                  ? "bg-primary/10 font-medium text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+              aria-current={active ? "page" : undefined}
+              data-tab={id}
+            >
+              <Icon className="size-4 shrink-0" />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <aside
+        className="hidden w-[260px] shrink-0 flex-col border-r bg-card/40 overflow-y-auto md:flex"
+        aria-label="Course workspace sidebar"
+      >
       {/* Back button + course title */}
       <div className="border-b p-3">
         <Button
@@ -68,9 +96,9 @@ export function CourseWorkspaceSidebar({
             Danh sách khóa học
           </Link>
         </Button>
-        <div className="flex items-start gap-2 px-1">
+        <div className="flex min-w-0 items-start gap-2 px-1">
           <GraduationCapIcon className="size-4 shrink-0 mt-0.5 text-primary" />
-          <p className="line-clamp-2 text-xs font-semibold text-foreground/90 tracking-tight leading-snug">
+          <p className="line-clamp-2 truncate text-xs font-semibold text-foreground/90 tracking-tight leading-snug">
             {courseTitle}
           </p>
         </div>
@@ -99,6 +127,7 @@ export function CourseWorkspaceSidebar({
           );
         })}
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 }

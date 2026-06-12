@@ -62,7 +62,7 @@ export function VideoPlayerControls({
             e.stopPropagation();
             onTogglePlay();
           }}
-          className="size-14 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity duration-300 pointer-events-auto hover:scale-105 transform active:scale-95"
+          className={`size-14 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-opacity duration-300 pointer-events-auto hover:scale-105 transform active:scale-95 ${paused ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"}`}
         >
           {!paused ? <Pause className="size-6 fill-white" /> : <Play className="size-6 fill-white ml-1" />}
         </button>
@@ -70,7 +70,7 @@ export function VideoPlayerControls({
 
       <div
         onClick={(e) => e.stopPropagation()}
-        className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-4 pt-12 flex flex-col gap-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-300 pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto"
+        className={`absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-4 pt-12 flex flex-col gap-3 transition-opacity duration-300 ${paused ? "opacity-100 pointer-events-auto" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto"}`}
       >
         <div className="relative w-full h-5 flex items-center group/timeline">
           <input

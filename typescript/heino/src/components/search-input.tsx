@@ -52,7 +52,7 @@ export function SearchInput({ placeholder = "ID hoặc email…", slugLabel }: S
   const field = detectField(value) ?? (value && slugLabel ? slugLabel : null);
 
   return (
-    <div className="relative w-72">
+    <div className="relative w-full min-w-40 max-w-72">
       <SearchIcon className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
       <Input
         className="pl-8 pr-20"

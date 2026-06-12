@@ -6,6 +6,7 @@ import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, CourseModuleService, LessonService, type CourseModule, type Lesson } from "buf/gen/richter/v1/courses_pb";
 import { CourseMemberService, CourseRole, type CourseMember } from "buf/gen/richter/v1/course_members_pb";
+import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import {
   UsersIcon,
   ClockIcon,
   GraduationCapIcon,
+  CheckCircle2,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { logout } from "@/app/actions/auth";
@@ -51,6 +53,12 @@ import { QuickCreateTrigger } from "@/components/dashboard/quick-create/QuickCre
 const CAN_MANAGE_ORG_ROLES = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const CAN_CHANGE_STATUS = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
 const MEMBERS_LIMIT = 50;
+
+// Strip a redundant "Bài N:" / "Bài N." / "Bài N -" prefix from a lesson title,
+// since the row already renders its own ordinal number.
+function stripLessonPrefix(title: string): string {
+  return title.replace(/^\s*Bài\s+\d+\s*[:.\-–]\s*/i, "").trim() || title;
+}
 
 function courseRoleBadge(role: CourseRole) {
   if (role === CourseRole.TEACHER)
@@ -126,18 +134,31 @@ export default async function CourseWorkspacePage({
   // ── Fetch modules + lessons (always needed for sidebar, only if having access) ────────
   let modulesWithLessons: (CourseModule & { lessons: Lesson[] })[] = [];
   let totalMembersCount = 0;
+  let membersCountKnown = false;
+  // Lessons the current student has attempted at least once (student view only).
+  const completedLessonIds = new Set<string>();
   if (course.canAccess || canManage) {
     const moduleClient = createRichterClient(CourseModuleService, token);
     const lessonClient = createRichterClient(LessonService, token);
     const memberClient = createRichterClient(CourseMemberService, token);
 
+    // Member count is supplementary: fetch it independently so a failure does not
+    // wipe out modules/lessons. Proto enforces limit lte:100.
+    const membersPromise = memberClient
+      .listCourseMembers({ courseId: course.id, limit: 100, offset: 0 })
+      .then((res) => {
+        totalMembersCount = res.members?.length ?? 0;
+        membersCountKnown = true;
+      })
+      .catch((err) => {
+        console.error("Failed to fetch course members count:", err);
+      });
+
     try {
-      const [{ modules }, { lessons: allLessons }, { members: courseMembers }] = await Promise.all([
+      const [{ modules }, { lessons: allLessons }] = await Promise.all([
         moduleClient.listCourseModules({ courseId: course.id, limit: 500, offset: 0 }),
         lessonClient.listLessonsByCourse({ courseId: course.id, limit: 500, offset: 0 }),
-        memberClient.listCourseMembers({ courseId: course.id, limit: 500, offset: 0 }).catch(() => ({ members: [] })),
       ]);
-      totalMembersCount = courseMembers?.length || 0;
 
       const lessonsByModule = new Map<string, typeof allLessons>();
       for (const l of allLessons) {
@@ -146,9 +167,27 @@ export default async function CourseWorkspacePage({
         lessonsByModule.set(l.moduleId, arr);
       }
       modulesWithLessons = modules.map((m) => ({ ...m, lessons: lessonsByModule.get(m.id) ?? [] }));
+
+      // For students, resolve which lessons have at least one attempt. No bulk RPC
+      // exists, so fan out GetMyAttempt once per lesson in a single batch.
+      if (!canManage && allLessons.length > 0) {
+        const interactionClient = createRichterClient(InteractionService, token);
+        await Promise.all(
+          allLessons.map((l) =>
+            interactionClient
+              .getMyAttempt({ lessonId: l.id })
+              .then((res) => {
+                if (res.attempt) completedLessonIds.add(l.id);
+              })
+              .catch(() => {}),
+          ),
+        );
+      }
     } catch (err) {
       console.error("Failed to fetch modules and lessons:", err);
     }
+
+    await membersPromise;
   }
 
   // ── Fetch members (tab=members) ────────────────────────────────────────────
@@ -163,7 +202,8 @@ export default async function CourseWorkspacePage({
         offset: membersOffset,
       });
       members = res.members ?? [];
-    } catch {
+    } catch (err) {
+      console.error("Failed to fetch course members:", err);
       members = [];
     }
     membersHasNext = members.length === MEMBERS_LIMIT;
@@ -244,7 +284,7 @@ export default async function CourseWorkspacePage({
           />
         </main>
       ) : (
-        <div className="flex flex-1 min-h-0 overflow-hidden bg-background">
+        <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden bg-background">
           <CourseWorkspaceSidebar
             slug={slug}
             courseId={courseId}
@@ -265,39 +305,39 @@ export default async function CourseWorkspacePage({
                       <p className="text-sm text-muted-foreground">{course.description}</p>
                     )}
                   </div>
-                  {courseStatusBadge(course.status)}
+                  {canManage && courseStatusBadge(course.status)}
                 </div>
 
                 {/* ── COURSE STATISTICS GRID ── */}
-                <div className="grid gap-4 grid-cols-2 md:grid-cols-4 bg-muted/20 p-4 rounded-xl border">
-                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 bg-muted/20 p-4 rounded-xl border">
+                  <div className="flex flex-col gap-1.5 p-4 min-w-0 bg-card rounded-lg border shadow-sm">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <BookOpenIcon className="size-4 text-blue-500" />
                       <span className="text-xs font-medium">Chương học</span>
                     </div>
-                    <div className="flex items-baseline gap-1 mt-1">
+                    <div className="flex items-baseline flex-wrap gap-1 mt-1">
                       <span className="text-2xl font-bold tracking-tight text-foreground">{modulesWithLessons.length}</span>
                       <span className="text-xs text-muted-foreground">chương</span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                  <div className="flex flex-col gap-1.5 p-4 min-w-0 bg-card rounded-lg border shadow-sm">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <GraduationCapIcon className="size-4 text-emerald-500" />
                       <span className="text-xs font-medium">Bài học</span>
                     </div>
-                    <div className="flex items-baseline gap-1 mt-1">
+                    <div className="flex items-baseline flex-wrap gap-1 mt-1">
                       <span className="text-2xl font-bold tracking-tight text-foreground">
                         {modulesWithLessons.reduce((acc, m) => acc + m.lessons.length, 0)}
                       </span>
                       <span className="text-xs text-muted-foreground">bài học</span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
+                  <div className="flex flex-col gap-1.5 p-4 min-w-0 bg-card rounded-lg border shadow-sm">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <ClockIcon className="size-4 text-indigo-500" />
                       <span className="text-xs font-medium">Thời lượng video</span>
                     </div>
-                    <div className="flex items-baseline gap-1 mt-1">
+                    <div className="flex items-baseline flex-wrap gap-1 mt-1">
                       <span className="text-2xl font-bold tracking-tight text-foreground">
                         {Math.round(
                           modulesWithLessons.reduce(
@@ -311,16 +351,18 @@ export default async function CourseWorkspacePage({
                       <span className="text-xs text-muted-foreground">phút</span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1.5 p-4 bg-card rounded-lg border shadow-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <UsersIcon className="size-4 text-amber-500" />
-                      <span className="text-xs font-medium">Thành viên</span>
+                  {(canManage || membersCountKnown) && (
+                    <div className="flex flex-col gap-1.5 p-4 min-w-0 bg-card rounded-lg border shadow-sm">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <UsersIcon className="size-4 text-amber-500" />
+                        <span className="text-xs font-medium">Thành viên</span>
+                      </div>
+                      <div className="flex items-baseline flex-wrap gap-1 mt-1">
+                        <span className="text-2xl font-bold tracking-tight text-foreground">{totalMembersCount}</span>
+                        <span className="text-xs text-muted-foreground font-normal">người</span>
+                      </div>
                     </div>
-                    <div className="flex items-baseline gap-1 mt-1">
-                      <span className="text-2xl font-bold tracking-tight text-foreground">{totalMembersCount}</span>
-                      <span className="text-xs text-muted-foreground font-normal">người</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {canManage && (
@@ -353,21 +395,6 @@ export default async function CourseWorkspacePage({
                       }
                     </div>
                   </>
-                )}
-
-                {!canManage && (
-                  <div className="rounded-md border p-4 flex items-center justify-between gap-4 bg-background">
-                    <div>
-                      <h2 className="font-medium">Trạng thái</h2>
-                      <p className="text-sm text-muted-foreground">
-                        Ngày tạo:{" "}
-                        {course.createdAt
-                          ? new Date(Number(course.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                          : "—"}
-                      </p>
-                    </div>
-                    {courseStatusBadge(course.status)}
-                  </div>
                 )}
 
                 {/* Danger zone — only for owner/admin */}
@@ -439,37 +466,55 @@ export default async function CourseWorkspacePage({
                           )}
                         </div>
 
-                        {m.lessons.map((lesson, li) => (
-                          <div
-                            key={lesson.id}
-                            className="flex items-center justify-between px-4 py-2 ml-4 rounded-md border bg-background"
-                          >
-                            <Link
-                              href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
-                              className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80"
+                        {m.lessons.map((lesson, li) => {
+                          const durationMinutes = Math.round((lesson.durationSeconds || 0) / 60);
+                          const isCompleted = !canManage && completedLessonIds.has(lesson.id);
+                          return (
+                            <div
+                              key={lesson.id}
+                              className="flex items-center justify-between gap-2 px-4 py-2 ml-4 rounded-md border bg-background"
                             >
-                              <span className="text-sm text-muted-foreground font-mono w-6">{li + 1}.</span>
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-sm truncate">{lesson.title}</span>
-                                {lesson.description && (
-                                  <span className="text-xs text-muted-foreground truncate">{lesson.description}</span>
+                              <Link
+                                href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
+                                className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80"
+                              >
+                                <span className="text-sm text-muted-foreground font-mono w-6">{li + 1}.</span>
+                                {isCompleted && (
+                                  <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                                )}
+                                <div className="flex flex-col min-w-0">
+                                  <span className="text-sm truncate">{stripLessonPrefix(lesson.title)}</span>
+                                  {lesson.description && (
+                                    <span className="text-xs text-muted-foreground truncate">{lesson.description}</span>
+                                  )}
+                                </div>
+                              </Link>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {lesson.durationSeconds > 0 ? (
+                                  <Badge variant="secondary" className="gap-1 font-normal tabular-nums">
+                                    <ClockIcon className="size-3" />~{Math.max(1, durationMinutes)} phút
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                                    Chưa có nội dung
+                                  </Badge>
+                                )}
+                                {canManage && (
+                                  <LessonActions
+                                    id={lesson.id}
+                                    moduleId={m.id}
+                                    courseId={courseId}
+                                    slug={slug}
+                                    title={lesson.title}
+                                    description={lesson.description}
+                                    orderIndex={lesson.orderIndex}
+                                    token={token}
+                                  />
                                 )}
                               </div>
-                            </Link>
-                            {canManage && (
-                              <LessonActions
-                                id={lesson.id}
-                                moduleId={m.id}
-                                courseId={courseId}
-                                slug={slug}
-                                title={lesson.title}
-                                description={lesson.description}
-                                orderIndex={lesson.orderIndex}
-                                token={token}
-                              />
-                            )}
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
 
                         {canManage && (
                           <div className="ml-4 mt-0.5">
@@ -505,7 +550,7 @@ export default async function CourseWorkspacePage({
                   Danh sách người dùng đang tham gia khóa học &ldquo;{course.title}&rdquo;.
                 </p>
 
-                <div className="rounded-md border bg-background">
+                <div className="rounded-md border bg-background overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -601,7 +646,9 @@ export default async function CourseWorkspacePage({
                 {canManage ? (
                   <>
                     <h1 className="font-semibold">Kết quả học viên</h1>
-                    <CourseResults courseId={course.id} token={token} />
+                    <div className="overflow-x-auto">
+                      <CourseResults courseId={course.id} token={token} />
+                    </div>
                   </>
                 ) : (
                   <div className="rounded-md border p-6 text-center text-sm text-muted-foreground bg-background">

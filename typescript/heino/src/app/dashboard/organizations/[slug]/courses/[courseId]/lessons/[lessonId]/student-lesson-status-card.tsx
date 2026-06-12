@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { InfoIcon, PlayIcon, SendIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { LessonInteraction, FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -21,6 +22,7 @@ interface StudentLessonStatusCardProps {
   submitted: boolean;
   token: string;
   previewMetrics?: PreviewMetrics;
+  nextLessonHref?: string;
 }
 
 export function StudentLessonStatusCard({
@@ -38,7 +40,21 @@ export function StudentLessonStatusCard({
   submitted,
   token,
   previewMetrics,
+  nextLessonHref,
 }: StudentLessonStatusCardProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const hasResult = submitted && result !== null;
+  // Initialised to the current value so we do NOT scroll on a first mount that
+  // already has a previousResult — only on the transition to having a result.
+  const hadResultRef = useRef(hasResult);
+
+  useEffect(() => {
+    if (hasResult && !hadResultRef.current) {
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    hadResultRef.current = hasResult;
+  }, [hasResult]);
+
   if (
     lessonInteractions.length === 0 ||
     !((!submitted && !activeInteraction) || readyToSubmit || (submitted && result) || error)
@@ -49,7 +65,7 @@ export function StudentLessonStatusCard({
   const allAnswered = passedCount >= lessonInteractions.length;
 
   return (
-    <div className="rounded-md border p-4 flex flex-col gap-3">
+    <div ref={rootRef} className="rounded-md border p-4 flex flex-col gap-3">
       {!submitted && !activeInteraction && passedCount === 0 && (
         <div className="rounded-md bg-muted/30 p-6 text-center">
           <InfoIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
@@ -92,6 +108,7 @@ export function StudentLessonStatusCard({
           token={token}
           maxAttempts={maxAttempts}
           previewMetrics={previewMetrics}
+          nextLessonHref={nextLessonHref}
         />
       )}
 

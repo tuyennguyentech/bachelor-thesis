@@ -27,7 +27,8 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { OrganizationRole, MemberStatus } from "buf/gen/richter/v1/organization_members_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { OrganizationMemberService } from "buf/gen/richter/v1/organization_members_pb";
-import { ConnectError } from "@connectrpc/connect";
+import { toast } from "sonner";
+import { toUserMessage } from "@/lib/connect-error";
 
 interface MemberActionsMenuProps {
   organizationId: string;
@@ -49,11 +50,9 @@ export function MemberActionsMenu({
   const memberClient = useRichterWebClient(OrganizationMemberService, token);
   const [isPending, startTransition] = useTransition();
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      {error && <p className="text-xs text-destructive max-w-48 text-right">{error}</p>}
+    <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8">
@@ -76,12 +75,12 @@ export function MemberActionsMenu({
                   disabled={value === currentRole || isPending}
                   onClick={() =>
                     startTransition(async () => {
-                      setError(null);
                       try {
                         await memberClient.updateOrganizationMemberRole({ organizationId, userId, role: value });
+                        toast.success("Đã cập nhật vai trò thành viên");
                         router.refresh();
                       } catch (err) {
-                        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật vai trò");
+                        toast.error(toUserMessage(err, "Không thể cập nhật vai trò"));
                       }
                     })
                   }
@@ -104,12 +103,12 @@ export function MemberActionsMenu({
                   disabled={value === currentStatus || isPending}
                   onClick={() =>
                     startTransition(async () => {
-                      setError(null);
                       try {
                         await memberClient.updateOrganizationMemberStatus({ organizationId, userId, status: value });
+                        toast.success("Đã cập nhật trạng thái thành viên");
                         router.refresh();
                       } catch (err) {
-                        setError(err instanceof ConnectError ? err.message : "Không thể cập nhật trạng thái");
+                        toast.error(toUserMessage(err, "Không thể cập nhật trạng thái"));
                       }
                     })
                   }
@@ -140,14 +139,15 @@ export function MemberActionsMenu({
           <AlertDialogFooter>
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction
+              disabled={isPending}
               onClick={() =>
                 startTransition(async () => {
-                  setError(null);
                   try {
                     await memberClient.removeOrganizationMember({ organizationId, userId });
+                    toast.success("Đã xóa thành viên khỏi tổ chức");
                     router.refresh();
                   } catch (err) {
-                    setError(err instanceof ConnectError ? err.message : "Không thể xóa thành viên");
+                    toast.error(toUserMessage(err, "Không thể xóa thành viên"));
                   }
                 })
               }
@@ -157,6 +157,6 @@ export function MemberActionsMenu({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

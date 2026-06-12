@@ -68,9 +68,9 @@ export default async function OrganizationsPage({
           <TableHeader>
             <TableRow>
               <TableHead>Tên</TableHead>
-              <TableHead>Slug</TableHead>
+              <TableHead className="hidden lg:table-cell">Slug</TableHead>
               <TableHead>Trạng thái</TableHead>
-              <TableHead>Ngày tạo</TableHead>
+              <TableHead className="hidden md:table-cell">Ngày tạo</TableHead>
               <TableHead className="w-16" />
             </TableRow>
           </TableHeader>
@@ -93,9 +93,11 @@ export default async function OrganizationsPage({
               orgs.map((org) => (
                 <TableRow key={org.id}>
                   <TableCell className="font-medium">{org.name}</TableCell>
-                  <TableCell className="font-mono text-sm">{org.slug}</TableCell>
+                  <TableCell className="hidden max-w-[16ch] truncate font-mono text-sm lg:table-cell">
+                    {org.slug}
+                  </TableCell>
                   <TableCell>{orgStatusBadge(org.status)}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
+                  <TableCell className="hidden text-muted-foreground text-sm md:table-cell">
                     {org.createdAt
                       ? new Date(Number(org.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
                       : "—"}

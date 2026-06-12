@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { UserService } from "buf/gen/richter/v1/users_pb";
+import { toast } from "sonner";
 
 interface Props {
   userId: string;
@@ -44,9 +45,15 @@ export function DeleteUserButton({ userId, token }: Props) {
         <AlertDialogFooter>
           <AlertDialogCancel>Hủy</AlertDialogCancel>
           <AlertDialogAction
+            variant="destructive"
+            disabled={pending}
             onClick={() => startTransition(async () => {
-              await userClient.deleteUser({ id: userId });
-              router.push("/admin/users");
+              try {
+                await userClient.deleteUser({ id: userId });
+                router.push("/admin/users");
+              } catch {
+                toast.error("Xóa người dùng thất bại");
+              }
             })}
           >
             Xóa

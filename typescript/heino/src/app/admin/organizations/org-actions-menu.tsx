@@ -25,6 +25,8 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { OrganizationStatus } from "buf/gen/richter/v1/organizations_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
+import { toast } from "sonner";
+import { toUserMessage } from "@/lib/connect-error";
 
 interface OrgActionsMenuProps {
   orgId: string;
@@ -36,7 +38,7 @@ interface OrgActionsMenuProps {
 export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsMenuProps) {
   const router = useRouter();
   const orgClient = useRichterWebClient(OrganizationService, token);
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   return (
@@ -60,8 +62,13 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsM
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await orgClient.updateOrganizationStatus({ id: orgId, status: OrganizationStatus.SUSPENDED });
-                  router.refresh();
+                  try {
+                    await orgClient.updateOrganizationStatus({ id: orgId, status: OrganizationStatus.SUSPENDED });
+                    toast.success("Đã tạm khóa tổ chức");
+                    router.refresh();
+                  } catch (err) {
+                    toast.error(toUserMessage(err, "Không thể tạm khóa tổ chức"));
+                  }
                 })
               }
             >
@@ -71,8 +78,13 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsM
             <DropdownMenuItem
               onClick={() =>
                 startTransition(async () => {
-                  await orgClient.updateOrganizationStatus({ id: orgId, status: OrganizationStatus.ACTIVE });
-                  router.refresh();
+                  try {
+                    await orgClient.updateOrganizationStatus({ id: orgId, status: OrganizationStatus.ACTIVE });
+                    toast.success("Đã kích hoạt tổ chức");
+                    router.refresh();
+                  } catch (err) {
+                    toast.error(toUserMessage(err, "Không thể kích hoạt tổ chức"));
+                  }
                 })
               }
             >
@@ -100,9 +112,15 @@ export function OrgActionsMenu({ orgId, orgSlug, orgStatus, token }: OrgActionsM
           <AlertDialogFooter>
             <AlertDialogCancel>Hủy</AlertDialogCancel>
             <AlertDialogAction
+              disabled={isPending}
               onClick={() => startTransition(async () => {
-                await orgClient.deleteOrganization({ id: orgId });
-                router.push("/admin/organizations");
+                try {
+                  await orgClient.deleteOrganization({ id: orgId });
+                  toast.success("Đã xóa tổ chức");
+                  router.push("/admin/organizations");
+                } catch (err) {
+                  toast.error(toUserMessage(err, "Không thể xóa tổ chức"));
+                }
               })}
             >
               Xóa

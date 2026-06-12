@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Select,
@@ -12,6 +12,7 @@ import {
 import { UserStatus } from "buf/gen/richter/v1/users_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { UserService } from "buf/gen/richter/v1/users_pb";
+import { toast } from "sonner";
 
 const STATUS_OPTIONS: { label: string; value: UserStatus }[] = [
   { label: "Chờ duyệt", value: UserStatus.PENDING },
@@ -23,22 +24,32 @@ interface Props {
   userId: string;
   currentStatus: UserStatus;
   token: string;
+  disabled?: boolean;
 }
 
-export function InlineStatusSelect({ userId, currentStatus, token }: Props) {
+export function InlineStatusSelect({ userId, currentStatus, token, disabled }: Props) {
   const router = useRouter();
   const userClient = useRichterWebClient(UserService, token);
   const [, startTransition] = useTransition();
+  const [value, setValue] = useState(String(currentStatus));
 
   return (
     <Select
-      defaultValue={String(currentStatus)}
+      value={value}
+      disabled={disabled}
       onValueChange={(val) => {
         const option = STATUS_OPTIONS.find((o) => String(o.value) === val);
         if (!option) return;
+        const previous = value;
+        setValue(val);
         startTransition(async () => {
-          await userClient.updateUserStatus({ id: userId, status: option.value });
-          router.refresh();
+          try {
+            await userClient.updateUserStatus({ id: userId, status: option.value });
+            router.refresh();
+          } catch {
+            setValue(previous);
+            toast.error("Cập nhật trạng thái thất bại");
+          }
         });
       }}
     >
