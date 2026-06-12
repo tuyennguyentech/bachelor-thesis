@@ -101,6 +101,8 @@ func kindToDBString(kind richterv1.InteractionKind) string {
 		return "listening"
 	case richterv1.InteractionKind_INTERACTION_KIND_READING:
 		return "reading"
+	case richterv1.InteractionKind_INTERACTION_KIND_WRITING:
+		return "writing"
 	default:
 		return "unknown"
 	}
@@ -121,6 +123,8 @@ func dbStringToKind(s string) richterv1.InteractionKind {
 		return richterv1.InteractionKind_INTERACTION_KIND_LISTENING
 	case "reading":
 		return richterv1.InteractionKind_INTERACTION_KIND_READING
+	case "writing":
+		return richterv1.InteractionKind_INTERACTION_KIND_WRITING
 	default:
 		return richterv1.InteractionKind_INTERACTION_KIND_UNSPECIFIED
 	}

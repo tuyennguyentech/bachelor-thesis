@@ -26,6 +26,7 @@ enum InteractionKind {
   INTERACTION_KIND_LISTENING = 3;
   INTERACTION_KIND_READING = 4;
   INTERACTION_KIND_MULTIPLE_CHOICE = 5;
+  INTERACTION_KIND_WRITING = 6;
 }
 
 enum ListeningMode {
@@ -116,6 +117,26 @@ message ReadingResponse {
   string audio_object_key = 1;
 }
 
+// ── Writing config ────────────────────────────────────────────────────────────
+
+message WritingConfig {
+  // The essay prompt / topic the student must write about (also mirrored into
+  // LessonInteraction.prompt for display).
+  string prompt = 1 [(buf.validate.field).string.min_len = 1];
+  // Optional grading rubric / guidance, shown to the student and used by the AI grader.
+  string rubric = 2;
+  // Optional model answer used by Gemini for content grading; stripped from the
+  // student-facing config (like reading.expected_answer).
+  string expected_answer = 3;
+  // Optional minimum word count to accept the submission (0 = no minimum).
+  int32 min_words = 4 [(buf.validate.field).int32.gte = 0];
+}
+
+message WritingResponse {
+  // The student's written essay.
+  string text = 1;
+}
+
 // ── LessonInteraction ─────────────────────────────────────────────────────────
 
 message LessonInteraction {
@@ -136,6 +157,7 @@ message LessonInteraction {
     FillBlankConfig fill_blank = 21;
     ListeningConfig listening = 22;
     ReadingConfig reading = 23;
+    WritingConfig writing = 24;
   }
 }
 
@@ -168,6 +190,7 @@ message LessonAttemptResponse {
     ListeningResponse listening = 22;
     ReadingResponse reading = 23;
     McqMultipleResponse mcq_multiple = 24;
+    WritingResponse writing = 25;
   }
 }
 
@@ -194,6 +217,7 @@ message CreateManualInteractionRequest {
     FillBlankConfig fill_blank = 21;
     ListeningConfig listening = 22;
     ReadingConfig reading = 23;
+    WritingConfig writing = 24;
   }
 }
 
@@ -211,6 +235,7 @@ message UpdateInteractionRequest {
     FillBlankConfig fill_blank = 21;
     ListeningConfig listening = 22;
     ReadingConfig reading = 23;
+    WritingConfig writing = 24;
   }
 }
 
@@ -260,6 +285,7 @@ message AttemptResponseInput {
     ListeningResponse listening = 22;
     ReadingResponse reading = 23;
     McqMultipleResponse mcq_multiple = 24;
+    WritingResponse writing = 25;
   }
 }
 
