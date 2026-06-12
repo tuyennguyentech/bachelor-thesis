@@ -7,7 +7,6 @@ import (
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
-	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackc/pgx/v5"
@@ -199,86 +198,6 @@ func resolveGenerationPlan(
 	return generationPlan{evenCounts: result}
 }
 
-func friendlyLanguageName(langCode string) string {
-	switch strings.ToLower(langCode) {
-	case "vi":
-		return "Tiếng Việt (Vietnamese)"
-	case "en":
-		return "Tiếng Anh (English)"
-	default:
-		if langCode != "" {
-			return langCode
-		}
-		return "Tiếng Việt (Vietnamese)"
-	}
-}
-
-func strongLanguageInstruction(langCode string) string {
-	langName := friendlyLanguageName(langCode)
-	if strings.ToLower(langCode) == "en" {
-		return fmt.Sprintf("BẮT BUỘC SỬ DỤNG TIẾNG ANH (ngôn ngữ: %s) cho toàn bộ câu hỏi, câu trả lời, phương án lựa chọn, đáp án đúng, giải thích đáp án. KHÔNG ĐƯỢC viết bằng tiếng Việt hay bất kỳ ngôn ngữ nào khác.", langName)
-	}
-	return fmt.Sprintf("BẮT BUỘC SỬ DỤNG TIẾNG VIỆT (ngôn ngữ: %s) cho toàn bộ câu hỏi, câu trả lời, phương án lựa chọn, đáp án đúng, giải thích đáp án. KHÔNG ĐƯỢC viết bằng tiếng Anh hay bất kỳ ngôn ngữ nào khác (trừ phi đó là bài tập đặc thù về dịch thuật hoặc học từ vựng tiếng Anh).", langName)
-}
-
-// buildAIChoosePrompt constructs the Gemini prompt for AI_CHOOSE mode.
-// Each allowed kind contributes its prompt hint and schema; the model picks per item.
-func buildAIChoosePrompt(
-	chunk gen.LessonTranscriptChunk,
-	transcript string,
-	totalCount int32,
-	specs []aiChooseKindSpec,
-	difficulty string,
-	focusPrompt string,
-	lessonLanguage string,
-) string {
-	var kindDescs strings.Builder
-	kindNames := make([]string, 0, len(specs))
-	for _, sp := range specs {
-		fmt.Fprintf(&kindDescs, "- \"%s\": %s\n  Schema cho loại này:\n%s\n\n",
-			sp.kindStr, sp.generator.GeminiPromptHint(), sp.generator.GeminiSchema())
-		kindNames = append(kindNames, `"`+sp.kindStr+`"`)
-	}
-	allowedList := strings.Join(kindNames, ", ")
-
-	var customInstructions strings.Builder
-	if difficulty != "" {
-		fmt.Fprintf(&customInstructions, "Mức độ khó của câu hỏi PHẢI là: %s.\n", difficulty)
-	}
-	if focusPrompt != "" {
-		fmt.Fprintf(&customInstructions, "Tập trung vào yêu cầu/chủ đề sau khi tạo câu hỏi: %s.\n", focusPrompt)
-	}
-	fmt.Fprintf(&customInstructions, "%s\n", strongLanguageInstruction(lessonLanguage))
-
-	return fmt.Sprintf(
-		`Bạn là trợ lý giáo dục. Dựa trên đoạn nội dung bài giảng sau, hãy tạo %d bài tập để kiểm tra hiểu biết của học sinh.
-
-%sVới mỗi bài tập, chọn loại phù hợp nhất từ các loại cho phép:
-%s
-Đoạn nội dung (%.1f - %.1f giây):
-%s
-
-start_seconds PHẢI bằng thời điểm kết thúc đoạn: %.1f giây.
-
-Mỗi item trong mảng "items" PHẢI có trường "kind" (một trong: %s) và các trường tương ứng với loại đó theo schema ở trên.
-
-Trả về JSON object: {"items": [...]}`,
-		totalCount,
-		customInstructions.String(),
-		kindDescs.String(),
-		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
-		transcript,
-		float32(chunk.EndSeconds),
-		allowedList,
-	)
-}
-
-// aiChooseKindSpec is used internally by buildAIChoosePrompt and runGeminiGenerateItemsAIChoose.
-type aiChooseKindSpec struct {
-	kindStr   string
-	generator svcinteractions.GeminiGenerator
-}
-
 // ── Step 7: GenerateInteractionsStream ───────────────────────────────────────
 //
 // GenerateInteractionsStream was removed in this revision. The generation
@@ -406,16 +325,6 @@ func normalizeGeneratedInteractionStartSeconds(ints []gen.LessonInteraction, chu
 			ints[i].StartSeconds = endSeconds
 		}
 	}
-}
-
-func generatedInteractionCheckpointSeconds(chunk gen.LessonTranscriptChunk) float32 {
-	if chunk.EndSeconds > 0 {
-		return float32(chunk.EndSeconds)
-	}
-	if chunk.StartSeconds > 0 {
-		return float32(chunk.StartSeconds)
-	}
-	return 0
 }
 
 func (s *AISvc) insertInteractionsInTx(ctx context.Context, q *gen.Queries, lessonID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {

@@ -90,11 +90,6 @@ type AISvc struct {
 	chunkOps       *chunkops.Service
 	transcription  *transcriptionService
 	grading        *gradingService
-	// interactionGen is kept for reference but is superseded by generation.Service.
-	// All quiz-generation calls go through s.generation; this field is unused and
-	// retained only to avoid removing it during a refactor without a full audit.
-	// TODO: delete after confirming generation.Service covers all quiz-gen paths.
-	interactionGen *interactionGenerationService
 	generation     *generation.Service
 	transcript     *transcript.Service
 	tqDB           taskqueue.DB
@@ -182,7 +177,6 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		grading:       newGradingService(geminiCfg, transcription),
 		tqDB:          tqDB,
 	}
-	svc.interactionGen = newInteractionGenerationService(geminiCfg, aiCfg, l, svc.synthesiseAndEmbed)
 	svc.generation = generation.New(generation.Deps{
 		Postgres:             pg,
 		Log:                  l,

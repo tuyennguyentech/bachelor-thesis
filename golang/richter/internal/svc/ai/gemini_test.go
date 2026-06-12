@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	richterv1 "example.com/buf/gen/richter/v1"
-	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -132,74 +131,6 @@ func TestResolveGenerationPlan_RequestOverridesAll(t *testing.T) {
 	}
 	if plan.aiCount != 5 {
 		t.Errorf("aiCount: want 5 (from request), got %d", plan.aiCount)
-	}
-}
-
-// ── buildAIChoosePrompt tests ─────────────────────────────────────────────────
-
-func TestBuildAIChoosePrompt_ContainsAllSupportedSchemas(t *testing.T) {
-	t.Parallel()
-	kinds := []richterv1.InteractionKind{
-		richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE,
-		richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE,
-		richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK,
-		richterv1.InteractionKind_INTERACTION_KIND_READING,
-		richterv1.InteractionKind_INTERACTION_KIND_LISTENING,
-	}
-	specs := make([]aiChooseKindSpec, 0, len(kinds))
-	generators := make(map[string]svcinteractions.GeminiGenerator, len(kinds))
-	for _, kind := range kinds {
-		handler := svcinteractions.Get(kind)
-		if handler == nil {
-			t.Fatalf("%v handler not registered", kind)
-		}
-		generator, ok := handler.(svcinteractions.GeminiGenerator)
-		if !ok {
-			t.Fatalf("%v handler does not implement GeminiGenerator", kind)
-		}
-		kindStr := svcinteractions.KindToDBString(kind)
-		specs = append(specs, aiChooseKindSpec{kindStr: kindStr, generator: generator})
-		generators[kindStr] = generator
-	}
-
-	var id pgtype.UUID
-	_ = id.Scan("00000000-0000-0000-0000-000000000002")
-	chunk := gen.LessonTranscriptChunk{ID: id, StartSeconds: 0, EndSeconds: 120}
-	prompt := buildAIChoosePrompt(chunk, "test transcript", 5, specs, "", "", "vi")
-
-	for _, want := range []string{"mcq", "multiple_choice", "fill_blank", "reading", "listening", "kind", "items"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("prompt missing %q", want)
-		}
-	}
-	for kindStr, generator := range generators {
-		if !strings.Contains(prompt, generator.GeminiSchema()) {
-			t.Errorf("prompt missing %s schema", kindStr)
-		}
-	}
-	if !strings.Contains(prompt, "start_seconds PHẢI bằng thời điểm kết thúc đoạn: 120.0 giây") {
-		t.Error("prompt should force generated checkpoints to the chunk end")
-	}
-}
-
-func TestGeneratedInteractionCheckpointSecondsUsesChunkEnd(t *testing.T) {
-	t.Parallel()
-	var id pgtype.UUID
-	_ = id.Scan("00000000-0000-0000-0000-000000000003")
-
-	chunk := gen.LessonTranscriptChunk{ID: id, StartSeconds: 10, EndSeconds: 63}
-	if got := generatedInteractionCheckpointSeconds(chunk); got != 63 {
-		t.Fatalf("checkpoint seconds: want chunk end 63, got %v", got)
-	}
-
-	chunk.EndSeconds = 0
-	if got := generatedInteractionCheckpointSeconds(chunk); got != 10 {
-		t.Fatalf("fallback checkpoint seconds: want chunk start 10, got %v", got)
-	}
-
-	chunk.StartSeconds = 0
-	if got := generatedInteractionCheckpointSeconds(chunk); got != 0 {
-		t.Fatalf("zero-boundary checkpoint seconds: want 0, got %v", got)
 	}
 }
 
