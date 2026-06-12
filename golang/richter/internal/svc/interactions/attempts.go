@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/kv"
 	"example.com/richter/internal/svc"
 	"example.com/sql/gen"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
@@ -202,33 +203,67 @@ func (s *InteractionsSvc) SubmitAttempt(
 		totalMaxScore += g.maxScore
 	}
 
+	// Load the previous attempt (if any) and its responses once. Reused for
+	// two purposes: best-effort audio cleanup on retake, and deciding whether
+	// this submission should consume an attempt (shouldIncrement).
+	var (
+		hasPrevAttempt   bool
+		prevAttempt      gen.LessonAttempt
+		prevResponseJSON = make(map[string][]byte) // interactionID string → stored response JSON
+	)
+	if pa, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
+		return q.GetMyLessonAttempt(ctx, gen.GetMyLessonAttemptParams{LessonID: lessonID, UserID: userID})
+	}); err == nil {
+		hasPrevAttempt = true
+		prevAttempt = pa
+		if prevResponses, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListAttemptResponsesRow, error) {
+			return q.ListAttemptResponses(ctx, pa.ID)
+		}); err == nil {
+			for _, pr := range prevResponses {
+				prevResponseJSON[pr.InteractionID.String()] = pr.Response
+			}
+		}
+	}
+
 	// Collect old audio keys to delete after upsert (best-effort cleanup on retake).
 	var oldAudioKeys []string
-	if s.deleteAudio != nil {
-		if prevAttempt, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAttempt, error) {
-			return q.GetMyLessonAttempt(ctx, gen.GetMyLessonAttemptParams{LessonID: lessonID, UserID: userID})
-		}); err == nil {
-			if prevResponses, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListAttemptResponsesRow, error) {
-				return q.ListAttemptResponses(ctx, prevAttempt.ID)
-			}); err == nil {
-				for _, pr := range prevResponses {
-					interactionRow, ok := interactionByID[pr.InteractionID.String()]
-					if !ok {
-						continue
-					}
-					kind := dbStringToKind(interactionRow.Kind)
-					h := Get(kind)
-					if h == nil {
-						continue
-					}
-					if ac, ok := h.(AudioObjectCleaner); ok {
-						if key := ac.AudioObjectKeyFromResponse(pr.Response); key != "" {
-							oldAudioKeys = append(oldAudioKeys, key)
-						}
-					}
+	if s.deleteAudio != nil && hasPrevAttempt {
+		for iid, respJSON := range prevResponseJSON {
+			interactionRow, ok := interactionByID[iid]
+			if !ok {
+				continue
+			}
+			kind := dbStringToKind(interactionRow.Kind)
+			h := Get(kind)
+			if h == nil {
+				continue
+			}
+			if ac, ok := h.(AudioObjectCleaner); ok {
+				if key := ac.AudioObjectKeyFromResponse(respJSON); key != "" {
+					oldAudioKeys = append(oldAudioKeys, key)
 				}
 			}
 		}
+	}
+
+	// Decide whether this submission consumes an attempt. First submission
+	// always increments. A resubmit increments only when something graded
+	// actually changed — any per-interaction response JSON differs, or the
+	// total score differs. No-op resubmits (e.g. re-opening and re-saving the
+	// same answers) must not burn an attempt against max_attempts.
+	shouldIncrement := true
+	if hasPrevAttempt {
+		changed := totalScore != prevAttempt.TotalScore
+		if !changed {
+			for _, g := range graded {
+				prev, ok := prevResponseJSON[g.interactionID.String()]
+				if !ok || !bytes.Equal(prev, g.responseJSON) {
+					changed = true
+					break
+				}
+			}
+		}
+		shouldIncrement = changed
 	}
 
 	// Build a per-interaction metrics map keyed by interaction ID string
@@ -250,8 +285,24 @@ func (s *InteractionsSvc) SubmitAttempt(
 		attempt   gen.LessonAttempt
 		responses []gen.ListAttemptResponsesRow
 	}, error) {
+		// Prefer the server-authoritative watch fraction derived from the
+		// coverage bitmap. WatchCoverageFraction returns -1 when the lesson
+		// duration is unknown (no usable data), in which case we fall back to
+		// the client-reported fraction. The SQL keeps GREATEST(old, new) across
+		// retakes, so this is now a max of honest fractions.
 		watchFrac := pgtype.Float4{}
-		if f := req.GetVideoWatchFraction(); f >= 0 {
+		serverFrac := float64(-1)
+		if s.kv != nil && lesson.DurationSeconds.Valid {
+			if sf, ferr := kv.WatchCoverageFraction(s.kv, claims.Sub, lessonID.String(), int(lesson.DurationSeconds.Int32)); ferr == nil {
+				serverFrac = sf
+			} else {
+				s.log.WarnContext(ctx, "interactions: watch coverage fraction failed, falling back to client value",
+					"lesson_id", lessonID.String(), "err", ferr)
+			}
+		}
+		if serverFrac >= 0 {
+			watchFrac = pgtype.Float4{Float32: float32(serverFrac), Valid: true}
+		} else if f := req.GetVideoWatchFraction(); f >= 0 {
 			watchFrac = pgtype.Float4{Float32: float32(f), Valid: true}
 		}
 		a, err := q.UpsertLessonAttempt(ctx, gen.UpsertLessonAttemptParams{
@@ -261,6 +312,7 @@ func (s *InteractionsSvc) SubmitAttempt(
 			MaxScore:           totalMaxScore,
 			Status:             "submitted",
 			VideoWatchFraction: watchFrac,
+			ShouldIncrement:    shouldIncrement,
 		})
 		if err != nil {
 			return struct {

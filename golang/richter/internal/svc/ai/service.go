@@ -105,6 +105,8 @@ const (
 	kvNsLesson = "lesson"
 	kvNsChunk  = "chunk"
 	kvNsWatch  = "watch"
+
+	kvNsWatchCov = "watch_cov"
 )
 
 var _ richterv1connect.AIServiceHandler = (*AISvc)(nil)

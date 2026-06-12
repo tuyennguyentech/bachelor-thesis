@@ -5,7 +5,7 @@ ON CONFLICT (user_id, lesson_id) DO UPDATE SET
   total_score = EXCLUDED.total_score,
   max_score = EXCLUDED.max_score,
   status = EXCLUDED.status,
-  attempt_count = COALESCE(lesson_attempts.attempt_count, 0) + 1,
+  attempt_count = COALESCE(lesson_attempts.attempt_count, 0) + CASE WHEN sqlc.arg(should_increment)::boolean THEN 1 ELSE 0 END,
   submitted_at = now(),
   started_at = COALESCE(lesson_attempts.started_at, now()),
   video_watch_fraction = GREATEST(COALESCE(lesson_attempts.video_watch_fraction, 0), EXCLUDED.video_watch_fraction)
@@ -49,6 +49,8 @@ SELECT
   la.attempt_count,
   la.video_watch_fraction,
   COALESCE(AVG(lar.time_to_answer_ms), 0)::float8 AS avg_time_to_answer_ms,
+  COALESCE(SUM(lar.time_to_answer_ms), 0)::float8 AS time_on_task_ms,
+  COALESCE(AVG(lar.replay_count), 0)::float8 AS avg_replay_count,
   u.first_name,
   u.middle_name,
   u.last_name,
