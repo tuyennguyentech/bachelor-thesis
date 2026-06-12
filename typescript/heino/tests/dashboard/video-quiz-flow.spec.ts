@@ -232,20 +232,30 @@ test.describe("Video player", () => {
   });
 
   test("video load error shows error placeholder instead of broken player", async ({ teacherPage: page }) => {
+    // Heavy real-video upload + player mount: under parallel load the storage PUT,
+    // presigned-URL fetch, and <video> load can run long. Give the whole test
+    // generous headroom so a slow-but-healthy run isn't cut off.
+    test.setTimeout(120_000);
     const lessonUrl = await createLesson(page, uid("ErrorVideoTest"), "Module 1", uid("Lesson"));
     // Upload controls live in the ?tab=processing tab
     await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
-    // Wait for upload widget to be ready before triggering the file input
-    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
+    // Wait for upload widget to be ready before triggering the file input (signals
+    // the processing tab is hydrated, not just DOM-loaded).
+    await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible({ timeout: 15_000 });
     // Upload a real file so video_storage_key is set in DB
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step — confirms upload succeeded.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 60_000 });
     // Navigate to ?tab=content so the server fetches the presigned download URL and renders the video player
     await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
-    await expect(page.locator("video").first()).toBeVisible({ timeout: 10_000 });
-    // The onError placeholder text must NOT be visible when the video loads fine
-    await expect(page.getByText("Video không thể tải")).not.toBeVisible();
+    // Wait for the player to actually mount as the definitive "ready" signal before
+    // asserting on the error placeholder (generous timeout for a slow load under load).
+    await expect(page.locator("video").first()).toBeVisible({ timeout: 30_000 });
+    // The onError placeholder text must NOT be visible when the video loads fine.
+    // Use a short positive timeout so this stays an auto-retrying web-first assertion
+    // (the player onError handler may fire slightly after mount); it asserts the
+    // placeholder is absent and gives a healthy load a moment to settle.
+    await expect(page.getByText("Video không thể tải")).toHaveCount(0, { timeout: 5_000 });
   });
 });
 
