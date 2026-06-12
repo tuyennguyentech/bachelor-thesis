@@ -12,11 +12,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, BuildingIcon } from "lucide-react";
 import { roleName, memberStatusBadge } from "@/lib/org-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateOrgDialog } from "@/app/dashboard/organizations/create-org-dialog";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
+import { EmptyState } from "@/components/ui/empty-state";
+import { formatDate } from "@/lib/date-utils";
 
 const LIMIT = 20;
 
@@ -80,8 +82,12 @@ export default async function OrganizationsPage({
           <TableBody>
             {members.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                  Bạn chưa tham gia tổ chức nào.
+                <TableCell colSpan={5} className="p-0">
+                  <EmptyState
+                    icon={<BuildingIcon className="size-5" />}
+                    title="Bạn chưa tham gia tổ chức nào"
+                    description="Tạo tổ chức mới hoặc liên hệ quản trị viên để được mời tham gia."
+                  />
                 </TableCell>
               </TableRow>
             ) : (
@@ -93,9 +99,7 @@ export default async function OrganizationsPage({
                     <TableCell>{roleName(m.role)}</TableCell>
                     <TableCell>{memberStatusBadge(m.status)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {m.createdAt
-                        ? new Date(Number(m.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                        : "—"}
+                      {m.createdAt ? formatDate(m.createdAt) : "—"}
                     </TableCell>
                     <TableCell>
                       {org?.slug && (

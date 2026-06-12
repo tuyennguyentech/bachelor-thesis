@@ -186,20 +186,20 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-md border p-4">
+        <Link href="/dashboard/organizations" className="rounded-md border p-4 transition-colors hover:bg-muted/50">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <BuildingIcon className="size-4" />
             Tổ chức
           </div>
           <p className="mt-2 text-2xl font-semibold">{activeOrganizations.length}</p>
-        </div>
-        <div className="rounded-md border p-4">
+        </Link>
+        <Link href="/dashboard/organizations" className="rounded-md border p-4 transition-colors hover:bg-muted/50">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <GraduationCapIcon className="size-4" />
             Khóa học
           </div>
           <p className="mt-2 text-2xl font-semibold">{courseItems.length}</p>
-        </div>
+        </Link>
         <div className="rounded-md border p-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <BookOpenIcon className="size-4" />

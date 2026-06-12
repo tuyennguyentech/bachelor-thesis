@@ -1,6 +1,7 @@
 import { createRichterClient } from "@/lib/connect-client";
 import { InteractionService, type CourseStudentSummary } from "buf/gen/richter/v1/interactions_pb";
-import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/date-utils";
+import { engagementBadge } from "@/lib/engagement-utils";
 import {
   Table,
   TableBody,
@@ -17,25 +18,6 @@ interface CourseResultsProps {
   token: string;
 }
 
-function engagementBadge(score: number) {
-  if (score >= 70)
-    return (
-      <Badge className="bg-green-100 text-green-800 border-green-300 hover:bg-green-100">
-        {score.toFixed(0)}
-      </Badge>
-    );
-  if (score >= 40)
-    return (
-      <Badge className="bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-100">
-        {score.toFixed(0)}
-      </Badge>
-    );
-  return (
-    <Badge className="bg-red-100 text-red-800 border-red-300 hover:bg-red-100">
-      {score.toFixed(0)}
-    </Badge>
-  );
-}
 
 export async function CourseResults({ courseId, token }: CourseResultsProps) {
   const client = createRichterClient(InteractionService, token);
@@ -113,9 +95,7 @@ export async function CourseResults({ courseId, token }: CourseResultsProps) {
                     {s.lessonsCompleted > 0 ? engagementBadge(s.engagementScore) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {s.lastActive
-                      ? new Date(Number(s.lastActive.seconds) * 1000).toLocaleDateString("vi-VN")
-                      : "—"}
+                    {s.lastActive ? formatDate(s.lastActive) : "—"}
                   </TableCell>
                 </TableRow>
               );

@@ -15,6 +15,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Activity,
   CheckCircle2,
   XCircle,
@@ -22,6 +32,7 @@ import {
   StopCircle,
   RefreshCw,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const LIMIT = 20;
@@ -34,6 +45,7 @@ export function TasksMonitor({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [activeTotalCount, setActiveTotalCount] = useState(0);
   const [successTotalCount, setSuccessTotalCount] = useState(0);
   const [failedTotalCount, setFailedTotalCount] = useState(0);
@@ -77,14 +89,20 @@ export function TasksMonitor({ token }: { token: string }) {
     };
   }, [fetchTasks]);
 
-  const handleCancelTask = async (taskId: string) => {
-    if (!confirm("Bạn có chắc chắn muốn huỷ tác vụ này?")) return;
+  const handleCancelTask = (taskId: string) => {
+    setConfirmCancelId(taskId);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!confirmCancelId) return;
+    const taskId = confirmCancelId;
+    setConfirmCancelId(null);
     setCancellingId(taskId);
     try {
       await aiClient.cancelLessonTask({ taskId });
       await fetchTasks();
     } catch (err) {
-      alert("Huỷ tác vụ thất bại!");
+      toast.error("Huỷ tác vụ thất bại!");
       console.error(err);
     } finally {
       setCancellingId(null);
@@ -203,6 +221,20 @@ export function TasksMonitor({ token }: { token: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <AlertDialog open={!!confirmCancelId} onOpenChange={(open) => { if (!open) setConfirmCancelId(null); }}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Huỷ tác vụ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Bạn có chắc chắn muốn huỷ tác vụ này? Hành động này không thể hoàn tác.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Không</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmCancel}>Huỷ tác vụ</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Dashboard Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="bg-card border shadow-sm">

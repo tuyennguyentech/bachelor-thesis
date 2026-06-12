@@ -1,4 +1,12 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { StudentAttemptSummary } from "buf/gen/richter/v1/interactions_pb";
 
 interface Props {
@@ -65,43 +73,43 @@ export function LessonAttempts({ attempts, total, maxAttempts }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">{total} lượt nộp</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm font-sans">
-          <thead>
-            <tr className="border-b text-xs text-muted-foreground">
-              <th className="text-left pb-2 font-medium">Học viên</th>
-              <th className="text-left pb-2 font-medium">Email</th>
-              <th className="text-center pb-2 font-medium">Số lần nộp</th>
-              <th className="text-right pb-2 font-medium">Điểm</th>
-              <th className="text-right pb-2 font-medium">TG trả lời TB</th>
-              <th className="text-right pb-2 font-medium">% xem video</th>
-              <th className="text-right pb-2 font-medium">Điểm TT</th>
-              <th className="text-right pb-2 font-medium">Thời gian</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Học viên</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead className="text-center">Số lần nộp</TableHead>
+              <TableHead className="text-right">Điểm</TableHead>
+              <TableHead className="text-right">TG trả lời TB</TableHead>
+              <TableHead className="text-right">% xem video</TableHead>
+              <TableHead className="text-right">Điểm TT</TableHead>
+              <TableHead className="text-right">Thời gian</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {attempts.map((a) => {
               const submittedDate = a.submittedAt
                 ? new Date(Number(a.submittedAt.seconds) * 1000)
                 : null;
               const badge = engagementBadge(a.engagementScore);
               return (
-                <tr key={a.userId} className="border-b last:border-0 hover:bg-muted/10 transition-colors">
-                  <td className="py-2 pr-4 font-medium">{a.displayName}</td>
-                  <td className="py-2 pr-4 text-muted-foreground">{a.email}</td>
-                  <td className="py-2 pr-4 text-center text-muted-foreground font-mono text-xs">
+                <TableRow key={a.userId}>
+                  <TableCell className="font-medium">{a.displayName}</TableCell>
+                  <TableCell className="text-muted-foreground">{a.email}</TableCell>
+                  <TableCell className="text-center text-muted-foreground font-mono text-xs">
                     {a.attemptCount}{maxAttempts && maxAttempts > 0 ? ` / ${maxAttempts}` : ""}
-                  </td>
-                  <td className={`py-2 pr-4 text-right font-medium font-mono ${scoreColor(a.totalScore, a.maxScore)}`}>
+                  </TableCell>
+                  <TableCell className={`text-right font-medium font-mono ${scoreColor(a.totalScore, a.maxScore)}`}>
                     {formatScore(a.totalScore)}/{formatScore(a.maxScore)}
-                  </td>
-                  <td className="py-2 pr-4 text-right text-muted-foreground text-xs font-mono">
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground text-xs font-mono">
                     {formatAvgTimeMs(a.avgTimeToAnswerMs)}
-                  </td>
-                  <td className="py-2 pr-4 text-right text-muted-foreground text-xs font-mono">
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground text-xs font-mono">
                     {formatWatchFraction(a.videoWatchFraction)}
-                  </td>
-                  <td className="py-2 pr-4 text-right">
+                  </TableCell>
+                  <TableCell className="text-right">
                     {a.engagementScore > 0 ? (
                       <Badge
                         variant="outline"
@@ -112,8 +120,8 @@ export function LessonAttempts({ attempts, total, maxAttempts }: Props) {
                     ) : (
                       <span className="text-xs text-muted-foreground font-mono">—</span>
                     )}
-                  </td>
-                  <td className="py-2 text-right text-muted-foreground text-xs font-mono">
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground text-xs font-mono">
                     {submittedDate
                       ? submittedDate.toLocaleString("vi-VN", {
                           day: "2-digit",
@@ -122,12 +130,12 @@ export function LessonAttempts({ attempts, total, maxAttempts }: Props) {
                           minute: "2-digit",
                         })
                       : "—"}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );

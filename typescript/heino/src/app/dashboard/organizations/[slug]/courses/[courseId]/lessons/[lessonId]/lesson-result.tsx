@@ -53,7 +53,8 @@ function DonutScore({ score, total, attemptCount, maxAttempts }: { score: number
 
   return (
     <div className="flex items-center gap-3">
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label={`Điểm: ${pct}%`}>
+        <title>Điểm: {pct}%</title>
         <circle cx="32" cy="32" r={r} fill="none" stroke="currentColor" strokeWidth="6" className="text-muted/40" />
         <circle
           cx="32" cy="32" r={r} fill="none"

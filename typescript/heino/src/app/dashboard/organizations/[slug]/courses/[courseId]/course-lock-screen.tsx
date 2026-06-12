@@ -38,7 +38,7 @@ export function CourseLockScreen({
       <Card className="w-full max-w-lg border-border/80 shadow-xl rounded-2xl overflow-hidden backdrop-blur-sm bg-card/90">
         <div className="h-2 bg-primary/80" />
         <CardHeader className="text-center pt-8 pb-6">
-          <div className="mx-auto size-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 text-primary animate-pulse">
+          <div className="mx-auto size-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 text-primary">
             <LockIcon className="size-8" />
           </div>
           <CardTitle className="text-2xl font-bold tracking-tight text-foreground/95">

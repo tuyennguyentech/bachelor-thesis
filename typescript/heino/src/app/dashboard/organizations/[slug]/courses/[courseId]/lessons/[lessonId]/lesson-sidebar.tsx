@@ -85,9 +85,9 @@ export function LessonSidebar({ chunks, segments, transcript, videoRef }: Props)
           aria-label={collapsed ? "Mở rộng" : "Thu gọn"}
         >
           {collapsed ? (
-            <ChevronLeftIcon className="size-3.5" />
-          ) : (
             <ChevronRightIcon className="size-3.5" />
+          ) : (
+            <ChevronLeftIcon className="size-3.5" />
           )}
         </button>
       </div>
