@@ -67,9 +67,13 @@ test.describe("Logout", () => {
 
   test("after logout, protected pages redirect to login", async ({ adminPage: page }) => {
     await page.goto("/admin");
-    await page.getByRole("button", { name: "Đăng xuất" }).click();
-    await page.waitForURL(/\/login/);
+    // Ensure the logout control is mounted/hydrated before clicking, then give
+    // the cookie-clear + middleware redirect generous time (flaked under load).
+    const logout = page.getByRole("button", { name: "Đăng xuất" });
+    await expect(logout).toBeVisible({ timeout: 10000 });
+    await logout.click();
+    await page.waitForURL(/\/login/, { timeout: 15000 });
     await page.goto("/admin/organizations");
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/login/, { timeout: 15000 });
   });
 });

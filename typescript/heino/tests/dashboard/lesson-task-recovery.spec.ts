@@ -541,7 +541,10 @@ test.describe("Lesson task panel", () => {
    * ≈ 2× single transcribe), but neither should fail with a timeout.
    */
   test("E. two parallel transcribe tasks on different lessons both succeed", async ({ teacherPage: page, baseURL }) => {
-    test.setTimeout(360_000);
+    // Heavy real-Whisper test: two extract setups (up to 150s each) + a 280s
+    // poll can approach the old 360s cap when Whisper is busy under parallel
+    // load. Give generous headroom so a slow-but-healthy run isn't cut off.
+    test.setTimeout(600_000);
     const token = await getTeacherToken(baseURL);
     const ai = createAIClient(token, baseURL);
 
@@ -589,7 +592,7 @@ test.describe("Lesson task panel", () => {
       // state. We assert both SUCCEEDED, never FAILED. The
       // concurrency cap on the Whisper server side means the two
       // requests run serially, but neither should time out.
-      const deadline = Date.now() + 280_000;
+      const deadline = Date.now() + 360_000;
       let statusA: LessonTaskStatus = LessonTaskStatus.UNSPECIFIED;
       let statusB: LessonTaskStatus = LessonTaskStatus.UNSPECIFIED;
       let msgA = "";

@@ -65,8 +65,11 @@ test.describe("Members list page", () => {
 
   test("shows seeded members", async ({ adminPage: page }) => {
     await gotoMembers(page);
-    // Table should have at least one data row (seeded members exist)
+    // Table should have at least one data row (seeded members exist).
+    // Wait for the first data row to render before counting — a bare count()
+    // is a non-retrying snapshot that flakes if the table hasn't loaded yet.
     const rows = page.getByRole("row");
+    await expect(rows.nth(1)).toBeVisible({ timeout: 10000 });
     expect(await rows.count()).toBeGreaterThan(1); // more than just the header
   });
 
