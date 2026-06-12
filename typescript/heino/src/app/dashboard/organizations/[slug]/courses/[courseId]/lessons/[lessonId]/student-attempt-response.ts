@@ -1,6 +1,6 @@
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
-import type { FillBlankResponse, ListeningResponse, McqResponse, ReadingResponse } from "@/interactions/types";
+import type { FillBlankResponse, ListeningResponse, McqResponse, ReadingResponse, WritingResponse } from "@/interactions/types";
 
 export interface ResponseMetrics {
   timeToAnswerMs?: number;
@@ -41,6 +41,16 @@ export function buildAttemptResponseInput(it: LessonInteraction, localResp: unkn
         response: {
           case: "reading" as const,
           value: { audioObjectKey: (localResp as ReadingResponse | undefined)?.audioObjectKey ?? "" },
+        },
+      };
+    case "writing":
+      return {
+        interactionId: it.id,
+        timeToAnswerMs,
+        replayCount,
+        response: {
+          case: "writing" as const,
+          value: { text: (localResp as WritingResponse | undefined)?.text ?? "" },
         },
       };
     case "listening": {

@@ -16,7 +16,7 @@ import { InteractionKind, InteractionService } from "buf/gen/richter/v1/interact
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { ConnectError } from "@connectrpc/connect";
 import { getRenderer, extractConfig } from "@/interactions/registry";
-import type { McqConfig, FillBlankConfig, ListeningConfig, ReadingConfig } from "@/interactions/types";
+import type { McqConfig, FillBlankConfig, ListeningConfig, ReadingConfig, WritingConfig } from "@/interactions/types";
 import { RegenerateModal } from "./regenerate-modal";
 
 // ── Kind badge utilities ───────────────────────────────────────────────────────
@@ -27,6 +27,7 @@ export const KIND_BADGE_CLS: Partial<Record<InteractionKind, string>> = {
   [InteractionKind.FILL_BLANK]: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
   [InteractionKind.LISTENING]: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
   [InteractionKind.READING]: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400",
+  [InteractionKind.WRITING]: "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400",
 };
 
 export const KIND_BORDER_L_CLS: Partial<Record<InteractionKind, string>> = {
@@ -35,6 +36,7 @@ export const KIND_BORDER_L_CLS: Partial<Record<InteractionKind, string>> = {
   [InteractionKind.FILL_BLANK]: "border-l-emerald-400",
   [InteractionKind.LISTENING]: "border-l-amber-400",
   [InteractionKind.READING]: "border-l-sky-400",
+  [InteractionKind.WRITING]: "border-l-indigo-400",
 };
 
 // ── Form data ─────────────────────────────────────────────────────────────────
@@ -67,6 +69,13 @@ export function emptyFormForKind(kind: InteractionKind): InteractionFormData {
     return {
       kind, prompt: "",
       config: { mode: "pronunciation", passageMarkdown: "", question: "" } satisfies ReadingConfig,
+      explanation: "", startSeconds: 0,
+    };
+  }
+  if (kind === InteractionKind.WRITING) {
+    return {
+      kind, prompt: "",
+      config: { prompt: "", minWords: 0 } satisfies WritingConfig,
       explanation: "", startSeconds: 0,
     };
   }
@@ -116,6 +125,10 @@ export function isSaveable(form: InteractionFormData): boolean {
     const c = form.config as ReadingConfig;
     return c.passageMarkdown.trim() !== "";
   }
+  if (form.kind === InteractionKind.WRITING) {
+    const c = form.config as WritingConfig;
+    return c.prompt.trim() !== "" && c.minWords >= 0;
+  }
   return false;
 }
 
@@ -154,6 +167,18 @@ export function buildProtoConfig(form: InteractionFormData) {
       },
     };
   }
+  if (form.kind === InteractionKind.WRITING) {
+    const c = form.config as WritingConfig;
+    return {
+      case: "writing" as const,
+      value: {
+        prompt: c.prompt,
+        rubric: c.rubric ?? "",
+        expectedAnswer: c.expectedAnswer ?? "",
+        minWords: c.minWords,
+      },
+    };
+  }
   const c = form.config as McqConfig;
   return {
     case: "mcq" as const,
@@ -189,24 +214,28 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
     <div className="flex flex-col gap-4 p-4 bg-muted/20 rounded-lg border border-border">
       <p className="text-sm font-medium text-muted-foreground">{renderer.label}</p>
 
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm text-muted-foreground">
-          {form.kind === InteractionKind.FILL_BLANK ? "Câu dẫn (tuỳ chọn)" :
-           form.kind === InteractionKind.LISTENING ? "Tiêu đề bài nghe" :
-           form.kind === InteractionKind.READING ? "Tiêu đề bài đọc" : "Câu hỏi"}
-        </label>
-        <textarea
-          rows={2}
-          value={form.prompt}
-          onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
-          className="text-sm rounded-lg border border-input bg-background px-3 py-2 resize-none"
-          placeholder="Nhập câu hỏi..."
-          disabled={saving}
-        />
-      </div>
+      {/* WRITING mirrors its prompt from the editor's "Đề bài" field, so the
+          generic top-level prompt textarea is hidden to avoid double entry. */}
+      {form.kind !== InteractionKind.WRITING && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm text-muted-foreground">
+            {form.kind === InteractionKind.FILL_BLANK ? "Câu dẫn (tuỳ chọn)" :
+             form.kind === InteractionKind.LISTENING ? "Tiêu đề bài nghe" :
+             form.kind === InteractionKind.READING ? "Tiêu đề bài đọc" : "Câu hỏi"}
+          </label>
+          <textarea
+            rows={2}
+            value={form.prompt}
+            onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
+            className="text-sm rounded-lg border border-input bg-background px-3 py-2 resize-none"
+            placeholder="Nhập câu hỏi..."
+            disabled={saving}
+          />
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
-        {form.kind !== InteractionKind.LISTENING && form.kind !== InteractionKind.READING && (
+        {form.kind !== InteractionKind.LISTENING && form.kind !== InteractionKind.READING && form.kind !== InteractionKind.WRITING && (
           <label className="text-sm text-muted-foreground">
             {form.kind === InteractionKind.SINGLE_CHOICE || form.kind === InteractionKind.MULTIPLE_CHOICE
               ? "Cấu hình các lựa chọn đáp án"
@@ -215,7 +244,13 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
         )}
         <renderer.EditorView
           config={form.config}
-          onChange={(c) => setForm((f) => ({ ...f, config: c }))}
+          onChange={(c) =>
+            setForm((f) =>
+              f.kind === InteractionKind.WRITING
+                ? { ...f, config: c, prompt: (c as WritingConfig).prompt }
+                : { ...f, config: c },
+            )
+          }
           lessonId={lessonId}
           token={token}
         />

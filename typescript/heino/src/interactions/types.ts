@@ -59,6 +59,17 @@ export interface ReadingResponse {
   audioObjectKey: string;
 }
 
+export interface WritingConfig {
+  prompt: string;
+  rubric?: string;
+  expectedAnswer?: string;
+  minWords: number;
+}
+
+export interface WritingResponse {
+  text: string;
+}
+
 export interface InteractionGrade {
   score: number;
   maxScore: number;

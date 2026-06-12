@@ -6,11 +6,13 @@ import type {
   FillBlankConfig, FillBlankResponse,
   ListeningConfig, ListeningResponse,
   ReadingConfig, ReadingResponse,
+  WritingConfig, WritingResponse,
 } from "./types";
 import { mcqRenderer, multipleChoiceRenderer } from "./mcq";
 import { fillBlankRenderer } from "./fill-blank";
 import { listeningRenderer } from "./listening";
 import { readingRenderer } from "./reading";
+import { writingRenderer } from "./writing";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const registry: Record<number, InteractionRenderer<any, any>> = {
@@ -19,6 +21,7 @@ const registry: Record<number, InteractionRenderer<any, any>> = {
   [InteractionKind.FILL_BLANK]: fillBlankRenderer,
   [InteractionKind.LISTENING]: listeningRenderer,
   [InteractionKind.READING]: readingRenderer,
+  [InteractionKind.WRITING]: writingRenderer,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,6 +79,15 @@ export function extractConfig(interaction: LessonInteraction): any | null {
       expectedAnswer: v.expectedAnswer,
     } satisfies ReadingConfig;
   }
+  if (interaction.config.case === "writing") {
+    const v = interaction.config.value;
+    return {
+      prompt: v.prompt,
+      rubric: v.rubric,
+      expectedAnswer: v.expectedAnswer,
+      minWords: v.minWords,
+    } satisfies WritingConfig;
+  }
   return null;
 }
 
@@ -103,6 +115,9 @@ export function extractLocalResponse(protoResp: LessonAttemptResponse): any | nu
   }
   if (protoResp.response.case === "reading") {
     return { audioObjectKey: protoResp.response.value.audioObjectKey } satisfies ReadingResponse;
+  }
+  if (protoResp.response.case === "writing") {
+    return { text: protoResp.response.value.text } satisfies WritingResponse;
   }
   return null;
 }

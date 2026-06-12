@@ -11,6 +11,7 @@ const KIND_OPTIONS = [
   { kind: InteractionKind.FILL_BLANK, label: "Điền đáp án", shortLabel: "Điền" },
   { kind: InteractionKind.READING, label: "Bài đọc", shortLabel: "Đọc" },
   { kind: InteractionKind.LISTENING, label: "Bài nghe", shortLabel: "Nghe" },
+  { kind: InteractionKind.WRITING, label: "Bài viết", shortLabel: "Viết" },
 ] as const;
 
 interface ChunkAddFormProps {
