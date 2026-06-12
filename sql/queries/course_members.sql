@@ -112,3 +112,47 @@ LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $2
 WHERE c.organization_id = $1 AND c.title ILIKE '%' || $3::text || '%'
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT $4 OFFSET $5;
+
+-- Draft-excluding variants: used for non-managers, who must never see (or
+-- paginate through) draft courses. Filtering at the query level keeps LIMIT
+-- counting only visible courses, so pagination isn't broken by hidden drafts.
+
+-- name: ListCoursesWithAccessExcludingDraft :many
+SELECT
+  c.*,
+  (
+    cm.user_id IS NOT NULL
+    OR c.owner_id = $2
+    OR EXISTS (
+      SELECT 1 FROM organization_members om
+      WHERE om.organization_id = c.organization_id
+        AND om.user_id = $2
+        AND om.status = 'active'
+        AND om.role IN ('owner', 'admin')
+    )
+  ) AS can_access
+FROM courses c
+LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $2
+WHERE c.organization_id = $1 AND c.status != 'draft'
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $3 OFFSET $4;
+
+-- name: ListCoursesWithAccessAndTitleFilterExcludingDraft :many
+SELECT
+  c.*,
+  (
+    cm.user_id IS NOT NULL
+    OR c.owner_id = $2
+    OR EXISTS (
+      SELECT 1 FROM organization_members om
+      WHERE om.organization_id = c.organization_id
+        AND om.user_id = $2
+        AND om.status = 'active'
+        AND om.role IN ('owner', 'admin')
+    )
+  ) AS can_access
+FROM courses c
+LEFT JOIN course_members cm ON cm.course_id = c.id AND cm.user_id = $2
+WHERE c.organization_id = $1 AND c.title ILIKE '%' || $3::text || '%' AND c.status != 'draft'
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $4 OFFSET $5;

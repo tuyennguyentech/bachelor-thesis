@@ -54,6 +54,10 @@ message ListCoursesRequest {
   int32 offset = 3 [(buf.validate.field).int32.gte = 0];
   optional CourseStatus status_filter = 4;
   optional string q = 5 [(buf.validate.field).string.max_len = 255];
+  // When true, exclude draft courses from the result. Set by non-managers,
+  // who must never see drafts — filtering server-side keeps pagination correct
+  // (LIMIT counts only visible courses).
+  optional bool exclude_drafts = 6;
 }
 
 message ListCoursesResponse {

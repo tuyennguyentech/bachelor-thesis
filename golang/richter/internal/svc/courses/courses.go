@@ -178,11 +178,66 @@ func (s *CoursesSvc) ListCourses(
 
 	var rows []courseWithAccess
 	if req.Q != nil && *req.Q != "" {
-		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndTitleFilterRow, error) {
-			return q.ListCoursesWithAccessAndTitleFilter(ctx, gen.ListCoursesWithAccessAndTitleFilterParams{
+		if req.GetExcludeDrafts() {
+			result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndTitleFilterExcludingDraftRow, error) {
+				return q.ListCoursesWithAccessAndTitleFilterExcludingDraft(ctx, gen.ListCoursesWithAccessAndTitleFilterExcludingDraftParams{
+					OrganizationID: orgID,
+					OwnerID:        callerID,
+					Column3:        req.GetQ(),
+					Limit:          req.GetLimit(),
+					Offset:         req.GetOffset(),
+				})
+			})
+			if qErr != nil {
+				err = qErr
+			} else {
+				for _, r := range result {
+					rows = append(rows, courseWithAccess{
+						course: gen.Course{
+							ID: r.ID, OrganizationID: r.OrganizationID, OwnerID: r.OwnerID,
+							Title: r.Title, Description: r.Description, Status: r.Status,
+							CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+						},
+						canAccess: r.CanAccess.Bool,
+					})
+				}
+			}
+		} else {
+			result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndTitleFilterRow, error) {
+				return q.ListCoursesWithAccessAndTitleFilter(ctx, gen.ListCoursesWithAccessAndTitleFilterParams{
+					OrganizationID: orgID,
+					OwnerID:        callerID,
+					Column3:        req.GetQ(),
+					Limit:          req.GetLimit(),
+					Offset:         req.GetOffset(),
+				})
+			})
+			if qErr != nil {
+				err = qErr
+			} else {
+				for _, r := range result {
+					rows = append(rows, courseWithAccess{
+						course: gen.Course{
+							ID: r.ID, OrganizationID: r.OrganizationID, OwnerID: r.OwnerID,
+							Title: r.Title, Description: r.Description, Status: r.Status,
+							CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+						},
+						canAccess: r.CanAccess.Bool,
+					})
+				}
+			}
+		}
+	} else if req.StatusFilter != nil {
+		sqlStatus, statusErr := CourseStatusToSQL(req.GetStatusFilter())
+		if statusErr != nil {
+			s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("ListCourses.StatusToSQL", statusErr)...)
+			return nil, statusErr
+		}
+		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndStatusRow, error) {
+			return q.ListCoursesWithAccessAndStatus(ctx, gen.ListCoursesWithAccessAndStatusParams{
 				OrganizationID: orgID,
 				OwnerID:        callerID,
-				Column3:        req.GetQ(),
+				Status:         sqlStatus,
 				Limit:          req.GetLimit(),
 				Offset:         req.GetOffset(),
 			})
@@ -201,17 +256,11 @@ func (s *CoursesSvc) ListCourses(
 				})
 			}
 		}
-	} else if req.StatusFilter != nil {
-		sqlStatus, statusErr := CourseStatusToSQL(req.GetStatusFilter())
-		if statusErr != nil {
-			s.log.ErrorContext(ctx, "courses service failed", svc.LogAttrs("ListCourses.StatusToSQL", statusErr)...)
-			return nil, statusErr
-		}
-		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessAndStatusRow, error) {
-			return q.ListCoursesWithAccessAndStatus(ctx, gen.ListCoursesWithAccessAndStatusParams{
+	} else if req.GetExcludeDrafts() {
+		result, qErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListCoursesWithAccessExcludingDraftRow, error) {
+			return q.ListCoursesWithAccessExcludingDraft(ctx, gen.ListCoursesWithAccessExcludingDraftParams{
 				OrganizationID: orgID,
 				OwnerID:        callerID,
-				Status:         sqlStatus,
 				Limit:          req.GetLimit(),
 				Offset:         req.GetOffset(),
 			})
