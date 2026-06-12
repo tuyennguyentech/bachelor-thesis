@@ -19,7 +19,12 @@ export const COOKIE_OPTS = {
   httpOnly: true,
   sameSite: "lax" as const,
   path: "/",
-  secure: process.env.NODE_ENV === "production",
+  // Secure in production, EXCEPT when an explicit test-only override is set so
+  // the E2E suite can run against a production build over plain http (Caddy).
+  // Real deployments never set DYADIA_INSECURE_COOKIES, so they stay Secure.
+  secure:
+    process.env.NODE_ENV === "production" &&
+    process.env.DYADIA_INSECURE_COOKIES !== "true",
 };
 export const REFRESH_COOKIE_OPTS = { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 };
 

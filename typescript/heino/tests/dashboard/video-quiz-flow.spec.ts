@@ -40,10 +40,13 @@ import {
   test,
   expect,
   goToSeededLesson,
+  createAnalyzedLesson,
+  createInteraction,
   SEED_HUST_CS_SLUG as ORG_SLUG,
   SEED_DSA_LESSON_BIG_O as SEEDED_LESSON,
   TEACHER_EMAIL,
   USER_PASSWORD,
+  InteractionKind,
 } from "../fixtures";
 
 const TEST_VIDEO = path.join(__dirname, "../fixtures/test-video.mp4");
@@ -432,53 +435,6 @@ test.describe("AI analysis streaming progress", () => {
 });
 
 // ── 5. Student quiz form ───────────────────────────────────────────────────
-
-// Clean up any non-seeded interactions on Big-O before the checkpoint-dependent
-// tests run. studio-new-interactions.spec.ts creates test interactions on the same
-// lesson; if a previous run left them in the DB, checkpoint overlays would show
-// multiple-choice or fill-blank questions that answerAllCheckpoints cannot handle.
-test.beforeAll(async ({ browser, baseURL }) => {
-  const rpcBase = process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
-  const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBase });
-  const token = (await createClient(AuthService, transport).login({
-    email: TEACHER_EMAIL,
-    password: USER_PASSWORD,
-  })).accessToken;
-
-  // Build an authed transport for InteractionService
-  const authedTransport = createConnectTransport({
-    httpVersion: "1.1",
-    baseUrl: rpcBase,
-    interceptors: [(next) => async (req) => {
-      req.header.set("Authorization", `Bearer ${token}`);
-      return next(req);
-    }],
-  });
-  const interactions = createClient(InteractionService, authedTransport);
-
-  // Resolve the Big-O lesson ID via the browser (goToSeededLesson handles slug lookup).
-  // The context must be authenticated so the dashboard navigation doesn't redirect to login.
-  const ctx = await browser.newContext({ baseURL: baseURL ?? undefined });
-  await ctx.addCookies([
-    { name: "dyadia_access", value: token, url: baseURL ?? "http://caddy", httpOnly: true, sameSite: "Lax" },
-  ]);
-  const page = await ctx.newPage();
-  try {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
-    const match = lessonHref.match(/\/lessons\/([^/?#]+)/);
-    if (!match) return;
-    const lessonId = match[1];
-
-    // Delete any interaction that was NOT seeded (generatedBy !== "seed").
-    const list = await interactions.listLessonInteractions({ lessonId, limit: 500, offset: 0 });
-    for (const interaction of list.interactions) {
-      if (interaction.generatedBy === "seed") continue;
-      await interactions.deleteInteraction({ interactionId: interaction.id }).catch(() => { /* best effort */ });
-    }
-  } finally {
-    await ctx.close();
-  }
-});
 
 // Big-O seeded lesson checkpoint times (startSeconds per seed data)
 const CHECKPOINT_SECONDS = [208, 416, 624, 831, 1039];
@@ -952,8 +908,16 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     // Firefox throws NS_BINDING_ABORTED if we navigate while the RSC refresh is still in flight.
     await page.waitForLoadState("domcontentloaded");
 
-    // Navigate to ?tab=content to verify VideoPlayer also shows updated segment text
-    await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
+    // Navigate to ?tab=content to verify VideoPlayer also shows updated segment text.
+    // Firefox may abort the navigation if an in-flight RSC refresh is racing; swallow it
+    // and let the assertions below confirm the tab settled correctly.
+    try {
+      await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
+    } catch (err) {
+      if (!String(err).includes("NS_BINDING_ABORTED")) throw err;
+      // Page still settles; wait for load to complete before proceeding.
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+    }
     await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
     await expect(page.locator('[data-testid="transcript-segment-0"]').first()).toContainText(newText, {
       timeout: 10_000,
@@ -1077,38 +1041,63 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 });
 
 // ── 11. Teacher question editing ──────────────────────────────────────────────
+// Uses a fresh analyzed lesson (created in beforeAll) so that edits/adds/deletes
+// never touch the shared seeded Big-O lesson and can run in parallel with other files.
 
-test.describe("Teacher question editing (seeded data)", () => {
+test.describe("Teacher question editing", () => {
+  // Shared across all tests in this describe block.
+  let editingLessonUrl = "";
+  let editingLessonId = "";
+  let editingToken = "";
+
+  test.beforeAll(async () => {
+    test.setTimeout(300_000);
+    const result = await createAnalyzedLesson();
+    editingLessonUrl = result.lessonUrl;
+    editingLessonId = result.lessonId;
+    editingToken = result.token;
+
+    // Seed two interactions so the exercises step has visible questions for edit/cancel tests.
+    for (let i = 0; i < 2; i++) {
+      await createInteraction(
+        editingToken,
+        editingLessonId,
+        {
+          kind: InteractionKind.SINGLE_CHOICE,
+          startSeconds: (i + 1) * 5,
+          prompt: `Câu hỏi khởi tạo ${i + 1}`,
+        },
+      );
+    }
+  });
+
   test("teacher sees edit/delete buttons on each question", async ({ teacherPage: page }) => {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Question editor is in the ?tab=processing tab (exercises step)
-    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${editingLessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
-    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    // Chunks collapse by default — expand first chunk to see interactions.
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
 
-    // First question row should have edit and delete icons
+    // First question row should have edit and delete icons.
     await expect(page.getByTitle("Chỉnh sửa").first()).toBeVisible();
     await expect(page.getByTitle("Xóa").first()).toBeVisible();
   });
 
   test("teacher can edit a question inline", async ({ teacherPage: page }) => {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Question editor is in the ?tab=processing tab (exercises step)
-    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${editingLessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
-    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    // Chunks collapse by default — expand first chunk to see interactions.
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
 
-    // Open edit for first question
+    // Open edit for first question.
     await page.getByTitle("Chỉnh sửa").first().click();
-    // Edit form appears
     const textarea = page.locator("textarea").first();
     await expect(textarea).toBeVisible();
 
-    // Change the question text
+    // Change the question text.
     const newText = `Câu hỏi đã sửa ${Date.now()}`;
     await textarea.fill(newText);
     await page.getByRole("button", { name: "Lưu" }).first().click();
@@ -1120,18 +1109,17 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("teacher can add a manual question", async ({ teacherPage: page }) => {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Question editor is in the ?tab=processing tab (exercises step)
-    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${editingLessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
-    // After redesign: chunk-based layout with per-chunk interaction cards
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5000 });
+    // Wait for chunk cards to appear (exercises step fully loaded).
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 10000 });
 
     await page.getByTestId("add-interaction-btn").first().click();
     // Inline form opens with single-choice selected by default.
     await expect(page.getByRole("button", { name: "Trắc nghiệm 1 đáp án", exact: true })).toBeVisible();
 
-    // Fill in the add form — after selecting kind, InteractionForm appears
+    // Fill in the add form.
     await page.getByPlaceholder("Nhập câu hỏi...").fill("Câu hỏi thủ công mới");
     const optionInputs = page.locator('input[type="text"]');
     await optionInputs.nth(0).fill("Phương án A");
@@ -1145,11 +1133,11 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("bug 1.8: adding 3 questions consecutively keeps all of them visible", async ({ teacherPage: page }) => {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Question editor is in the ?tab=processing tab (exercises step)
-    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${editingLessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
-    await expect(page.getByText(/\d+ bài tập/).first()).toBeVisible({ timeout: 5_000 });
+    // Wait for chunk cards to appear (exercises step fully loaded).
+    await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 10_000 });
 
     const stamp = Date.now();
     const q = (n: number) => `Bug18-${n}-${stamp}`;
@@ -1163,7 +1151,7 @@ test.describe("Teacher question editing (seeded data)", () => {
       await opts.nth(2).fill("C");
       await opts.nth(3).fill("D");
       await page.getByRole("button", { name: "Lưu" }).last().click();
-      // Wait for form to close
+      // Wait for form to close.
       await expect(page.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 5_000 });
     }
 
@@ -1188,13 +1176,12 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("teacher can delete a question", async ({ teacherPage: page }) => {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Question editor is in the ?tab=processing tab (exercises step)
-    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${editingLessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
 
-    // Add a unique question so the delete is self-contained (seeded timed interactions untouched)
+    // Add a unique question so the delete is self-contained.
     const deleteTarget = `Câu hỏi tạm xóa ${Date.now()}`;
     await page.getByTestId("add-interaction-btn").first().click();
     await page.getByPlaceholder("Nhập câu hỏi...").fill(deleteTarget);
@@ -1204,7 +1191,7 @@ test.describe("Teacher question editing (seeded data)", () => {
     await page.getByRole("button", { name: "Lưu" }).last().click();
     await expect(page.getByText(deleteTarget)).toBeVisible({ timeout: 5_000 });
 
-    // Delete the row we just created — scoped by unique text so no seeded interaction is affected
+    // Delete the row we just created — scoped by unique text.
     const row = page.getByTestId("interaction-row").filter({ hasText: deleteTarget });
     await row.getByTitle("Xóa").click();
     // Scope to the workflow step body to avoid matching the video player's
@@ -1230,15 +1217,14 @@ test.describe("Teacher question editing (seeded data)", () => {
   });
 
   test("cancel edit discards changes", async ({ teacherPage: page }) => {
-    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Question editor is in the ?tab=processing tab (exercises step)
-    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${editingLessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("workflow-step-exercises").click();
-    // After redesign v2: chunks collapse by default — expand first chunk to see interactions
+    // Chunks collapse by default — expand first chunk to see interactions.
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
     await page.getByTestId("chunk-title-bar").first().click();
 
-    // Open edit first to read the original question text from the textarea
+    // Open edit first to read the original question text from the textarea.
     await page.getByTitle("Chỉnh sửa").first().click();
     const textarea = page.locator("textarea").first();
     const questionText = await textarea.inputValue();

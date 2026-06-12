@@ -2,6 +2,7 @@ import {
   test,
   expect,
   goToSeededLesson,
+  createAnalyzedLesson,
   SEED_DSA_LESSON_BIG_O,
   STUDENT_EMAIL,
   USER_PASSWORD,
@@ -39,26 +40,28 @@ function lessonIdFromUrl(url: string) {
 }
 
 test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
+  // Fresh analyzed lesson used by "teacher can manually create every supported interaction kind".
+  // Created once in beforeAll so the test doesn't touch the seeded Big-O lesson.
+  let studioLessonUrl = "";
+  let studioLessonId = "";
+
+  test.beforeAll(async () => {
+    test.setTimeout(300_000);
+    const result = await createAnalyzedLesson();
+    studioLessonUrl = result.lessonUrl.split("?")[0];
+    studioLessonId = result.lessonId;
+  });
+
   test("teacher can manually create every supported interaction kind", async ({ teacherPage: teacher }) => {
     test.setTimeout(180_000);
 
     const stamp = Date.now();
-    let lessonUrl = "";
-    // Track interaction IDs that existed before this test so we can delete only
-    // the ones we added, regardless of whether the test passes or fails.
-    // Populated after the first openExercises() call (which sets lessonUrl).
-    let preExistingInteractionIds = new Set<string>();
+    // lessonUrl is set from the shared studioLessonUrl (fresh analyzed lesson).
+    const lessonUrl = studioLessonUrl;
+    const lessonId = studioLessonId;
+
     const openExercises = async () => {
-      const rawUrl = await goToSeededLesson(teacher, SEED_DSA_LESSON_BIG_O);
-      // Strip any existing query params — goToSeededLesson returns page.url() when
-      // already on the lesson page, which may already include ?tab=processing from a
-      // previous openExercises() call. Appending ?tab=processing to such a URL would
-      // produce ?tab=processing?tab=processing, an invalid param that hides the
-      // processing tab div (activeTab !== "processing").
-      lessonUrl = rawUrl.split("?")[0];
       // The interaction editor lives inside the ?tab=processing tab.
-      // Navigate there first so the AnalysisWorkflowShell panel is visible
-      // (non-active tabs are CSS-hidden but still mounted).
       // On repeat calls the teacher may already be on this exact URL, and the processing
       // tab normalizes its URL client-side; Firefox aborts such navigations with
       // NS_BINDING_ABORTED. The page still settles, so swallow that specific error and
@@ -77,10 +80,26 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
       await expect(teacher.getByTestId("add-interaction-btn").first()).toBeEnabled({ timeout: 15000 });
     };
     const openManualForm = async (kind: InteractionKind) => {
-      await openExercises();
-      await teacher.getByTestId("add-interaction-btn").first().click({ force: true });
-      const form = teacher.getByTestId("chunk-add-form").last();
-      await expect(form).toBeVisible({ timeout: 15000 });
+      // Retry loop: navigate to exercises tab, click add-interaction-btn, wait for form.
+      // Under heavy parallel load Firefox can lose the click event if the component
+      // tree is still settling after a prior router.refresh(); retry up to 5 times.
+      let form = teacher.getByTestId("chunk-add-form").last();
+      let visible = false;
+      for (let attempt = 0; attempt < 5 && !visible; attempt++) {
+        await openExercises();
+        // Re-query the button each attempt in case DOM was remounted.
+        const btn = teacher.getByTestId("add-interaction-btn").first();
+        await expect(btn).toBeEnabled({ timeout: 10_000 });
+        await btn.click();
+        form = teacher.getByTestId("chunk-add-form").last();
+        visible = await form.isVisible().catch(() => false);
+        if (!visible) {
+          // Wait briefly for React to settle before retrying
+          await teacher.waitForTimeout(500 * (attempt + 1));
+          visible = await form.isVisible().catch(() => false);
+        }
+      }
+      await expect(form).toBeVisible({ timeout: 10000 });
       await form.getByTestId(`interaction-kind-${kind}`).click({ force: true });
       return form;
     };
@@ -90,17 +109,14 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
       await prompt.fill(value);
     };
 
-    // ── Record pre-existing interaction IDs before creating anything ──
-    // openExercises sets lessonUrl; call it once up-front to capture the snapshot.
-    // All 5 creation steps are wrapped in try/finally so cleanup always runs —
-    // this prevents accumulated interactions from contaminating video-quiz-flow.spec.ts.
+    // Record pre-existing interaction IDs before creating anything so cleanup
+    // removes only what this test adds, regardless of pass/fail.
     await openExercises();
-    const lessonId = lessonIdFromUrl(lessonUrl);
     const snapshot = await rpc<{ interactions: Array<{ id: string }> }>(
       teacher, "richter.v1.InteractionService", "ListLessonInteractions",
       { lessonId, limit: 500, offset: 0 },
     );
-    preExistingInteractionIds = new Set(snapshot.interactions.map((i) => i.id));
+    const preExistingInteractionIds = new Set((snapshot.interactions ?? []).map((i) => i.id));
 
     try {
 
@@ -216,7 +232,7 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
         teacher, "richter.v1.InteractionService", "ListLessonInteractions",
         { lessonId, limit: 500, offset: 0 },
       ).catch(() => ({ interactions: [] as Array<{ id: string }> }));
-      for (const interaction of after.interactions) {
+      for (const interaction of (after.interactions ?? [])) {
         if (preExistingInteractionIds.has(interaction.id)) continue;
         await rpc(
           teacher, "richter.v1.InteractionService", "DeleteInteraction",

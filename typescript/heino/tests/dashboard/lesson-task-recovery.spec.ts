@@ -153,6 +153,9 @@ async function createLessonWithChunks(
   }
   if (!extractDone) throw new Error("createLessonWithChunks: extract timed out");
 
+  // Register the lessonId so cancelAllCreatedLessonTasks() can clean it up later.
+  createdLessonIds.push(lessonId);
+
   // Run chunk task via API and poll until minChunks chunks exist.
   await ai.startLessonTask({ lessonId, kind: LessonTaskKind.CHUNK_TRANSCRIPT });
   const chunkDeadline = Date.now() + 120_000;
@@ -533,7 +536,9 @@ test.describe("Lesson task panel", () => {
       await createLessonWithChunks(page, ai, 1),
       await createLessonWithChunks(page, ai, 1),
     ];
-    // Cancel any leftover active tasks from previous tests.
+    // Cancel ALL active tasks for carol from previous tests in this file AND the new capLessons,
+    // to ensure we start with a clean slate (0 active tasks) before testing the cap.
+    await cancelAllCreatedLessonTasks(ai);
     for (const lesson of capLessons) {
       await cancelActiveLessonTasks(ai, lesson.lessonId);
     }

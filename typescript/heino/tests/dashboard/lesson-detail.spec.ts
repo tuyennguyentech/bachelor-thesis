@@ -28,6 +28,7 @@ import {
   CourseModuleService,
   LessonService,
 } from "buf/gen/richter/v1/courses_pb";
+import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import {
   OrganizationService,
 } from "buf/gen/richter/v1/organizations_pb";
@@ -35,10 +36,18 @@ import {
   test,
   expect,
   goToSeededLesson,
+  createAnalyzedLesson,
+  createInteraction,
+  addCourseMember,
+  authedClient,
+  getUserId,
   SEED_HUST_CS_SLUG as ORG_SLUG,
   SEED_DSA_LESSON_BIG_O as SEEDED_LESSON_BIG_O,
   TEACHER_EMAIL,
+  STUDENT_EMAIL,
   USER_PASSWORD,
+  InteractionKind,
+  CourseRole,
 } from "../fixtures";
 
 const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
@@ -137,6 +146,9 @@ async function createLesson(
 
 /** Trigger a synthetic checkpoint hit via the E2E window hook. */
 async function triggerCheckpoint(page: Page, seconds: number) {
+  // Wait for the VideoPlayer to mount and register __triggerVideoCheckpoint before firing.
+  // Without this wait, a page that is still hydrating will silently drop the trigger.
+  await page.waitForFunction(() => "__triggerVideoCheckpoint" in window, { timeout: 10_000 });
   await page.evaluate((t) => {
     const fn = (window as unknown as Record<string, unknown>).__triggerVideoCheckpoint;
     if (typeof fn === "function") (fn as (t: number) => void)(t);
@@ -364,62 +376,82 @@ test.describe("Seeded lesson with video key — teacher management section", () 
   });
 });
 
-// ── Seeded lesson — AFTER_EACH mode (teacher changes mode) ────────────────
+// ── Fresh analyzed lesson — AFTER_EACH mode ───────────────────────────────
+// Uses a fresh analyzed lesson (not the seeded Big-O lesson) so that mutating
+// feedbackMode never affects shared seed state or races with other spec files.
 
-test.describe("Seeded lesson — AFTER_EACH feedback mode", () => {
-  test("AFTER_EACH: checkpoint shows green banner for correct answer", async ({ teacherPage: teachPage, studentPage: studPage }) => {
-    // Teacher navigates to the lesson and sets AFTER_EACH feedback mode
-    await goToSeededLesson(teachPage, SEEDED_LESSON_BIG_O);
-    // Open the "Bài tập" tab in AnalyzeButton
-    const baiTapTab = teachPage.getByRole("tab", { name: "Bài tập" });
-    // The tab is inside the AnalyzeButton section — click it if visible
-    if (await baiTapTab.isVisible()) {
-      await baiTapTab.click();
-      // Set AFTER_EACH mode
-      const afterEachRadio = teachPage.getByLabel(/Ngay sau mỗi câu/);
-      if (await afterEachRadio.isVisible()) {
-        await afterEachRadio.click();
-        // Wait for save
-        await teachPage.waitForTimeout(500);
+test.describe("Fresh lesson — AFTER_EACH feedback mode", () => {
+  // Shared across all tests in this describe block.
+  let freshLessonUrl = "";
+  let freshLessonId = "";
+  let teacherToken = "";
+
+  test.beforeAll(async () => {
+    test.setTimeout(300_000);
+    const result = await createAnalyzedLesson();
+    freshLessonUrl = result.lessonUrl;
+    freshLessonId = result.lessonId;
+    teacherToken = result.token;
+
+    // Add bob (studentPage) to the fresh course so he can access the lesson.
+    const bobId = await getUserId(STUDENT_EMAIL, USER_PASSWORD);
+    await addCourseMember(teacherToken, result.courseId, bobId, CourseRole.STUDENT);
+
+    // Seed one interaction on the fresh lesson so a checkpoint fires at a known time.
+    // edu-sample-en.mp4 is ~6.3s — use startSeconds=3 (within video duration).
+    await createInteraction(
+      teacherToken,
+      freshLessonId,
+      {
+        kind: InteractionKind.SINGLE_CHOICE,
+        startSeconds: 3,
+        prompt: "AFTER_EACH test question",
+      },
+    );
+  });
+
+  test("AFTER_EACH: checkpoint shows green or red banner for correct answer", async ({ studentPage: studPage }) => {
+    // Set AFTER_EACH feedback mode via API (no browser page needed) to avoid the
+    // teacherPage + studentPage shared-context cookie pollution: both fixtures share
+    // the same Playwright `page` instance and the second loginAs overwrites the first's
+    // cookies, causing the teacher page to actually show the student view.
+    const lessonClient = authedClient(LessonService, teacherToken);
+    await lessonClient.updateLessonFeedbackMode({
+      id: freshLessonId,
+      feedbackMode: FeedbackMode.AFTER_EACH,
+    });
+
+    try {
+      // Student navigates to the fresh lesson with AFTER_EACH mode now active.
+      await studPage.goto(`${freshLessonUrl}`, { waitUntil: "domcontentloaded" });
+
+      // Reset via Làm lại if student has a previous attempt.
+      await page_getByRole_retake(studPage);
+
+      // Trigger the checkpoint we seeded at 3 s.
+      await triggerCheckpoint(studPage, 3);
+
+      const checkpoint = studPage.locator('[data-testid="quiz-checkpoint"]');
+      await expect(checkpoint).toBeVisible({ timeout: 5000 });
+
+      // Click the first option.
+      await checkpoint.locator("button").first().click();
+
+      // AFTER_EACH: should show either green banner or red banner immediately.
+      const hasBanner = await checkpoint.getByText(/Chính xác|Chưa đúng/).isVisible().catch(() => false);
+      if (hasBanner) {
+        const correct = await checkpoint.getByText("Chính xác").isVisible().catch(() => false);
+        const wrong = await checkpoint.getByText("Chưa đúng").isVisible().catch(() => false);
+        expect(correct || wrong).toBe(true);
       }
-    }
-
-    // Student navigates to the lesson (fresh page load with new mode)
-    await goToSeededLesson(studPage, SEEDED_LESSON_BIG_O);
-
-    // Reset via Làm lại (bob has seeded attempt)
-    await page_getByRole_retake(studPage);
-
-    // Trigger first checkpoint
-    await triggerCheckpoint(studPage, 208);
-
-    const checkpoint = studPage.locator('[data-testid="quiz-checkpoint"]');
-    await expect(checkpoint).toBeVisible({ timeout: 5000 });
-
-    // Find the correct answer index by looking at the seeded data (correctAnswer=0 for index 0)
-    // The seeded lesson's first interaction has correctAnswer at index i%4 for i=0, so index 0
-    // Click the first option (which is correct for the first interaction in seed)
-    await checkpoint.locator("button").first().click();
-
-    // AFTER_EACH: should show either green banner or red banner immediately
-    const hasBanner = await checkpoint.getByText(/Chính xác|Chưa đúng/).isVisible().catch(() => false);
-    // If the mode was set successfully, banner should appear
-    if (hasBanner) {
-      // Verify it's a green or red banner (one of the two)
-      const correct = await checkpoint.getByText("✅ Chính xác!").isVisible().catch(() => false);
-      const wrong = await checkpoint.getByText(/❌ Chưa đúng/).isVisible().catch(() => false);
-      expect(correct || wrong).toBe(true);
-    }
-    // Whether or not mode change propagated, the Continue button should be visible
-    await expect(checkpoint.getByRole("button", { name: /Tiếp tục/ })).toBeVisible({ timeout: 3000 });
-
-    // Restore AFTER_SUBMIT mode for other tests
-    if (await teachPage.getByRole("tab", { name: "Bài tập" }).isVisible()) {
-      const afterSubmitRadio = teachPage.getByLabel(/Sau khi nộp bài/);
-      if (await afterSubmitRadio.isVisible()) {
-        await afterSubmitRadio.click();
-        await teachPage.waitForTimeout(300);
-      }
+      // Whether or not mode change propagated, the Continue button should be visible.
+      await expect(checkpoint.getByRole("button", { name: /Tiếp tục/ })).toBeVisible({ timeout: 3000 });
+    } finally {
+      // Restore AFTER_SUBMIT mode on the fresh lesson (best-effort; only affects this fresh lesson).
+      await lessonClient.updateLessonFeedbackMode({
+        id: freshLessonId,
+        feedbackMode: FeedbackMode.AFTER_SUBMIT,
+      }).catch(() => {/* best-effort */});
     }
   });
 });

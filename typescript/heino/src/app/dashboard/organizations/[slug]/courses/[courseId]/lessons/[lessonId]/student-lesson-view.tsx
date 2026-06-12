@@ -74,8 +74,16 @@ export function StudentLessonView({
   const timeToAnswerMsRef = useRef<Map<string, number>>(new Map());
   /** Replay count per listening interaction id */
   const replayCountsRef = useRef<Map<string, number>>(new Map());
-  /** Furthest video position (seconds) reached — for watch fraction computation */
-  const maxVideoPositionRef = useRef(initialPosition);
+  /**
+   * Accumulated ACTUAL watched time (seconds).  Only continuous forward playback
+   * deltas (≤ MAX_DELTA_SECONDS) are counted.  Forward seeks (large jumps) and
+   * paused intervals are excluded so seeking to the end cannot inflate the metric.
+   */
+  const watchedSecondsRef = useRef(0);
+  /** Maximum delta between two consecutive timeupdate events to be counted as
+   *  real playback (not a seek).  HTMLVideoElement fires timeupdate ~4× per second,
+   *  so legitimate playback steps are < 0.5 s; we use 1.5 s to tolerate buffering. */
+  const MAX_WATCH_DELTA_SECONDS = 1.5;
 
   const [previewMetrics, setPreviewMetrics] = useState<PreviewMetrics | null>(null);
 
@@ -139,9 +147,15 @@ export function StudentLessonView({
 
   const handleTimeUpdate = useCallback(
     (t: number) => {
-      // Track furthest position for video watch fraction (even while paused at checkpoint)
-      if (t > maxVideoPositionRef.current) {
-        maxVideoPositionRef.current = t;
+      // Accumulate actual watched seconds: only count continuous forward deltas
+      // (delta ≤ MAX_WATCH_DELTA_SECONDS) so seeking to the end doesn't inflate the metric.
+      // Skip accumulation during: initial load, active checkpoints (video paused), or after submit.
+      if (!activeId && !submitted && !isInitialLoadRef.current) {
+        const prev = prevTimeRef.current;
+        const delta = t - prev;
+        if (delta > 0 && delta <= MAX_WATCH_DELTA_SECONDS) {
+          watchedSecondsRef.current += delta;
+        }
       }
 
       if (submitted || activeId) return;
@@ -317,7 +331,7 @@ export function StudentLessonView({
 
   function handleRetake() {
     prevTimeRef.current = 0;
-    maxVideoPositionRef.current = 0;
+    watchedSecondsRef.current = 0;
     questionShownAtRef.current = new Map();
     timeToAnswerMsRef.current = new Map();
     replayCountsRef.current = new Map();
@@ -342,8 +356,9 @@ export function StudentLessonView({
     const video = videoRef.current;
     const duration = video?.duration ?? 0;
     if (!duration || duration <= 0) return 0;
-    const fraction = maxVideoPositionRef.current / duration;
-    return Math.min(1, Math.max(0, fraction));
+    // Use accumulated watched seconds (not high-water mark) so seeking to the
+    // end cannot game the metric.
+    return Math.min(1, Math.max(0, watchedSecondsRef.current / duration));
   }
 
   function handleSubmit() {

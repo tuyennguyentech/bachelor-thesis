@@ -46,6 +46,7 @@ import { CourseMemberActionsMenu } from "./course-member-actions-menu";
 import { CourseWorkspaceSidebar, type CourseTab } from "./course-workspace";
 import { CourseLockScreen } from "./course-lock-screen";
 import { JoinRequestsTab } from "./join-requests-tab";
+import { QuickCreateTrigger } from "@/components/dashboard/quick-create/QuickCreateTrigger";
 
 const CAN_MANAGE_ORG_ROLES = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const CAN_CHANGE_STATUS = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
@@ -398,7 +399,15 @@ export default async function CourseWorkspacePage({
                     </h1>
                   </div>
                   {canManage && (
-                    <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modulesWithLessons.length} token={token} />
+                    <div className="flex items-center gap-2">
+                      <QuickCreateTrigger
+                        token={token}
+                        modules={modulesWithLessons}
+                        courseId={course.id}
+                        slug={slug}
+                      />
+                      <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modulesWithLessons.length} token={token} />
+                    </div>
                   )}
                 </div>
 

@@ -35,7 +35,12 @@ const COURSES_URL = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses`;
 
 test.describe("Course list — enrolled course (studentPage = bob)", () => {
   test("'Khóa học của bạn' section heading is visible", async ({ studentPage: page }) => {
-    await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
+    // Use ?q= to filter for the DSA course bob is enrolled in.
+    // Without filtering, page 1 may not contain older seeded courses when there are 42+ courses.
+    await page.goto(
+      `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
+      { waitUntil: "domcontentloaded" },
+    );
     await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Khóa học của bạn" })).toBeVisible();
   });

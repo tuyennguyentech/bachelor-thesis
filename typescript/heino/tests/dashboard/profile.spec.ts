@@ -1,4 +1,4 @@
-import { test, expect, USER_EMAIL } from "../fixtures";
+import { test, expect, uid, loginAs, getAdminAuth, createUser, USER_PASSWORD, USER_EMAIL } from "../fixtures";
 
 test.describe("Dashboard profile page", () => {
   test("shows profile heading", async ({ userPage: page }) => {
@@ -27,22 +27,25 @@ test.describe("Dashboard profile page", () => {
     await expect(page.getByLabel("Xác nhận mật khẩu mới")).toBeVisible();
   });
 
-  test("edits first and last name", async ({ userPage: page }) => {
+  test("edits first and last name", async ({ page, baseURL }) => {
+    // Use a fresh user so this test never mutates alice's seed profile
+    const { token: adminToken } = await getAdminAuth(baseURL);
+    const freshEmail = `profile-edit-${uid("")}@test.local`;
+    await createUser(
+      adminToken,
+      { email: freshEmail, firstName: "Original", lastName: "Name" },
+      baseURL,
+    );
+
+    await loginAs(page, freshEmail, USER_PASSWORD, baseURL ?? "http://caddy");
     await page.goto("/dashboard/profile");
+
     // "Họ" = lastName field, "Tên" = firstName field (Vietnamese order)
     await page.getByLabel("Họ").clear();
-    await page.getByLabel("Họ").fill("Nguyen");
+    await page.getByLabel("Họ").fill("Updated");
     // profile form has "Tên đệm" label too — exact: true targets only "Tên"
     await page.getByLabel("Tên", { exact: true }).clear();
-    await page.getByLabel("Tên", { exact: true }).fill("Alice");
-    await page.getByRole("button", { name: "Lưu thay đổi" }).click();
-    await expect(page.getByText("Đã lưu thay đổi")).toBeVisible();
-
-    // Revert to original seed values so other tests (e.g. members.spec.ts) see "Alice Nguyen"
-    await page.getByLabel("Họ").clear();
-    await page.getByLabel("Họ").fill("Nguyen");
-    await page.getByLabel("Tên", { exact: true }).clear();
-    await page.getByLabel("Tên", { exact: true }).fill("Alice");
+    await page.getByLabel("Tên", { exact: true }).fill("Fresh");
     await page.getByRole("button", { name: "Lưu thay đổi" }).click();
     await expect(page.getByText("Đã lưu thay đổi")).toBeVisible();
   });

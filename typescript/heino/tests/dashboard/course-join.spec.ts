@@ -26,12 +26,32 @@
  *
  * Sidebar tab label (from course-workspace.tsx):
  *   - "Duyệt yêu cầu"
+ *
+ * Isolation strategy (mutation tests):
+ *   - A fresh student user (unique email) is created via API in beforeAll.
+ *   - A fresh course owned by carol is created in hust-cs.
+ *   - The fresh student is added to hust-cs as OrganizationRole.STUDENT but NOT to the fresh course.
+ *   - The submit→approve lifecycle runs on fresh-student + fresh-course, never bob/OOP.
+ *   - Read-only lock-screen tests for bob against the seeded OOP course remain unchanged.
  */
 
 import {
   test,
   expect,
+  uid,
+  loginAs,
+  getAdminAuth,
+  getTeacherAuth,
+  getToken,
+  getOrgId,
+  createUser,
+  addOrgMember,
+  createCourse,
+  submitJoinRequest,
+  USER_EMAIL,
+  USER_PASSWORD,
   SEED_HUST_CS_SLUG,
+  OrganizationRole,
 } from "../fixtures";
 
 const ORG_SLUG = SEED_HUST_CS_SLUG;
@@ -106,12 +126,34 @@ test.describe("Course lock screen — non-enrolled org member (bob)", () => {
   });
 });
 
-// ── Lock screen — submitting a join request ────────────────────────────────
+// ── Lock screen — submitting a join request (fresh isolated user + fresh course) ────
 
-test.describe("Course lock screen — submitting join request (bob)", () => {
-  test("clicking 'Yêu cầu tham gia khóa học' shows pending state", async ({ studentPage: page }) => {
-    const courseHref = await goToOopCourse(page);
-    await page.goto(courseHref, { waitUntil: "domcontentloaded" });
+test.describe("Course lock screen — submitting join request (fresh student)", () => {
+  let freshEmail: string;
+  let freshCourseHref: string;
+
+  test.beforeAll(async ({ baseURL }) => {
+    // Create a fresh student user (not in any course)
+    freshEmail = `joiner-${uid("")}@test.local`;
+    const { token: adminToken } = await getAdminAuth(baseURL);
+    const { token: teacherToken, userId: carolId } = await getTeacherAuth(baseURL);
+
+    const freshUserId = await createUser(adminToken, { email: freshEmail }, baseURL);
+    const orgId = await getOrgId(adminToken, SEED_HUST_CS_SLUG, baseURL);
+
+    // Add fresh student to hust-cs org (but not to any course)
+    await addOrgMember(adminToken, orgId, freshUserId, OrganizationRole.STUDENT, baseURL);
+
+    // Create a fresh course owned by carol — fresh student is NOT enrolled
+    const freshCourseTitle = uid("Khóa học Thử nghiệm Tham gia");
+    const courseId = await createCourse(teacherToken, orgId, freshCourseTitle, carolId, baseURL);
+    // Derive the course URL directly from the returned courseId
+    freshCourseHref = `/dashboard/organizations/${ORG_SLUG}/courses/${courseId}`;
+  });
+
+  test("clicking 'Yêu cầu tham gia khóa học' shows pending state", async ({ page, baseURL }) => {
+    await loginAs(page, freshEmail, USER_PASSWORD, baseURL ?? "http://caddy");
+    await page.goto(freshCourseHref, { waitUntil: "domcontentloaded" });
 
     const btn = page.getByRole("button", { name: "Yêu cầu tham gia khóa học" });
     await expect(btn).toBeEnabled();
@@ -125,9 +167,9 @@ test.describe("Course lock screen — submitting join request (bob)", () => {
     ).toBeVisible();
   });
 
-  test("after submitting, pending alert 'Đang chờ phê duyệt' is shown", async ({ studentPage: page }) => {
-    const courseHref = await goToOopCourse(page);
-    await page.goto(courseHref, { waitUntil: "domcontentloaded" });
+  test("after submitting, pending alert 'Đang chờ phê duyệt' is shown", async ({ page, baseURL }) => {
+    await loginAs(page, freshEmail, USER_PASSWORD, baseURL ?? "http://caddy");
+    await page.goto(freshCourseHref, { waitUntil: "domcontentloaded" });
 
     // Submit a join request (may already be PENDING from prior test run — handle both states)
     const requestBtn = page.getByRole("button", { name: "Yêu cầu tham gia khóa học" });
@@ -203,53 +245,69 @@ test.describe("Course workspace — 'Duyệt yêu cầu' tab visible to manager"
   });
 });
 
-// ── Manager reviews join request in Duyệt yêu cầu tab ──────────────────────
+// ── Manager reviews join request in Duyệt yêu cầu tab (fresh isolated entities) ──
 
 test.describe("Course workspace — join-requests tab content (manager)", () => {
+  let freshEmail: string;
+  let freshToken: string;
+  let freshCourseTitle: string;
+  let freshCourseHref: string;
+  let freshCourseId: string;
+
+  test.beforeAll(async ({ baseURL }) => {
+    // Create fresh isolated entities for the join-requests tab tests
+    freshEmail = `joiner-tab-${uid("")}@test.local`;
+    freshCourseTitle = uid("Khóa học Duyệt Yêu Cầu");
+
+    const { token: adminToken } = await getAdminAuth(baseURL);
+    const { token: teacherToken, userId: carolId } = await getTeacherAuth(baseURL);
+
+    const freshUserId = await createUser(adminToken, { email: freshEmail }, baseURL);
+    const orgId = await getOrgId(adminToken, SEED_HUST_CS_SLUG, baseURL);
+
+    // Add fresh student to hust-cs org (NOT to the fresh course)
+    await addOrgMember(adminToken, orgId, freshUserId, OrganizationRole.STUDENT, baseURL);
+
+    // Authenticate fresh student so we can submit join requests via API
+    freshToken = await getToken(freshEmail, USER_PASSWORD, baseURL);
+
+    // Create fresh course owned by carol — derive the course URL directly from the returned ID
+    freshCourseId = await createCourse(teacherToken, orgId, freshCourseTitle, carolId, baseURL);
+    freshCourseHref = `/dashboard/organizations/${ORG_SLUG}/courses/${freshCourseId}`;
+  });
+
   /**
-   * Navigate to OOP course as admin and open the join-requests tab.
-   * Pre-condition: bob's join request for OOP has been submitted (test order
-   * within this describe block does NOT rely on the prior describe block
-   * having run first — we check for both "no requests" and "approve" scenarios).
+   * Navigate to the fresh course's join-requests tab as admin (alice).
+   * Uses the direct course URL stored in freshCourseHref — no search required.
    */
-  async function goToOopJoinRequestsTab(page: import("@playwright/test").Page): Promise<void> {
-    await page.goto(
-      `${COURSES_URL}?q=${encodeURIComponent(LOCKED_COURSE_TITLE)}`,
-      { waitUntil: "domcontentloaded" },
-    );
-    const card = page.locator('[data-slot="card"]').filter({ hasText: LOCKED_COURSE_TITLE }).first();
-    const href = await card.getByRole("link").first().getAttribute("href");
-    if (!href) throw new Error("Admin cannot find OOP course link");
-    await page.goto(`${href.split("?")[0]}?tab=join-requests`, { waitUntil: "domcontentloaded" });
+  async function goToFreshJoinRequestsTab(page: import("@playwright/test").Page): Promise<void> {
+    await page.goto(`${freshCourseHref}?tab=join-requests`, { waitUntil: "domcontentloaded" });
   }
 
   test("admin sees 'Duyệt yêu cầu tham gia' heading in join-requests tab", async ({ userPage: page }) => {
-    await goToOopJoinRequestsTab(page);
+    await goToFreshJoinRequestsTab(page);
     await expect(
       page.getByRole("heading", { name: "Duyệt yêu cầu tham gia" }),
     ).toBeVisible();
   });
 
   test("join-requests tab shows 'Người yêu cầu' table column", async ({ userPage: page }) => {
-    await goToOopJoinRequestsTab(page);
+    await goToFreshJoinRequestsTab(page);
     await expect(
       page.getByRole("columnheader", { name: "Người yêu cầu" }),
     ).toBeVisible();
   });
 
   test("join-requests tab shows Ngày yêu cầu column header", async ({ userPage: page }) => {
-    await goToOopJoinRequestsTab(page);
+    await goToFreshJoinRequestsTab(page);
     await expect(
       page.getByRole("columnheader", { name: "Ngày yêu cầu" }),
     ).toBeVisible();
   });
 
   test("shows empty state 'Không có yêu cầu nào' when no pending requests", async ({ userPage: page }) => {
-    // If no request has been sent, the empty state message appears.
-    // This test is valid when run before the join request is submitted.
-    // It also serves as the baseline check that the tab renders correctly.
-    await goToOopJoinRequestsTab(page);
-    // Either there are pending requests (Duyệt/Từ chối buttons) or the empty state shows
+    // Fresh course has no join requests yet — empty state must appear.
+    await goToFreshJoinRequestsTab(page);
     const approveButtons = page.getByRole("button", { name: "Duyệt" });
     const emptyState = page.getByText("Không có yêu cầu nào");
     // At least one of these must be visible — the tab renders one or the other
@@ -258,79 +316,46 @@ test.describe("Course workspace — join-requests tab content (manager)", () => 
     expect(hasApprove || hasEmpty).toBe(true);
   });
 
-  test("bob's join request row shows bob email and Duyệt + Từ chối buttons", async ({ studentPage: studentPage, userPage: adminPage }) => {
-    // Step 1: bob submits a join request for OOP course
-    await studentPage.goto(
-      `${COURSES_URL}?q=${encodeURIComponent(LOCKED_COURSE_TITLE)}`,
-      { waitUntil: "domcontentloaded" },
-    );
-    const bobCard = studentPage.locator('[data-slot="card"]').filter({ hasText: LOCKED_COURSE_TITLE }).first();
-    const bobRawHref = await bobCard.getByRole("link").first().getAttribute("href");
-    if (!bobRawHref) throw new Error("bob cannot find OOP course link");
-    const courseHref = bobRawHref.split("?")[0];
-    await studentPage.goto(courseHref, { waitUntil: "domcontentloaded" });
+  test("fresh student's join request row shows email and Duyệt + Từ chối buttons", async ({ userPage: adminPage, baseURL }) => {
+    // Step 1: Submit join request via API (avoids browser hydration timing issues)
+    await submitJoinRequest(freshToken, freshCourseId, baseURL);
 
-    // Submit if the button exists (may already be PENDING from prior test run)
-    const requestBtn = studentPage.getByRole("button", { name: "Yêu cầu tham gia khóa học" });
-    if (await requestBtn.isVisible().catch(() => false)) {
-      await requestBtn.click();
-      // Wait for the UI to reflect the PENDING state
-      await expect(
-        studentPage.getByRole("button", { name: "Đã gửi yêu cầu tham gia" }),
-      ).toBeVisible();
-    }
+    // Step 2: admin alice opens the join-requests tab and sees the fresh student's request
+    await goToFreshJoinRequestsTab(adminPage);
 
-    // Step 2: admin alice opens the join-requests tab and sees bob's request
-    await goToOopJoinRequestsTab(adminPage);
+    // Fresh student email should appear in the table
+    await expect(adminPage.getByText(freshEmail)).toBeVisible();
 
-    // Bob's email should appear in the table
-    await expect(adminPage.getByText("bob@dyadia.local")).toBeVisible();
-
-    // The Duyệt and Từ chối buttons should appear in bob's row
-    const bobRow = adminPage.getByRole("row").filter({ hasText: "bob@dyadia.local" });
-    await expect(bobRow.getByRole("button", { name: "Duyệt" })).toBeVisible();
-    await expect(bobRow.getByRole("button", { name: "Từ chối" })).toBeVisible();
+    // The Duyệt and Từ chối buttons should appear in the fresh student's row
+    const freshRow = adminPage.getByRole("row").filter({ hasText: freshEmail });
+    await expect(freshRow.getByRole("button", { name: "Duyệt" })).toBeVisible();
+    await expect(freshRow.getByRole("button", { name: "Từ chối" })).toBeVisible();
   });
 
-  test("admin approves bob's join request — request disappears and bob can access course", async ({ studentPage: studentPage, userPage: adminPage }) => {
-    // Step 1: Ensure bob's join request exists
-    await studentPage.goto(
-      `${COURSES_URL}?q=${encodeURIComponent(LOCKED_COURSE_TITLE)}`,
-      { waitUntil: "domcontentloaded" },
-    );
-    const bobCard2 = studentPage.locator('[data-slot="card"]').filter({ hasText: LOCKED_COURSE_TITLE }).first();
-    const bobRawHref2 = await bobCard2.getByRole("link").first().getAttribute("href");
-    if (!bobRawHref2) throw new Error("bob cannot find OOP course link");
-    const courseHrefForBob = bobRawHref2.split("?")[0];
-    await studentPage.goto(courseHrefForBob, { waitUntil: "domcontentloaded" });
-
-    const requestBtn = studentPage.getByRole("button", { name: "Yêu cầu tham gia khóa học" });
-    if (await requestBtn.isVisible().catch(() => false)) {
-      await requestBtn.click();
-      await expect(
-        studentPage.getByRole("button", { name: "Đã gửi yêu cầu tham gia" }),
-      ).toBeVisible();
-    }
+  test("admin approves fresh student's join request — request disappears and student can access course", async ({ page: freshPage, userPage: adminPage, baseURL }) => {
+    // Step 1: Ensure the fresh student's join request exists via API
+    await submitJoinRequest(freshToken, freshCourseId, baseURL);
 
     // Step 2: Admin navigates to join-requests tab and approves
-    await goToOopJoinRequestsTab(adminPage);
-    const bobRow = adminPage.getByRole("row").filter({ hasText: "bob@dyadia.local" });
-    await expect(bobRow).toBeVisible();
-    await bobRow.getByRole("button", { name: "Duyệt" }).click();
+    await goToFreshJoinRequestsTab(adminPage);
+    const freshRow = adminPage.getByRole("row").filter({ hasText: freshEmail });
+    await expect(freshRow).toBeVisible();
+    await freshRow.getByRole("button", { name: "Duyệt" }).click();
 
     // After approval, the server revalidates the path.
-    // Bob's row should disappear (or empty state should appear if no more requests).
-    await expect(adminPage.getByText("bob@dyadia.local")).not.toBeVisible();
+    // The fresh student's row should disappear (or empty state appears if no more requests).
+    await expect(adminPage.getByText(freshEmail)).not.toBeVisible();
 
-    // Step 3: Bob reloads the course page — he should now see the workspace, not the lock screen
-    await studentPage.goto(courseHrefForBob, { waitUntil: "domcontentloaded" });
+    // Step 3: Fresh student logs in and reloads the course page — should see the workspace
+    await loginAs(freshPage, freshEmail, USER_PASSWORD, baseURL ?? "http://caddy");
+    await freshPage.goto(freshCourseHref, { waitUntil: "domcontentloaded" });
     // Lock screen title should NOT be present (rendered as CardTitle, a generic element)
     await expect(
-      studentPage.getByText("Khóa học đang bị khóa"),
+      freshPage.getByText("Khóa học đang bị khóa"),
     ).not.toBeVisible();
     // The course workspace sidebar should be visible instead
     await expect(
-      studentPage.locator("aside[aria-label='Course workspace sidebar']"),
+      freshPage.locator("aside[aria-label='Course workspace sidebar']"),
     ).toBeVisible();
   });
 });

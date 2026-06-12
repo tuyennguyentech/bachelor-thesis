@@ -110,11 +110,19 @@ test.describe("Video Player Bug Tests", () => {
 
       const videoElement = page.locator("video").first();
       await expect(videoElement).toBeVisible();
-      await page.waitForTimeout(2000);
+      // Wait for video metadata to load (readyState >= 1 = HAVE_METADATA) instead of a fixed sleep.
+      await expect.poll(
+        async () => videoElement.evaluate((v: HTMLVideoElement) => v.readyState),
+        { timeout: 10000 },
+      ).toBeGreaterThanOrEqual(1);
 
       const videoPlayer = page.getByTestId("video-player");
       await videoPlayer.click();
-      await page.waitForTimeout(1000);
+      // Wait for video to actually start playing (currentTime advances) instead of fixed sleep.
+      await expect.poll(
+        async () => videoElement.evaluate((v: HTMLVideoElement) => v.currentTime),
+        { timeout: 5000 },
+      ).toBeGreaterThan(0);
 
       const time1 = await videoElement.evaluate((v: HTMLVideoElement) => v.currentTime);
       await page.waitForTimeout(500);
@@ -158,10 +166,13 @@ test.describe("Video Player Bug Tests", () => {
       await videoPlayer.click();
       const videoElement = page.locator("video").first();
       await videoElement.evaluate((v: HTMLVideoElement) => v.play().catch(() => {}));
-      await page.waitForTimeout(500);
 
+      // Poll for video to actually advance rather than using a fixed sleep.
       const initialTime = await videoElement.evaluate((v: HTMLVideoElement) => v.currentTime);
-      await page.waitForTimeout(2000);
+      await expect.poll(
+        async () => videoElement.evaluate((v: HTMLVideoElement) => v.currentTime),
+        { timeout: 5000 },
+      ).toBeGreaterThan(initialTime);
       const timeAfter2s = await videoElement.evaluate((v: HTMLVideoElement) => v.currentTime);
       expect(timeAfter2s).toBeGreaterThan(initialTime);
     });
@@ -174,12 +185,20 @@ test.describe("Video Player Bug Tests", () => {
 
       const videoElement = page.locator("video").first();
       await expect(videoElement).toBeVisible();
-      await page.waitForTimeout(2000);
+      // Wait for video metadata to load instead of a fixed sleep.
+      await expect.poll(
+        async () => videoElement.evaluate((v: HTMLVideoElement) => v.readyState),
+        { timeout: 10000 },
+      ).toBeGreaterThanOrEqual(1);
 
       const videoPlayer = page.getByTestId("video-player");
       await videoPlayer.click();
       await videoElement.evaluate((v: HTMLVideoElement) => v.play().catch(() => {}));
-      await page.waitForTimeout(1000);
+      // Wait for video to start playing (currentTime > 0) instead of a fixed sleep.
+      await expect.poll(
+        async () => videoElement.evaluate((v: HTMLVideoElement) => v.currentTime),
+        { timeout: 5000 },
+      ).toBeGreaterThan(0);
 
       const time1 = await videoElement.evaluate((v: HTMLVideoElement) => v.currentTime);
       await page.waitForTimeout(500);
@@ -209,7 +228,11 @@ test.describe("Video Player Bug Tests", () => {
       await expect(videoElement).toBeVisible();
 
       await videoPlayer.click();
-      await page.waitForTimeout(1000);
+      // Wait for video to start playing instead of a fixed sleep.
+      await expect.poll(
+        async () => videoElement.evaluate((v: HTMLVideoElement) => v.currentTime),
+        { timeout: 5000 },
+      ).toBeGreaterThan(0);
 
       const time1 = await videoElement.evaluate((v: HTMLVideoElement) => v.currentTime);
       await page.waitForTimeout(500);

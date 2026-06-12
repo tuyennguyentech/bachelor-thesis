@@ -9,9 +9,15 @@ interface StudentProgressSectionProps {
 
 export function StudentProgressSection({ courses, errorMsg }: StudentProgressSectionProps) {
   const totalDone = courses.reduce((sum, c) => sum + c.lessonsDone, 0);
+  // Weighted average score: weight each course by the number of lessons the student
+  // has done in that course.  An unweighted mean would let a course with 1 completed
+  // lesson dominate the score equally as a 10-lesson course.
+  // TODO(backend): for a precise weighted avg we need per-course question totals from
+  // the API (lessonsDone is the best proxy available without a proto change).
+  const totalWeight = courses.reduce((sum, c) => sum + c.lessonsDone, 0);
   const avgScore =
-    courses.length > 0
-      ? courses.reduce((sum, c) => sum + c.avgScore, 0) / courses.length
+    totalWeight > 0
+      ? courses.reduce((sum, c) => sum + c.avgScore * c.lessonsDone, 0) / totalWeight
       : 0;
   const avgScorePct = Math.round(avgScore * 100);
 
