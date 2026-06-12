@@ -2151,6 +2151,10 @@ func TestAnalyticsEmptyAndPagination(t *testing.T) {
 		if _, err := ia.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
 			LessonId:  lessonID,
 			Responses: buildResponses(ints, correct),
+			// Completion now requires watch >= min_watch_fraction (default 0.8) in
+			// addition to score; simulate a student who watched the video so the
+			// SummaryFieldsValid subtest's lessons_completed >= 1 assertion holds.
+			VideoWatchFraction: 1.0,
 		}); err != nil {
 			t.Fatalf("SubmitAttempt for pagination setup: %v", err)
 		}
@@ -2553,5 +2557,599 @@ func TestAccessGateMatrixComplete(t *testing.T) {
 				GetLessonById(ctx, &richterv1.GetLessonByIdRequest{Id: gofakeit.UUID()})
 			return e
 		}(), connect.CodeNotFound)
+	})
+}
+
+// ── TestLessonHeatmap ─────────────────────────────────────────────────────────
+
+// TestLessonHeatmap verifies the per-chunk score heatmap:
+//   - cells are returned ordered by chunk_index ascending;
+//   - avg_score is the score-weighted average across all student responses in the
+//     chunk;
+//   - is_gap is set only when response_count > 0 AND avg_score < 0.6;
+//   - a chunk with interactions but no responses (and a chunk with no
+//     interactions at all) report response_count 0 and is_gap false.
+//
+// Setup: 3 ordered chunks.
+//   - chunk0: 1 MCQ (correct=0). Both students answer correctly → avg 1.0, no gap.
+//   - chunk1: 1 MCQ (correct=0). Both students answer wrong → avg 0.0, gap.
+//   - chunk2: 1 MCQ, nobody answers → 0 responses, no gap.
+func TestLessonHeatmap(t *testing.T) {
+	t.Parallel()
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	studentAEmail, studentAPassword, studentAID := createActiveUser(t, c.users)
+	studentBEmail, studentBPassword, studentBID := createActiveUser(t, c.users)
+	for _, uid := range []string{studentAID, studentBID} {
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: uid,
+			Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member %s: %v", uid, err)
+		}
+	}
+
+	courseRes, _ := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	modRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonID := lessonRes.Lesson.Id
+
+	for _, uid := range []string{studentAID, studentBID} {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseRes.Course.Id, UserId: uid, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enrol student %s: %v", uid, err)
+		}
+	}
+
+	// 3 ordered chunks, one MCQ (correct=0) attached to each.
+	chunk0 := insertTestChunk(t, lessonID, 0, "")
+	chunk1 := insertTestChunk(t, lessonID, 1, "")
+	chunk2 := insertTestChunk(t, lessonID, 2, "")
+	int0 := insertTestInteractionsForChunk(t, lessonID, chunk0.ID.String(), 1)[0]
+	int1 := insertTestInteractionsForChunk(t, lessonID, chunk1.ID.String(), 1)[0]
+	_ = insertTestInteractionsForChunk(t, lessonID, chunk2.ID.String(), 1)[0]
+
+	// Both students: chunk0 correct (selected 0), chunk1 wrong (selected 1).
+	// chunk2 is never answered.
+	for _, st := range []struct{ email, pw string }{
+		{studentAEmail, studentAPassword},
+		{studentBEmail, studentBPassword},
+	} {
+		tok := getUserToken(t, url, st.email, st.pw)
+		ia := richterv1connect.NewInteractionServiceClient(httpClientWithToken(tok), url)
+		if _, err := ia.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId: lessonID,
+			Responses: []*richterv1.AttemptResponseInput{
+				{InteractionId: int0.ID.String(), Response: &richterv1.AttemptResponseInput_McqSelected{McqSelected: 0}},
+				{InteractionId: int1.ID.String(), Response: &richterv1.AttemptResponseInput_McqSelected{McqSelected: 1}},
+			},
+		}); err != nil {
+			t.Fatalf("SubmitAttempt for %s: %v", st.email, err)
+		}
+	}
+
+	res, err := c.interactions.LessonHeatmap(ctx, &richterv1.LessonHeatmapRequest{LessonId: lessonID})
+	if err != nil {
+		t.Fatalf("LessonHeatmap: %v", err)
+	}
+	if res.GapThreshold != 0.6 {
+		t.Errorf("gap_threshold: want 0.6, got %v", res.GapThreshold)
+	}
+	if len(res.Cells) != 3 {
+		t.Fatalf("expected 3 cells (one per chunk), got %d", len(res.Cells))
+	}
+
+	// Cells must be ordered by chunk_index ascending.
+	for i, cell := range res.Cells {
+		if cell.ChunkIndex != int32(i) {
+			t.Errorf("cell %d: chunk_index want %d, got %d", i, i, cell.ChunkIndex)
+		}
+	}
+
+	c0, c1, c2 := res.Cells[0], res.Cells[1], res.Cells[2]
+
+	// chunk0: both correct → avg 1.0, 2 responses, 2 students, no gap.
+	if c0.ResponseCount != 2 {
+		t.Errorf("chunk0 response_count: want 2, got %d", c0.ResponseCount)
+	}
+	if c0.StudentCount != 2 {
+		t.Errorf("chunk0 student_count: want 2, got %d", c0.StudentCount)
+	}
+	if c0.AvgScore != 1.0 {
+		t.Errorf("chunk0 avg_score: want 1.0, got %v", c0.AvgScore)
+	}
+	if c0.IsGap {
+		t.Errorf("chunk0 is_gap: want false (avg 1.0), got true")
+	}
+
+	// chunk1: both wrong → avg 0.0, 2 responses, gap.
+	if c1.ResponseCount != 2 {
+		t.Errorf("chunk1 response_count: want 2, got %d", c1.ResponseCount)
+	}
+	if c1.AvgScore != 0.0 {
+		t.Errorf("chunk1 avg_score: want 0.0, got %v", c1.AvgScore)
+	}
+	if !c1.IsGap {
+		t.Errorf("chunk1 is_gap: want true (avg 0.0 < 0.6 with responses), got false")
+	}
+
+	// chunk2: no responses → response_count 0, no gap even though avg is 0.
+	if c2.ResponseCount != 0 {
+		t.Errorf("chunk2 response_count: want 0, got %d", c2.ResponseCount)
+	}
+	if c2.IsGap {
+		t.Errorf("chunk2 is_gap: want false (no responses), got true")
+	}
+
+	// Authz: a non-member must be denied.
+	nonMemberEmail, nonMemberPassword, _ := createActiveUser(t, c.users)
+	nonMemberToken := getUserToken(t, url, nonMemberEmail, nonMemberPassword)
+	nonMemberIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(nonMemberToken), url)
+	t.Run("Authz/NonMember_PermissionDenied", func(t *testing.T) {
+		assertCode(t, func() error {
+			_, e := nonMemberIA.LessonHeatmap(ctx, &richterv1.LessonHeatmapRequest{LessonId: lessonID})
+			return e
+		}(), connect.CodePermissionDenied)
+	})
+	t.Run("Authz/Anon_Unauthenticated", func(t *testing.T) {
+		anonIA := richterv1connect.NewInteractionServiceClient(http.DefaultClient, url)
+		assertCode(t, func() error {
+			_, e := anonIA.LessonHeatmap(ctx, &richterv1.LessonHeatmapRequest{LessonId: lessonID})
+			return e
+		}(), connect.CodeUnauthenticated)
+	})
+}
+
+// ── TestListAtRiskStudents ────────────────────────────────────────────────────
+
+// TestListAtRiskStudents verifies the consecutive low-engagement detection:
+//   - a student with engagement < 40 across 2 CONSECUTIVE lessons is flagged;
+//   - a student who engages well in both lessons is NOT flagged;
+//   - a student low in only ONE lesson (streak 1 < atRiskMinStreak) is NOT flagged;
+//   - pagination (limit/offset) is honoured;
+//   - authz: non-members are denied.
+//
+// Engagement = round(100*(0.4*watch + 0.3*responseRate + 0.3*scoreFrac)).
+// low student: watch 0, all-wrong (scoreFrac 0), all answered (responseRate 1)
+//
+//	→ round(100*0.3) = 30  (< 40)  ✓ low
+//
+// fine student: watch 1, all-correct (scoreFrac 1), all answered (responseRate 1)
+//
+//	→ round(100*1.0) = 100 (>= 40) ✓ not low
+func TestListAtRiskStudents(t *testing.T) {
+	t.Parallel()
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	// lowID: low in both lessons. fineID: fine in both. oneLowID: low only in
+	// lesson 1, fine in lesson 2 (streak 1, must NOT be flagged).
+	lowEmail, lowPassword, lowID := createActiveUser(t, c.users)
+	fineEmail, finePassword, fineID := createActiveUser(t, c.users)
+	oneLowEmail, oneLowPassword, oneLowID := createActiveUser(t, c.users)
+	for _, uid := range []string{lowID, fineID, oneLowID} {
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: uid,
+			Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member %s: %v", uid, err)
+		}
+	}
+
+	courseRes, _ := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	courseID := courseRes.Course.Id
+	modRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseID, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	// Two consecutive lessons in the same module.
+	lesson1Res, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lesson2Res, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 1,
+	})
+	lesson1ID := lesson1Res.Lesson.Id
+	lesson2ID := lesson2Res.Lesson.Id
+
+	for _, uid := range []string{lowID, fineID, oneLowID} {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: uid, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enrol student %s: %v", uid, err)
+		}
+	}
+
+	ints1 := insertTestInteractions(t, lesson1ID, 3)
+	ints2 := insertTestInteractions(t, lesson2ID, 3)
+	correct1 := correctAnswers(ints1)
+	correct2 := correctAnswers(ints2)
+	wrong := func(correct []int32) []int32 {
+		w := make([]int32, len(correct))
+		for i := range correct {
+			w[i] = (correct[i] + 1) % 4
+		}
+		return w
+	}
+
+	// submit answers all interactions (responseRate 1.0) with the given watch
+	// fraction; "ok" picks correct options, else wrong.
+	submit := func(t *testing.T, email, pw, lessonID string, ints []gen.LessonInteraction, answers []int32, watch float64) {
+		t.Helper()
+		tok := getUserToken(t, url, email, pw)
+		ia := richterv1connect.NewInteractionServiceClient(httpClientWithToken(tok), url)
+		if _, err := ia.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId:           lessonID,
+			Responses:          buildResponses(ints, answers),
+			VideoWatchFraction: watch,
+		}); err != nil {
+			t.Fatalf("SubmitAttempt %s lesson %s: %v", email, lessonID, err)
+		}
+	}
+
+	// low: low in BOTH lessons → eng 30/30.
+	submit(t, lowEmail, lowPassword, lesson1ID, ints1, wrong(correct1), 0.0)
+	submit(t, lowEmail, lowPassword, lesson2ID, ints2, wrong(correct2), 0.0)
+	// fine: fine in BOTH lessons → eng 100/100.
+	submit(t, fineEmail, finePassword, lesson1ID, ints1, correct1, 1.0)
+	submit(t, fineEmail, finePassword, lesson2ID, ints2, correct2, 1.0)
+	// oneLow: low in lesson1 only, fine in lesson2 → streak 1.
+	submit(t, oneLowEmail, oneLowPassword, lesson1ID, ints1, wrong(correct1), 0.0)
+	submit(t, oneLowEmail, oneLowPassword, lesson2ID, ints2, correct2, 1.0)
+
+	res, err := c.interactions.ListAtRiskStudents(ctx, &richterv1.ListAtRiskStudentsRequest{
+		CourseId: courseID, Limit: 50, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListAtRiskStudents: %v", err)
+	}
+
+	flagged := map[string]*richterv1.AtRiskStudent{}
+	for _, s := range res.Students {
+		flagged[s.UserId] = s
+	}
+
+	t.Run("LowStudent_Flagged", func(t *testing.T) {
+		s, ok := flagged[lowID]
+		if !ok {
+			t.Fatalf("low student %s expected to be flagged at-risk, got %+v", lowID, res.Students)
+		}
+		if len(s.LowStreak) != 2 {
+			t.Fatalf("low student low_streak: want 2 consecutive lessons, got %d", len(s.LowStreak))
+		}
+		// streak ordered by course order: lesson1 then lesson2.
+		if s.LowStreak[0].LessonId != lesson1ID || s.LowStreak[1].LessonId != lesson2ID {
+			t.Errorf("low_streak lesson order: want [%s,%s], got [%s,%s]",
+				lesson1ID, lesson2ID, s.LowStreak[0].LessonId, s.LowStreak[1].LessonId)
+		}
+		for _, p := range s.LowStreak {
+			if p.EngagementScore >= 40 {
+				t.Errorf("low_streak point engagement: want < 40, got %v", p.EngagementScore)
+			}
+		}
+		if s.Email != lowEmail {
+			t.Errorf("flagged email: want %s, got %s", lowEmail, s.Email)
+		}
+	})
+
+	t.Run("FineStudent_NotFlagged", func(t *testing.T) {
+		if _, ok := flagged[fineID]; ok {
+			t.Errorf("fine student %s should NOT be flagged at-risk", fineID)
+		}
+	})
+
+	t.Run("OneLowLesson_NotFlagged_StreakRule", func(t *testing.T) {
+		// Low in only 1 of 2 lessons → streak 1 < atRiskMinStreak(2) → not flagged.
+		if _, ok := flagged[oneLowID]; ok {
+			t.Errorf("student low in only 1 lesson should NOT be flagged (2+ consecutive rule)")
+		}
+	})
+
+	t.Run("Pagination", func(t *testing.T) {
+		// Only the low student qualifies here, so total must be 1.
+		if res.Total != 1 {
+			t.Fatalf("total at-risk: want 1, got %d", res.Total)
+		}
+		// Offset beyond the result set → empty page, total unchanged.
+		page2, err := c.interactions.ListAtRiskStudents(ctx, &richterv1.ListAtRiskStudentsRequest{
+			CourseId: courseID, Limit: 50, Offset: 1,
+		})
+		if err != nil {
+			t.Fatalf("ListAtRiskStudents page2: %v", err)
+		}
+		if len(page2.Students) != 0 {
+			t.Errorf("offset past end: want 0 students, got %d", len(page2.Students))
+		}
+		if page2.Total != 1 {
+			t.Errorf("page2 total: want 1, got %d", page2.Total)
+		}
+		// limit 1, offset 0 → exactly the one flagged student.
+		page1, err := c.interactions.ListAtRiskStudents(ctx, &richterv1.ListAtRiskStudentsRequest{
+			CourseId: courseID, Limit: 1, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListAtRiskStudents page1: %v", err)
+		}
+		if len(page1.Students) != 1 {
+			t.Errorf("limit 1: want 1 student, got %d", len(page1.Students))
+		}
+	})
+
+	t.Run("Authz/NonMember_PermissionDenied", func(t *testing.T) {
+		nonMemberEmail, nonMemberPassword, _ := createActiveUser(t, c.users)
+		nonMemberToken := getUserToken(t, url, nonMemberEmail, nonMemberPassword)
+		nonMemberIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(nonMemberToken), url)
+		assertCode(t, func() error {
+			_, e := nonMemberIA.ListAtRiskStudents(ctx, &richterv1.ListAtRiskStudentsRequest{
+				CourseId: courseID, Limit: 50, Offset: 0,
+			})
+			return e
+		}(), connect.CodePermissionDenied)
+	})
+}
+
+// ── TestGetLessonQuestionAnalytics ────────────────────────────────────────────
+
+// TestGetLessonQuestionAnalytics verifies per-question analytics:
+//   - per-kind accuracy (mcq + fill_blank) with correct response_count/accuracy;
+//   - MCQ option distribution: chosen_count per option and is_correct flagging
+//     (misconception detection);
+//   - avg_response_length_words across free-text (fill_blank) responses.
+//
+// Setup: one MCQ (4 options, correct index 0) authored via CreateManualInteraction
+// (so option text round-trips), plus one fill_blank interaction. Three students:
+//
+//	A → MCQ option 0 (correct), fill "alpha"        (1 word)
+//	B → MCQ option 2 (wrong),   fill "beta gamma"   (2 words)
+//	C → MCQ option 2 (wrong),   fill "delta epsilon zeta" (3 words)
+//
+// MCQ accuracy = 1/3. fill_blank: answers compared against accepted sets.
+// avg_response_length_words = (1+2+3)/3 = 2.0.
+func TestGetLessonQuestionAnalytics(t *testing.T) {
+	t.Parallel()
+	c, url := setupInteractionsTestClients(t)
+	ctx := context.Background()
+
+	ownerRes, err := c.users.CreateUserWithRoleAndStatus(ctx, &richterv1.CreateUserWithRoleAndStatusRequest{
+		Email: testEmail(), Password: testPassword(),
+		FirstName: gofakeit.FirstName(), LastName: gofakeit.LastName(),
+		Role: richterv1.UserRole_USER_ROLE_NORMAL, Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+	})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	orgRes, err := c.orgs.CreateOrganization(ctx, &richterv1.CreateOrganizationRequest{
+		CreatedBy: ownerRes.User.Id, Name: gofakeit.Company(), Slug: testSlug(),
+	})
+	if err != nil {
+		t.Fatalf("create org: %v", err)
+	}
+	orgID := orgRes.Organization.Id
+
+	type student struct{ email, pw, id string }
+	var students []student
+	for range 3 {
+		e, pw, id := createActiveUser(t, c.users)
+		students = append(students, student{e, pw, id})
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: id,
+			Role: richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT, Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member: %v", err)
+		}
+	}
+
+	courseRes, _ := c.courses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerRes.User.Id, Title: gofakeit.JobTitle(),
+	})
+	modRes, _ := c.modules.CreateCourseModule(ctx, &richterv1.CreateCourseModuleRequest{
+		CourseId: courseRes.Course.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonRes, _ := c.lessons.CreateLesson(ctx, &richterv1.CreateLessonRequest{
+		ModuleId: modRes.Module.Id, Title: gofakeit.JobTitle(), OrderIndex: 0,
+	})
+	lessonID := lessonRes.Lesson.Id
+
+	for _, s := range students {
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseRes.Course.Id, UserId: s.id, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enrol student %s: %v", s.id, err)
+		}
+	}
+
+	// MCQ with explicit option texts and correct index 0.
+	mcqRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+		LessonId: lessonID, Prompt: "Pick the correct option", StartSeconds: 1,
+		Config: &richterv1.CreateManualInteractionRequest_Mcq{Mcq: &richterv1.McqConfig{
+			Options:       []*richterv1.McqOption{{Text: "Right"}, {Text: "WrongB"}, {Text: "Distractor"}, {Text: "WrongD"}},
+			CorrectAnswer: 0,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create mcq: %v", err)
+	}
+	mcqID := mcqRes.Interaction.Id
+
+	// fill_blank with 1 blank.
+	fb := insertFillBlankInteraction(t, lessonID, "Greek letter: {{0}}.", []struct{ Accepted []string }{
+		{Accepted: []string{"alpha"}},
+	})
+	fbID := fb.ID.String()
+
+	// Each student submits an MCQ choice + a fill answer of varying word length.
+	type sub struct {
+		mcq      int32
+		fillText string
+	}
+	subs := []sub{
+		{mcq: 0, fillText: "alpha"},              // 1 word, correct fill
+		{mcq: 2, fillText: "beta gamma"},         // 2 words
+		{mcq: 2, fillText: "delta epsilon zeta"}, // 3 words
+	}
+	for i, s := range students {
+		tok := getUserToken(t, url, s.email, s.pw)
+		ia := richterv1connect.NewInteractionServiceClient(httpClientWithToken(tok), url)
+		if _, err := ia.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId: lessonID,
+			Responses: []*richterv1.AttemptResponseInput{
+				{InteractionId: mcqID, Response: &richterv1.AttemptResponseInput_McqSelected{McqSelected: subs[i].mcq}},
+				{InteractionId: fbID, Response: &richterv1.AttemptResponseInput_FillBlank{
+					FillBlank: &richterv1.FillBlankResponse{Answers: []string{subs[i].fillText}},
+				}},
+			},
+		}); err != nil {
+			t.Fatalf("SubmitAttempt student %d: %v", i, err)
+		}
+	}
+
+	res, err := c.interactions.GetLessonQuestionAnalytics(ctx, &richterv1.GetLessonQuestionAnalyticsRequest{
+		LessonId: lessonID,
+	})
+	if err != nil {
+		t.Fatalf("GetLessonQuestionAnalytics: %v", err)
+	}
+
+	t.Run("KindAccuracy", func(t *testing.T) {
+		byKind := map[string]*richterv1.KindAccuracy{}
+		for _, ka := range res.KindAccuracy {
+			byKind[ka.Kind] = ka
+		}
+		mcq, ok := byKind["mcq"]
+		if !ok {
+			t.Fatalf("kind_accuracy missing mcq; got %+v", res.KindAccuracy)
+		}
+		if mcq.ResponseCount != 3 {
+			t.Errorf("mcq response_count: want 3, got %d", mcq.ResponseCount)
+		}
+		// 1 of 3 correct → accuracy 1/3.
+		if mcq.Accuracy < 0.32 || mcq.Accuracy > 0.34 {
+			t.Errorf("mcq accuracy: want ~0.333, got %v", mcq.Accuracy)
+		}
+		fbKind, ok := byKind["fill_blank"]
+		if !ok {
+			t.Fatalf("kind_accuracy missing fill_blank; got %+v", res.KindAccuracy)
+		}
+		if fbKind.ResponseCount != 3 {
+			t.Errorf("fill_blank response_count: want 3, got %d", fbKind.ResponseCount)
+		}
+		// Only "alpha" is accepted → 1 of 3 correct.
+		if fbKind.Accuracy < 0.32 || fbKind.Accuracy > 0.34 {
+			t.Errorf("fill_blank accuracy: want ~0.333, got %v", fbKind.Accuracy)
+		}
+	})
+
+	t.Run("McqOptionDistribution", func(t *testing.T) {
+		var stat *richterv1.McqInteractionStats
+		for _, m := range res.McqStats {
+			if m.InteractionId == mcqID {
+				stat = m
+				break
+			}
+		}
+		if stat == nil {
+			t.Fatalf("mcq_stats missing interaction %s; got %+v", mcqID, res.McqStats)
+		}
+		if stat.Prompt != "Pick the correct option" {
+			t.Errorf("mcq prompt: want %q, got %q", "Pick the correct option", stat.Prompt)
+		}
+		byIdx := map[int32]*richterv1.McqOptionStat{}
+		for _, o := range stat.Options {
+			byIdx[o.OptionIndex] = o
+		}
+		// Option 0 chosen once, correct, text "Right".
+		opt0 := byIdx[0]
+		if opt0 == nil || opt0.ChosenCount != 1 {
+			t.Errorf("option 0 chosen_count: want 1, got %+v", opt0)
+		}
+		if opt0 != nil {
+			if !opt0.IsCorrect {
+				t.Errorf("option 0 is_correct: want true")
+			}
+			if opt0.OptionText != "Right" {
+				t.Errorf("option 0 text: want %q, got %q", "Right", opt0.OptionText)
+			}
+		}
+		// Option 2 chosen twice (the misconception), not correct.
+		opt2 := byIdx[2]
+		if opt2 == nil || opt2.ChosenCount != 2 {
+			t.Errorf("option 2 chosen_count: want 2, got %+v", opt2)
+		}
+		if opt2 != nil && opt2.IsCorrect {
+			t.Errorf("option 2 is_correct: want false")
+		}
+		// Only options actually chosen appear in the distribution (0 and 2).
+		for _, o := range stat.Options {
+			if o.OptionIndex == 1 || o.OptionIndex == 3 {
+				t.Errorf("unexpected option %d in distribution (never chosen)", o.OptionIndex)
+			}
+		}
+	})
+
+	t.Run("AvgResponseLengthWords", func(t *testing.T) {
+		// fill words: 1 + 2 + 3 = 6 across 3 responses → avg 2.0.
+		if res.AvgResponseLengthWords < 1.99 || res.AvgResponseLengthWords > 2.01 {
+			t.Errorf("avg_response_length_words: want 2.0, got %v", res.AvgResponseLengthWords)
+		}
+	})
+
+	t.Run("Authz/Student_PermissionDenied", func(t *testing.T) {
+		studentTok := getUserToken(t, url, students[0].email, students[0].pw)
+		studentIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(studentTok), url)
+		assertCode(t, func() error {
+			_, e := studentIA.GetLessonQuestionAnalytics(ctx, &richterv1.GetLessonQuestionAnalyticsRequest{LessonId: lessonID})
+			return e
+		}(), connect.CodePermissionDenied)
+	})
+
+	t.Run("Authz/NonMember_PermissionDenied", func(t *testing.T) {
+		nonMemberEmail, nonMemberPassword, _ := createActiveUser(t, c.users)
+		nonMemberToken := getUserToken(t, url, nonMemberEmail, nonMemberPassword)
+		nonMemberIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(nonMemberToken), url)
+		assertCode(t, func() error {
+			_, e := nonMemberIA.GetLessonQuestionAnalytics(ctx, &richterv1.GetLessonQuestionAnalyticsRequest{LessonId: lessonID})
+			return e
+		}(), connect.CodePermissionDenied)
 	})
 }
