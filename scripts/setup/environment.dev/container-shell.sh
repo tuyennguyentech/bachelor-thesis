@@ -12,6 +12,17 @@ set -eu
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-dyadia}"
 DEFAULT_CONTAINER="debug"
 
+# Load the repo .env so app-level env (RICHTER_AI_*, WHISPER__*, PIPER_*) reaches
+# the exec'd process. container-shell only joins the container's NETWORK namespace
+# (nsenter -n) — it does NOT inherit the container's environment — so concurrency
+# config kept in .env must be sourced here for the host go-run process to see it.
+_REPO_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
+if [ -f "$_REPO_ROOT/.env" ]; then
+  set -a
+  . "$_REPO_ROOT/.env"
+  set +a
+fi
+
 # --- Parse args: [CONTAINER] [--] [COMMAND...] ---
 CONTAINER="${1:-$DEFAULT_CONTAINER}"
 if [ "$CONTAINER" = "--" ]; then

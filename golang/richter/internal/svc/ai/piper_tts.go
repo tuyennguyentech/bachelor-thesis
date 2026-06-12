@@ -18,16 +18,33 @@ import (
 type PiperTTSClient struct {
 	endpoint string // e.g. "http://piper-tts:5000"
 	hc       *http.Client
+	// sem is a counting semaphore capping concurrent in-flight TTS
+	// requests when maxConcurrent > 0; nil = unlimited.
+	sem chan struct{}
 }
 
-func newPiperTTSClient(endpoint string) *PiperTTSClient {
-	return &PiperTTSClient{endpoint: endpoint, hc: &http.Client{}}
+func newPiperTTSClient(endpoint string, maxConcurrent int) *PiperTTSClient {
+	c := &PiperTTSClient{endpoint: endpoint, hc: &http.Client{}}
+	if maxConcurrent > 0 {
+		c.sem = make(chan struct{}, maxConcurrent)
+	}
+	return c
 }
 
 // Synthesise converts text to WAV audio using Piper TTS.
 // language must be "vi" or "en".
 // Returns raw WAV bytes.
 func (c *PiperTTSClient) Synthesise(ctx context.Context, text, language string) ([]byte, error) {
+	// App-side concurrency gate (mirrors the Whisper semaphore): bound
+	// concurrent TTS calls when PiperMaxConcurrent > 0.
+	if c.sem != nil {
+		select {
+		case c.sem <- struct{}{}:
+			defer func() { <-c.sem }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	u, err := url.Parse(c.endpoint + "/tts")
 	if err != nil {
 		return nil, fmt.Errorf("piper-tts: parse endpoint: %w", err)

@@ -20,4 +20,4 @@ dl() {
 dl vi_VN-vais1000-medium vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium
 dl en_US-lessac-medium en/en_US/lessac/medium/en_US-lessac-medium
 
-exec python3 /app/server.py
+exec uvicorn server:app --host 0.0.0.0 --port 5000 --app-dir /app

@@ -51,6 +51,14 @@ type AiCfg struct {
 	// (rely on worker count only). Recommended: 1 for the default
 	// speaches deployment since it serializes model inference.
 	WhisperMaxConcurrent int `mapstructure:"whisper_max_concurrent"`
+	// PiperMaxConcurrent caps in-flight Piper TTS requests across the
+	// whole process — the same app-side semaphore idea as
+	// WhisperMaxConcurrent, applied to the other local AI service.
+	// Piper's Flask server is already multi-threaded so 0 = unlimited is
+	// usually fine; set > 0 to bound load on a constrained host. Pair it
+	// with PIPER_NUM_WORKERS on the piper service. Override via env
+	// RICHTER_AI_PIPER_MAX_CONCURRENT.
+	PiperMaxConcurrent int `mapstructure:"piper_max_concurrent"`
 	// PipelineTimeout is the total wall-clock budget for the full
 	// extract pipeline (download + ffmpeg + Whisper). It wraps the
 	// outer context of runWhisperAnalyze so a hung ffmpeg or Whisper
@@ -115,6 +123,9 @@ func NewAiCfg() AiCfg {
 		WhisperRequestTimeout:        10 * time.Minute,
 		WhisperProgressInterval:      20 * time.Second,
 		WhisperMaxConcurrent:         1,
+		// 0 = unlimited (Piper is multi-threaded and cheap); override via
+		// RICHTER_AI_PIPER_MAX_CONCURRENT if a host needs a hard cap.
+		PiperMaxConcurrent: 0,
 		// PipelineTimeout: generous budget = DownloadTimeout +
 		// AudioExtractTimeout + WhisperRequestTimeout + 5 min buffer.
 		// Default is 33 minutes — enough for a 2 GB / 90-min video on

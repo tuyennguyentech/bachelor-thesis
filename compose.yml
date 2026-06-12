@@ -80,6 +80,9 @@ services:
       # float16 is efficient on CUDA but unsupported on CPU (falls back to float32).
       # "default" lets CTranslate2 pick the best quantization for the active device.
       WHISPER__COMPUTE_TYPE: default
+      # Number of parallel Whisper inference workers. Keep in sync with the
+      # richter-side cap RICHTER_AI_WHISPER_MAX_CONCURRENT (both from .env).
+      WHISPER__NUM_WORKERS: ${WHISPER__NUM_WORKERS:-1}
       PRELOAD_MODELS: '["Systran/faster-whisper-small"]'
     volumes:
       - hf_hub_cache:/home/ubuntu/.cache/huggingface/hub
@@ -102,6 +105,9 @@ services:
       PIPER_MODELS_DIR: /models
       # Set to "1" (via compose.gpu.yml) to enable CUDA inference in piper.
       PIPER_USE_CUDA: "0"
+      # Max concurrent TTS syntheses. Keep in sync with the richter-side cap
+      # RICHTER_AI_PIPER_MAX_CONCURRENT (both from .env). 0 = unlimited.
+      PIPER_NUM_WORKERS: ${PIPER_NUM_WORKERS:-0}
     volumes:
       - piper_models:/models
     restart: unless-stopped

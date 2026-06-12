@@ -79,6 +79,25 @@ whisper_progress_interval      = "20s"
 # under parallel transcribe (most common cause of "timeout awaiting
 # response headers" failures). 0 = unlimited.
 whisper_max_concurrent         = 1
+# Semaphore chặn TTS (Piper) đồng thời ở richter — cặp với PIPER_NUM_WORKERS.
+# 0 = unlimited. Default; override bằng RICHTER_AI_PIPER_MAX_CONCURRENT trong .env.
+piper_max_concurrent           = 0
+# ── ĐỘ ĐỒNG THỜI AI LOCAL — cấu hình TẬP TRUNG ở .env, KHÔNG chỉnh số ở file này ──
+# 2 dòng *_max_concurrent trên CHỈ là default. Mỗi service AI local có 1 CẶP:
+# cap ở richter (app-side semaphore) + số workers ở service. Đặt trong .env, để cặp bằng nhau:
+#   Whisper: RICHTER_AI_WHISPER_MAX_CONCURRENT  +  WHISPER__NUM_WORKERS
+#   Piper:   RICHTER_AI_PIPER_MAX_CONCURRENT    +  PIPER_NUM_WORKERS
+# richter đọc RICHTER_AI_* qua viper (SetEnvPrefix("richter") + '.'→'_' + AutomaticEnv,
+#   ⇒ override [ai].whisper_max_concurrent / [ai].piper_max_concurrent);
+# speaches/piper lấy WHISPER__NUM_WORKERS / PIPER_NUM_WORKERS qua compose nội suy ${...} từ .env.
+#
+# QUAN TRỌNG về nơi env có hiệu lực:
+#  • Container thật / CI (compose `env_file: .env` hoặc `environment: ${...}`): nhận env trực tiếp.
+#  • Dev qua scripts/.../container-shell.sh: script chỉ `nsenter -n` (MƯỢN network
+#    namespace) — KHÔNG `podman exec`, nên KHÔNG kế thừa env của container; tiến trình
+#    `go run` đọc env của SHELL HOST. ⇒ phải nạp .env vào shell trước khi chạy:
+#        set -a; source .env; set +a
+#    (hoặc thêm `source .env` vào container-shell.sh). Không nạp thì default ở trên được dùng.
 # Total wall-clock budget for the full extract pipeline
 # (download + ffmpeg + Whisper). Guards against hung sub-stages.
 # 0 = unlimited (rely on per-stage timeouts only).

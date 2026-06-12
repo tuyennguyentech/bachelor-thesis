@@ -163,7 +163,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		pg: pg, kv: kvSvc, log: l, authz: az,
 		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, whisperCfg: whisperCfg, aiCfg: aiCfg,
 		taskCfg: taskCfg,
-		ttsCfg: ttsCfg, ttsClient: newPiperTTSClient(ttsCfg.Endpoint),
+		ttsCfg: ttsCfg, ttsClient: newPiperTTSClient(ttsCfg.Endpoint, aiCfg.PiperMaxConcurrent),
 		chunking:      newChunkingService(geminiCfg, aiCfg, l),
 		transcription: transcription,
 		grading:       newGradingService(geminiCfg, transcription),
