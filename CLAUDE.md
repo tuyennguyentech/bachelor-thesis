@@ -24,7 +24,7 @@ pnpm --filter heino lint         # Run ESLint
 
 ### Code Generation
 ```sh
-make generate-protoc             # Regenerate protobuf code (Go + TypeScript)
+buf generate                     # Regenerate protobuf code (Go + TypeScript). NOTE: Makefile is empty — do NOT use `make`
 sqlc generate                    # Regenerate SQL code from queries/migrations
 ```
 
@@ -184,9 +184,13 @@ Config via `-c` flag for richter. Never hardcode hostnames/passwords/endpoints i
 
 ### DB reset for tests
 ```sh
-# Use goose -env flag to load .env/.env.test — do NOT inline GOOSE_DBSTRING or source the file manually
-./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test reset
-./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test up
+# Run goose via the goose.sh wrapper, passing the target env (dev|test) as the
+# FIRST arg. The wrapper layers .env.goose (shared GOOSE_DRIVER/MIGRATION_DIR)
+# under .env.<target> (GOOSE_DBSTRING). Do NOT use `goose -env .env.test` — its
+# -env does not override the env that container-shell sourced from .env, and do
+# NOT inline GOOSE_DBSTRING or source the file manually.
+./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/setup/environment.dev/goose.sh test reset
+./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/setup/environment.dev/goose.sh test up
 
 # Reseed
 ./scripts/setup/environment.dev/container-shell.sh richter -- go run ./golang/richter/ -c golang/richter/richter.base.toml,golang/richter/richter.test.toml seed --dev
@@ -195,7 +199,7 @@ Config via `-c` flag for richter. Never hardcode hostnames/passwords/endpoints i
 ## Adding a New RPC Method
 
 1. Add message + service method to `proto/richter/v1/users.proto` (include protovalidate annotations)
-2. Run `make generate-protoc` — updates `golang/buf/gen/` and `typescript/buf/gen/`
+2. Run `buf generate` — updates `golang/buf/gen/` and `typescript/buf/gen/`
 3. Implement handler in `golang/richter/internal/svc/users/users.go`
 4. Add SQL query to `sql/queries/users.sql` and run `sqlc generate`
 5. Add proto ↔ SQL conversion to `internal/svc/mapper.go` if needed
