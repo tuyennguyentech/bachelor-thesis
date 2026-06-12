@@ -92,6 +92,39 @@ export async function updateLessonFeedbackModeAction({
   });
 }
 
+export async function updateLessonCompletionAction({
+  lessonId,
+  title,
+  description,
+  orderIndex,
+  language,
+  maxAttempts,
+  minWatchFraction,
+  minScoreFraction,
+}: {
+  lessonId: string;
+  title: string;
+  description: string;
+  orderIndex: number;
+  language: string;
+  maxAttempts: number;
+  minWatchFraction: number;
+  minScoreFraction: number;
+}): Promise<ActionResult> {
+  return withLessonClient(async (client) => {
+    await client.updateLesson({
+      id: lessonId,
+      title,
+      description,
+      orderIndex,
+      language,
+      maxAttempts,
+      minWatchFraction,
+      minScoreFraction,
+    });
+  });
+}
+
 export async function mergeLessonChunksAction({
   keepChunkId,
   discardChunkId,

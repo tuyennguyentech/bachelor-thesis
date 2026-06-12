@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 import { AnalyzeButton } from "./analyze-button";
 import { LessonAttempts } from "./lesson-attempts";
+import { LessonHeatmap } from "./lesson-heatmap";
+import { LessonCompletionSettings } from "./lesson-completion-settings";
 import { VideoPlayer } from "./video-player";
 import { StudentLessonView } from "./student-lesson-view";
 import { extractLocalResponse } from "@/interactions/registry";
@@ -157,7 +159,7 @@ export default async function LessonDetailPage({
   // Parallel fetches: video URL, AI analysis, my attempt, teacher attempts list, watch progress.
   // Each non-critical call logs to console so a real RPC failure is visible in dev tools
   // instead of being silently replaced with an empty value.
-  const [videoUrl, analysisRes, myAttempt, attemptsData, initialPosition] = await Promise.all([
+  const [videoUrl, analysisRes, myAttempt, attemptsData, initialPosition, heatmapData, questionAnalytics] = await Promise.all([
     lesson.videoStorageKey
       ? getVideoUrl(lesson.videoStorageKey, token)
       : Promise.resolve(null),
@@ -195,6 +197,24 @@ export default async function LessonDetailPage({
             return 0;
           })
       : Promise.resolve(0),
+    effectiveCanManage
+      ? interactionClient
+          .lessonHeatmap({ lessonId })
+          .then((r) => ({ cells: r.cells }))
+          .catch((err) => {
+            console.error("[lesson/page] lessonHeatmap failed:", err);
+            return { cells: [] };
+          })
+      : Promise.resolve(null),
+    effectiveCanManage
+      ? interactionClient
+          .getLessonQuestionAnalytics({ lessonId })
+          .then((r) => ({ kindAccuracy: r.kindAccuracy, mcqStats: r.mcqStats }))
+          .catch((err) => {
+            console.error("[lesson/page] getLessonQuestionAnalytics failed:", err);
+            return { kindAccuracy: [], mcqStats: [] };
+          })
+      : Promise.resolve(null),
   ]);
 
   const { analysis, chunks: initialChunks } = analysisRes;
@@ -513,12 +533,41 @@ export default async function LessonDetailPage({
 
                   {/* ── Tab 3: Kết quả & Thống kê ── */}
                   {activeTab === "results" && attemptsData && (
-                    <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2">
-                        <BarChart2Icon className="size-4 text-muted-foreground" />
-                        <h2 className="font-medium text-sm">Kết quả &amp; Thống kê học viên</h2>
+                    <div className="flex flex-col gap-4 animate-in fade-in duration-200">
+                      <LessonCompletionSettings
+                        lessonId={lesson.id}
+                        title={lesson.title}
+                        description={lesson.description}
+                        orderIndex={lesson.orderIndex}
+                        language={lesson.language || "vi"}
+                        maxAttempts={lesson.maxAttempts ?? 0}
+                        minWatchFraction={lesson.minWatchFraction ?? 0}
+                        minScoreFraction={lesson.minScoreFraction ?? 0}
+                      />
+
+                      {heatmapData && heatmapData.cells.length > 0 && (
+                        <div className="rounded-md border p-4 flex flex-col gap-3">
+                          <div className="flex items-center gap-2">
+                            <BarChart2Icon className="size-4 text-muted-foreground" />
+                            <h2 className="font-medium text-sm">Bản đồ nhiệt theo phân đoạn</h2>
+                          </div>
+                          <LessonHeatmap cells={heatmapData.cells} />
+                        </div>
+                      )}
+
+                      <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
+                        <div className="flex items-center gap-2">
+                          <BarChart2Icon className="size-4 text-muted-foreground" />
+                          <h2 className="font-medium text-sm">Kết quả &amp; Thống kê học viên</h2>
+                        </div>
+                        <LessonAttempts
+                          attempts={attemptsData.attempts}
+                          total={attemptsData.total}
+                          maxAttempts={lesson.maxAttempts}
+                          perKind={questionAnalytics?.kindAccuracy}
+                          questions={questionAnalytics?.mcqStats}
+                        />
                       </div>
-                      <LessonAttempts attempts={attemptsData.attempts} total={attemptsData.total} maxAttempts={lesson.maxAttempts} />
                     </div>
                   )}
                 </>
