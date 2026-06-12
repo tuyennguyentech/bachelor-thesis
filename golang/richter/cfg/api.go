@@ -19,6 +19,11 @@ type ApiCfg struct {
 	// (used by the server's Shutdown method when the caller's context
 	// has no deadline). 0 = unlimited.
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	// AllowTestSeed enables the test-only POST
+	// /richter/v1/test/seed-analyzed-lesson endpoint used by Playwright
+	// E2E fixtures to seed analyzed lessons without real AI calls.
+	// NEVER set this to true in production configs.
+	AllowTestSeed bool `mapstructure:"allow_test_seed"`
 }
 
 func NewApiCfgSvc(i do.Injector) (l *ApiCfg, err error) {

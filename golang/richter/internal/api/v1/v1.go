@@ -101,6 +101,13 @@ func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	path, handler = interactionsSvc.Handler()
 	mux.Handle(path, handler)
 
+	// Test-only seed endpoint. Enabled when RICHTER_ALLOW_TEST_SEED=true
+	// (set in richter.test.toml). Returns ("", nil) in production and is
+	// never registered.
+	if seedPath, seedHandler := aiSvc.TestSeedHandler(); seedHandler != nil {
+		mux.Handle(seedPath, seedHandler)
+	}
+
 	v1 = &V1Svc{Mux: mux}
 	return
 }

@@ -34,8 +34,6 @@ import {
 } from "buf/gen/richter/v1/interactions_pb";
 import {
   AIService,
-  LessonTaskKind,
-  LessonTaskStatus,
   type TranscriptChunk,
 } from "buf/gen/richter/v1/ai_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
@@ -585,31 +583,37 @@ export async function createAnalyzedLesson(
     durationSeconds: 7,
   });
 
-  // 7. Run EXTRACT_TRANSCRIPT via API and poll until terminal state.
-  const aiClient = createClient(AIService, transport);
-  await aiClient.startLessonTask({ lessonId, kind: LessonTaskKind.EXTRACT_TRANSCRIPT });
-  const extractDeadline = Date.now() + 120_000;
-  let extractDone = false;
-  while (Date.now() < extractDeadline) {
-    const tasks = await aiClient.listLessonTasks({ lessonId, activeOnly: false, limit: 20, offset: 0 });
-    const extract = tasks.tasks.find((t) => t.kind === LessonTaskKind.EXTRACT_TRANSCRIPT);
-    if (extract?.status === LessonTaskStatus.SUCCEEDED) { extractDone = true; break; }
-    if (extract?.status === LessonTaskStatus.FAILED) throw new Error("createAnalyzedLesson: EXTRACT_TRANSCRIPT failed");
-    await new Promise((r) => setTimeout(r, 2000));
+  // 7. Seed transcript chunks directly via the test-only endpoint (no Gemini,
+  //    no Whisper). The endpoint inserts PG rows + FDB transcripts + synthetic
+  //    succeeded task rows so preflight checks and GetLessonAnalysis pass.
+  //    Enabled in richter.test.toml via [api] allow_test_seed = true.
+  const seedUrl = `${rpcBaseUrl()}/richter/v1/test/seed-analyzed-lesson`;
+  const seedBody = {
+    lesson_id: lessonId,
+    chunks: Array.from({ length: Math.max(minChunks, 1) }, (_, i) => ({
+      transcript: `Seeded transcript for chunk ${i + 1}. This content is used by E2E tests.`,
+      start_seconds: i * 7,
+      end_seconds: (i + 1) * 7,
+      summary: `Seeded chunk ${i + 1}`,
+    })),
+  };
+  const seedResp = await fetch(seedUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
+    body: JSON.stringify(seedBody),
+  });
+  if (!seedResp.ok) {
+    const body = await seedResp.text();
+    throw new Error(`createAnalyzedLesson: seed endpoint failed (${seedResp.status}): ${body}`);
   }
-  if (!extractDone) throw new Error("createAnalyzedLesson: EXTRACT_TRANSCRIPT timed out");
 
-  // 8. Run CHUNK_TRANSCRIPT via API and poll until minChunks chunks exist.
-  await aiClient.startLessonTask({ lessonId, kind: LessonTaskKind.CHUNK_TRANSCRIPT });
-  const chunkDeadline = Date.now() + 120_000;
-  while (Date.now() < chunkDeadline) {
-    const analysis = await aiClient.getLessonAnalysis({ lessonId });
-    if (analysis.chunks.length >= minChunks) {
-      return { courseId, moduleId, lessonId, lessonUrl, chunks: analysis.chunks, token, teacherEmail };
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error("createAnalyzedLesson: CHUNK_TRANSCRIPT timed out");
+  // 8. Read back the seeded chunks from GetLessonAnalysis.
+  const aiClient = createClient(AIService, transport);
+  const analysis = await aiClient.getLessonAnalysis({ lessonId });
+  return { courseId, moduleId, lessonId, lessonUrl, chunks: analysis.chunks, token, teacherEmail };
 }
 
 export { expect };

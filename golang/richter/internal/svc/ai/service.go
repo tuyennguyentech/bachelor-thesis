@@ -82,6 +82,7 @@ type AISvc struct {
 	geminiCfg      *cfg.GeminiCfg
 	whisperCfg     *cfg.WhisperCfg
 	aiCfg          *cfg.AiCfg
+	apiCfg         *cfg.ApiCfg
 	taskCfg        *cfg.LessonTaskCfg
 	ttsCfg         *cfg.TTSCfg
 	ttsClient      *PiperTTSClient
@@ -89,6 +90,10 @@ type AISvc struct {
 	chunkOps       *chunkops.Service
 	transcription  *transcriptionService
 	grading        *gradingService
+	// interactionGen is kept for reference but is superseded by generation.Service.
+	// All quiz-generation calls go through s.generation; this field is unused and
+	// retained only to avoid removing it during a refactor without a full audit.
+	// TODO: delete after confirming generation.Service covers all quiz-gen paths.
 	interactionGen *interactionGenerationService
 	generation     *generation.Service
 	transcript     *transcript.Service
@@ -150,6 +155,11 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		return nil, fmt.Errorf("taskqueue.DB: %w", err)
 	}
 
+	apiCfg, err := do.Invoke[*cfg.ApiCfg](i)
+	if err != nil {
+		return nil, fmt.Errorf("ApiCfg: %w", err)
+	}
+
 	s3client, err := minio.New(s3cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(s3cfg.AccessKeyID, s3cfg.SecretAccessKey, ""),
 		Secure: s3cfg.UseSSL,
@@ -162,6 +172,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	svc := &AISvc{
 		pg: pg, kv: kvSvc, log: l, authz: az,
 		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, whisperCfg: whisperCfg, aiCfg: aiCfg,
+		apiCfg:  apiCfg,
 		taskCfg: taskCfg,
 		ttsCfg: ttsCfg, ttsClient: newPiperTTSClient(ttsCfg.Endpoint, aiCfg.PiperMaxConcurrent),
 		chunking:      newChunkingService(geminiCfg, aiCfg, l),
