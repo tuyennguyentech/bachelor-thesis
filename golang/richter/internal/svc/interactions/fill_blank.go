@@ -163,6 +163,17 @@ func (h *fillBlankHandler) GradeWithContext(ctx context.Context, deps GradingDep
 	return score, maxScore, feedback, nil
 }
 
+// ResponseWordCount implements TextResponseMeasurer: counts words across all
+// fill-blank answers joined by whitespace.
+func (h *fillBlankHandler) ResponseWordCount(responseJSON []byte) (int, bool) {
+	var resp fillBlankResponseJSON
+	if err := json.Unmarshal(responseJSON, &resp); err != nil {
+		return 0, false
+	}
+	joined := strings.Join(resp.Answers, " ")
+	return len(strings.Fields(joined)), true
+}
+
 func (h *fillBlankHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
 	fb, ok := req.Response.(*richterv1.AttemptResponseInput_FillBlank)
 	if !ok || fb == nil || fb.FillBlank == nil {

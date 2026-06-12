@@ -154,6 +154,9 @@ func (s *InteractionsSvc) ListAttempts(
 			AvgTimeToAnswerMs:  r.AvgTimeToAnswerMs,
 			VideoWatchFraction: watchFrac,
 			EngagementScore:    eng,
+			TimeOnTaskMs:       r.TimeOnTaskMs,
+			ResponseRate:       responseRate,
+			AvgReplayCount:     r.AvgReplayCount,
 		})
 	}
 
@@ -239,6 +242,7 @@ func (s *InteractionsSvc) ListCourseAttemptsSummary(
 			AvgScore:        r.AvgScore,
 			EngagementScore: eng,
 			LastActive:      lastActive,
+			ResponseRate:    r.ResponseRate,
 		})
 	}
 

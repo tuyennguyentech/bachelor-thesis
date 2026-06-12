@@ -296,6 +296,9 @@ message StudentAttemptSummary {
   double video_watch_fraction = 9;
   // Composite engagement score (0..100).
   double engagement_score = 10;
+  double time_on_task_ms = 11;
+  double response_rate = 12;
+  double avg_replay_count = 13;
 }
 
 message ListAttemptsRequest {
@@ -355,6 +358,81 @@ message CourseStudentSummary {
   double engagement_score = 7;
   // Timestamp of the most recent attempt submission.
   google.protobuf.Timestamp last_active = 8;
+  double response_rate = 9;
+}
+
+message ChunkScoreCell {
+  string chunk_id = 1;
+  int32 chunk_index = 2;
+  float start_seconds = 3;
+  float end_seconds = 4;
+  string summary = 5;
+  double avg_score = 6;
+  int32 response_count = 7;
+  int32 student_count = 8;
+  bool is_gap = 9;
+}
+
+message LessonHeatmapRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message LessonHeatmapResponse {
+  repeated ChunkScoreCell cells = 1;
+  double gap_threshold = 2;
+}
+
+message AtRiskLessonPoint {
+  string lesson_id = 1;
+  string lesson_title = 2;
+  double engagement_score = 3;
+}
+
+message AtRiskStudent {
+  string user_id = 1;
+  string display_name = 2;
+  string email = 3;
+  repeated AtRiskLessonPoint low_streak = 4;
+}
+
+message ListAtRiskStudentsRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 200}];
+  int32 offset = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+message ListAtRiskStudentsResponse {
+  repeated AtRiskStudent students = 1;
+  int32 total = 2;
+}
+
+message KindAccuracy {
+  string kind = 1;
+  int32 response_count = 2;
+  double accuracy = 3;
+}
+
+message McqOptionStat {
+  int32 option_index = 1;
+  string option_text = 2;
+  int32 chosen_count = 3;
+  bool is_correct = 4;
+}
+
+message McqInteractionStats {
+  string interaction_id = 1;
+  string prompt = 2;
+  repeated McqOptionStat options = 3;
+}
+
+message GetLessonQuestionAnalyticsRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetLessonQuestionAnalyticsResponse {
+  repeated KindAccuracy kind_accuracy = 1;
+  repeated McqInteractionStats mcq_stats = 2;
+  double avg_response_length_words = 3;
 }
 
 message ListCourseAttemptsSummaryRequest {
@@ -406,6 +484,12 @@ service InteractionService {
   rpc ListAttempts(ListAttemptsRequest) returns (ListAttemptsResponse) {}
   // Teacher/Admin: list per-student attempt summaries across an entire course.
   rpc ListCourseAttemptsSummary(ListCourseAttemptsSummaryRequest) returns (ListCourseAttemptsSummaryResponse) {}
+  // Teacher: per-chunk score heatmap for a lesson.
+  rpc LessonHeatmap(LessonHeatmapRequest) returns (LessonHeatmapResponse) {}
+  // Teacher/Admin: list students with consecutive low-engagement lesson runs.
+  rpc ListAtRiskStudents(ListAtRiskStudentsRequest) returns (ListAtRiskStudentsResponse) {}
+  // Teacher: per-question accuracy/distribution analytics for a lesson.
+  rpc GetLessonQuestionAnalytics(GetLessonQuestionAnalyticsRequest) returns (GetLessonQuestionAnalyticsResponse) {}
 
   // Student: submit all interaction responses and receive a graded attempt.
   rpc SubmitAttempt(SubmitAttemptRequest) returns (SubmitAttemptResponse) {}

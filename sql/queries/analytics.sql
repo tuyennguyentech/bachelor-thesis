@@ -15,9 +15,13 @@ SELECT
   u.middle_name,
   u.last_name,
   u.email,
-  -- lessons_completed: lessons with score >= 50 % of max_score
-  COUNT(DISTINCT CASE WHEN la.max_score > 0 AND la.total_score >= la.max_score * 0.5
-        THEN la.lesson_id END)::int           AS lessons_completed,
+  -- lessons_completed: lessons meeting per-lesson score + watch thresholds
+  -- (0 in a threshold column means "use default": 0.6 score / 0.8 watch).
+  COUNT(DISTINCT CASE
+    WHEN la.max_score > 0
+     AND la.total_score >= la.max_score * COALESCE(NULLIF(l.min_score_fraction,0), 0.6)
+     AND COALESCE(la.video_watch_fraction,0) >= COALESCE(NULLIF(l.min_watch_fraction,0), 0.8)
+    THEN la.lesson_id END)::int               AS lessons_completed,
   (
     SELECT COUNT(*)::int
     FROM lessons l2
@@ -94,3 +98,50 @@ WHERE la.user_id = $1
 GROUP BY c.id, c.title
 ORDER BY MAX(la.submitted_at) DESC NULLS LAST
 LIMIT $2 OFFSET $3;
+
+-- name: LessonChunkScoreHeatmap :many
+SELECT c.id AS chunk_id, c.order_index AS chunk_index, c.start_seconds, c.end_seconds, c.summary,
+  COALESCE(SUM(lar.score)::float8 / NULLIF(SUM(lar.max_score),0),0)::float8 AS avg_score,
+  COUNT(lar.interaction_id)::int AS response_count,
+  COUNT(DISTINCT la.user_id)::int AS student_count
+FROM lesson_transcript_chunks c
+LEFT JOIN lesson_interactions li ON li.chunk_id = c.id
+LEFT JOIN lesson_attempt_responses lar ON lar.interaction_id = li.id
+LEFT JOIN lesson_attempts la ON la.id = lar.attempt_id
+WHERE c.lesson_id = $1
+GROUP BY c.id, c.order_index, c.start_seconds, c.end_seconds, c.summary
+ORDER BY c.order_index ASC;
+
+-- name: ListCourseAttemptEngagementInputs :many
+-- No LIMIT/OFFSET on purpose: handler scans all attempts per student to find consecutive low-engagement runs; paginate the OUTPUT in Go.
+SELECT la.user_id, u.first_name, u.middle_name, u.last_name, u.email,
+  l.id AS lesson_id, l.title AS lesson_title, cm.order_index AS module_order, l.order_index AS lesson_order,
+  COALESCE(la.video_watch_fraction,0)::float8 AS watch_fraction,
+  COALESCE(COUNT(lar.interaction_id)::float8 / NULLIF((SELECT COUNT(*) FROM lesson_interactions li WHERE li.lesson_id = la.lesson_id),0),0)::float8 AS response_rate,
+  COALESCE(la.total_score / NULLIF(la.max_score,0),0)::float8 AS score_fraction,
+  la.submitted_at
+FROM lesson_attempts la
+JOIN lessons l ON l.id = la.lesson_id
+JOIN course_modules cm ON cm.id = l.module_id
+JOIN users u ON u.id = la.user_id
+LEFT JOIN lesson_attempt_responses lar ON lar.attempt_id = la.id
+WHERE cm.course_id = $1
+GROUP BY la.id, la.user_id, u.id, l.id, cm.order_index, l.order_index
+ORDER BY la.user_id, cm.order_index ASC, l.order_index ASC;
+
+-- name: LessonAccuracyByKind :many
+SELECT li.kind AS kind, COUNT(*)::int AS response_count,
+  COALESCE(SUM(lar.score) / NULLIF(SUM(lar.max_score),0),0)::float8 AS accuracy
+FROM lesson_attempt_responses lar
+JOIN lesson_attempts la ON la.id = lar.attempt_id
+JOIN lesson_interactions li ON li.id = lar.interaction_id
+WHERE la.lesson_id = $1
+GROUP BY li.kind ORDER BY li.kind;
+
+-- name: LessonMcqOptionDistribution :many
+SELECT lar.interaction_id AS interaction_id, (lar.response->>'selected')::int AS option_index, COUNT(*)::int AS chosen_count
+FROM lesson_attempt_responses lar
+JOIN lesson_attempts la ON la.id = lar.attempt_id
+JOIN lesson_interactions li ON li.id = lar.interaction_id
+WHERE la.lesson_id = $1 AND li.kind = 'mcq' AND lar.response ? 'selected'
+GROUP BY lar.interaction_id, option_index ORDER BY lar.interaction_id, option_index;

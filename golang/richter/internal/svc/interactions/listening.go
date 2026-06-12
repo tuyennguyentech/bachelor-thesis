@@ -139,6 +139,16 @@ func (h *listeningHandler) GradeWithContext(ctx context.Context, deps GradingDep
 	}
 }
 
+// ResponseWordCount implements TextResponseMeasurer: counts words in the
+// dictation transcription field.
+func (h *listeningHandler) ResponseWordCount(responseJSON []byte) (int, bool) {
+	var resp listeningResponseJSON
+	if err := json.Unmarshal(responseJSON, &resp); err != nil {
+		return 0, false
+	}
+	return len(strings.Fields(resp.Transcription)), true
+}
+
 func (h *listeningHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
 	lr, ok := req.Response.(*richterv1.AttemptResponseInput_Listening)
 	if !ok || lr == nil || lr.Listening == nil {

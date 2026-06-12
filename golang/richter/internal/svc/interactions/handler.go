@@ -46,6 +46,18 @@ type TTSProvider interface {
 	SetAudioObjectKey(configJSON []byte, key string) ([]byte, error)
 }
 
+// TextResponseMeasurer may be optionally implemented by a Handler whose
+// responses contain free-text (e.g. fill_blank answers, listening transcription).
+// Learning analytics uses it to compute average response length in words.
+// Handlers without free-text responses (mcq, reading) do not implement it, so
+// the type assertion fails and the response is skipped.
+type TextResponseMeasurer interface {
+	// ResponseWordCount returns the number of whitespace-separated words in the
+	// free-text portion of responseJSON, and ok=true if the response contributes.
+	// Returns (0, false) if responseJSON cannot be parsed or carries no text.
+	ResponseWordCount(responseJSON []byte) (int, bool)
+}
+
 // Handler grades a single interaction response and converts between proto and JSONB.
 // Register new interaction types by implementing this interface and calling registerHandler.
 type Handler interface {
