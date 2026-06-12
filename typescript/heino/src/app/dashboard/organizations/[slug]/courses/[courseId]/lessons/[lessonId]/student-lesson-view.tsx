@@ -13,7 +13,6 @@ import { AIService } from "buf/gen/richter/v1/ai_pb";
 import type { TranscriptSegment, TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { submitAttemptErrorMessage } from "@/interactions/_shared/connect-error-message";
 import { useRichterWebClient } from "@/lib/connect-webclient";
-import { videoPlayerConfig } from "@/lib/client-config";
 import { VideoPlayer } from "./video-player";
 import { LessonSidebar } from "./lesson-sidebar";
 import type { QuizResult } from "./lesson-result";
@@ -28,6 +27,9 @@ import { getRenderer, extractConfig, extractLocalResponse } from "@/interactions
 import type { InteractionGrade } from "@/interactions/types";
 
 const CHECKPOINT_EPSILON_SECONDS = 0.35;
+/** Tolerance (seconds) for the forward-seek guard. Seeking within this slack of
+ *  the high-water mark is treated as a rewatch/rewind, not a forbidden skip. */
+const FORWARD_SEEK_SLACK_S = 1;
 
 interface Props {
   videoUrl: string;
@@ -84,6 +86,18 @@ export function StudentLessonView({
    * paused intervals are excluded so seeking to the end cannot inflate the metric.
    */
   const watchedSecondsRef = useRef(0);
+  /**
+   * High-water mark (seconds) of the furthest position the student has legitimately
+   * reached via real forward playback.  Advanced ONLY on genuine forward playback
+   * (never on seeks) and used by the always-on seek guard to block fast-forward
+   * while still allowing rewind / rewatch of already-seen regions.
+   */
+  const maxWatchedSecondsRef = useRef(initialPosition);
+  // Throttled mirror of the high-water mark for the locked-region scrubber band.
+  // Updated at most ~1×/s from handleTimeUpdate so the band re-renders without
+  // churning on every video tick.
+  const [maxWatchedSeconds, setMaxWatchedSeconds] = useState(initialPosition);
+  const lastMaxWatchedPushRef = useRef(0);
   /** Maximum delta between two consecutive timeupdate events to be counted as
    *  real playback (not a seek).  HTMLVideoElement fires timeupdate ~4× per second,
    *  so legitimate playback steps are < 0.5 s; we use 1.5 s to tolerate buffering. */
@@ -129,6 +143,10 @@ export function StudentLessonView({
   );
   // Which checkpoint is currently active (paused on)
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Whether the active checkpoint overlay is collapsed for review. Collapsing does
+  // NOT clear activeId (the answer gate stays) — it only frees the scrubber so the
+  // student can rewatch the already-seen region before answering.
+  const [checkpointCollapsed, setCheckpointCollapsed] = useState(false);
   const {
     isFullscreen,
     setShowFullscreenTip,
@@ -159,6 +177,16 @@ export function StudentLessonView({
         const delta = t - prev;
         if (delta > 0 && delta <= MAX_WATCH_DELTA_SECONDS) {
           watchedSecondsRef.current += delta;
+          // Advance the high-water mark ONLY on genuine forward playback (never on
+          // seeks) so the seek guard can distinguish rewatch from fast-forward.
+          if (t > maxWatchedSecondsRef.current) {
+            maxWatchedSecondsRef.current = t;
+            // Throttle the state push (~1×/s) for the locked-region scrubber band.
+            if (t - lastMaxWatchedPushRef.current >= 1) {
+              lastMaxWatchedPushRef.current = t;
+              setMaxWatchedSeconds(t);
+            }
+          }
         }
       }
 
@@ -195,6 +223,26 @@ export function StudentLessonView({
     [submitted, activeId, pendingCheckpoints, initialPosition],
   );
 
+  // Fire the final checkpoint(s) on video end. The last interaction's startSeconds
+  // can sit at/after duration (incl. legacy data with startSeconds >= duration), so
+  // the timeupdate hit-test never fires it. When the video ends, activate the
+  // earliest un-passed pending checkpoint whose startSeconds <= duration + epsilon
+  // instead of falling through to the results screen.
+  const handleEnded = useCallback(() => {
+    if (submitted || activeId) return;
+    const video = videoRef.current;
+    const duration = video?.duration ?? 0;
+    const candidate = pendingCheckpoints.find(
+      (c) => !duration || c.startSeconds <= duration + CHECKPOINT_EPSILON_SECONDS,
+    );
+    if (!candidate) return;
+    if (video) video.pause();
+    if (!questionShownAtRef.current.has(candidate.id)) {
+      questionShownAtRef.current.set(candidate.id, Date.now());
+    }
+    setActiveId(candidate.id);
+  }, [submitted, activeId, pendingCheckpoints]);
+
   const handleFirstPlay = useCallback(() => {
     isInitialLoadRef.current = false;
     prevTimeRef.current = videoRef.current?.currentTime ?? 0;
@@ -211,43 +259,60 @@ export function StudentLessonView({
     }
   }, [lessonInteractions]);
 
-  // While a checkpoint is active: prevent the student from playing the video.
+  // A newly-activated checkpoint always opens expanded.
   useEffect(() => {
-    if (!activeId) return;
-    const video = videoRef.current;
-    if (!video) return;
-    const onPlay = () => video.pause();
-    video.addEventListener("play", onPlay);
-    return () => video.removeEventListener("play", onPlay);
+    if (activeId) setCheckpointCollapsed(false);
   }, [activeId]);
 
-  // While a checkpoint is active: prevent seeking past the checkpoint's start time.
+  // While a checkpoint is active: the answer gate stays (activeId only clears on
+  // handleContinue), but the student MAY press play to re-watch the already-seen
+  // region. Playback auto-re-pauses once it reaches the high-water mark so they
+  // cannot watch past the unanswered checkpoint.
   useEffect(() => {
     if (!activeId) return;
     const video = videoRef.current;
     if (!video) return;
-    const interaction = lessonInteractions.find((it) => it.id === activeId);
-    if (!interaction || interaction.startSeconds <= 0) return;
-    const cap = interaction.startSeconds + 5;
-    const clampSeek = () => {
-      if (video.currentTime <= cap) return;
-      video.currentTime = interaction.startSeconds;
-      prevTimeRef.current = interaction.startSeconds;
-      video.pause();
+    const onPlay = () => {
+      // Only block play at/after the high-water mark; allow rewatching earlier.
+      if (video.currentTime >= maxWatchedSecondsRef.current - FORWARD_SEEK_SLACK_S) {
+        video.pause();
+      }
     };
-    clampSeek();
-    video.addEventListener("timeupdate", clampSeek);
-    video.addEventListener("seeking", clampSeek);
-    video.addEventListener("seeked", clampSeek);
-    const clampInterval = window.setInterval(clampSeek, videoPlayerConfig.seekClampIntervalMs);
+    const onTimeUpdate = () => {
+      // Auto re-pause when a rewatch catches up to the high-water mark.
+      if (video.currentTime >= maxWatchedSecondsRef.current - FORWARD_SEEK_SLACK_S) {
+        video.pause();
+      }
+    };
+    onPlay();
+    video.addEventListener("play", onPlay);
+    video.addEventListener("timeupdate", onTimeUpdate);
     return () => {
-      video.removeEventListener("timeupdate", clampSeek);
-      video.removeEventListener("seeking", clampSeek);
-      video.removeEventListener("seeked", clampSeek);
-      window.clearInterval(clampInterval);
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("timeupdate", onTimeUpdate);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
+
+  // Always-on seek guard (students only): rewind/rewatch freely, but fast-forward
+  // past the legitimately-reached high-water mark is snapped back. Teachers in
+  // preview seek without restriction.
+  useEffect(() => {
+    if (isPreview) return;
+    const video = videoRef.current;
+    if (!video) return;
+    const guardSeek = () => {
+      if (video.currentTime > maxWatchedSecondsRef.current + FORWARD_SEEK_SLACK_S) {
+        video.currentTime = maxWatchedSecondsRef.current;
+        prevTimeRef.current = maxWatchedSecondsRef.current;
+      }
+    };
+    video.addEventListener("seeking", guardSeek);
+    video.addEventListener("seeked", guardSeek);
+    return () => {
+      video.removeEventListener("seeking", guardSeek);
+      video.removeEventListener("seeked", guardSeek);
+    };
+  }, [isPreview, playerKey]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleAnswer(id: string, response: any) {
@@ -336,6 +401,9 @@ export function StudentLessonView({
   function handleRetake() {
     prevTimeRef.current = 0;
     watchedSecondsRef.current = 0;
+    maxWatchedSecondsRef.current = 0;
+    lastMaxWatchedPushRef.current = 0;
+    setMaxWatchedSeconds(0);
     questionShownAtRef.current = new Map();
     timeToAnswerMsRef.current = new Map();
     replayCountsRef.current = new Map();
@@ -352,6 +420,7 @@ export function StudentLessonView({
     setPassedIds(new Set());
     setResponses(new Map());
     setActiveId(null);
+    setCheckpointCollapsed(false);
     setError(null);
     setPreviewMetrics(null);
   }
@@ -555,6 +624,8 @@ export function StudentLessonView({
             token={token}
             onTimeUpdate={handleTimeUpdate}
             onFirstPlay={handleFirstPlay}
+            onEnded={handleEnded}
+            maxWatchedSeconds={isPreview ? undefined : maxWatchedSeconds}
             showTranscript={false}
             allowNativeFullscreen={false}
             isFullscreen={isFullscreen}
@@ -574,7 +645,7 @@ export function StudentLessonView({
           )}
           {/* Fullscreen path only: a portalled Dialog would hide behind a
               fullscreened element, so keep the in-video overlay when fullscreen. */}
-          {!submitted && activeInteraction && isFullscreen && (() => {
+          {!submitted && activeInteraction && isFullscreen && !checkpointCollapsed && (() => {
             const cluster = lessonInteractions
               .filter((it) => it.startSeconds === activeInteraction.startSeconds)
               .sort((a, b) => a.orderIndex - b.orderIndex);
@@ -582,15 +653,28 @@ export function StudentLessonView({
             return (
               <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 md:p-8 overflow-y-auto text-foreground animate-in fade-in duration-200">
                 <div className="w-full h-full bg-card p-6 md:p-8 overflow-y-auto flex flex-col justify-between rounded-none border-none">
+                  <div className="flex justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => setCheckpointCollapsed(true)} className="text-xs">
+                      Xem lại video
+                    </Button>
+                  </div>
                   {renderCheckpoint(clusterIndex, cluster.length)}
                 </div>
               </div>
             );
           })()}
+          {/* Fullscreen, collapsed-for-review: a slim banner to reopen the question. */}
+          {!submitted && activeInteraction && isFullscreen && checkpointCollapsed && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <Button size="sm" onClick={() => setCheckpointCollapsed(false)} className="shadow-lg">
+                Trở lại câu hỏi
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Non-fullscreen path: render the checkpoint inside a centered modal. */}
-        {!submitted && activeInteraction && !isFullscreen && (() => {
+        {!submitted && activeInteraction && !isFullscreen && !checkpointCollapsed && (() => {
           const cluster = lessonInteractions
             .filter((it) => it.startSeconds === activeInteraction.startSeconds)
             .sort((a, b) => a.orderIndex - b.orderIndex);
@@ -607,13 +691,33 @@ export function StudentLessonView({
                 <VisuallyHidden.Root>
                   <DialogTitle>Câu hỏi tương tác</DialogTitle>
                 </VisuallyHidden.Root>
-                <div className="flex h-full flex-col justify-between">
-                  {renderCheckpoint(clusterIndex, cluster.length)}
+                <div className="flex h-full flex-col">
+                  <div className="flex justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => setCheckpointCollapsed(true)} className="text-xs">
+                      Xem lại video
+                    </Button>
+                  </div>
+                  <div className="flex flex-1 flex-col justify-between">
+                    {renderCheckpoint(clusterIndex, cluster.length)}
+                  </div>
                 </div>
               </DialogContent>
             </Dialog>
           );
         })()}
+
+        {/* Non-fullscreen, collapsed-for-review: a banner to reopen the question
+            while the scrubber stays reachable for rewatching the seen region. */}
+        {!submitted && activeInteraction && !isFullscreen && checkpointCollapsed && (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-primary/40 bg-primary/5 px-4 py-3 animate-in fade-in slide-in-from-top-1 duration-200">
+            <p className="text-sm text-foreground">
+              Bạn đang xem lại video. Hãy trả lời câu hỏi để tiếp tục bài học.
+            </p>
+            <Button size="sm" onClick={() => setCheckpointCollapsed(false)}>
+              Trở lại câu hỏi
+            </Button>
+          </div>
+        )}
 
         <StudentLessonStatusCard
           activeInteraction={activeInteraction}

@@ -24,6 +24,8 @@ interface Props {
   onTimeUpdate?: (currentTime: number) => void;
   /** Called once on the first Play event. */
   onFirstPlay?: () => void;
+  /** Called when the video reaches its end. */
+  onEnded?: () => void;
   /** Called when video metadata loads, with the total duration in seconds. */
   onDurationChange?: (duration: number) => void;
   showTranscript?: boolean;
@@ -35,6 +37,10 @@ interface Props {
   isFullscreen?: boolean;
   onFullscreenToggle?: () => void;
   interactions?: LessonInteraction[];
+  /** High-water mark (seconds) of legitimately-reached playback. When set, the
+   *  scrubber greys out the locked forward region beyond it. Omit for free seeking
+   *  (e.g. teacher preview). */
+  maxWatchedSeconds?: number;
 }
 
 declare global {
@@ -64,6 +70,7 @@ export function VideoPlayer({
   videoRef: externalVideoRef,
   onTimeUpdate,
   onFirstPlay,
+  onEnded,
   onDurationChange,
   showTranscript = true,
   allowNativeFullscreen = true,
@@ -72,12 +79,21 @@ export function VideoPlayer({
   isFullscreen = false,
   onFullscreenToggle,
   interactions = [],
+  maxWatchedSeconds,
 }: Props) {
   const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastSavedPos = useRef<number>(-1);
+  /** Position (seconds) marking the start of the watched interval reported on the
+   *  next save. Tracks continuous forward playback; reset to the landing position
+   *  whenever a seek occurs so seeked-over regions are never counted. */
+  const intervalFromRef = useRef<number>(initialPosition);
+  /** Last position observed via a timeupdate tick, used to detect discontinuities. */
+  const lastTickPosRef = useRef<number>(initialPosition);
+  /** Set when a seek happened since the last save, so that save reports no interval. */
+  const seekedSinceSaveRef = useRef(false);
   const lastSetCurrentTime = useRef<number | null>(null);
   const hasPlayedRef = useRef(false);
   const durationRef = useRef(0);
@@ -116,11 +132,13 @@ export function VideoPlayer({
 
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const onFirstPlayRef = useRef(onFirstPlay);
+  const onEndedRef = useRef(onEnded);
 
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate;
     onFirstPlayRef.current = onFirstPlay;
-  }, [onTimeUpdate, onFirstPlay]);
+    onEndedRef.current = onEnded;
+  }, [onTimeUpdate, onFirstPlay, onEnded]);
 
   const attachVideoRef = useCallback(
     (node: HTMLVideoElement | null) => {
@@ -150,6 +168,10 @@ export function VideoPlayer({
     hasPlayedRef.current = false;
     durationRef.current = 0;
     lastSetCurrentTime.current = null;
+    lastSavedPos.current = -1;
+    intervalFromRef.current = 0;
+    lastTickPosRef.current = 0;
+    seekedSinceSaveRef.current = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlayerError(null);
     const video = nativeVideoRef.current;
@@ -209,7 +231,27 @@ export function VideoPlayer({
       if (!lessonId) return;
       if (Math.abs(pos - lastSavedPos.current) < 1) return;
       lastSavedPos.current = pos;
-      void aiClient.updateWatchProgress({ lessonId, positionSeconds: pos });
+      // Report the continuous-play interval [from, to] since the last interval
+      // anchor, but ONLY when no seek occurred in between — a seek would make the
+      // span non-continuous and let students inflate %watch by scrubbing. The
+      // server uses these intervals for authoritative coverage; positionSeconds is
+      // still always sent for resume.
+      let watchedFromSeconds = 0;
+      let watchedToSeconds = 0;
+      const from = intervalFromRef.current;
+      if (!seekedSinceSaveRef.current && pos > from) {
+        watchedFromSeconds = from;
+        watchedToSeconds = pos;
+      }
+      // Next interval starts from the current position; clear the seek flag.
+      intervalFromRef.current = pos;
+      seekedSinceSaveRef.current = false;
+      void aiClient.updateWatchProgress({
+        lessonId,
+        positionSeconds: pos,
+        watchedFromSeconds,
+        watchedToSeconds,
+      });
     },
     [lessonId, aiClient],
   );
@@ -299,11 +341,25 @@ export function VideoPlayer({
     if (video) saveProgress(video.currentTime);
   };
 
+  /** Max gap (seconds) between consecutive timeupdate ticks that still counts as
+   *  continuous playback. Larger jumps indicate a seek. timeupdate fires ~4×/s, so
+   *  real steps are well under this; we tolerate buffering with a 1.5 s window. */
+  const CONTINUOUS_TICK_GAP_S = 1.5;
+
   const handleNativeTimeUpdate = () => {
     const video = nativeVideoRef.current;
     if (!video) return;
     syncMediaDuration(video);
     const t = video.currentTime;
+    // Detect a seek (forward or backward discontinuity) since the last tick. When
+    // detected, the interval anchor jumps to the landing position and the save will
+    // report no watched interval, so scrubbed-over spans are never counted.
+    const gap = t - lastTickPosRef.current;
+    if (gap < 0 || gap > CONTINUOUS_TICK_GAP_S) {
+      seekedSinceSaveRef.current = true;
+      intervalFromRef.current = t;
+    }
+    lastTickPosRef.current = t;
     // Throttle React state updates to ~4Hz (every 0.25s) so the timeline
     // gradient, the formatTime label, and any consumer of `currentTime`
     // re-render at human-noticeable rate instead of on every video timeupdate
@@ -434,6 +490,7 @@ export function VideoPlayer({
           onEnded={() => {
             setPaused(true);
             handleNativeTimeUpdate();
+            onEndedRef.current?.();
           }}
         />
 
@@ -466,6 +523,7 @@ export function VideoPlayer({
           duration={duration}
           interactions={interactions}
           isFullscreen={isFullscreen}
+          maxWatchedSeconds={maxWatchedSeconds}
           muted={muted}
           onSeekChange={handleSeekChange}
           onToggleFullscreen={toggleFullscreen}

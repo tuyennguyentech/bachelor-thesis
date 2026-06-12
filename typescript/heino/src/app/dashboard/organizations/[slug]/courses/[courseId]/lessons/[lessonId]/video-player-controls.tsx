@@ -10,6 +10,9 @@ interface VideoPlayerControlsProps {
   duration: number;
   interactions: LessonInteraction[];
   isFullscreen: boolean;
+  /** High-water mark (seconds). When set, the scrubber greys the locked region
+   *  beyond it (fast-forward blocked). Undefined = no locked band (free seek). */
+  maxWatchedSeconds?: number;
   muted: boolean;
   onSeekChange: (value: number) => void;
   onToggleFullscreen: () => void;
@@ -33,6 +36,7 @@ export function VideoPlayerControls({
   duration,
   interactions,
   isFullscreen,
+  maxWatchedSeconds,
   muted,
   onSeekChange,
   onToggleFullscreen,
@@ -45,6 +49,19 @@ export function VideoPlayerControls({
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
   const seekMax = duration > 0 ? duration : 0;
   const seekValue = Math.min(currentTime, seekMax);
+
+  // Locked forward region: when a high-water mark is provided and sits below the
+  // end, mark everything beyond it as locked (greyed) so the fast-forward block is
+  // visible. lockPct is clamped to be at least the current progress.
+  const hasLock =
+    typeof maxWatchedSeconds === "number" && duration > 0 && maxWatchedSeconds < duration;
+  const lockPct = hasLock
+    ? Math.min(100, Math.max(progressPct, (maxWatchedSeconds! / duration) * 100))
+    : 100;
+  // 3-stop gradient: played (white) → reachable/watched (translucent white) → locked (grey).
+  const trackBackground = hasLock
+    ? `linear-gradient(to right, white ${progressPct}%, rgba(255,255,255,0.35) ${progressPct}%, rgba(255,255,255,0.35) ${lockPct}%, rgba(255,255,255,0.08) ${lockPct}%)`
+    : `linear-gradient(to right, white ${progressPct}%, rgba(255,255,255,0.2) ${progressPct}%)`;
 
   return (
     <>
@@ -83,9 +100,7 @@ export function VideoPlayerControls({
             aria-disabled={duration <= 0}
             onChange={(e) => onSeekChange(Number(e.target.value))}
             className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-white aria-disabled:cursor-not-allowed aria-disabled:opacity-50 focus:outline-none transition-all duration-200 group-hover/timeline:h-2"
-            style={{
-              background: `linear-gradient(to right, white ${progressPct}%, rgba(255,255,255,0.2) ${progressPct}%)`,
-            }}
+            style={{ background: trackBackground }}
           />
           {duration > 0 && interactions.map((it) => {
             if (it.startSeconds > duration) return null;
