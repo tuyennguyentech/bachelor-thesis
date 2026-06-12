@@ -268,6 +268,15 @@ func (s *InteractionsSvc) SubmitAttempt(
 
 	// Build a per-interaction metrics map keyed by interaction ID string
 	// so we can persist time_to_answer_ms and replay_count per response.
+	//
+	// These two are client-supplied and display-only (not part of the engagement
+	// score), but a tampered client could still inflate them to poison teacher
+	// analytics. protovalidate already rejects negatives (gte:0); clamp the upper
+	// bound to plausible ceilings here so absurd values cannot be persisted.
+	const (
+		maxTimeToAnswerMs = int32(30 * 60 * 1000) // 30 min per question
+		maxReplayCount    = int32(100)
+	)
 	type inputMetrics struct {
 		timeToAnswerMs int32
 		replayCount    int32
@@ -275,8 +284,8 @@ func (s *InteractionsSvc) SubmitAttempt(
 	metricsMap := make(map[string]inputMetrics, len(req.GetResponses()))
 	for _, respInput := range req.GetResponses() {
 		metricsMap[respInput.GetInteractionId()] = inputMetrics{
-			timeToAnswerMs: respInput.GetTimeToAnswerMs(),
-			replayCount:    respInput.GetReplayCount(),
+			timeToAnswerMs: min(respInput.GetTimeToAnswerMs(), maxTimeToAnswerMs),
+			replayCount:    min(respInput.GetReplayCount(), maxReplayCount),
 		}
 	}
 
