@@ -9,6 +9,7 @@ import (
 )
 
 func TestListeningGradeDictation(t *testing.T) {
+	t.Parallel()
 	h := &listeningHandler{}
 
 	cfg := listeningConfigJSON{
@@ -71,6 +72,7 @@ func TestListeningGradeDictation(t *testing.T) {
 }
 
 func TestListeningGradeComprehension(t *testing.T) {
+	t.Parallel()
 	h := &listeningHandler{}
 
 	cfg := listeningConfigJSON{
@@ -112,6 +114,7 @@ func TestListeningGradeComprehension(t *testing.T) {
 }
 
 func TestListeningGradeUnknownMode(t *testing.T) {
+	t.Parallel()
 	h := &listeningHandler{}
 	cfg := listeningConfigJSON{AudioObjectKey: "key", Mode: "unknown"}
 	cfgJSON, _ := json.Marshal(cfg)
@@ -124,6 +127,7 @@ func TestListeningGradeUnknownMode(t *testing.T) {
 }
 
 func TestNormalizeText(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ input, want string }{
 		{"Hello, World!", "hello world"},
 		{"  multiple   spaces  ", "multiple spaces"},
@@ -139,6 +143,7 @@ func TestNormalizeText(t *testing.T) {
 }
 
 func TestWordOverlapRatio(t *testing.T) {
+	t.Parallel()
 	if r := wordOverlapRatio("", ""); r != 1.0 {
 		t.Errorf("both empty: want 1.0, got %v", r)
 	}
@@ -156,6 +161,7 @@ func TestWordOverlapRatio(t *testing.T) {
 }
 
 func TestListeningGradeDictationWithAIContext(t *testing.T) {
+	t.Parallel()
 	h := &listeningHandler{}
 	cfg := listeningConfigJSON{
 		AudioObjectKey: "lessons/uuid/audio.mp3",

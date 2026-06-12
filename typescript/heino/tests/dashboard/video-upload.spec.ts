@@ -23,14 +23,10 @@ import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import { CourseService, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
-import { test, expect, goToSeededLesson, SEED_DSA_LESSON_BIG_O, TEACHER_EMAIL, USER_PASSWORD } from "../fixtures";
+import { test, expect, uid, goToSeededLesson, SEED_DSA_LESSON_BIG_O, TEACHER_EMAIL, USER_PASSWORD } from "../fixtures";
 
 const ORG_SLUG = "hust-cs";
 const TEST_VIDEO = path.join(__dirname, "../fixtures/test-video.mp4");
-
-function uid(base: string) {
-  return `${base} ${Date.now()}`;
-}
 
 function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;

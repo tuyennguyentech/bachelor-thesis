@@ -18,6 +18,7 @@ import (
 )
 
 func TestStorageAuthz(t *testing.T) {
+	t.Parallel()
 	url := newV1Server(t)
 	ctx := context.Background()
 	adminToken := getAdminToken(t, url)

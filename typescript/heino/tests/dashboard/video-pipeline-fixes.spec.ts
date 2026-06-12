@@ -17,7 +17,7 @@ async function openLessonAsStudent(page: import("@playwright/test").Page) {
   if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
   // Lesson links live under the "Bài học" tab of the course workspace, not the default overview tab.
   await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
-  const lessonHref = await page.getByRole("link").filter({ hasText: LESSON_TITLE }).first().getAttribute("href");
+  const lessonHref = await page.getByRole("link").filter({ hasText: LESSON_TITLE.replace(/^Bài\s*\d+\s*[:.\-]\s*/i, "") }).first().getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
   await page.goto(lessonHref);
   await expect(page.getByRole("heading", { name: LESSON_TITLE })).toBeVisible({ timeout: 20000 });

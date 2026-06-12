@@ -162,7 +162,7 @@ const test = base.extend<{ freshStudentPage: Page }>({
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-test.describe("Interactive Video Quiz Overlay & Retake Constraints", () => {
+test.describe.serial("Interactive Video Quiz Overlay & Retake Constraints", () => {
   test.beforeAll(async () => {
     // 1. Create isolated course + module + lesson with a real video + chunks.
     //    Uses a fresh unique teacher so the 3-task cap is never shared.

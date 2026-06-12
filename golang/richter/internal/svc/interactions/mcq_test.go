@@ -6,6 +6,7 @@ import (
 )
 
 func TestSingleChoiceGrade(t *testing.T) {
+	t.Parallel()
 	h := &singleChoiceHandler{}
 
 	// Thử với số lượng 3 đáp án (khác 4)
@@ -41,6 +42,7 @@ func TestSingleChoiceGrade(t *testing.T) {
 }
 
 func TestMultipleChoiceGrade(t *testing.T) {
+	t.Parallel()
 	h := &multipleChoiceHandler{}
 
 	// Thử với số lượng 5 đáp án và chọn 3 đáp án đúng (khác 4)

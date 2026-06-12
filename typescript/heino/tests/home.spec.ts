@@ -1,4 +1,4 @@
-import { test, expect, ADMIN_EMAIL } from "./fixtures";
+import { test, expect, ADMIN_EMAIL, uid } from "./fixtures";
 import { test as base } from "@playwright/test";
 
 base.describe("Home page (unauthenticated)", () => {
@@ -69,7 +69,7 @@ base.describe("Register page", () => {
   });
 
   base("registers a new account and redirects to login", async ({ page }) => {
-    const email = `e2e.register.${Date.now()}@test.local`;
+    const email = `e2e.register.${uid("")}@test.local`;
     await page.goto("/register");
     await page.getByLabel("Họ").fill("Reg");
     await page.getByLabel("Tên", { exact: true }).fill("User");

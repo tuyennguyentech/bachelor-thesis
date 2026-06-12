@@ -110,11 +110,13 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(page.getByText("Xóa khóa học")).toBeVisible();
   });
 
-  test("student sees course title h1 and Trạng thái but NOT Thông tin chung", async ({ studentPage: page }) => {
+  test("student sees course title h1 but NOT Thông tin chung or status/danger sections", async ({ studentPage: page }) => {
     const href = await goToCourseWorkspace(page);
     await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByText("Trạng thái")).toBeVisible();
+    // The overview is manager-only chrome: students no longer see the status panel,
+    // the "Thông tin chung" editor, or the danger zone.
+    await expect(page.getByText("Trạng thái")).not.toBeVisible();
     await expect(page.getByText("Thông tin chung")).not.toBeVisible();
     await expect(page.getByText("Xóa khóa học")).not.toBeVisible();
   });
@@ -135,8 +137,9 @@ test.describe("Course workspace — ?tab=lessons", () => {
     await page.goto(`${href}?tab=lessons`, { waitUntil: "domcontentloaded" });
     // The DSA course has modules and lessons seeded
     await expect(page.getByRole("heading", { name: /Nội dung/ })).toBeVisible();
-    // At least one lesson link is rendered (link contains lesson title with href to /lessons/)
-    await expect(page.getByRole("link").filter({ hasText: /Bài \d+/ }).first()).toBeVisible();
+    // At least one lesson link is rendered. The displayed title no longer carries the
+    // redundant "Bài N:" prefix, so match on the lesson href instead of the title text.
+    await expect(page.locator('a[href*="/lessons/"]').first()).toBeVisible();
   });
 
   test("student sees lessons but NOT Thêm chương", async ({ studentPage: page }) => {

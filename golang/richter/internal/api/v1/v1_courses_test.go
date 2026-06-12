@@ -132,6 +132,7 @@ func createTestLesson(t *testing.T, c coursesTestClients, moduleID string, order
 // ── CourseService ─────────────────────────────────────────────────────────────
 
 func TestCourseValidation(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 	_, _, userID := createActiveUser(t, c.users)
@@ -164,6 +165,7 @@ func TestCourseValidation(t *testing.T) {
 }
 
 func TestCourseLifecycle(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 	_, _, ownerID := createActiveUser(t, c.users)
@@ -290,6 +292,7 @@ func TestCourseLifecycle(t *testing.T) {
 }
 
 func TestCourseErrors(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 
@@ -313,6 +316,7 @@ func TestCourseErrors(t *testing.T) {
 }
 
 func TestCoursesAuthz(t *testing.T) {
+	t.Parallel()
 	url := newV1Server(t)
 	ctx := context.Background()
 	adminToken := getAdminToken(t, url)
@@ -579,6 +583,7 @@ func TestCoursesAuthz(t *testing.T) {
 // ── CourseModuleService ───────────────────────────────────────────────────────
 
 func TestCourseModuleValidation(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 	_, _, ownerID := createActiveUser(t, c.users)
@@ -608,6 +613,7 @@ func TestCourseModuleValidation(t *testing.T) {
 }
 
 func TestCourseModuleLifecycle(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 	_, _, ownerID := createActiveUser(t, c.users)
@@ -697,6 +703,7 @@ func TestCourseModuleLifecycle(t *testing.T) {
 }
 
 func TestCourseModuleErrors(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 
@@ -719,6 +726,7 @@ func TestCourseModuleErrors(t *testing.T) {
 }
 
 func TestCourseModulesAuthz(t *testing.T) {
+	t.Parallel()
 	url := newV1Server(t)
 	ctx := context.Background()
 	adminToken := getAdminToken(t, url)
@@ -928,6 +936,7 @@ func TestCourseModulesAuthz(t *testing.T) {
 // ── LessonService ─────────────────────────────────────────────────────────────
 
 func TestLessonValidation(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 	_, _, ownerID := createActiveUser(t, c.users)
@@ -958,6 +967,7 @@ func TestLessonValidation(t *testing.T) {
 }
 
 func TestLessonLifecycle(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 	_, _, ownerID := createActiveUser(t, c.users)
@@ -1099,6 +1109,7 @@ func TestLessonLifecycle(t *testing.T) {
 }
 
 func TestLessonErrors(t *testing.T) {
+	t.Parallel()
 	c := setupCoursesTestClients(t)
 	ctx := t.Context()
 
@@ -1121,6 +1132,7 @@ func TestLessonErrors(t *testing.T) {
 }
 
 func TestLessonsAuthz(t *testing.T) {
+	t.Parallel()
 	url := newV1Server(t)
 	ctx := context.Background()
 	adminToken := getAdminToken(t, url)

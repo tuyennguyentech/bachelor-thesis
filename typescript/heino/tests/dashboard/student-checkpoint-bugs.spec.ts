@@ -101,7 +101,7 @@ const test = base.extend<{ isolatedLesson: LessonRef }>({
   },
 });
 
-test.describe("Student Checkpoint Bugs", () => {
+test.describe.serial("Student Checkpoint Bugs", () => {
   test.beforeAll(async () => {
     // Build a self-contained analyzed lesson: fresh course → module → lesson,
     // video uploaded via API, EXTRACT + CHUNK pipeline completed.

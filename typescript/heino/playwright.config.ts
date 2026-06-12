@@ -4,15 +4,14 @@ try { process.loadEnvFile(".env.test"); } catch {}
 
 export default defineConfig({
   testDir: "./tests",
-  // File-level parallelism: fullyParallel=false keeps tests WITHIN a file serial
-  // (so a file's beforeAll-created data is shared safely by its own tests), while
-  // different files run concurrently across `workers`. Every spec is self-isolating
-  // (it creates its own unique users/courses/lessons via fixtures helpers and never
-  // mutates shared seed entities), so this is race-free. Plain `playwright test`
-  // is therefore parallel with no CLI flags — do not pass --workers/--project.
-  // workers is capped at 4 because the local Whisper (speaches) service serializes
-  // transcriptions (whisper_max_concurrent=1), so higher worker counts only queue
-  // at that bottleneck without speeding the AI-heavy specs up.
+  // File-level parallelism: with fullyParallel=false, `workers` files run concurrently
+  // but tests WITHIN a file stay serial. This is the proven-green config (348/348).
+  // The test suite was hardened for higher parallelism (uid()-isolated data, .serial on
+  // shared-state describes, seeded AI setup via createAnalyzedLesson instead of real
+  // Whisper), but per-test fullyParallel at workers:8 overloaded the single dev
+  // richter+heino (beforeEach UI flows timed out under 8 concurrent browser sessions).
+  // True per-test max parallelism needs multiple richter+heino LANES (separate port/DB
+  // per shard), not just more workers on one instance — tracked as a follow-up.
   fullyParallel: false,
   workers: 4,
   forbidOnly: !!process.env.CI,

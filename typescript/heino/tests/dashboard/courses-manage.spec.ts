@@ -10,14 +10,19 @@
  * be visible to admin and teacher, hidden from student.
  */
 
-import { test, expect, SEED_DSA_COURSE_TITLE } from "../fixtures";
+import {
+  test,
+  expect,
+  uid,
+  createCourse,
+  getTeacherAuth,
+  getOrgId,
+  SEED_HUST_CS_SLUG,
+  SEED_DSA_COURSE_TITLE,
+} from "../fixtures";
 
 const ORG_SLUG = "hust-cs";
 const COURSES_URL = `/dashboard/organizations/${ORG_SLUG}/courses`;
-
-function uid(base: string) {
-  return `${base} ${Date.now()}`;
-}
 
 // ── Visibility ────────────────────────────────────────────────────────────────
 
@@ -40,26 +45,23 @@ test.describe("Manage button visibility on courses list", () => {
 
 // ── Teacher full lifecycle ────────────────────────────────────────────────────
 
-test.describe("Teacher course lifecycle", () => {
+// .serial: all tests share a single course created once via the API in
+// beforeAll and mutate it (modules/lessons/title) across siblings, so they must
+// run in order. Per-test module/lesson creation stays inside each test.
+test.describe.serial("Teacher course lifecycle", () => {
   let courseTitle: string;
   let courseUrl: string;
 
-  test.beforeEach(async ({ teacherPage: page }) => {
+  test.beforeAll(async ({ baseURL }) => {
+    // Create the shared course via the richter API (no UI clicking) — the
+    // create-course UI flow is covered separately by "Admin course status and
+    // delete" / visibility tests. carol (teacherPage) owns it so all the
+    // teacher-management tests can mutate it.
     courseTitle = uid("Khóa học Giáo viên E2E");
-    await page.goto(COURSES_URL);
-    await page.getByRole("button", { name: "Tạo khóa học" }).click();
-    await page.getByLabel("Tên khóa học").fill(courseTitle);
-    await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-    // The new course appears as a card in "Khóa học của bạn"; search by title to
-    // avoid pagination hiding the freshly created course.
-    await page.goto(`${COURSES_URL}?q=${encodeURIComponent(courseTitle)}`, { waitUntil: "domcontentloaded" });
-    const card = page.locator('[data-slot="card"]').filter({ hasText: courseTitle }).first();
-    await expect(card).toBeVisible();
-    const href = await card.getByRole("link").first().getAttribute("href");
-    courseUrl = `${href}`;
-    await page.goto(courseUrl);
-    await expect(page.getByRole("heading", { name: courseTitle })).toBeVisible();
+    const { token, userId: carolId } = await getTeacherAuth(baseURL);
+    const orgId = await getOrgId(token, SEED_HUST_CS_SLUG, baseURL);
+    const courseId = await createCourse(token, orgId, courseTitle, carolId, baseURL);
+    courseUrl = `${COURSES_URL}/${courseId}`;
   });
 
   test("course detail shows management sections for teacher", async ({ teacherPage: page }) => {
@@ -142,7 +144,8 @@ test.describe("Teacher course lifecycle", () => {
     await expect(page.getByRole("dialog")).not.toBeVisible();
 
     const lessonTitle = uid("Bài học Giáo viên E2E");
-    await page.getByRole("button", { name: "Thêm bài học" }).click();
+    // The .serial course accumulates modules; target the just-created module's button (last).
+    await page.getByRole("button", { name: "Thêm bài học" }).last().click();
     await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
     await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
@@ -158,7 +161,8 @@ test.describe("Teacher course lifecycle", () => {
     await expect(page.getByRole("dialog")).not.toBeVisible();
 
     const lessonTitle = uid("Bài học Sửa E2E");
-    await page.getByRole("button", { name: "Thêm bài học" }).click();
+    // The .serial course accumulates modules; target the just-created module's button (last).
+    await page.getByRole("button", { name: "Thêm bài học" }).last().click();
     await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
     await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
@@ -184,7 +188,8 @@ test.describe("Teacher course lifecycle", () => {
     await expect(page.getByRole("dialog")).not.toBeVisible();
 
     const lessonTitle = uid("Bài học Xóa E2E");
-    await page.getByRole("button", { name: "Thêm bài học" }).click();
+    // The .serial course accumulates modules; target the just-created module's button (last).
+    await page.getByRole("button", { name: "Thêm bài học" }).last().click();
     await page.getByRole("dialog").getByLabel("Tên bài học").fill(lessonTitle);
     await page.getByRole("dialog").getByRole("button", { name: "Thêm" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();

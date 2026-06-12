@@ -28,6 +28,7 @@ func setupAuthTestClients(t *testing.T) authTestClients {
 }
 
 func TestAuthValidation(t *testing.T) {
+	t.Parallel()
 	c := setupAuthTestClients(t)
 	ctx := t.Context()
 
@@ -87,6 +88,7 @@ func TestAuthValidation(t *testing.T) {
 }
 
 func TestAuthLifecycle(t *testing.T) {
+	t.Parallel()
 	c := setupAuthTestClients(t)
 	ctx := t.Context()
 
@@ -161,6 +163,7 @@ func TestAuthLifecycle(t *testing.T) {
 }
 
 func TestAuthLoginErrors(t *testing.T) {
+	t.Parallel()
 	c := setupAuthTestClients(t)
 	ctx := t.Context()
 
@@ -243,6 +246,7 @@ func TestAuthLoginErrors(t *testing.T) {
 }
 
 func TestAuthLogoutErrors(t *testing.T) {
+	t.Parallel()
 	c := setupAuthTestClients(t)
 	ctx := t.Context()
 
@@ -291,6 +295,7 @@ func TestAuthLogoutErrors(t *testing.T) {
 }
 
 func TestAuthRefreshTokenErrors(t *testing.T) {
+	t.Parallel()
 	c := setupAuthTestClients(t)
 	ctx := t.Context()
 

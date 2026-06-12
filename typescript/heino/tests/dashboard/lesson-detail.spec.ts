@@ -13,16 +13,10 @@
  * - Feedback modes: AFTER_SUBMIT (no reveal at checkpoint), AFTER_EACH (immediate reveal)
  */
 
-import path from "path";
 import type { Page } from "@playwright/test";
 import { createClient, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
-import {
-  AIService,
-  LessonTaskKind,
-  LessonTaskStatus,
-} from "buf/gen/richter/v1/ai_pb";
 import {
   CourseService,
   CourseModuleService,
@@ -48,19 +42,8 @@ import {
   USER_PASSWORD,
   InteractionKind,
   CourseRole,
+  uid,
 } from "../fixtures";
-
-const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
-
-function uid(base: string) {
-  return `${base} ${Date.now()}`;
-}
-
-function lessonIdFromUrl(rawUrl: string) {
-  const url = new URL(rawUrl, "http://caddy");
-  const parts = url.pathname.split("/").filter(Boolean);
-  return parts[parts.length - 1];
-}
 
 function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
@@ -73,11 +56,6 @@ async function getTeacherAuth(baseURL?: string) {
   return { token: res.accessToken, userId: res.user?.id ?? "" };
 }
 
-async function getTeacherToken(baseURL?: string) {
-  const { token } = await getTeacherAuth(baseURL);
-  return token;
-}
-
 function createAuthedTransport(token: string, baseURL?: string) {
   const authInterceptor: Interceptor = (next) => async (req) => {
     req.header.set("Authorization", `Bearer ${token}`);
@@ -88,10 +66,6 @@ function createAuthedTransport(token: string, baseURL?: string) {
     baseUrl: rpcBaseUrl(baseURL),
     interceptors: [authInterceptor],
   });
-}
-
-function createAIClient(token: string, baseURL?: string) {
-  return createClient(AIService, createAuthedTransport(token, baseURL));
 }
 
 /**
@@ -380,7 +354,7 @@ test.describe("Seeded lesson with video key — teacher management section", () 
 // Uses a fresh analyzed lesson (not the seeded Big-O lesson) so that mutating
 // feedbackMode never affects shared seed state or races with other spec files.
 
-test.describe("Fresh lesson — AFTER_EACH feedback mode", () => {
+test.describe.serial("Fresh lesson — AFTER_EACH feedback mode", () => {
   // Shared across all tests in this describe block.
   let freshLessonUrl = "";
   let freshLessonId = "";
@@ -467,64 +441,20 @@ async function page_getByRole_retake(page: Page) {
 
 test.describe("Fill-blank interaction — teacher creates via editor", () => {
   test("teacher can add a fill-blank interaction and it appears in the list", async ({ teacherPage: page, baseURL }) => {
-    // Create a fresh lesson and run the full analysis pipeline (extract + chunk)
-    // so that the exercises step is reliably enabled. Using the seeded Big-O
-    // lesson is fragile: cancelled quiz_gen tasks from other test runs cause
-    // deriveAnalysisFromTasks to return PENDING, which triggers the PENDING
-    // effect in useLessonAnalysisState to clear all client-side chunks, locking
-    // the exercises step.
-    test.setTimeout(300_000);
+    // This test asserts on the fill-blank EDITOR, not on transcription/chunking,
+    // so the extract+chunk pipeline is seeded via the test endpoint (no real
+    // Whisper/Gemini). createAnalyzedLesson provisions a fresh unique teacher +
+    // course (with chunks + succeeded tasks) and adds carol (the teacherPage
+    // user) as a course teacher, so the exercises step is reliably enabled
+    // without the fragile cancelled-quiz_gen PENDING race against the seeded
+    // Big-O lesson.
+    test.setTimeout(180_000);
 
-    const url = await createLesson(
-      page,
-      uid("Khóa học Fill Blank"),
-      uid("Chương Fill Blank"),
-      uid("Bài Fill Blank"),
-    );
-    const lessonId = lessonIdFromUrl(url);
-    const token = await getTeacherToken(baseURL);
-    const ai = createAIClient(token, baseURL);
+    const { lessonUrl } = await createAnalyzedLesson(baseURL);
+    const url = lessonUrl.split("?")[0];
 
-    // Upload the test video and wait for the transcript button to appear.
-    await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
-    await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(
-      page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }),
-    ).toBeVisible({ timeout: 120_000 });
-
-    // Start EXTRACT_TRANSCRIPT via API and poll until it succeeds.
-    const extractRes = await ai.startLessonTask({ lessonId, kind: LessonTaskKind.EXTRACT_TRANSCRIPT });
-    const extractTaskId = extractRes.task?.id;
-    if (!extractTaskId) throw new Error("startLessonTask(EXTRACT_TRANSCRIPT) returned no task id");
-
-    const extractDeadline = Date.now() + 180_000;
-    let extractStatus = LessonTaskStatus.UNSPECIFIED;
-    while (Date.now() < extractDeadline) {
-      const r = await ai.getLessonTask({ taskId: extractTaskId });
-      extractStatus = r.task?.status ?? extractStatus;
-      if (extractStatus === LessonTaskStatus.SUCCEEDED || extractStatus === LessonTaskStatus.FAILED) break;
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
-    expect(extractStatus, "EXTRACT_TRANSCRIPT task should succeed").toBe(LessonTaskStatus.SUCCEEDED);
-
-    // Start CHUNK_TRANSCRIPT via API and poll until it succeeds.
-    const chunkRes = await ai.startLessonTask({ lessonId, kind: LessonTaskKind.CHUNK_TRANSCRIPT });
-    const chunkTaskId = chunkRes.task?.id;
-    if (!chunkTaskId) throw new Error("startLessonTask(CHUNK_TRANSCRIPT) returned no task id");
-
-    const chunkDeadline = Date.now() + 60_000;
-    let chunkStatus = LessonTaskStatus.UNSPECIFIED;
-    while (Date.now() < chunkDeadline) {
-      const r = await ai.getLessonTask({ taskId: chunkTaskId });
-      chunkStatus = r.task?.status ?? chunkStatus;
-      if (chunkStatus === LessonTaskStatus.SUCCEEDED || chunkStatus === LessonTaskStatus.FAILED) break;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-    expect(chunkStatus, "CHUNK_TRANSCRIPT task should succeed").toBe(LessonTaskStatus.SUCCEEDED);
-
-    // Reload the lesson page — now deriveAnalysisFromTasks returns ChunksReady
-    // (not PENDING), so the PENDING effect does NOT fire and chunks remain in
-    // client state, making the exercises step enabled.
+    // Open the lesson page — deriveAnalysisFromTasks returns ChunksReady (the
+    // seeded chunks + succeeded tasks), so the exercises step is enabled.
     await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 

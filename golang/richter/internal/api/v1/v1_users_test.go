@@ -134,6 +134,7 @@ func setupTestClient(t *testing.T) richterv1connect.UserServiceClient {
 }
 
 func TestUserValidation(t *testing.T) {
+	t.Parallel()
 	c := setupTestClient(t)
 	ctx := t.Context()
 
@@ -181,6 +182,7 @@ func TestUserValidation(t *testing.T) {
 }
 
 func TestUserLifecycle(t *testing.T) {
+	t.Parallel()
 	c := setupTestClient(t)
 	ctx := t.Context()
 
@@ -343,6 +345,7 @@ func TestUserLifecycle(t *testing.T) {
 }
 
 func TestCreateUserWithRoleAndStatus(t *testing.T) {
+	t.Parallel()
 	c := setupTestClient(t)
 	ctx := t.Context()
 
@@ -387,6 +390,7 @@ func TestCreateUserWithRoleAndStatus(t *testing.T) {
 }
 
 func TestUsersAuthz(t *testing.T) {
+	t.Parallel()
 	url := newV1Server(t)
 	ctx := context.Background()
 	adminToken := getAdminToken(t, url)

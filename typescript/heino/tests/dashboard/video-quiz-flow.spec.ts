@@ -47,14 +47,11 @@ import {
   TEACHER_EMAIL,
   USER_PASSWORD,
   InteractionKind,
+  uid,
 } from "../fixtures";
 
 const TEST_VIDEO = path.join(__dirname, "../fixtures/test-video.mp4");
 const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
-
-function uid(base: string) {
-  return `${base} ${Date.now()}`;
-}
 
 function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
@@ -891,7 +888,7 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     await expect(page.getByTitle("Chỉnh sửa").first()).toBeVisible({ timeout: 5_000 });
 
     // Edit the first segment
-    const newText = `Đoạn đã sửa ${Date.now()}`;
+    const newText = uid("Đoạn đã sửa");
     await page.getByTitle("Chỉnh sửa").first().click();
     const textarea = page.locator("textarea").first();
     await textarea.clear();
@@ -1044,7 +1041,7 @@ test.describe.serial("Full pipeline with audio fixture", () => {
 // Uses a fresh analyzed lesson (created in beforeAll) so that edits/adds/deletes
 // never touch the shared seeded Big-O lesson and can run in parallel with other files.
 
-test.describe("Teacher question editing", () => {
+test.describe.serial("Teacher question editing", () => {
   // Shared across all tests in this describe block.
   let editingLessonUrl = "";
   let editingLessonId = "";
@@ -1098,7 +1095,7 @@ test.describe("Teacher question editing", () => {
     await expect(textarea).toBeVisible();
 
     // Change the question text.
-    const newText = `Câu hỏi đã sửa ${Date.now()}`;
+    const newText = uid("Câu hỏi đã sửa");
     await textarea.fill(newText);
     await page.getByRole("button", { name: "Lưu" }).first().click();
 
@@ -1139,7 +1136,7 @@ test.describe("Teacher question editing", () => {
     // Wait for chunk cards to appear (exercises step fully loaded).
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 10_000 });
 
-    const stamp = Date.now();
+    const stamp = uid("");
     const q = (n: number) => `Bug18-${n}-${stamp}`;
 
     async function addMcq(question: string) {
@@ -1182,7 +1179,7 @@ test.describe("Teacher question editing", () => {
     await expect(page.getByTestId("chunk-title-bar").first()).toBeVisible({ timeout: 5000 });
 
     // Add a unique question so the delete is self-contained.
-    const deleteTarget = `Câu hỏi tạm xóa ${Date.now()}`;
+    const deleteTarget = uid("Câu hỏi tạm xóa");
     await page.getByTestId("add-interaction-btn").first().click();
     await page.getByPlaceholder("Nhập câu hỏi...").fill(deleteTarget);
     const opts = page.locator('input[type="text"]');

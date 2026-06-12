@@ -11,6 +11,7 @@ import (
 )
 
 func TestReadingGradeStub(t *testing.T) {
+	t.Parallel()
 	h := &readingHandler{}
 	score, max, _, err := h.Grade(nil, nil)
 	if err != nil {
@@ -25,6 +26,7 @@ func TestReadingGradeStub(t *testing.T) {
 }
 
 func TestReadingProtoToJSON(t *testing.T) {
+	t.Parallel()
 	h := &readingHandler{}
 
 	t.Run("pronunciation valid", func(t *testing.T) {
@@ -110,6 +112,7 @@ func TestReadingProtoToJSON(t *testing.T) {
 }
 
 func TestReadingApplyConfigStripsAnswerForStudent(t *testing.T) {
+	t.Parallel()
 	h := &readingHandler{}
 	cfgJSON, err := json.Marshal(readingConfigJSON{
 		Mode:            "open_answer",
@@ -157,6 +160,7 @@ func TestReadingApplyConfigStripsAnswerForStudent(t *testing.T) {
 // storage hiccup from 500-ing the whole grade request and surfacing as
 // Code.Unavailable on the FE.
 func TestReadingGradeWithContextGracefulOnDownloadFailure(t *testing.T) {
+	t.Parallel()
 	h := &readingHandler{}
 	cfgJSON, _ := json.Marshal(readingConfigJSON{
 		Mode:            "pronunciation",
@@ -189,6 +193,7 @@ func TestReadingGradeWithContextGracefulOnDownloadFailure(t *testing.T) {
 }
 
 func TestReadingModeConversions(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		mode   richterv1.ReadingMode
 		str    string

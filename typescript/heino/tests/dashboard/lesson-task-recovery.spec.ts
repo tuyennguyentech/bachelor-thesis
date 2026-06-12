@@ -26,7 +26,6 @@ import {
   LessonTaskKind,
   LessonTaskStatus,
   type LessonTask,
-  type TranscriptChunk,
 } from "buf/gen/richter/v1/ai_pb";
 import {
   CourseService,
@@ -44,6 +43,8 @@ import {
   TEACHER_EMAIL,
   USER_PASSWORD,
   goToSeededLesson,
+  uid,
+  createAnalyzedLesson,
 } from "../fixtures";
 
 const COURSES_URL = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses`;
@@ -55,10 +56,6 @@ const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp
  * from earlier tests before starting its 3 parallel tasks.
  */
 const createdLessonIds: string[] = [];
-
-function uid(base: string) {
-  return `${base} ${Date.now()}`;
-}
 
 function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
@@ -112,62 +109,6 @@ async function getSeededLessonWithChunks(
   return { lessonId, lessonUrl, chunks: analysis.chunks };
 }
 
-/**
- * Creates a fresh lesson, runs extract+chunk pipeline via API, and
- * returns the lesson ID, URL, and chunk list once minChunks chunks
- * are available. This avoids touching the seeded Big-O lesson and
- * contaminating it with cancelled tasks, which would break subsequent
- * tests (e.g. studio-new-interactions.spec.ts) that need exercises unlocked.
- */
-async function createLessonWithChunks(
-  page: Page,
-  ai: ReturnType<typeof createAIClient>,
-  minChunks = 1,
-): Promise<{ lessonId: string; lessonUrl: string; chunks: TranscriptChunk[] }> {
-  const url = await createLesson(
-    page,
-    uid("Khóa học Chunks"),
-    uid("Chương Chunks"),
-    uid("Bài Chunks"),
-  );
-  const lessonId = lessonIdFromUrl(url);
-
-  // Upload video via UI so the lesson gets a video_storage_key.
-  await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
-  await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-  // Wait for the upload to finish (button appears when video_storage_key is set).
-  await expect(
-    page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }),
-  ).toBeVisible({ timeout: 150_000 });
-
-  // Run extract task via API and poll until it reaches a terminal state.
-  await ai.startLessonTask({ lessonId, kind: LessonTaskKind.EXTRACT_TRANSCRIPT });
-  const extractDeadline = Date.now() + 120_000;
-  let extractDone = false;
-  while (Date.now() < extractDeadline) {
-    const tasks = await ai.listLessonTasks({ lessonId, activeOnly: false, limit: 20, offset: 0 });
-    const extract = tasks.tasks.find((t) => t.kind === LessonTaskKind.EXTRACT_TRANSCRIPT);
-    if (extract?.status === LessonTaskStatus.SUCCEEDED) { extractDone = true; break; }
-    if (extract?.status === LessonTaskStatus.FAILED) throw new Error("createLessonWithChunks: extract failed");
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  if (!extractDone) throw new Error("createLessonWithChunks: extract timed out");
-
-  // Register the lessonId so cancelAllCreatedLessonTasks() can clean it up later.
-  createdLessonIds.push(lessonId);
-
-  // Run chunk task via API and poll until minChunks chunks exist.
-  await ai.startLessonTask({ lessonId, kind: LessonTaskKind.CHUNK_TRANSCRIPT });
-  const chunkDeadline = Date.now() + 120_000;
-  while (Date.now() < chunkDeadline) {
-    const analysis = await ai.getLessonAnalysis({ lessonId });
-    if (analysis.chunks.length >= minChunks) {
-      return { lessonId, lessonUrl: url, chunks: analysis.chunks };
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error("createLessonWithChunks: chunk pipeline timed out");
-}
 
 async function startGenerateTask(
   ai: ReturnType<typeof createAIClient>,
@@ -437,21 +378,24 @@ test.describe("Lesson task panel", () => {
   });
 
   test("A. shows three parallel generate_interactions tasks for distinct chunks", async ({ teacherPage: page, baseURL }) => {
-    // Pipeline time: 3 fresh lessons × ~3 min each = ~9 min.
-    test.setTimeout(720_000);
+    test.setTimeout(300_000);
     const token = await getTeacherToken(baseURL);
     const ai = createAIClient(token, baseURL);
-    // edu-sample.mp4 produces exactly 1 chunk per pipeline run, so we cannot
-    // get 3 chunks from a single fresh lesson. Instead, create 3 separate fresh
-    // lessons (1 chunk each) so we have 3 distinct (lessonId, chunkId) pairs.
-    // This avoids contaminating the seeded Big-O lesson with cancelled quiz_gen
-    // tasks (which would flip Big-O to PENDING and lock the exercises step in
-    // studio-new-interactions.spec.ts).
-    const lessons = [
-      await createLessonWithChunks(page, ai, 1),
-      await createLessonWithChunks(page, ai, 1),
-      await createLessonWithChunks(page, ai, 1),
-    ];
+    // This test asserts on GENERATE_INTERACTIONS tasks, NOT on transcription/
+    // chunking, so the extract+chunk pipeline is seeded via the test endpoint
+    // (no real Whisper/Gemini). We need 3 distinct (lessonId, chunkId) pairs, so
+    // create one fresh analyzed lesson with 3 seeded chunks and use its chunk ids.
+    // createAnalyzedLesson provisions a fresh unique teacher+course and adds carol
+    // (the teacherPage user) as a course teacher, so the `ai` client can act on it.
+    const seeded = await createAnalyzedLesson(baseURL, 3);
+    createdLessonIds.push(seeded.lessonId);
+    // Shape three "lesson" entries from the single analyzed lesson's distinct
+    // chunks so the rest of the test (3 distinct generate tasks) is unchanged.
+    const lessons = seeded.chunks.slice(0, 3).map((chunk) => ({
+      lessonId: seeded.lessonId,
+      lessonUrl: seeded.lessonUrl,
+      chunks: [chunk],
+    }));
     // Cancel active tasks across all lessons created by tests that ran
     // before this one (158, 190, 227, 288) to avoid hitting the per-user
     // cap (max_active_per_user = 3) before we can start 3 parallel tasks.
@@ -494,13 +438,14 @@ test.describe("Lesson task panel", () => {
     await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
   });
 
-  test("C. repeated same-kind task on the same chunk is idempotent", async ({ teacherPage: page, baseURL }) => {
-    // Includes pipeline time for createLessonWithChunks.
-    test.setTimeout(420_000);
+  test("C. repeated same-kind task on the same chunk is idempotent", async ({ baseURL }) => {
+    test.setTimeout(180_000);
     const token = await getTeacherToken(baseURL);
     const ai = createAIClient(token, baseURL);
-    // Use a fresh lesson to avoid contaminating the seeded Big-O lesson.
-    const { lessonId, chunks } = await createLessonWithChunks(page, ai, 1);
+    // This test asserts on GENERATE task idempotency, NOT on transcription, so
+    // seed the extract+chunk pipeline via the test endpoint (no Whisper/Gemini).
+    const { lessonId, chunks } = await createAnalyzedLesson(baseURL, 1);
+    createdLessonIds.push(lessonId);
     const tasks: LessonTask[] = [];
 
     try {
@@ -522,20 +467,21 @@ test.describe("Lesson task panel", () => {
     }
   });
 
-  test("D. UI surfaces per-user active task cap on the fourth task", async ({ teacherPage: page, baseURL }) => {
-    // Pipeline time: 3 fresh lessons × ~3 min each = ~9 min.
-    test.setTimeout(720_000);
+  test("D. UI surfaces per-user active task cap on the fourth task", async ({ baseURL }) => {
+    test.setTimeout(300_000);
     const token = await getTeacherToken(baseURL);
     const ai = createAIClient(token, baseURL);
-    // edu-sample.mp4 produces exactly 1 chunk per pipeline run, so we cannot
-    // get 3 chunks from a single fresh lesson. Create 3 separate fresh lessons
-    // (1 chunk each) to obtain 3 distinct (lessonId, chunkId) pairs for the cap
-    // test. This also avoids contaminating the seeded Big-O lesson.
-    const capLessons = [
-      await createLessonWithChunks(page, ai, 1),
-      await createLessonWithChunks(page, ai, 1),
-      await createLessonWithChunks(page, ai, 1),
-    ];
+    // This test asserts on the per-user active-task CAP, NOT on transcription, so
+    // seed the extract+chunk pipeline via the test endpoint (no Whisper/Gemini).
+    // We need 3 distinct (lessonId, chunkId) pairs to start 3 parallel generate
+    // tasks; one analyzed lesson with 3 seeded chunks gives 3 distinct triples.
+    const seeded = await createAnalyzedLesson(baseURL, 3);
+    createdLessonIds.push(seeded.lessonId);
+    const capLessons = seeded.chunks.slice(0, 3).map((chunk) => ({
+      lessonId: seeded.lessonId,
+      lessonUrl: seeded.lessonUrl,
+      chunks: [chunk],
+    }));
     // Cancel ALL active tasks for carol from previous tests in this file AND the new capLessons,
     // to ensure we start with a clean slate (0 active tasks) before testing the cap.
     await cancelAllCreatedLessonTasks(ai);

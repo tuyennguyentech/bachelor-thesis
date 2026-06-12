@@ -100,7 +100,8 @@ test.describe("Student dashboard — pure student (eve) sees progress section", 
   test("DSA course appears in the progress list with a progress figure", async ({ pureStudentPage: page }) => {
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     const section = page.getByRole("heading", { name: "Tiến độ học tập của tôi" }).locator("xpath=ancestor::section[1]");
-    await expect(section.getByText(SEED_DSA_COURSE_TITLE)).toBeVisible();
+    // Seed has multiple DSA courses across orgs — assert at least one appears.
+    await expect(section.getByText(SEED_DSA_COURSE_TITLE).first()).toBeVisible();
     // Each course card shows a "x/y bài học" progress figure (eve has 1 attempt).
     await expect(section.getByText(/\d+\s*\/\s*\d+\s*bài học/).first()).toBeVisible();
   });

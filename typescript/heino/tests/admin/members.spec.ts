@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures";
+import { test, expect, uid } from "../fixtures";
 import type { Locator, Page } from "@playwright/test";
 
 const SEED_ORG_SLUG = process.env.TEST_ORG_SLUG ?? "dyadia-demo";
@@ -6,7 +6,7 @@ const MEMBERS_URL = `/admin/organizations/${SEED_ORG_SLUG}/members`;
 const CREATE_USER_BUTTON = "Tạo người dùng";
 
 function uniqueEmail() {
-  return `e2e.member.${Date.now()}@test.local`;
+  return `e2e.member.${uid("")}@test.local`;
 }
 
 async function gotoMembers(page: Page) {

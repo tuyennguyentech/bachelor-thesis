@@ -128,7 +128,7 @@ test.describe("Course lock screen — non-enrolled org member (bob)", () => {
 
 // ── Lock screen — submitting a join request (fresh isolated user + fresh course) ────
 
-test.describe("Course lock screen — submitting join request (fresh student)", () => {
+test.describe.serial("Course lock screen — submitting join request (fresh student)", () => {
   let freshEmail: string;
   let freshCourseHref: string;
 
@@ -247,7 +247,7 @@ test.describe("Course workspace — 'Duyệt yêu cầu' tab visible to manager"
 
 // ── Manager reviews join request in Duyệt yêu cầu tab (fresh isolated entities) ──
 
-test.describe("Course workspace — join-requests tab content (manager)", () => {
+test.describe.serial("Course workspace — join-requests tab content (manager)", () => {
   let freshEmail: string;
   let freshToken: string;
   let freshCourseTitle: string;

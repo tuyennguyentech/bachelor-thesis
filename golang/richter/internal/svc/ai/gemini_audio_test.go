@@ -14,6 +14,7 @@ import (
 // with typed struct literals (and verifying that the result looks sane)
 // removes the entire failure mode.
 func TestAudioGradingResponseSchema(t *testing.T) {
+	t.Parallel()
 	s := audioGradingResponseSchema()
 	if s == nil {
 		t.Fatal("schema is nil")

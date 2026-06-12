@@ -1,6 +1,7 @@
 import {
   test,
   expect,
+  uid,
   goToSeededLesson,
   createAnalyzedLesson,
   SEED_DSA_LESSON_BIG_O,
@@ -39,7 +40,7 @@ function lessonIdFromUrl(url: string) {
   return match[1];
 }
 
-test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
+test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => {
   // Fresh analyzed lesson used by "teacher can manually create every supported interaction kind".
   // Created once in beforeAll so the test doesn't touch the seeded Big-O lesson.
   let studioLessonUrl = "";
@@ -55,7 +56,7 @@ test.describe("Interactive Video Quiz — New Features E2E Tests", () => {
   test("teacher can manually create every supported interaction kind", async ({ teacherPage: teacher }) => {
     test.setTimeout(180_000);
 
-    const stamp = Date.now();
+    const stamp = uid("");
     // lessonUrl is set from the shared studioLessonUrl (fresh analyzed lesson).
     const lessonUrl = studioLessonUrl;
     const lessonId = studioLessonId;

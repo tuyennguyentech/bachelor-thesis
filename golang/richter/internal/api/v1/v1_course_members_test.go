@@ -110,6 +110,7 @@ func createCMTestLesson(t *testing.T, c courseMembersTestClients, moduleID strin
 // ── validation tests ──────────────────────────────────────────────────────────
 
 func TestCourseMemberValidation(t *testing.T) {
+	t.Parallel()
 	c, _ := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 	_, _, ownerID := createActiveUser(t, c.users)
@@ -165,6 +166,7 @@ func TestCourseMemberValidation(t *testing.T) {
 // ── lifecycle tests ───────────────────────────────────────────────────────────
 
 func TestCourseMemberLifecycle(t *testing.T) {
+	t.Parallel()
 	c, _ := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 
@@ -312,6 +314,7 @@ func TestCourseMemberLifecycle(t *testing.T) {
 //   - An org admin (not an explicit course member) may access those endpoints.
 //   - The course owner may access those endpoints.
 func TestCourseMemberAccessGate(t *testing.T) {
+	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 
@@ -430,6 +433,7 @@ func TestCourseMemberAccessGate(t *testing.T) {
 //   - AddCourseMember to a non-existent course returns NotFound (manager sees it).
 //   - ListCourseMembers is denied to a non-course-member.
 func TestCourseMemberAuthz(t *testing.T) {
+	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 
@@ -609,6 +613,7 @@ func TestCourseMemberAuthz(t *testing.T) {
 //   - Another user's memberships are not accessible (PermissionDenied).
 //   - Pagination (limit/offset) works.
 func TestListUserCourses(t *testing.T) {
+	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 
@@ -723,6 +728,7 @@ func TestListUserCourses(t *testing.T) {
 // TestListCoursesCanAccess verifies that ListCourses populates the can_access flag
 // correctly: course members (and bypasses) get true, non-members get false.
 func TestListCoursesCanAccess(t *testing.T) {
+	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 
@@ -849,6 +855,7 @@ func TestListCoursesCanAccess(t *testing.T) {
 }
 
 func TestCourseJoinRequests(t *testing.T) {
+	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 
@@ -1023,6 +1030,7 @@ func TestCourseJoinRequests(t *testing.T) {
 //   - ListPendingJoinRequests: pagination (limit/offset) works correctly
 //   - GetMyJoinRequestStatus: always scoped to the caller's own sub
 func TestCourseJoinRequestsAuthz(t *testing.T) {
+	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
 	ctx := t.Context()
 

@@ -8,6 +8,7 @@ import (
 )
 
 func TestBuildTextOnlyGradingPrompt(t *testing.T) {
+	t.Parallel()
 	t.Run("Vietnamese prompt", func(t *testing.T) {
 		prompt := buildTextOnlyGradingPrompt("vi", "Điền từ vào câu", "học sinh", "học sinh, học viên")
 		if !strings.Contains(prompt, "Tiếng Việt") {
@@ -27,6 +28,7 @@ func TestBuildTextOnlyGradingPrompt(t *testing.T) {
 }
 
 func TestTextGradingSchema(t *testing.T) {
+	t.Parallel()
 	// Verify that the schema type is TypeObject and includes required properties
 	// This mirrors TestAudioGradingResponseSchema to avoid runtime crashes during marshalling
 	schema := &genai.Schema{

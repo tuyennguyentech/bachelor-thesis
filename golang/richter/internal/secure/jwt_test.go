@@ -33,6 +33,7 @@ func createTestUser() *v1.User {
 }
 
 func TestGenerateAndValidateToken(t *testing.T) {
+	t.Parallel()
 	svc := setupJWTService(t)
 	user := createTestUser()
 
@@ -76,6 +77,7 @@ func TestGenerateAndValidateToken(t *testing.T) {
 }
 
 func TestValidateToken_InvalidSignature(t *testing.T) {
+	t.Parallel()
 	svc := setupJWTService(t)
 	user := createTestUser()
 
@@ -100,6 +102,7 @@ func TestValidateToken_InvalidSignature(t *testing.T) {
 }
 
 func TestValidateToken_Expired(t *testing.T) {
+	t.Parallel()
 	svc := setupJWTService(t)
 	user := createTestUser()
 
@@ -115,6 +118,7 @@ func TestValidateToken_Expired(t *testing.T) {
 }
 
 func TestGenerateToken_WithoutMiddleName(t *testing.T) {
+	t.Parallel()
 	svc := setupJWTService(t)
 	user := &v1.User{
 		Id:        gofakeit.UUID(),
@@ -141,6 +145,7 @@ func TestGenerateToken_WithoutMiddleName(t *testing.T) {
 }
 
 func TestGenerateToken_TokenTypePreserved(t *testing.T) {
+	t.Parallel()
 	svc := setupJWTService(t)
 	user := createTestUser()
 
@@ -168,6 +173,7 @@ func TestGenerateToken_TokenTypePreserved(t *testing.T) {
 }
 
 func TestJWTClaims_ImplementsJWTClaims(t *testing.T) {
+	t.Parallel()
 	claims := &JWTClaims{
 		JWTClaims: &jwtv1.JWTClaims{
 			Sub: gofakeit.UUID(),

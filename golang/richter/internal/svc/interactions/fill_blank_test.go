@@ -9,6 +9,7 @@ import (
 )
 
 func TestFillBlankGradeStatic(t *testing.T) {
+	t.Parallel()
 	h := &fillBlankHandler{}
 
 	cfg := fillBlankConfigJSON{
@@ -57,6 +58,7 @@ func TestFillBlankGradeStatic(t *testing.T) {
 }
 
 func TestFillBlankGradeWithAIContext(t *testing.T) {
+	t.Parallel()
 	h := &fillBlankHandler{}
 
 	cfg := fillBlankConfigJSON{

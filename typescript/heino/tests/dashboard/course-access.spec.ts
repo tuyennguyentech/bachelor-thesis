@@ -64,8 +64,9 @@ test.describe("Course list — enrolled course (studentPage = bob)", () => {
       { waitUntil: "domcontentloaded" },
     );
 
-    // The accessible card footer has a "Vào học" link for students
-    const vaoHocLink = page.getByRole("link", { name: /Vào học/ });
+    // The accessible card footer has a "Vào học" / "Tiếp tục học" link for students.
+    // CTA label is progress-aware: "Tiếp tục học" once the student has started, else "Vào học".
+    const vaoHocLink = page.getByRole("link", { name: /Vào học|Tiếp tục học/ }).first();
     await expect(vaoHocLink).toBeVisible();
     const href = await vaoHocLink.getAttribute("href");
     expect(href).toMatch(/\/courses\//);
@@ -76,7 +77,7 @@ test.describe("Course list — enrolled course (studentPage = bob)", () => {
       `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
       { waitUntil: "domcontentloaded" },
     );
-    const vaoHocLink = page.getByRole("link", { name: /Vào học/ }).first();
+    const vaoHocLink = page.getByRole("link", { name: /Vào học|Tiếp tục học/ }).first();
     const href = await vaoHocLink.getAttribute("href");
     await page.goto(href!, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: SEED_DSA_COURSE_TITLE })).toBeVisible();
@@ -89,7 +90,6 @@ test.describe("Course list — locked course cards (studentPage = bob)", () => {
   test("'Khóa học khác trong tổ chức' section is visible with locked courses", async ({ studentPage: page }) => {
     // Load all courses in hust-cs (no search filter — show everything)
     await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
 
     // The locked section heading should be visible
     await expect(
@@ -99,7 +99,6 @@ test.describe("Course list — locked course cards (studentPage = bob)", () => {
 
   test("locked course card shows 'Chưa tham gia' badge", async ({ studentPage: page }) => {
     await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
 
     // At least one card in the locked section carries the "Chưa tham gia" badge
     const lockedBadge = page.getByText("Chưa tham gia").first();

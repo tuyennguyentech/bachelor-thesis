@@ -95,6 +95,7 @@ func TestAnalysisLocks_ParallelLessonsContended(t *testing.T) {
 // a single item already exhausts a meaningful fraction of the output token
 // budget at 65536.
 func TestInteractionGenerationBatchSize(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind richterv1.InteractionKind
 		want int32

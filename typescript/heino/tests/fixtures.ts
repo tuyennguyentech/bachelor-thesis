@@ -160,7 +160,10 @@ export async function goToSeededLesson(page: Page, lessonTitle: string): Promise
   if (!courseHref) throw new Error(`Seeded course "${SEED_DSA_COURSE_TITLE}" not found`);
   // Course workspace: lessons are in ?tab=lessons tab (not the default overview tab)
   await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
-  const lessonLink = page.getByRole("link").filter({ hasText: lessonTitle }).first();
+  // The lessons tab strips the "Bài N:" prefix from displayed titles, so match the
+  // core title (substring) to stay robust whether or not the prefix is shown.
+  const lessonCore = lessonTitle.replace(/^Bài\s*\d+\s*[:.\-]\s*/i, "");
+  const lessonLink = page.getByRole("link").filter({ hasText: lessonCore }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson link not found for "${lessonTitle}"`);
   await page.goto(lessonHref, { waitUntil: "domcontentloaded" });

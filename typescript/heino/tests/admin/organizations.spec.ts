@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures";
+import { test, expect, uid } from "../fixtures";
 import type { Page } from "@playwright/test";
 
 const SEED_ORG_SLUG = process.env.TEST_ORG_SLUG ?? "dyadia-demo";
@@ -7,11 +7,11 @@ const CREATE_ORG_BUTTON = "Tạo tổ chức";
 const OWNER_LABEL = "Người sở hữu ban đầu";
 
 function uniqueSlug() {
-  return `e2e-${Date.now()}`;
+  return `e2e-${uid("")}`;
 }
 
 function uniqueName() {
-  return `E2E Org ${Date.now()}`;
+  return `E2E Org ${uid("")}`;
 }
 
 // Get any seeded user's UUID by reading the detail-link href (avoids click-navigation flakiness).
@@ -157,12 +157,13 @@ test.describe("Org detail CRUD", () => {
 
   test("edits org name", async ({ adminPage: page }) => {
     await page.goto(orgUrl);
-    const newName = `Renamed ${Date.now()}`;
+    const newName = `Renamed ${uid("")}`;
     await page.getByLabel("Tên").clear();
     await page.getByLabel("Tên").fill(newName);
     await page.getByRole("button", { name: "Lưu" }).click();
-    // Next.js revalidates the route in-place after the action — heading updates without navigation
-    await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible();
+    // Next.js revalidates the route in-place after the action — heading updates without navigation.
+    // router.refresh() is async (re-fetch + re-render), so allow more than the 5s default under load.
+    await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 10000 });
   });
 
   test("updates org status", async ({ adminPage: page }) => {

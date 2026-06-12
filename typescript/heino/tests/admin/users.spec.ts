@@ -1,10 +1,10 @@
-import { test, expect } from "../fixtures";
+import { test, expect, uid } from "../fixtures";
 
 const USERS_URL = "/admin/users";
 const CREATE_USER_BUTTON = "Tạo người dùng";
 
 function uniqueEmail() {
-  return `e2e.user.${Date.now()}@test.local`;
+  return `e2e.user.${uid("")}@test.local`;
 }
 
 test.describe("Users list page", () => {

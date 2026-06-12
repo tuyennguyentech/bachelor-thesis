@@ -6,13 +6,13 @@
  * with unique suffixed titles to avoid collisions across parallel runs.
  */
 
-import { test, expect } from "../fixtures";
+import { test, expect, uid } from "../fixtures";
 
 const ORG_SLUG = process.env.TEST_ORG_SLUG ?? "dyadia-demo";
 const COURSES_URL = `/admin/organizations/${ORG_SLUG}/courses`;
 
 function uniqueTitle(base: string) {
-  return `${base} ${Date.now()}`;
+  return uid(base);
 }
 
 test.describe("Course list page", () => {
@@ -97,8 +97,9 @@ test.describe("Course detail page", () => {
     await titleInput.clear();
     await titleInput.fill(newTitle);
     await page.getByRole("button", { name: "Lưu" }).click();
-    // page revalidates and heading updates to reflect the saved title
-    await expect(page.getByRole("heading", { name: newTitle })).toBeVisible();
+    // page revalidates and heading updates to reflect the saved title.
+    // router.refresh() is async, so allow more than the 5s default under load.
+    await expect(page.getByRole("heading", { name: newTitle })).toBeVisible({ timeout: 10000 });
   });
 
   test("adds a module and it appears in the list", async ({ adminPage: page }) => {

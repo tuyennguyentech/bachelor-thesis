@@ -2319,7 +2319,7 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 		
 		task1IDRaw, _ := uuid.NewV7()
 		task1ID := pgtype.UUID{Bytes: [16]byte(task1IDRaw), Valid: true}
-		_, err := tq.CreateTask(ctx, task1ID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "test_task", []byte("hello"))
+		_, err := tq.CreateTask(ctx, task1ID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "ai_listall_probe_task", []byte("hello"))
 		if err != nil {
 			t.Fatalf("failed to create task: %v", err)
 		}

@@ -24,7 +24,9 @@ async function goToLessonByRole(page: Page): Promise<string> {
   if (!courseHref) throw new Error(`Course not found: ${COURSE_TITLE}`);
   // Course workspace: lessons are in ?tab=lessons tab
   await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
-  const lessonLink = page.getByRole("link").filter({ hasText: LESSON_TITLE }).first();
+  // Lessons tab strips the "Bài N:" prefix from displayed titles — match the core title.
+  const lessonCore = LESSON_TITLE.replace(/^Bài\s*\d+\s*[:.\-]\s*/i, "");
+  const lessonLink = page.getByRole("link").filter({ hasText: lessonCore }).first();
   const lessonHref = await lessonLink.getAttribute("href");
   if (!lessonHref) throw new Error(`Lesson not found: ${LESSON_TITLE}`);
   await page.goto(lessonHref, { waitUntil: "domcontentloaded" });
@@ -81,7 +83,7 @@ test.describe("Video Player Bug Tests", () => {
       if (!courseHref) throw new Error(`Course not found: ${DEMO_COURSE_TITLE}`);
       // Course workspace: lessons are in ?tab=lessons tab
       await page.goto(`${courseHref}?tab=lessons`, { waitUntil: "domcontentloaded" });
-      const lessonHref = await page.getByRole("link").filter({ hasText: DEMO_LESSON_TITLE }).first().getAttribute("href");
+      const lessonHref = await page.getByRole("link").filter({ hasText: DEMO_LESSON_TITLE.replace(/^Bài\s*\d+\s*[:.\-]\s*/i, "") }).first().getAttribute("href");
       if (!lessonHref) throw new Error(`Lesson not found: ${DEMO_LESSON_TITLE}`);
       const sidebarStorageKey = await lessonSidebarStorageKey(page, lessonHref);
 

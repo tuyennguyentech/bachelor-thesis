@@ -12,6 +12,7 @@ import (
 // TestExtractAudioFromMP4 verifies that extractAudio produces valid 16kHz mono WAV
 // from the educational test video. Requires ffmpeg in PATH.
 func TestExtractAudioFromMP4(t *testing.T) {
+	t.Parallel()
 	const videoPath = "../../../testdata/edu-sample.mp4"
 	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
 		t.Skipf("test video not found at %s — run generation script in testdata/README.md", videoPath)
@@ -74,6 +75,7 @@ func TestExtractAudioFromMP4(t *testing.T) {
 // faster-whisper-server is parsed into transcript text and segment timestamps.
 // This is a pure struct / JSON unit test — no network call is made.
 func TestWhisperResponseShape(t *testing.T) {
+	t.Parallel()
 	raw := `{
 		"text": "  Binary search is efficient.  ",
 		"segments": [
@@ -114,6 +116,7 @@ func TestWhisperResponseShape(t *testing.T) {
 // is a valid 16 kHz mono WAV. Uses a small segment_seconds so the short test
 // video yields more than one chunk. Requires ffmpeg in PATH.
 func TestExtractAudioSegments(t *testing.T) {
+	t.Parallel()
 	const videoPath = "../../../testdata/edu-sample.mp4"
 	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
 		t.Skipf("test video not found at %s — run generation script in testdata/README.md", videoPath)
@@ -159,6 +162,7 @@ func TestExtractAudioSegments(t *testing.T) {
 // TestExtractAudioSegmentsSingle verifies that segment_seconds <= 0 falls back
 // to a single full-length extraction (one chunk), preserving legacy behavior.
 func TestExtractAudioSegmentsSingle(t *testing.T) {
+	t.Parallel()
 	const videoPath = "../../../testdata/edu-sample.mp4"
 	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
 		t.Skipf("test video not found at %s", videoPath)

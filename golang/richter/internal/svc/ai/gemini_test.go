@@ -36,6 +36,7 @@ func emptyLesson() gen.Lesson {
 // ── resolveGenerationPlan tests ───────────────────────────────────────────────
 
 func TestResolveGenerationPlan_DefaultIsAIChoose(t *testing.T) {
+	t.Parallel()
 	// No config anywhere, no request overrides → server default is AI_CHOOSE with MCQ.
 	plan := resolveGenerationPlan(
 		emptyChunk(), emptyLesson(),
@@ -54,6 +55,7 @@ func TestResolveGenerationPlan_DefaultIsAIChoose(t *testing.T) {
 }
 
 func TestResolveGenerationPlan_ExplicitAIChoose(t *testing.T) {
+	t.Parallel()
 	plan := resolveGenerationPlan(
 		emptyChunk(), emptyLesson(),
 		[]richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE, richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK},
@@ -72,6 +74,7 @@ func TestResolveGenerationPlan_ExplicitAIChoose(t *testing.T) {
 }
 
 func TestResolveGenerationPlan_EvenDistribution(t *testing.T) {
+	t.Parallel()
 	plan := resolveGenerationPlan(
 		emptyChunk(), emptyLesson(),
 		[]richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE, richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK},
@@ -94,6 +97,7 @@ func TestResolveGenerationPlan_EvenDistribution(t *testing.T) {
 }
 
 func TestResolveGenerationPlan_ChunkConfigOverridesLesson(t *testing.T) {
+	t.Parallel()
 	// Lesson default: EVEN, 2 MCQ.
 	lesson := emptyLesson()
 	lesson.DefaultInteractionConfig = configJSON(2, []string{"mcq"}, "even")
@@ -112,6 +116,7 @@ func TestResolveGenerationPlan_ChunkConfigOverridesLesson(t *testing.T) {
 }
 
 func TestResolveGenerationPlan_RequestOverridesAll(t *testing.T) {
+	t.Parallel()
 	// Chunk says EVEN, but request says AI_CHOOSE.
 	chunk := emptyChunk()
 	chunk.InteractionConfig = configJSON(2, []string{"mcq"}, "even")
@@ -133,6 +138,7 @@ func TestResolveGenerationPlan_RequestOverridesAll(t *testing.T) {
 // ── buildAIChoosePrompt tests ─────────────────────────────────────────────────
 
 func TestBuildAIChoosePrompt_ContainsAllSupportedSchemas(t *testing.T) {
+	t.Parallel()
 	kinds := []richterv1.InteractionKind{
 		richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE,
 		richterv1.InteractionKind_INTERACTION_KIND_MULTIPLE_CHOICE,
@@ -177,6 +183,7 @@ func TestBuildAIChoosePrompt_ContainsAllSupportedSchemas(t *testing.T) {
 }
 
 func TestGeneratedInteractionCheckpointSecondsUsesChunkEnd(t *testing.T) {
+	t.Parallel()
 	var id pgtype.UUID
 	_ = id.Scan("00000000-0000-0000-0000-000000000003")
 
@@ -197,6 +204,7 @@ func TestGeneratedInteractionCheckpointSecondsUsesChunkEnd(t *testing.T) {
 }
 
 func TestNormalizeGeneratedInteractionStartSecondsBackfillsLegacyAIItems(t *testing.T) {
+	t.Parallel()
 	var chunkID pgtype.UUID
 	_ = chunkID.Scan("00000000-0000-0000-0000-000000000004")
 	var manualChunkID pgtype.UUID
@@ -243,6 +251,7 @@ func makeResp(finishReason genai.FinishReason, text string) *genai.GenerateConte
 }
 
 func TestGeminiResponseText_NoCandidates(t *testing.T) {
+	t.Parallel()
 	resp := &genai.GenerateContentResponse{}
 	_, err := geminiResponseText(resp)
 	if err == nil {
@@ -254,6 +263,7 @@ func TestGeminiResponseText_NoCandidates(t *testing.T) {
 }
 
 func TestGeminiResponseText_FinishReasonStop(t *testing.T) {
+	t.Parallel()
 	resp := makeResp(genai.FinishReasonStop, `{"key":"value"}`)
 	got, err := geminiResponseText(resp)
 	if err != nil {
@@ -265,6 +275,7 @@ func TestGeminiResponseText_FinishReasonStop(t *testing.T) {
 }
 
 func TestGeminiResponseText_FinishReasonUnspecified(t *testing.T) {
+	t.Parallel()
 	// FinishReasonUnspecified (0) should be treated as OK (not an error).
 	resp := makeResp(genai.FinishReasonUnspecified, `{"ok":true}`)
 	got, err := geminiResponseText(resp)
@@ -277,6 +288,7 @@ func TestGeminiResponseText_FinishReasonUnspecified(t *testing.T) {
 }
 
 func TestGeminiResponseText_FinishReasonMaxTokens(t *testing.T) {
+	t.Parallel()
 	resp := makeResp(genai.FinishReasonMaxTokens, `{"truncated":`)
 	_, err := geminiResponseText(resp)
 	if err == nil {
@@ -288,6 +300,7 @@ func TestGeminiResponseText_FinishReasonMaxTokens(t *testing.T) {
 }
 
 func TestGeminiResponseText_FinishReasonSafety(t *testing.T) {
+	t.Parallel()
 	resp := makeResp(genai.FinishReasonSafety, "")
 	_, err := geminiResponseText(resp)
 	if err == nil {
@@ -296,6 +309,7 @@ func TestGeminiResponseText_FinishReasonSafety(t *testing.T) {
 }
 
 func TestGeminiResponseText_NilContent(t *testing.T) {
+	t.Parallel()
 	resp := makeResp(genai.FinishReasonStop, "")
 	// No content set — cand.Content is nil.
 	_, err := geminiResponseText(resp)
@@ -308,6 +322,7 @@ func TestGeminiResponseText_NilContent(t *testing.T) {
 }
 
 func TestGeminiResponseText_EmptyTextParts(t *testing.T) {
+	t.Parallel()
 	resp := &genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{
 			{
@@ -328,6 +343,7 @@ func TestGeminiResponseText_EmptyTextParts(t *testing.T) {
 }
 
 func TestGeminiResponseText_MarkdownFenceStripped(t *testing.T) {
+	t.Parallel()
 	resp := makeResp(genai.FinishReasonStop, "```\n{\"a\":1}\n```")
 	got, err := geminiResponseText(resp)
 	if err != nil {
@@ -339,6 +355,7 @@ func TestGeminiResponseText_MarkdownFenceStripped(t *testing.T) {
 }
 
 func TestGeminiResponseText_MarkdownFenceJsonStripped(t *testing.T) {
+	t.Parallel()
 	resp := makeResp(genai.FinishReasonStop, "```json\n{\"b\":2}\n```")
 	got, err := geminiResponseText(resp)
 	if err != nil {
@@ -350,6 +367,7 @@ func TestGeminiResponseText_MarkdownFenceJsonStripped(t *testing.T) {
 }
 
 func TestGeminiResponseText_NoMarkdownFence(t *testing.T) {
+	t.Parallel()
 	raw := `{"chunks":[{"summary":"intro"}]}`
 	resp := makeResp(genai.FinishReasonStop, raw)
 	got, err := geminiResponseText(resp)

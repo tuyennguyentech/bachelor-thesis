@@ -50,6 +50,7 @@ func createTestOrgForMembers(t *testing.T, c orgMembersTestClients, userID strin
 }
 
 func TestOrgMemberValidation(t *testing.T) {
+	t.Parallel()
 	c := setupOrgMembersTestClients(t)
 	ctx := t.Context()
 	userID := createTestUserForMembers(t, c)
@@ -110,6 +111,7 @@ func TestOrgMemberValidation(t *testing.T) {
 }
 
 func TestOrgMemberLifecycle(t *testing.T) {
+	t.Parallel()
 	c := setupOrgMembersTestClients(t)
 	ctx := t.Context()
 	ownerID := createTestUserForMembers(t, c)
@@ -239,6 +241,7 @@ func TestOrgMemberLifecycle(t *testing.T) {
 }
 
 func TestOrgMemberErrors(t *testing.T) {
+	t.Parallel()
 	c := setupOrgMembersTestClients(t)
 	ctx := t.Context()
 	ownerID := createTestUserForMembers(t, c)
@@ -322,6 +325,7 @@ func TestOrgMemberErrors(t *testing.T) {
 }
 
 func TestOrgMembersAuthz(t *testing.T) {
+	t.Parallel()
 	url := newV1Server(t)
 	ctx := context.Background()
 	adminToken := getAdminToken(t, url)

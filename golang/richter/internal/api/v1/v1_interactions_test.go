@@ -135,6 +135,7 @@ func correctAnswers(interactions []gen.LessonInteraction) []int32 {
 // ── TestInteractionsLifecycle ─────────────────────────────────────────────────
 
 func TestInteractionsLifecycle(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -292,6 +293,7 @@ func TestInteractionsLifecycle(t *testing.T) {
 }
 
 func TestManualInteractionKindMatrix(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -476,6 +478,7 @@ func TestManualInteractionKindMatrix(t *testing.T) {
 // ── TestInteractionsValidation ────────────────────────────────────────────────
 
 func TestInteractionsValidation(t *testing.T) {
+	t.Parallel()
 	c, _ := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -531,6 +534,7 @@ func TestInteractionsValidation(t *testing.T) {
 // ── TestInteractionsAuthz ─────────────────────────────────────────────────────
 
 func TestInteractionsAuthz(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -701,6 +705,7 @@ func insertFillBlankInteraction(t *testing.T, lessonID string, template string, 
 }
 
 func TestFillBlankInteractions(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -867,6 +872,7 @@ func TestFillBlankInteractions(t *testing.T) {
 // ── TestListeningInteractionLifecycle ─────────────────────────────────────────
 
 func TestListeningInteractionLifecycle(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -972,6 +978,7 @@ func TestListeningInteractionLifecycle(t *testing.T) {
 // ── TestReadingInteractionLifecycle ───────────────────────────────────────────
 
 func TestReadingInteractionLifecycle(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -1172,6 +1179,7 @@ func TestReadingInteractionLifecycle(t *testing.T) {
 //   - rejects when the interaction does not belong to the requested lesson
 //   - rejects unauthenticated callers
 func TestPreviewGrade(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -1438,6 +1446,7 @@ func TestPreviewGrade(t *testing.T) {
 // correctly associates the new interaction with a chunk when chunk_id is provided,
 // and creates an unattached interaction when chunk_id is empty.
 func TestCreateManualInteractionChunkAssociation(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -1531,6 +1540,7 @@ func TestCreateManualInteractionChunkAssociation(t *testing.T) {
 }
 
 func TestDeleteLessonInteractionsBulk(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -1653,6 +1663,7 @@ func TestDeleteLessonInteractionsBulk(t *testing.T) {
 // TestRegenerateInteraction verifies authz and the unimplemented path (no AI
 // configured in the integration-test environment).
 func TestRegenerateInteraction(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -1749,6 +1760,7 @@ func TestRegenerateInteraction(t *testing.T) {
 //  3. ListCourseAttemptsSummary returns the student with sane aggregate fields.
 //  4. ListMyCourseProgress returns the course for that student.
 func TestMetricsAndAnalytics(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -2016,6 +2028,7 @@ func TestMetricsAndAnalytics(t *testing.T) {
 //     multiple students.
 //   - ListMyCourseProgress returns empty for a student with no attempts.
 func TestAnalyticsEmptyAndPagination(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -2225,6 +2238,7 @@ func TestAnalyticsEmptyAndPagination(t *testing.T) {
 //   - zero watch fraction + all wrong → engagement_score should be LOW (< 40)
 //   - full watch fraction (1.0) + all correct → engagement_score should be HIGH (>= 60)
 func TestEngagementEdgeCases(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
@@ -2404,6 +2418,7 @@ func TestEngagementEdgeCases(t *testing.T) {
 // non-org-member path; this test specifically targets the "org member but not
 // course member → PermissionDenied" path that is distinct from a total stranger.
 func TestAccessGateMatrixComplete(t *testing.T) {
+	t.Parallel()
 	c, url := setupInteractionsTestClients(t)
 	ctx := context.Background()
 
