@@ -68,11 +68,11 @@ Configs are comma-separated, merged left-to-right via viper `MergeInConfig`. Env
 ## DB Reset
 
 ```
-./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test reset
-./scripts/setup/environment.dev/container-shell.sh richter -- goose -env .env.test up
+./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/setup/environment.dev/goose.sh test reset
+./scripts/setup/environment.dev/container-shell.sh richter -- ./scripts/setup/environment.dev/goose.sh test up
 ```
 
-Uses `goose` with `.env`/`.env.test` for DB connection strings — do not inline `GOOSE_DBSTRING`. Migration naming convention: `NNNNN_action_type_objects.sql` (see `docs/backend/migration-naming.md`).
+Run goose through `goose.sh <dev|test>`, which layers `.env.goose` (shared `GOOSE_DRIVER`/`GOOSE_MIGRATION_DIR`) under `.env.<target>` (`GOOSE_DBSTRING`). Do not use `goose -env` (it cannot override the env container-shell sourced from `.env`) and do not inline `GOOSE_DBSTRING`. Migration naming convention: `NNNNN_action_type_objects.sql` (see `docs/backend/migration-naming.md`).
 
 ## Test vs Dev DB
 
@@ -239,7 +239,7 @@ const hasNext = res.users.length === LIMIT  // no total field
 
 ### Test infrastructure checklist (before claiming "test broken")
 1. Confirm richter is up with `richter.test.toml` (not local)
-2. Reset + re-seed test DB (`goose -env .env.test reset` + `goose -env .env.test up` + `seed --dev`)
+2. Reset + re-seed test DB (`goose.sh test reset` + `goose.sh test up` + `seed --dev`)
 3. **Critical: restart richter AFTER goose reset** (schema OID cache invalidation)
 4. Verify seed data matches test expectations
 
