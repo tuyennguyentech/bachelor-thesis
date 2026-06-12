@@ -58,7 +58,7 @@ TIÊU CHÍ CHẤT LƯỢNG (bắt buộc với mỗi bài tập):
 Đoạn nội dung (%.1f - %.1f giây):
 %s
 
-start_seconds PHẢI bằng thời điểm kết thúc đoạn: %.1f giây.
+start_seconds PHẢI đặt câu hỏi ngay TRƯỚC khi kết thúc đoạn, tại khoảng %.1f giây (không được bằng hoặc vượt quá thời điểm kết thúc đoạn).
 
 Mỗi item trong mảng "items" phải tuân theo JSON schema sau:
 %s
@@ -69,7 +69,7 @@ Trả về JSON object: {"items": [...]}`,
 		customInstructions.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
-		float32(chunk.EndSeconds),
+		generatedInteractionCheckpointSeconds(chunk),
 		generator.GeminiSchema(),
 	)
 

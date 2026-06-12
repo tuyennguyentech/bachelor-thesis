@@ -19,6 +19,13 @@ import (
 
 const defaultGenerationCount = 2
 
+// checkpointEndSafetySeconds is the margin subtracted from a chunk's end so the
+// generated interaction's start_seconds lands strictly BEFORE the chunk end.
+// For the final chunk, EndSeconds equals the video duration; placing the
+// checkpoint at the exact end means the playback hit-test never crosses it and
+// the question never fires. The margin guarantees start_seconds < duration.
+const checkpointEndSafetySeconds = 2.0
+
 type kindCount struct {
 	kind  richterv1.InteractionKind
 	count int32
@@ -235,7 +242,7 @@ TIÊU CHÍ CHẤT LƯỢNG (bắt buộc):
 Đoạn nội dung (%.1f - %.1f giây):
 %s
 
-start_seconds PHẢI bằng thời điểm kết thúc đoạn: %.1f giây.
+start_seconds PHẢI đặt câu hỏi ngay TRƯỚC khi kết thúc đoạn, tại khoảng %.1f giây (không được bằng hoặc vượt quá thời điểm kết thúc đoạn).
 
 Mỗi item trong mảng "items" PHẢI có trường "kind" (một trong: %s) và các trường tương ứng với loại đó theo schema ở trên.
 
@@ -245,7 +252,7 @@ Trả về JSON object: {"items": [...]}`,
 		kindDescs.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
-		float32(chunk.EndSeconds),
+		generatedInteractionCheckpointSeconds(chunk),
 		allowedList,
 	)
 }
@@ -316,11 +323,25 @@ func geminiResponseText(resp *genai.GenerateContentResponse) (string, error) {
 }
 
 func generatedInteractionCheckpointSeconds(chunk gen.LessonTranscriptChunk) float32 {
-	if chunk.EndSeconds > 0 {
-		return float32(chunk.EndSeconds)
+	start := float32(chunk.StartSeconds)
+	end := float32(chunk.EndSeconds)
+	if end > 0 {
+		// Place the checkpoint a small margin before the chunk end so it always
+		// lands strictly inside the chunk (and, for the last chunk, before the
+		// video's final frame) — otherwise the playback hit-test never fires it.
+		safe := end - checkpointEndSafetySeconds
+		if safe > start {
+			return safe
+		}
+		// Chunk shorter than the safety margin: fall back to the midpoint, which
+		// is still strictly before the end (and after the start when start < end).
+		if end > start {
+			return start + (end-start)/2
+		}
+		return end
 	}
-	if chunk.StartSeconds > 0 {
-		return float32(chunk.StartSeconds)
+	if start > 0 {
+		return start
 	}
 	return 0
 }
