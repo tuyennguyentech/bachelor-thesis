@@ -13,6 +13,9 @@ import (
 	"net/textproto"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +34,10 @@ type transcriptionService struct {
 	// (when aiCfg.WhisperMaxConcurrent <= 0). The semaphore is built
 	// once on construction so we never allocate per request.
 	whisperSem chan struct{}
+	// whisperClient is the tuned HTTP client for Whisper calls. Built
+	// once on construction and reused so the underlying Transport's
+	// connection pool (keep-alive, HTTP/2) survives across requests.
+	whisperClient *http.Client
 }
 
 // newWhisperHTTPClient returns a tuned HTTP client for the Whisper
@@ -62,6 +69,7 @@ func newWhisperHTTPClient(ai *cfg.AiCfg) *http.Client {
 
 func newTranscriptionService(s3client *minio.Client, s3cfg *cfg.S3Cfg, whisperCfg *cfg.WhisperCfg, aiCfg *cfg.AiCfg) *transcriptionService {
 	s := &transcriptionService{s3client: s3client, s3cfg: s3cfg, whisperCfg: whisperCfg, aiCfg: aiCfg}
+	s.whisperClient = newWhisperHTTPClient(aiCfg)
 	if aiCfg.WhisperMaxConcurrent > 0 {
 		// Buffered channel acts as a counting semaphore: each in-flight
 		// request takes one slot, releases on return. Blocks excess
@@ -175,6 +183,87 @@ func extractAudio(ctx context.Context, videoPath, tempDir string) (audioPath str
 		return "", fmt.Errorf("ffmpeg extract audio: %w: %s", err, stderr.String())
 	}
 	return audioPath, nil
+}
+
+// wavBytesPerSecond is the byte rate of the 16 kHz mono signed-16-bit PCM
+// WAV we extract: 16000 samples/s × 2 bytes/sample. Used to derive a chunk's
+// duration from its file size without spawning ffprobe.
+const wavBytesPerSecond = 16000 * 2
+
+// wavHeaderBytes is the size of the canonical 44-byte WAV header that
+// precedes the PCM data ffmpeg writes.
+const wavHeaderBytes = 44
+
+// wavDurationSeconds returns the playback duration of a 16 kHz mono s16le WAV
+// file computed from its size on disk. Returns 0 if the file is missing or
+// smaller than the header. Exact for the PCM format we always produce, so it
+// avoids an ffprobe call per chunk when stitching offsets.
+func wavDurationSeconds(path string) float64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	dataBytes := fi.Size() - wavHeaderBytes
+	if dataBytes <= 0 {
+		return 0
+	}
+	return float64(dataBytes) / float64(wavBytesPerSecond)
+}
+
+// extractAudioSegments extracts the video's audio as a sequence of 16 kHz
+// mono WAV chunks, each at most segmentSeconds long, written to outDir in a
+// SINGLE ffmpeg pass straight from the video. No full-length WAV is ever
+// produced — this is what keeps memory and per-request time bounded for very
+// long (> 1h) videos. Returns the ordered chunk paths.
+//
+// When segmentSeconds <= 0 the audio is extracted as one file (the legacy
+// whole-video behavior), still streamed to disk, never into memory.
+//
+// The caller owns outDir and every returned file; removing outDir (e.g. via
+// os.RemoveAll) cleans them all up.
+func extractAudioSegments(ctx context.Context, videoPath, outDir string, segmentSeconds int) ([]string, error) {
+	if segmentSeconds <= 0 {
+		audioPath, err := extractAudio(ctx, videoPath, outDir)
+		if err != nil {
+			return nil, err
+		}
+		return []string{audioPath}, nil
+	}
+
+	// ffmpeg's segment muxer cuts the PCM stream on packet boundaries; for
+	// raw PCM every sample is independently addressable so the cuts land at
+	// (approximately) segmentSeconds. We recompute each chunk's real offset
+	// from its byte size when stitching, so any sub-second drift is exact.
+	pattern := filepath.Join(outDir, "chunk_%05d.wav")
+	cmd := exec.CommandContext(ctx,
+		"ffmpeg", "-hide_banner", "-loglevel", "error",
+		"-y",
+		"-i", videoPath,
+		"-vn",
+		"-acodec", "pcm_s16le",
+		"-ar", "16000",
+		"-ac", "1",
+		"-f", "segment",
+		"-segment_time", strconv.Itoa(segmentSeconds),
+		"-reset_timestamps", "1",
+		pattern,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg segment audio: %w: %s", err, stderr.String())
+	}
+
+	matches, err := filepath.Glob(filepath.Join(outDir, "chunk_*.wav"))
+	if err != nil {
+		return nil, fmt.Errorf("list audio segments: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("ffmpeg produced no audio segments (video may have no audio track)")
+	}
+	// chunk_%05d.wav is zero-padded so lexical sort == chronological order.
+	sort.Strings(matches)
+	return matches, nil
 }
 
 // whisperTranscribe streams the WAV audio at audioPath to the faster-whisper-server
@@ -327,23 +416,90 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 		"Đang trích xuất âm thanh..."); err != nil {
 		return "", nil, err
 	}
+	// Extract the audio straight into time-bounded WAV chunks in a private
+	// temp dir. A single ffmpeg pass; no full-length WAV is ever produced,
+	// so this scales to arbitrarily long (> 1h) videos on bounded disk.
+	segDir, segErr := os.MkdirTemp(s.tempDir(), "richter-segs-*")
+	if segErr != nil {
+		return "", nil, fmt.Errorf("create segment dir: %w", segErr)
+	}
+	defer os.RemoveAll(segDir)
+
 	audioCtx, audioCancel := s.aiCtx(pipeCtx, s.aiCfg.AudioExtractTimeout)
-	defer audioCancel()
-	// extractAudio returns the path of the temp WAV file. The caller
-	// (this function) is responsible for removing it once Whisper is done.
-	audioPath, audioErr := extractAudio(audioCtx, videoPath, s.tempDir())
+	chunks, audioErr := extractAudioSegments(audioCtx, videoPath, segDir, s.aiCfg.WhisperSegmentSeconds)
+	audioCancel()
 	if audioErr != nil {
 		return "", nil, fmt.Errorf("extract audio: %w", audioErr)
 	}
-	defer os.Remove(audioPath)
+	// The source video is no longer needed once audio is extracted; free
+	// its disk immediately rather than waiting for the deferred remove,
+	// which matters when several large videos transcribe back to back.
+	_ = os.Remove(videoPath)
 
-	// Emit "Phiên âm bằng Whisper (chờ máy chủ...)" first. The actual
-	// elapsed time is filled in by the heartbeat loop below.
 	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING,
 		"Đang phiên âm bằng Whisper — chờ máy chủ xử lý..."); err != nil {
 		return "", nil, err
 	}
-	whisperCtx, whisperCancel := s.aiCtx(pipeCtx, s.aiCfg.WhisperRequestTimeout)
+
+	// Transcribe each chunk as a separate bounded request, stitching the
+	// text and offsetting every segment's timestamps by the cumulative
+	// duration of the chunks already processed. Each chunk's real duration
+	// is read from its WAV byte size, so offsets are exact with no drift.
+	var (
+		textBuf strings.Builder
+		allSegs []transcriptSegment
+		offset  float64
+	)
+	for i, chunkPath := range chunks {
+		label := ""
+		if len(chunks) > 1 {
+			label = fmt.Sprintf("phần %d/%d ", i+1, len(chunks))
+		}
+		text, segs, cErr := s.transcribeChunk(pipeCtx, chunkPath, label, progress)
+		if cErr != nil {
+			// Sanitize: don't leak the internal whisper URL / net/http
+			// stack. Keep a short Vietnamese message; the wrap preserves
+			// detail for the logs.
+			if errors.Is(cErr, context.DeadlineExceeded) || isTimeoutErr(cErr) {
+				return "", nil, fmt.Errorf("whisper transcription: %w", cErr)
+			}
+			if strings.Contains(cErr.Error(), "timeout awaiting response headers") {
+				return "", nil, fmt.Errorf("whisper transcription: máy chủ phiên âm không phản hồi (có thể đang bận xử lý tác vụ khác): %w", cErr)
+			}
+			return "", nil, fmt.Errorf("whisper transcription: %w", cErr)
+		}
+		for j := range segs {
+			segs[j].StartSeconds += float32(offset)
+			segs[j].EndSeconds += float32(offset)
+		}
+		allSegs = append(allSegs, segs...)
+		if t := strings.TrimSpace(text); t != "" {
+			if textBuf.Len() > 0 {
+				textBuf.WriteByte(' ')
+			}
+			textBuf.WriteString(t)
+		}
+		offset += wavDurationSeconds(chunkPath)
+		// Free each chunk as soon as it is transcribed so a multi-hour
+		// video never holds all its audio chunks on disk at once.
+		_ = os.Remove(chunkPath)
+	}
+
+	transcript = strings.TrimSpace(textBuf.String())
+	if transcript == "" {
+		return "", nil, fmt.Errorf("Whisper trả về transcript rỗng — video có thể không có lời nói hoặc chất lượng âm thanh quá thấp")
+	}
+	return transcript, allSegs, nil
+}
+
+// transcribeChunk runs one Whisper request for a single audio chunk under its
+// own WhisperRequestTimeout, emitting a progress heartbeat while it waits.
+// It is the per-chunk unit used by runWhisperAnalyze so that a long video is
+// transcribed as a sequence of independently bounded requests. label (e.g.
+// "phần 2/6 ") is prefixed to the progress message; pass "" for single-chunk
+// videos.
+func (s *transcriptionService) transcribeChunk(ctx context.Context, audioPath, label string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
+	whisperCtx, whisperCancel := s.aiCtx(ctx, s.aiCfg.WhisperRequestTimeout)
 	defer whisperCancel()
 
 	type whisperResult struct {
@@ -352,59 +508,35 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 		err        error
 	}
 	resultCh := make(chan whisperResult, 1)
-	whisperStart := time.Now()
+	start := time.Now()
 	go func() {
-		transcript, segments, err := s.whisperTranscribe(whisperCtx, audioPath)
-		resultCh <- whisperResult{transcript: transcript, segments: segments, err: err}
+		t, segs, err := s.whisperTranscribe(whisperCtx, audioPath)
+		resultCh <- whisperResult{transcript: t, segments: segs, err: err}
 	}()
 
-	progressInterval := s.aiCfg.WhisperProgressInterval
 	var progressC <-chan time.Time
-	if progressInterval > 0 {
-		ticker := time.NewTicker(progressInterval)
+	if iv := s.aiCfg.WhisperProgressInterval; iv > 0 {
+		ticker := time.NewTicker(iv)
 		defer ticker.Stop()
 		progressC = ticker.C
 	}
 
-	var result whisperResult
 	for {
 		select {
-		case result = <-resultCh:
-			goto whisperDone
+		case r := <-resultCh:
+			return r.transcript, r.segments, r.err
 		case <-progressC:
-			elapsed := time.Since(whisperStart).Truncate(time.Second)
-			msg := fmt.Sprintf("Đang phiên âm bằng Whisper (%s đã trôi qua)...", formatDuration(elapsed))
+			elapsed := time.Since(start).Truncate(time.Second)
+			msg := fmt.Sprintf("Đang phiên âm %sbằng Whisper (%s đã trôi qua)...", label, formatDuration(elapsed))
 			if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING, msg); err != nil {
 				whisperCancel()
 				return "", nil, err
 			}
-		case <-pipeCtx.Done():
+		case <-ctx.Done():
 			whisperCancel()
-			return "", nil, pipeCtx.Err()
+			return "", nil, ctx.Err()
 		}
 	}
-
-whisperDone:
-	transcript, segments, whisperErr := result.transcript, result.segments, result.err
-	if whisperErr != nil {
-		// Sanitize the message: don't leak the internal whisper
-		// service URL or net/http stack to the user-facing error.
-		// Keep the full error in the log via wrap, but expose a
-		// short Vietnamese message in the response.
-		_ = whisperErr // logged via wrap below
-		if errors.Is(whisperErr, context.DeadlineExceeded) || isTimeoutErr(whisperErr) {
-			return "", nil, fmt.Errorf("whisper transcription: %w", whisperErr)
-		}
-		if strings.Contains(whisperErr.Error(), "timeout awaiting response headers") {
-			return "", nil, fmt.Errorf("whisper transcription: máy chủ phiên âm không phản hồi (có thể đang bận xử lý tác vụ khác): %w", whisperErr)
-		}
-		return "", nil, fmt.Errorf("whisper transcription: %w", whisperErr)
-	}
-	if strings.TrimSpace(transcript) == "" {
-		return "", nil, fmt.Errorf("Whisper trả về transcript rỗng — video có thể không có lời nói hoặc chất lượng âm thanh quá thấp")
-	}
-
-	return transcript, segments, nil
 }
 
 // isTimeoutErr returns true if err is a net/http timeout error of any kind.
@@ -442,8 +574,9 @@ func (s *transcriptionService) aiCtx(ctx context.Context, d time.Duration) (cont
 }
 
 // whisperHTTPClient returns the configured Whisper HTTP client. The
-// client is built once from cfg.AiCfg; we cache it on the service so
-// we don't allocate per request.
+// client is built once in newTranscriptionService and cached on the
+// service so the Transport's connection pool is reused across requests
+// (a fresh client per request would defeat keep-alive/HTTP2 pooling).
 func (s *transcriptionService) whisperHTTPClient() *http.Client {
-	return newWhisperHTTPClient(s.aiCfg)
+	return s.whisperClient
 }

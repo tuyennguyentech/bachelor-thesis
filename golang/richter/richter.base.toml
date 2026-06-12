@@ -66,13 +66,24 @@ student_upload_window = "1m"
 # All durations accept 0 = unlimited (no deadline). Values < 0 are
 # clamped to 0 by the service layer. Defaults match sane production
 # values; override via env RICHTER_AI_<KEY>.
-whisper_client_timeout         = "10m"
+# ── PHIÊN ÂM VIDEO DÀI (> 1h) ─────────────────────────────────────────────
+# Audio được tách thẳng thành các đoạn WAV ≤ whisper_segment_seconds (1 lần
+# ffmpeg, ghi ra ĐĨA, KHÔNG bao giờ giữ WAV nguyên bài trong RAM), rồi phiên
+# âm từng đoạn như 1 request riêng và ghép lại (offset timestamp theo độ dài
+# thực mỗi đoạn). Nhờ vậy thời gian + bộ nhớ mỗi request luôn có cận, xử lý
+# được video dài tuỳ ý. Các *_timeout dưới đây vì thế là cận CHO MỖI ĐOẠN.
+# 0 = tắt cắt đoạn (1 request cho cả bài — chỉ an toàn với clip ngắn).
+whisper_segment_seconds        = 600
+whisper_client_timeout         = "30m"
 whisper_idle_conn_timeout      = "90s"
-whisper_response_header_timeout = "5m"
+# 0 = tắt. speaches /v1/audio/transcriptions KHÔNG streaming: chỉ gửi header
+# SAU khi phiên âm xong cả đoạn, nên header-timeout sẽ giết nhầm đoạn chậm mà
+# vẫn khoẻ. Dùng whisper_request_timeout làm cận thực sự thay cho nó.
+whisper_response_header_timeout = "0s"
 whisper_max_idle_conns_per_host = 10
-download_timeout               = "5m"
-audio_extract_timeout          = "3m"
-whisper_request_timeout        = "10m"
+download_timeout               = "10m"
+audio_extract_timeout          = "15m"
+whisper_request_timeout        = "30m"
 whisper_progress_interval      = "20s"
 # Cap concurrent in-flight Whisper requests across the process to
 # prevent the default speaches deployment from being overwhelmed
@@ -98,12 +109,13 @@ piper_max_concurrent           = 0
 #    `go run` đọc env của SHELL HOST. ⇒ phải nạp .env vào shell trước khi chạy:
 #        set -a; source .env; set +a
 #    (hoặc thêm `source .env` vào container-shell.sh). Không nạp thì default ở trên được dùng.
-# Total wall-clock budget for the full extract pipeline
-# (download + ffmpeg + Whisper). Guards against hung sub-stages.
-# 0 = unlimited (rely on per-stage timeouts only).
-# Default: generous 33 min = DownloadTimeout + AudioExtractTimeout +
-# WhisperRequestTimeout + 5 min buffer.
-pipeline_timeout               = "33m"
+# Tổng ngân sách wall-clock cho cả pipeline (download + ffmpeg + Whisper).
+# 0 = unlimited — KHUYẾN NGHỊ cho video dài: đặt số cố định sẽ chặn nhầm video
+# dài hơn ngưỡng đó (vd 33m sẽ giết 1 video 1h khi đang phiên âm dở). Mỗi
+# stage đã có cận riêng (download_timeout, audio_extract_timeout, và
+# whisper_request_timeout cho TỪNG đoạn) nên không stage nào treo vô hạn.
+# Chỉ đặt > 0 nếu muốn áp trần cứng cho tổng thời gian xử lý.
+pipeline_timeout               = "0s"
 # Maximum video file size accepted at download time.
 # 0 = use built-in default (2 GB). Override for smaller deployments.
 # E.g. 536870912 = 512 MB; 2147483648 = 2 GB.

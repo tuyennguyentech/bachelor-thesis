@@ -35,8 +35,19 @@ type AiCfg struct {
 	// source video. 0 = unlimited.
 	AudioExtractTimeout time.Duration `mapstructure:"audio_extract_timeout"`
 	// WhisperRequestTimeout caps a single Whisper request, including
-	// upload of the audio. 0 = unlimited.
+	// upload of the audio. With segmentation enabled (the default) this
+	// bounds the transcription of ONE audio chunk, not the whole video,
+	// so it can stay modest even for multi-hour videos. 0 = unlimited.
 	WhisperRequestTimeout time.Duration `mapstructure:"whisper_request_timeout"`
+	// WhisperSegmentSeconds splits the extracted audio into chunks of
+	// this many seconds, each transcribed as a separate bounded Whisper
+	// request, then stitched back with offset timestamps. This is what
+	// lets the pipeline handle arbitrarily long videos (> 1h) with
+	// bounded per-request time and memory — a single 1h+ request would
+	// otherwise blow past the per-request timeout and stream a huge body
+	// from a non-streaming server. 0 = disable (one request for the whole
+	// video; only safe for short clips). Recommended: 600 (10 min).
+	WhisperSegmentSeconds int `mapstructure:"whisper_segment_seconds"`
 	// WhisperProgressInterval is the heartbeat cadence of the
 	// "Whisper đang chạy, vui lòng đợi…" progress message. 0 = no
 	// progress emit (worker appears stuck until completion).
@@ -114,23 +125,38 @@ const DefaultMaxVideoBytes = int64(2 * 1024 * 1024 * 1024) // 2 GB
 
 func NewAiCfg() AiCfg {
 	return AiCfg{
-		WhisperClientTimeout:         10 * time.Minute,
-		WhisperIdleConnTimeout:       90 * time.Second,
-		WhisperResponseHeaderTimeout: 5 * time.Minute,
+		// Per-chunk budgets (segmentation is on by default): each value
+		// bounds the transcription of one WhisperSegmentSeconds chunk, so
+		// a multi-hour video is a sequence of bounded requests.
+		WhisperClientTimeout:   30 * time.Minute,
+		WhisperIdleConnTimeout: 90 * time.Second,
+		// 0 = disabled. speaches' /v1/audio/transcriptions is NON-streaming:
+		// it sends response headers only AFTER the whole chunk is
+		// transcribed, so a header timeout is indistinguishable from "still
+		// working" and would wrongly kill slow-but-healthy chunks. The
+		// per-request WhisperRequestTimeout is the real bound instead.
+		WhisperResponseHeaderTimeout: 0,
 		WhisperMaxIdleConnsPerHost:   10,
-		DownloadTimeout:              5 * time.Minute,
-		AudioExtractTimeout:          3 * time.Minute,
-		WhisperRequestTimeout:        10 * time.Minute,
-		WhisperProgressInterval:      20 * time.Second,
-		WhisperMaxConcurrent:         1,
+		DownloadTimeout:              10 * time.Minute,
+		// ffmpeg now decodes the whole video in one pass while segmenting;
+		// a 1h+ source needs more than the old 3m. Decode is several×
+		// realtime so 15m covers multi-hour videos comfortably.
+		AudioExtractTimeout:     15 * time.Minute,
+		WhisperRequestTimeout:   30 * time.Minute,
+		WhisperSegmentSeconds:   600,
+		WhisperProgressInterval: 20 * time.Second,
+		WhisperMaxConcurrent:    1,
 		// 0 = unlimited (Piper is multi-threaded and cheap); override via
 		// RICHTER_AI_PIPER_MAX_CONCURRENT if a host needs a hard cap.
 		PiperMaxConcurrent: 0,
-		// PipelineTimeout: generous budget = DownloadTimeout +
-		// AudioExtractTimeout + WhisperRequestTimeout + 5 min buffer.
-		// Default is 33 minutes — enough for a 2 GB / 90-min video on
-		// a slow link while still bounding hung workers.
-		PipelineTimeout: 33 * time.Minute,
+		// 0 = unlimited. A fixed wall-clock budget would cap how long a
+		// video can be (a 33-min budget kills a 1h+ transcription mid-way).
+		// Each stage is independently bounded (DownloadTimeout,
+		// AudioExtractTimeout, and per-chunk WhisperRequestTimeout), so no
+		// single stage can hang; the pipeline simply takes as long as the
+		// video legitimately needs. Set a positive value only to impose a
+		// hard ceiling on total processing time.
+		PipelineTimeout: 0,
 		// MaxVideoBytes: 0 means "use defaultMaxVideoBytes (2 GB)".
 		// Set a positive value to override.
 		MaxVideoBytes:         0,

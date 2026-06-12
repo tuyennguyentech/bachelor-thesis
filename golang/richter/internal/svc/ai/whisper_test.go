@@ -108,3 +108,66 @@ func TestWhisperResponseShape(t *testing.T) {
 		t.Errorf("seg[0].text: want %q, got %q", "Binary search", strings.TrimSpace(result.Segments[0].Text))
 	}
 }
+
+// TestExtractAudioSegments verifies that the video audio is split into
+// multiple time-bounded WAV chunks (the long-video path) and that each chunk
+// is a valid 16 kHz mono WAV. Uses a small segment_seconds so the short test
+// video yields more than one chunk. Requires ffmpeg in PATH.
+func TestExtractAudioSegments(t *testing.T) {
+	const videoPath = "../../../testdata/edu-sample.mp4"
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+		t.Skipf("test video not found at %s — run generation script in testdata/README.md", videoPath)
+	}
+
+	ctx := context.Background()
+	outDir := t.TempDir()
+	// 2-second segments force the short sample into several chunks.
+	chunks, err := extractAudioSegments(ctx, videoPath, outDir, 2)
+	if err != nil {
+		t.Fatalf("extractAudioSegments: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple segments for a multi-second video, got %d", len(chunks))
+	}
+
+	var total float64
+	for i, ch := range chunks {
+		b, err := os.ReadFile(ch)
+		if err != nil {
+			t.Fatalf("read chunk %d: %v", i, err)
+		}
+		if len(b) < wavHeaderBytes || string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" {
+			t.Errorf("chunk %d is not a valid WAV (len=%d)", i, len(b))
+		}
+		if got := binary.LittleEndian.Uint32(b[24:28]); got != 16000 {
+			t.Errorf("chunk %d sample rate: want 16000, got %d", i, got)
+		}
+		d := wavDurationSeconds(ch)
+		if d <= 0 {
+			t.Errorf("chunk %d duration: want > 0, got %f", i, d)
+		}
+		total += d
+	}
+	// Sum of chunk durations should reconstruct the full audio length (a few
+	// seconds for edu-sample). Sanity-check it is non-trivial.
+	if total < 1.0 {
+		t.Errorf("summed chunk duration too small: %f s", total)
+	}
+	t.Logf("split into %d chunks, total %.2fs", len(chunks), total)
+}
+
+// TestExtractAudioSegmentsSingle verifies that segment_seconds <= 0 falls back
+// to a single full-length extraction (one chunk), preserving legacy behavior.
+func TestExtractAudioSegmentsSingle(t *testing.T) {
+	const videoPath = "../../../testdata/edu-sample.mp4"
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+		t.Skipf("test video not found at %s", videoPath)
+	}
+	chunks, err := extractAudioSegments(context.Background(), videoPath, t.TempDir(), 0)
+	if err != nil {
+		t.Fatalf("extractAudioSegments(0): %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("segment_seconds=0 should yield exactly 1 chunk, got %d", len(chunks))
+	}
+}
