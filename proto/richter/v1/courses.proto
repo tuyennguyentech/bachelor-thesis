@@ -177,6 +177,9 @@ message Lesson {
   // Language of the lesson content: "vi" or "en". Used by TTS and AI grading.
   string language = 11;
   int32 max_attempts = 12;
+  // Teacher-set completion thresholds; 0 means "use default" (0.8 / 0.6).
+  double min_watch_fraction = 13;
+  double min_score_fraction = 14;
 }
 
 message CreateLessonRequest {
@@ -227,6 +230,8 @@ message UpdateLessonRequest {
   // Language of the lesson content: "vi" or "en".
   string language = 5 [(buf.validate.field).string = {in: ["vi", "en", ""]}];
   optional int32 max_attempts = 6 [(buf.validate.field).int32.gte = 0];
+  optional double min_watch_fraction = 7 [(buf.validate.field).double = {gte: 0, lte: 1}];
+  optional double min_score_fraction = 8 [(buf.validate.field).double = {gte: 0, lte: 1}];
 }
 
 message UpdateLessonResponse {

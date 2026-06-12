@@ -21,18 +21,20 @@ func LessonToProto(l gen.Lesson) *richterv1.Lesson {
 		duration = l.DurationSeconds.Int32
 	}
 	return &richterv1.Lesson{
-		Id:              l.ID.String(),
-		ModuleId:        l.ModuleID.String(),
-		Title:           l.Title,
-		Description:     desc,
-		OrderIndex:      l.OrderIndex,
-		VideoStorageKey: videoKey,
-		DurationSeconds: duration,
-		FeedbackMode:    interactions.FeedbackModeToProto(l.FeedbackMode),
-		Language:        l.Language,
-		MaxAttempts:     l.MaxAttempts,
-		CreatedAt:       svc.TimestampToProto(l.CreatedAt),
-		UpdatedAt:       svc.TimestampToProto(l.UpdatedAt),
+		Id:               l.ID.String(),
+		ModuleId:         l.ModuleID.String(),
+		Title:            l.Title,
+		Description:      desc,
+		OrderIndex:       l.OrderIndex,
+		VideoStorageKey:  videoKey,
+		DurationSeconds:  duration,
+		FeedbackMode:     interactions.FeedbackModeToProto(l.FeedbackMode),
+		Language:         l.Language,
+		MaxAttempts:      l.MaxAttempts,
+		MinWatchFraction: float64(l.MinWatchFraction),
+		MinScoreFraction: float64(l.MinScoreFraction),
+		CreatedAt:        svc.TimestampToProto(l.CreatedAt),
+		UpdatedAt:        svc.TimestampToProto(l.UpdatedAt),
 	}
 }
 

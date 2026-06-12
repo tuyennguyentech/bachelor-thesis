@@ -175,14 +175,24 @@ func (s *LessonsSvc) UpdateLesson(
 	if req.MaxAttempts == nil {
 		maxAtt = existing.MaxAttempts
 	}
+	minWatch := existing.MinWatchFraction
+	if req.MinWatchFraction != nil {
+		minWatch = float32(req.GetMinWatchFraction())
+	}
+	minScore := existing.MinScoreFraction
+	if req.MinScoreFraction != nil {
+		minScore = float32(req.GetMinScoreFraction())
+	}
 	l, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
 		return q.UpdateLesson(ctx, gen.UpdateLessonParams{
-			ID:          existing.ID,
-			Title:       req.GetTitle(),
-			Description: descToPgText(req.GetDescription()),
-			OrderIndex:  req.GetOrderIndex(),
-			Language:    lang,
-			MaxAttempts: maxAtt,
+			ID:               existing.ID,
+			Title:            req.GetTitle(),
+			Description:      descToPgText(req.GetDescription()),
+			OrderIndex:       req.GetOrderIndex(),
+			Language:         lang,
+			MaxAttempts:      maxAtt,
+			MinWatchFraction: minWatch,
+			MinScoreFraction: minScore,
 		})
 	})
 	if err != nil {
