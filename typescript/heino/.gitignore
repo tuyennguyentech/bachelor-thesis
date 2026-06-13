@@ -42,3 +42,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Caddy internal CA, extracted at E2E runtime so the test process can VALIDATE the local https cert
+.caddy-local-ca.crt

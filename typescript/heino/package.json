@@ -7,8 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "NODE_TLS_REJECT_UNAUTHORIZED=0 playwright test",
-    "test:e2e:ui": "NODE_TLS_REJECT_UNAUTHORIZED=0 playwright test --ui"
+    "e2e:ca": "podman exec \"$(podman ps -qf name=caddy | head -1)\" cat /data/caddy/pki/authorities/local/root.crt > .caddy-local-ca.crt 2>/dev/null || true",
+    "pretest:e2e": "pnpm e2e:ca",
+    "test:e2e": "NODE_EXTRA_CA_CERTS=.caddy-local-ca.crt playwright test",
+    "pretest:e2e:ui": "pnpm e2e:ca",
+    "test:e2e:ui": "NODE_EXTRA_CA_CERTS=.caddy-local-ca.crt playwright test --ui"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.0",
