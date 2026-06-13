@@ -12,7 +12,7 @@ set -eu
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-dyadia}"
 DEFAULT_CONTAINER="debug"
 
-# Load the repo .env so app-level env (RICHTER_AI_*, WHISPER__*, PIPER_*) reaches
+# Load the repo .env so app-level env (RICHTER_AI_*, RICHTER_STT_*, RICHTER_TTS_*, WHISPER__*) reaches
 # the exec'd process. container-shell only joins the container's NETWORK namespace
 # (nsenter -n) — it does NOT inherit the container's environment — so concurrency
 # config kept in .env must be sourced here for the host go-run process to see it.

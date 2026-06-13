@@ -71,19 +71,22 @@ services:
     command: sh
 
   speaches:
-    # AI_DEVICE selects the compute backend: "cpu" (default) or "cuda".
-    # The image tag must match: latest-cpu for CPU, latest-cuda for GPU.
-    # Set AI_DEVICE in .env and apply compose.gpu.yml for GPU device reservations.
-    image: ghcr.io/speaches-ai/speaches:latest-${AI_DEVICE:-cpu}
+    # The BASE stack is always CPU. GPU is enabled SOLELY by applying the
+    # self-sufficient overlay (compose.gpu.yml), which overrides the image,
+    # inference device, and attaches the CDI device. This avoids the footgun of a
+    # half-switched state (cuda image with no GPU attached). There is intentionally
+    # no AI_DEVICE knob here — see docs/infra/podman-gpu.md.
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
     environment:
-      WHISPER__INFERENCE_DEVICE: ${AI_DEVICE:-cpu}
+      WHISPER__INFERENCE_DEVICE: cpu
       # float16 is efficient on CUDA but unsupported on CPU (falls back to float32).
       # "default" lets CTranslate2 pick the best quantization for the active device.
       WHISPER__COMPUTE_TYPE: default
-      # Number of parallel Whisper inference workers. Keep in sync with the
-      # richter-side cap RICHTER_AI_WHISPER_MAX_CONCURRENT (both from .env).
+      # Number of parallel STT (Whisper) inference workers in speaches. Keep in
+      # sync with the richter-side cap RICHTER_AI_STT_MAX_CONCURRENT (both from .env).
       WHISPER__NUM_WORKERS: ${WHISPER__NUM_WORKERS:-1}
-      PRELOAD_MODELS: '["Systran/faster-whisper-small"]'
+      # STT model preloaded into memory at boot. Single source: RICHTER_STT_MODEL in .env.
+      PRELOAD_MODELS: '["${RICHTER_STT_MODEL:-Systran/faster-whisper-small}"]'
     volumes:
       - hf_hub_cache:/home/ubuntu/.cache/huggingface/hub
     restart: unless-stopped
@@ -94,41 +97,42 @@ services:
       retries: 3
       start_period: 60s
 
-  piper-tts:
-    build:
-      context: infra/piper
-      # GPU build: install onnxruntime-gpu instead of onnxruntime (CPU-only).
-      # Compose.gpu.yml sets USE_CUDA_RUNTIME=1 to activate this build arg.
-      args:
-        USE_CUDA_RUNTIME: "0"
-    environment:
-      PIPER_MODELS_DIR: /models
-      # Set to "1" (via compose.gpu.yml) to enable CUDA inference in piper.
-      PIPER_USE_CUDA: "0"
-      # Max concurrent TTS syntheses. Keep in sync with the richter-side cap
-      # RICHTER_AI_PIPER_MAX_CONCURRENT (both from .env). 0 = unlimited.
-      PIPER_NUM_WORKERS: ${PIPER_NUM_WORKERS:-0}
+  # One-shot init: pulls the Piper TTS models Speaches serves at /v1/audio/speech
+  # so the first synthesis is not blocked on a cold download. Mirrors the Postgres
+  # init pattern (scripts/init/<service>) — Speaches is a third-party image with no
+  # entrypoint hook, so this sidecar runs the script once after Speaches is healthy.
+  speaches-init:
+    image: alpine/curl
+    depends_on:
+      speaches:
+        condition: service_healthy
     volumes:
-      - piper_models:/models
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 300s
+      - ./scripts/init/speaches:/init:ro,Z
+    environment:
+      # Single source for the TTS models: RICHTER_TTS_* in .env (same vars richter reads).
+      SPEACHES_URL: ${RICHTER_TTS_ENDPOINT:-http://speaches:8000}
+      TTS_VI_MODEL: ${RICHTER_TTS_VI_MODEL:-speaches-ai/piper-vi_VN-vais1000-medium}
+      TTS_EN_MODEL: ${RICHTER_TTS_EN_MODEL:-speaches-ai/piper-en_US-lessac-medium}
+    entrypoint: ["sh", "/init/preload-tts.sh"]
+    restart: "no"
 
+  # richter/heino run as HOST processes via container-shell.sh (which sources .env),
+  # so these are network-namespace placeholders. env_file is declared so the env
+  # also applies if/when they run as real containers (prod), keeping one source of truth.
   richter:
     image: busybox:musl
     command: ["sleep", "infinity"]
+    env_file:
+      - .env
 
   heino:
     image: busybox:musl
     command: ["sleep", "infinity"]
+    env_file:
+      - .env
 
 volumes:
   caddy_data:
   caddy_config:
   storage_data:
   hf_hub_cache:
-  piper_models:

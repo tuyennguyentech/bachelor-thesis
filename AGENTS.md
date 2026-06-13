@@ -116,14 +116,14 @@ SeaweedFS via compose service `storage:9000`. Public endpoint differs between de
 ### AI audio key path
 Must be `lessons/<lessonID>/ai-audio/<uuid>.wav` (not `ai-generated/audio/`).
 
-### Piper TTS
-Piper TTS is the primary self-hosted TTS provider; VieNeu was rejected because it requires CUDA.
+### TTS (text-to-speech)
+TTS is served by the **Speaches** container (same service as Whisper STT) via its
+OpenAI-compatible endpoint — the standalone `piper-tts` container was removed.
 
-- Compose service: `piper-tts`
-- Endpoint: `http://piper-tts:5000/tts?text=...&language=vi` -> WAV bytes
-- Health: `http://piper-tts:5000/health`
-- Languages: `vi` (vi-VN-vivos) and `en` (en-US-lessac)
-- Go client: `golang/richter/internal/svc/ai/piper_tts.go`
+- Endpoint: `POST http://speaches:8000/v1/audio/speech` (JSON `{model, input, voice, response_format:"wav"}`) -> WAV bytes
+- Speaches serves Piper voices; per-language model+voice from `[tts]` config: `vi` → `piper-vi_VN-vais1000-medium` (voice `vais1000`), `en` → `piper-en_US-lessac-medium` (voice `lessac`)
+- Go client: `golang/richter/internal/svc/ai/speaches_tts.go` (implements the `TTSSynthesizer` interface)
+- TTS models are pre-pulled at compose up by the `speaches-init` sidecar (`scripts/init/speaches/preload-tts.sh`)
 - Output must be `audio/wav` with `.wav` object keys.
 
 ## Interaction System — Phase Progress
@@ -133,16 +133,16 @@ Piper TTS is the primary self-hosted TTS provider; VieNeu was rejected because i
 | 0 | MCQ refactor + registry pattern + UI redesign + feedback mode | Done |
 | 1 | Fill-blank interaction + AI generation | Done |
 | 2 | Listening + Reading interactions (audio upload, comprehension, dictation) | Done |
-| 3 | Writing interaction (AI-graded essay via Gemini judge, async grading pipeline) | Not started |
-| 4 | Code interaction (Monaco editor + sandboxed execution) | Not started |
+| 3 | Writing interaction (AI-graded essay via Gemini) | **Done** — synchronous `ContextualGrader` (no async pipeline) |
+| 4 | Code interaction (Monaco editor + sandboxed execution) | **Dropped** (user decision) |
 
-Phase 3 introduces async grading pipeline (`LessonAttempt.status='pending_review'`). Phase 4 reuses it.
+Phase 3 shipped SYNCHRONOUS grading via the optional `ContextualGrader` interface (`GradeText`), not an async pending_review pipeline.
 Multi-attempt support: Phase 0 single-attempt; Phases 1+ may differ — scope per interaction type.
 
 ## Current Project State
 
 - Audio reading/listening pipeline is implemented in backend and frontend.
-- Piper TTS replaced VieNeu and is expected to run on CPU-only dev/demo machines.
+- TTS + STT are both served by the Speaches container (CPU by default; GPU via the self-sufficient `compose.gpu.yml` overlay — see docs/infra/podman-gpu.md).
 - Student Learning UI Phase 0 (MCQ refactor, registry, dynamic choice count, and full student UI) is successfully completed and verified on both Backend and Frontend via comprehensive tests (unit/integration and Playwright E2E).
 - Historical active plan: heino auth silent refresh should live in `src/proxy.ts`, with `src/lib/auth.ts` read-only during Server Component rendering. Do not set cookies from Server Components.
 - Historical video-player plan: remove any dummy `<video>` or global `document.querySelector("video")` monkey-patch; expose Vidstack's real video element via a React callback/state path.

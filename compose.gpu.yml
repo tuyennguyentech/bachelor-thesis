@@ -1,55 +1,46 @@
 # GPU override for compose.yml.
 #
-# Usage (requires nvidia-container-toolkit installed on host):
+# Speaches serves BOTH STT and TTS, so it is the only AI service that needs a GPU.
 #
-#   # One-time setup: generate CDI spec for podman
+# Usage (requires nvidia-container-toolkit installed on host — see
+# docs/infra/podman-gpu.md for the exact install + CDI setup):
+#
+#   # One-time setup: generate the CDI spec podman uses for GPU passthrough
 #   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 #
-#   # Set device in .env
-#   AI_DEVICE=cuda
+#   # Start (or restart) the AI service with GPU support (this overlay is the
+#   # ONLY switch — there is no AI_DEVICE knob; the base stack is always CPU)
+#   podman compose -f compose.yml -f compose.gpu.yml up -d speaches
 #
-#   # Start (or restart) AI services with GPU support
-#   podman compose -f compose.yml -f compose.gpu.yml up -d speaches piper-tts
-#
-#   # Verify GPU is used (should show the container process)
+#   # Verify the GPU is used
 #   nvidia-smi
 #
-# To revert to CPU-only (the safe default):
-#   AI_DEVICE=cpu
-#   podman compose up -d speaches piper-tts
+# To revert to CPU-only (the safe default), bring speaches up WITHOUT this overlay:
+#   podman compose up -d speaches
 #
 # Notes:
-#   - speaches uses ghcr.io/speaches-ai/speaches:latest-cuda (pulled automatically).
-#   - piper-tts must be rebuilt: podman compose -f compose.yml -f compose.gpu.yml build piper-tts
-#   - Without nvidia-container-toolkit, the deploy.resources reservation is silently ignored
-#     by podman and the container falls back to CPU.
+#   - speaches uses ghcr.io/speaches-ai/speaches:latest-cuda (this overlay sets it).
+#   - Without nvidia-container-toolkit + CDI + the SELinux boolean, podman cannot
+#     attach the CDI device and the run fails (it does NOT silently fall back).
 #
 name: dyadia
 
 services:
   speaches:
-    # WHISPER__COMPUTE_TYPE=float16: optimal for CUDA; the base compose.yml sets "default"
-    # which auto-selects float32 on CPU. Override here for GPU efficiency.
+    # This overlay is SELF-SUFFICIENT: applying it is the ONLY switch needed to go
+    # GPU — it overrides the image tag and inference device, so AI_DEVICE in .env
+    # does NOT need to change.
+    #   CPU:  podman compose up -d
+    #   GPU:  podman compose -f compose.yml -f compose.gpu.yml up -d
+    image: ghcr.io/speaches-ai/speaches:latest-cuda
     environment:
+      WHISPER__INFERENCE_DEVICE: cuda
+      # float16: optimal for CUDA (base sets "default" → float32 on CPU).
       WHISPER__COMPUTE_TYPE: float16
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  piper-tts:
-    build:
-      args:
-        USE_CUDA_RUNTIME: "1"
-    environment:
-      PIPER_USE_CUDA: "1"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # CDI device — the ONLY GPU mechanism podman compose honours. It maps to
+    # `--device nvidia.com/gpu=all`. The Docker-Swarm `deploy.resources.reservations.devices`
+    # (driver: nvidia) form is silently IGNORED by podman compose (containers/podman#19338),
+    # so do NOT use it here. Requires nvidia-container-toolkit + CDI spec + the SELinux
+    # boolean — see docs/infra/podman-gpu.md.
+    devices:
+      - nvidia.com/gpu=all
