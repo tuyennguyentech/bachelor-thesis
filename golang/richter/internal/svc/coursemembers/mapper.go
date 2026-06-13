@@ -69,11 +69,12 @@ func JoinRequestStatusToProto(status gen.JoinRequestStatus) richterv1.JoinReques
 
 func JoinRequestToProto(r gen.CourseJoinRequest) *richterv1.CourseJoinRequest {
 	return &richterv1.CourseJoinRequest{
-		CourseId:  r.CourseID.String(),
-		UserId:    r.UserID.String(),
-		Status:    JoinRequestStatusToProto(r.Status),
-		CreatedAt: svc.TimestampToProto(r.CreatedAt),
-		UpdatedAt: svc.TimestampToProto(r.UpdatedAt),
+		CourseId:      r.CourseID.String(),
+		UserId:        r.UserID.String(),
+		Status:        JoinRequestStatusToProto(r.Status),
+		CreatedAt:     svc.TimestampToProto(r.CreatedAt),
+		UpdatedAt:     svc.TimestampToProto(r.UpdatedAt),
+		RequestedRole: CourseRoleToProto(r.RequestedRole),
 	}
 }
 
@@ -84,9 +85,9 @@ func JoinRequestRowToProto(r gen.ListPendingJoinRequestsRow) *richterv1.CourseJo
 		Status:        JoinRequestStatusToProto(r.Status),
 		CreatedAt:     svc.TimestampToProto(r.CreatedAt),
 		UpdatedAt:     svc.TimestampToProto(r.UpdatedAt),
+		RequestedRole: CourseRoleToProto(r.RequestedRole),
 		UserEmail:     r.UserEmail,
 		UserFirstName: r.UserFirstName,
 		UserLastName:  r.UserLastName,
 	}
 }
-

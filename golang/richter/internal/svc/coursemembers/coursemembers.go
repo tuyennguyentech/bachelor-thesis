@@ -8,6 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/validate"
+	jwtv1 "example.com/buf/gen/richter/jwt/v1"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/buf/gen/richter/v1/richterv1connect"
 	"example.com/richter/internal"
@@ -199,6 +200,104 @@ func (s *CourseMembersSvc) ListUserCourses(
 	return &richterv1.ListUserCoursesResponse{Memberships: out}, nil
 }
 
+// EnrollSelf materialises the caller's OWN course_members row. It is permitted
+// only for callers who already have BYPASS access to the course (system admin,
+// course owner, or org owner/admin) — i.e. they can already reach the content,
+// this just makes the membership explicit so they appear in the member list.
+// Idempotent: if a row already exists it is returned unchanged. Plain course
+// members and other org roles are denied (they must use the join-request flow).
+func (s *CourseMembersSvc) EnrollSelf(
+	ctx context.Context,
+	req *richterv1.EnrollSelfRequest,
+) (*richterv1.EnrollSelfResponse, error) {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+
+	// Only bypass callers may self-enrol. requireCourseBypass returns NotFound
+	// for a missing course and PermissionDenied for non-bypass callers.
+	if err := s.requireCourseBypass(ctx, claims, courseID); err != nil {
+		return nil, err
+	}
+
+	// Role to enrol as. Unspecified defaults to TEACHER (manager), since only
+	// bypass callers reach here.
+	role := gen.CourseRoleTeacher
+	if req.GetRole() != richterv1.CourseRole_COURSE_ROLE_UNSPECIFIED {
+		role, err = CourseRoleToSQL(req.GetRole())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Idempotent + atomic: EnrollCourseMemberIfAbsent inserts a new row or, on
+	// conflict, returns the EXISTING row unchanged (no role mutation). Doing the
+	// check + insert in one statement closes the TOCTOU window a separate
+	// GetCourseMember pre-check would leave — concurrent self-enrols can never
+	// silently promote/demote.
+	member, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseMember, error) {
+		return q.EnrollCourseMemberIfAbsent(ctx, gen.EnrollCourseMemberIfAbsentParams{
+			CourseID: courseID,
+			UserID:   userID,
+			Role:     role,
+		})
+	})
+	if err != nil {
+		err = svc.ConnectDBError(err)
+		s.log.ErrorContext(ctx, "course_members service failed", svc.LogAttrs("EnrollSelf", err)...)
+		return nil, err
+	}
+	return &richterv1.EnrollSelfResponse{Member: CourseMemberToProto(member)}, nil
+}
+
+// GetMyCourseMembership returns the caller's OWN course_members row (presence +
+// role). Any authenticated user may call it — it only ever exposes the caller's
+// own membership (keyed on the token subject) — so the UI can decide canManage
+// by membership without listing all members.
+func (s *CourseMembersSvc) GetMyCourseMembership(
+	ctx context.Context,
+	req *richterv1.GetMyCourseMembershipRequest,
+) (*richterv1.GetMyCourseMembershipResponse, error) {
+	claims, err := s.authz.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	courseID, err := svc.ParseUUID(req.GetCourseId())
+	if err != nil {
+		return nil, err
+	}
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+
+	member, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseMember, error) {
+		return q.GetCourseMember(ctx, gen.GetCourseMemberParams{CourseID: courseID, UserID: userID})
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &richterv1.GetMyCourseMembershipResponse{
+				IsMember: false,
+				Role:     richterv1.CourseRole_COURSE_ROLE_UNSPECIFIED,
+			}, nil
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	return &richterv1.GetMyCourseMembershipResponse{
+		IsMember: true,
+		Role:     CourseRoleToProto(member.Role),
+	}, nil
+}
+
 func (s *CourseMembersSvc) CreateJoinRequest(
 	ctx context.Context,
 	req *richterv1.CreateJoinRequestRequest,
@@ -240,11 +339,24 @@ func (s *CourseMembersSvc) CreateJoinRequest(
 		return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("already a member of this course"))
 	}
 
+	// Requested role. Unspecified defaults to STUDENT (request to learn) so the
+	// existing student flow keeps working. An org member may request TEACHER
+	// (request to manage); the requested role is honoured only on approval by a
+	// course manager.
+	requestedRole := gen.CourseRoleStudent
+	if req.GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_UNSPECIFIED {
+		requestedRole, err = CourseRoleToSQL(req.GetRequestedRole())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Create or update the join request in database
 	request, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseJoinRequest, error) {
 		return q.CreateJoinRequest(ctx, gen.CreateJoinRequestParams{
-			CourseID: courseID,
-			UserID:   userID,
+			CourseID:      courseID,
+			UserID:        userID,
+			RequestedRole: requestedRole,
 		})
 	})
 	if err != nil {
@@ -282,8 +394,10 @@ func (s *CourseMembersSvc) ReviewJoinRequest(
 	}
 
 	err = db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, tx pgx.Tx) error {
-		// Update status
-		_, err := q.ReviewJoinRequest(ctx, gen.ReviewJoinRequestParams{
+		// Update status. The returned row carries the requested role, so the
+		// course_members row is created with the role the requester asked for
+		// (STUDENT = learner / TEACHER = manager).
+		reviewed, err := q.ReviewJoinRequest(ctx, gen.ReviewJoinRequestParams{
 			CourseID: courseID,
 			UserID:   userID,
 			Status:   status,
@@ -293,11 +407,11 @@ func (s *CourseMembersSvc) ReviewJoinRequest(
 		}
 
 		if req.GetApprove() {
-			// Add to course_members
+			// Add to course_members with the requested role.
 			_, err = q.AddCourseMember(ctx, gen.AddCourseMemberParams{
 				CourseID: courseID,
 				UserID:   userID,
-				Role:     gen.CourseRoleStudent,
+				Role:     reviewed.RequestedRole,
 			})
 			if err != nil {
 				return err
@@ -438,4 +552,47 @@ func (s *CourseMembersSvc) requireCourseManager(ctx context.Context, courseID pg
 		return nil
 	}
 	return connect.NewError(connect.CodePermissionDenied, errors.New("insufficient permissions to manage course members"))
+}
+
+// requireCourseBypass returns nil if the caller has BYPASS access to the course
+// (system admin, course owner, or org owner/admin) — the same set that passes
+// RequireCourseMember without an explicit course_members row. Unlike
+// requireCourseManager it deliberately does NOT honour a course-TEACHER row:
+// EnrollSelf is for callers who don't yet have a membership row, so a plain
+// course member must not use it to mutate their own role. Returns NotFound for
+// a missing course and PermissionDenied otherwise.
+func (s *CourseMembersSvc) requireCourseBypass(ctx context.Context, claims *jwtv1.JWTClaims, courseID pgtype.UUID) error {
+	if claims.GetRole() == richterv1.UserRole_USER_ROLE_ADMIN {
+		return nil
+	}
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+	info, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.GetCourseAccessInfoByCourseIDRow, error) {
+		return q.GetCourseAccessInfoByCourseID(ctx, courseID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return connect.NewError(connect.CodeNotFound, errors.New("course not found"))
+		}
+		return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	// Course owner.
+	if info.OwnerID == userID {
+		return nil
+	}
+	// Org owner or admin.
+	orgMember, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+		return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: info.OrganizationID,
+			UserID:         userID,
+		})
+	})
+	if err == nil && orgMember.Status == gen.MemberStatusActive {
+		if orgMember.Role == gen.OrganizationRoleOwner || orgMember.Role == gen.OrganizationRoleAdmin {
+			return nil
+		}
+	}
+	return connect.NewError(connect.CodePermissionDenied, errors.New("not allowed to self-enrol in this course"))
 }

@@ -16,6 +16,7 @@ import (
 	"example.com/richter/internal/svc"
 	"example.com/richter/log"
 	"example.com/sql/gen"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
@@ -97,13 +98,28 @@ func (s *CoursesSvc) CreateCourse(
 		return nil, err
 	}
 
-	course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
-		return q.CreateCourse(ctx, gen.CreateCourseParams{
+	// Create the course and auto-enrol the creator as a course manager
+	// (course_members role TEACHER) in one transaction, so the creator
+	// immediately appears in the member list and can manage membership without a
+	// separate self-enrol step.
+	course, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.Course, error) {
+		c, err := q.CreateCourse(ctx, gen.CreateCourseParams{
 			OrganizationID: orgID,
 			OwnerID:        ownerID,
 			Title:          req.GetTitle(),
 			Description:    descriptionToPgText(req.GetDescription()),
 		})
+		if err != nil {
+			return gen.Course{}, err
+		}
+		if _, err := q.AddCourseMember(ctx, gen.AddCourseMemberParams{
+			CourseID: c.ID,
+			UserID:   ownerID,
+			Role:     gen.CourseRoleTeacher,
+		}); err != nil {
+			return gen.Course{}, err
+		}
+		return c, nil
 	})
 	if err != nil {
 		err = svc.ConnectDBError(err)
@@ -151,7 +167,6 @@ func (s *CoursesSvc) GetCourseById(
 
 	return &richterv1.GetCourseByIdResponse{Course: courseProto}, nil
 }
-
 
 func (s *CoursesSvc) ListCourses(
 	ctx context.Context,

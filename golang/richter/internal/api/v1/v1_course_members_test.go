@@ -246,6 +246,9 @@ func TestCourseMemberLifecycle(t *testing.T) {
 	})
 
 	t.Run("ListCourseMembers_Pagination", func(t *testing.T) {
+		// The course now has two members: memberID (added above) plus the course
+		// creator, who is auto-enrolled as a manager at CreateCourse time. With
+		// limit=1, page 1 and page 2 each return one distinct member.
 		res, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
 			CourseId: courseID,
 			Limit:    1,
@@ -266,8 +269,25 @@ func TestCourseMemberLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list course members page 2: %v", err)
 		}
-		if len(res2.Members) != 0 {
-			t.Errorf("expected 0 members (past end), got %d", len(res2.Members))
+		if len(res2.Members) != 1 {
+			t.Errorf("expected 1 member (page 2: the auto-enrolled creator), got %d", len(res2.Members))
+		}
+		if len(res.Members) == 1 && len(res2.Members) == 1 &&
+			res.Members[0].UserId == res2.Members[0].UserId {
+			t.Errorf("pagination returned the same member on both pages")
+		}
+
+		// Past the end (offset 2) must now be empty.
+		res3, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+			CourseId: courseID,
+			Limit:    1,
+			Offset:   2,
+		})
+		if err != nil {
+			t.Fatalf("list course members page 3: %v", err)
+		}
+		if len(res3.Members) != 0 {
+			t.Errorf("expected 0 members (past end), got %d", len(res3.Members))
 		}
 	})
 
@@ -1280,4 +1300,390 @@ func TestCourseJoinRequestsAuthz(t *testing.T) {
 			t.Errorf("teacher should have no join request, got status %v", teacherStatus.GetRequest().GetStatus())
 		}
 	})
+}
+
+// TestCreateCourseAutoEnrollsManager verifies that creating a course auto-enrols
+// the creator as a course manager (course_members role TEACHER), so the creator
+// immediately appears in the member list and holds management rights.
+func TestCreateCourseAutoEnrollsManager(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	// The course owner is an org OWNER (createCMTestOrg uses them as createdBy).
+	// They create the course with their OWN token so the auto-enrolled creator
+	// (derived from claims.sub) is ownerID, not the admin client.
+	ownerEmail, ownerPass, ownerID := createActiveUser(t, c.users)
+	orgID := createCMTestOrg(t, c, ownerID)
+
+	ownerToken := getUserToken(t, url, ownerEmail, ownerPass)
+	ownerCourses := richterv1connect.NewCourseServiceClient(httpClientWithToken(ownerToken), url)
+	createRes, err := ownerCourses.CreateCourse(ctx, &richterv1.CreateCourseRequest{
+		OrganizationId: orgID, OwnerId: ownerID, Title: gofakeit.JobTitle(),
+	})
+	if err != nil {
+		t.Fatalf("owner CreateCourse: %v", err)
+	}
+	courseID := createRes.Course.Id
+
+	// The creator must be listed as a TEACHER (manager) course member.
+	res, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+		CourseId: courseID, Limit: 50, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListCourseMembers: %v", err)
+	}
+	var found *richterv1.CourseMember
+	for _, m := range res.Members {
+		if m.UserId == ownerID {
+			found = m
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("course creator %s not auto-enrolled as course member", ownerID)
+	}
+	if found.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+		t.Errorf("creator role: want TEACHER (manager), got %v", found.Role)
+	}
+
+	// The creator's own ListUserCourses must include this course too.
+	ownerCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(ownerToken), url)
+	mine, err := ownerCM.ListUserCourses(ctx, &richterv1.ListUserCoursesRequest{
+		UserId: ownerID, Limit: 50, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListUserCourses (creator): %v", err)
+	}
+	seen := false
+	for _, m := range mine.Memberships {
+		if m.CourseId == courseID {
+			seen = true
+			if m.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+				t.Errorf("creator membership role: want TEACHER, got %v", m.Role)
+			}
+		}
+	}
+	if !seen {
+		t.Errorf("course %s not in creator's own memberships", courseID)
+	}
+}
+
+// TestEnrollSelf verifies the EnrollSelf RPC:
+//   - An org owner/admin (bypass caller) not yet a course member can self-enrol
+//     and gets a TEACHER (manager) row by default; the call is idempotent.
+//   - A non-bypass user (plain org student) is denied.
+//   - A non-existent course returns NotFound.
+func TestEnrollSelf(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	// ownerID is the org OWNER and course owner.
+	_, _, ownerID := createActiveUser(t, c.users)
+	// orgAdmin is an org ADMIN — a bypass caller who is NOT the course owner.
+	orgAdminEmail, orgAdminPass, orgAdminID := createActiveUser(t, c.users)
+	// orgStudent is a plain org member — NOT a bypass caller.
+	orgStudentEmail, orgStudentPass, orgStudentID := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, orgAdminID, richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN)
+	addOrgMember(t, c, orgID, orgStudentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	orgAdminToken := getUserToken(t, url, orgAdminEmail, orgAdminPass)
+	orgStudentToken := getUserToken(t, url, orgStudentEmail, orgStudentPass)
+	orgAdminCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(orgAdminToken), url)
+	orgStudentCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(orgStudentToken), url)
+
+	t.Run("OrgAdmin_DefaultsToManager", func(t *testing.T) {
+		// Org admin is a bypass caller but has no explicit membership row yet.
+		res, err := orgAdminCM.EnrollSelf(ctx, &richterv1.EnrollSelfRequest{
+			CourseId: courseID,
+		})
+		if err != nil {
+			t.Fatalf("EnrollSelf (org admin): %v", err)
+		}
+		if res.Member.UserId != orgAdminID {
+			t.Errorf("member user_id: want %s, got %s", orgAdminID, res.Member.UserId)
+		}
+		if res.Member.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("self-enrol role: want TEACHER (manager default), got %v", res.Member.Role)
+		}
+	})
+
+	t.Run("Idempotent", func(t *testing.T) {
+		// A second call is a no-op and returns the existing row.
+		res, err := orgAdminCM.EnrollSelf(ctx, &richterv1.EnrollSelfRequest{
+			CourseId: courseID,
+		})
+		if err != nil {
+			t.Fatalf("EnrollSelf idempotent: %v", err)
+		}
+		if res.Member.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("idempotent self-enrol role: want TEACHER, got %v", res.Member.Role)
+		}
+	})
+
+	t.Run("ExistingMember_RoleNotMutated", func(t *testing.T) {
+		// The org admin is already a TEACHER member (from the first subtest).
+		// A self-enrol that explicitly asks for STUDENT must NOT downgrade an
+		// existing row — EnrollSelf preserves the stored role.
+		res, err := orgAdminCM.EnrollSelf(ctx, &richterv1.EnrollSelfRequest{
+			CourseId: courseID,
+			Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		})
+		if err != nil {
+			t.Fatalf("EnrollSelf (existing member, role=STUDENT): %v", err)
+		}
+		if res.Member.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("existing member role must be preserved: want TEACHER, got %v", res.Member.Role)
+		}
+	})
+
+	t.Run("NonBypassUser_PermissionDenied", func(t *testing.T) {
+		// A plain org student has no bypass access and must not self-enrol.
+		_, err := orgStudentCM.EnrollSelf(ctx, &richterv1.EnrollSelfRequest{
+			CourseId: courseID,
+		})
+		assertCode(t, err, connect.CodePermissionDenied)
+	})
+
+	t.Run("NonExistentCourse_NotFound", func(t *testing.T) {
+		_, err := orgAdminCM.EnrollSelf(ctx, &richterv1.EnrollSelfRequest{
+			CourseId: gofakeit.UUID(),
+		})
+		assertCode(t, err, connect.CodeNotFound)
+	})
+}
+
+// TestGetMyCourseMembership verifies the self-membership probe the UI uses to
+// decide canManage by membership and first-entry vs re-entry. It returns the
+// CALLER's own row only, for any authenticated user.
+func TestGetMyCourseMembership(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	// teacherMember and studentMember get explicit course rows; stranger gets none.
+	teacherEmail, teacherPass, teacherID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	strangerEmail, strangerPass, strangerID := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, teacherID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	addOrgMember(t, c, orgID, strangerID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	// Materialise explicit rows (owner uses the manager client).
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: teacherID, Role: richterv1.CourseRole_COURSE_ROLE_TEACHER,
+	}); err != nil {
+		t.Fatalf("AddCourseMember(teacher): %v", err)
+	}
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: studentID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("AddCourseMember(student): %v", err)
+	}
+
+	cmFor := func(token string) richterv1connect.CourseMemberServiceClient {
+		return richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(token), url)
+	}
+
+	t.Run("ManagerMember_ReturnsTeacher", func(t *testing.T) {
+		res, err := cmFor(getUserToken(t, url, teacherEmail, teacherPass)).GetMyCourseMembership(ctx,
+			&richterv1.GetMyCourseMembershipRequest{CourseId: courseID})
+		if err != nil {
+			t.Fatalf("GetMyCourseMembership(teacher): %v", err)
+		}
+		if !res.GetIsMember() || res.GetRole() != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("want is_member=true role=TEACHER, got is_member=%v role=%v", res.GetIsMember(), res.GetRole())
+		}
+	})
+
+	t.Run("LearnerMember_ReturnsStudent", func(t *testing.T) {
+		res, err := cmFor(getUserToken(t, url, studentEmail, studentPass)).GetMyCourseMembership(ctx,
+			&richterv1.GetMyCourseMembershipRequest{CourseId: courseID})
+		if err != nil {
+			t.Fatalf("GetMyCourseMembership(student): %v", err)
+		}
+		if !res.GetIsMember() || res.GetRole() != richterv1.CourseRole_COURSE_ROLE_STUDENT {
+			t.Errorf("want is_member=true role=STUDENT, got is_member=%v role=%v", res.GetIsMember(), res.GetRole())
+		}
+	})
+
+	t.Run("NonMember_ReturnsNotMember", func(t *testing.T) {
+		res, err := cmFor(getUserToken(t, url, strangerEmail, strangerPass)).GetMyCourseMembership(ctx,
+			&richterv1.GetMyCourseMembershipRequest{CourseId: courseID})
+		if err != nil {
+			t.Fatalf("GetMyCourseMembership(stranger): %v", err)
+		}
+		if res.GetIsMember() || res.GetRole() != richterv1.CourseRole_COURSE_ROLE_UNSPECIFIED {
+			t.Errorf("want is_member=false role=UNSPECIFIED, got is_member=%v role=%v", res.GetIsMember(), res.GetRole())
+		}
+	})
+}
+
+// TestCourseJoinRequestRequestToManage verifies the request-to-MANAGE flow:
+// an org teacher (not yet in the course) requests to join as a manager
+// (CourseRole TEACHER). On approval by a course manager, the materialised
+// course_members row carries the requested TEACHER role.
+func TestCourseJoinRequestRequestToManage(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	// orgTeacher is an org TEACHER — NOT a course bypass, so they must request to join.
+	orgTeacherEmail, orgTeacherPass, orgTeacherID := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, orgTeacherID, richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER)
+
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	orgTeacherToken := getUserToken(t, url, orgTeacherEmail, orgTeacherPass)
+	orgTeacherCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(orgTeacherToken), url)
+
+	// Request to join as a MANAGER (TEACHER role).
+	createRes, err := orgTeacherCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+		CourseId:      courseID,
+		RequestedRole: richterv1.CourseRole_COURSE_ROLE_TEACHER,
+	})
+	if err != nil {
+		t.Fatalf("CreateJoinRequest (request-to-manage): %v", err)
+	}
+	if createRes.GetRequest().GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+		t.Errorf("requested_role: want TEACHER, got %v", createRes.GetRequest().GetRequestedRole())
+	}
+
+	// The pending list (as the course owner / manager) must echo the requested role.
+	listRes, err := c.courseMembers.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{
+		CourseId: courseID, Limit: 10, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListPendingJoinRequests: %v", err)
+	}
+	var pending *richterv1.CourseJoinRequest
+	for _, r := range listRes.GetRequests() {
+		if r.UserId == orgTeacherID {
+			pending = r
+		}
+	}
+	if pending == nil {
+		t.Fatalf("request from %s not in pending list", orgTeacherID)
+	}
+	if pending.GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+		t.Errorf("pending requested_role: want TEACHER, got %v", pending.GetRequestedRole())
+	}
+
+	// Approve via the course owner (a course manager).
+	if _, err := c.courseMembers.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+		CourseId: courseID, UserId: orgTeacherID, Approve: true,
+	}); err != nil {
+		t.Fatalf("ReviewJoinRequest approve: %v", err)
+	}
+
+	// The materialised course_members row must be TEACHER (manager), not STUDENT.
+	membersRes, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+		CourseId: courseID, Limit: 50, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListCourseMembers: %v", err)
+	}
+	var enrolled *richterv1.CourseMember
+	for _, m := range membersRes.Members {
+		if m.UserId == orgTeacherID {
+			enrolled = m
+		}
+	}
+	if enrolled == nil {
+		t.Fatalf("approved manager %s not enrolled as course member", orgTeacherID)
+	}
+	if enrolled.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+		t.Errorf("approved-as-manager role: want TEACHER, got %v", enrolled.Role)
+	}
+
+	// A request with no explicit role still defaults to STUDENT on approval.
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+	studentCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(studentToken), url)
+	if _, err := studentCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{
+		CourseId: courseID,
+	}); err != nil {
+		t.Fatalf("student CreateJoinRequest (default role): %v", err)
+	}
+	if _, err := c.courseMembers.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+		CourseId: courseID, UserId: studentID, Approve: true,
+	}); err != nil {
+		t.Fatalf("ReviewJoinRequest approve student: %v", err)
+	}
+	membersRes2, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+		CourseId: courseID, Limit: 50, Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListCourseMembers (after student approve): %v", err)
+	}
+	for _, m := range membersRes2.Members {
+		if m.UserId == studentID && m.Role != richterv1.CourseRole_COURSE_ROLE_STUDENT {
+			t.Errorf("default-role approval: want STUDENT, got %v", m.Role)
+		}
+	}
+}
+
+// TestCourseManagerCanSubmitAttempt verifies that a course manager
+// (course_members role TEACHER) can SubmitAttempt — i.e. a manager can learn the
+// lesson for real. No authz change is needed for this: SubmitAttempt gates on
+// RequireCourseMemberByLesson, which any explicit course member passes.
+func TestCourseManagerCanSubmitAttempt(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	// The "manager" here is enrolled as a course TEACHER but is a plain org
+	// student, so the ONLY thing granting access is the course_members TEACHER
+	// row — proving managers can submit attempts.
+	mgrEmail, mgrPass, mgrID := createActiveUser(t, c.users)
+
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, mgrID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+	moduleID := createCMTestModule(t, c, courseID)
+	lessonID := createCMTestLesson(t, c, moduleID)
+
+	// Enrol the manager as a course TEACHER.
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID, UserId: mgrID, Role: richterv1.CourseRole_COURSE_ROLE_TEACHER,
+	}); err != nil {
+		t.Fatalf("setup: enrol manager as TEACHER: %v", err)
+	}
+
+	// Insert MCQ interactions (shared helper from the interactions test file).
+	ints := insertTestInteractions(t, lessonID, 2)
+	correct := correctAnswers(ints)
+
+	mgrToken := getUserToken(t, url, mgrEmail, mgrPass)
+	mgrIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(mgrToken), url)
+
+	res, err := mgrIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+		LessonId:  lessonID,
+		Responses: buildResponses(ints, correct),
+	})
+	if err != nil {
+		t.Fatalf("manager SubmitAttempt: %v", err)
+	}
+	if res.Attempt == nil {
+		t.Fatal("expected attempt in response for manager submission")
+	}
+	if res.Attempt.TotalScore != float32(len(ints)) {
+		t.Errorf("manager total_score: want %d (all correct), got %v", len(ints), res.Attempt.TotalScore)
+	}
 }

@@ -1,8 +1,9 @@
 -- name: CreateJoinRequest :one
-INSERT INTO course_join_requests (course_id, user_id, status)
-VALUES ($1, $2, 'pending')
+INSERT INTO course_join_requests (course_id, user_id, status, requested_role)
+VALUES ($1, $2, 'pending', $3)
 ON CONFLICT (course_id, user_id) DO UPDATE
   SET status = 'pending',
+      requested_role = EXCLUDED.requested_role,
       updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 RETURNING *;
 

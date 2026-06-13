@@ -85,10 +85,17 @@ message CourseJoinRequest {
   string user_email = 6;
   string user_first_name = 7;
   string user_last_name = 8;
+  // Requested course role. STUDENT = request to learn (Thành viên); TEACHER =
+  // request to manage (Quản lý). On approval the materialised course_members
+  // row uses this role.
+  CourseRole requested_role = 9 [(buf.validate.field).enum.defined_only = true];
 }
 
 message CreateJoinRequestRequest {
   string course_id = 1 [(buf.validate.field).string.uuid = true];
+  // Requested course role. Defaults (unspecified) to STUDENT for backwards
+  // compatibility. An org teacher not yet in the course may request TEACHER.
+  CourseRole requested_role = 2 [(buf.validate.field).enum.defined_only = true];
 }
 
 message CreateJoinRequestResponse {
@@ -124,11 +131,44 @@ message GetMyJoinRequestStatusResponse {
   optional CourseJoinRequest request = 1;
 }
 
+// EnrollSelf materialises the caller's own course_members row. It is only
+// permitted when the caller already has bypass access to the course (org
+// owner/admin or course owner). This turns an implicit bypass into an explicit
+// membership row so the caller appears in the member list ("Tham gia" → first
+// entry). Idempotent: a no-op if the row already exists.
+message EnrollSelfRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+  // Role to enrol as. Unspecified defaults to TEACHER (manager) since only
+  // bypass callers may self-enrol.
+  CourseRole role = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
+message EnrollSelfResponse {
+  CourseMember member = 1;
+}
+
+message GetMyCourseMembershipRequest {
+  string course_id = 1 [(buf.validate.field).string.uuid = true];
+}
+message GetMyCourseMembershipResponse {
+  // is_member is true when the caller has an explicit course_members row.
+  bool is_member = 1;
+  // role is the caller's course role; UNSPECIFIED when not a member.
+  CourseRole role = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
 service CourseMemberService {
   rpc AddCourseMember(AddCourseMemberRequest) returns (AddCourseMemberResponse) {}
   rpc RemoveCourseMember(RemoveCourseMemberRequest) returns (RemoveCourseMemberResponse) {}
   rpc ListCourseMembers(ListCourseMembersRequest) returns (ListCourseMembersResponse) {}
   rpc ListUserCourses(ListUserCoursesRequest) returns (ListUserCoursesResponse) {}
+  rpc EnrollSelf(EnrollSelfRequest) returns (EnrollSelfResponse) {}
+  // GetMyCourseMembership returns the caller's OWN course_members row (presence
+  // + role) for a course. Available to any authenticated user — it only ever
+  // exposes the caller's own membership — so the UI can decide canManage by
+  // membership and distinguish first-entry from re-entry without listing all
+  // members (which non-managers are not allowed to do).
+  rpc GetMyCourseMembership(GetMyCourseMembershipRequest) returns (GetMyCourseMembershipResponse) {}
 
   // Join Requests
   rpc CreateJoinRequest(CreateJoinRequestRequest) returns (CreateJoinRequestResponse) {}

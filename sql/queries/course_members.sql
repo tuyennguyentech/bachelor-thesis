@@ -6,6 +6,18 @@ ON CONFLICT (course_id, user_id) DO UPDATE
       updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 RETURNING *;
 
+-- name: EnrollCourseMemberIfAbsent :one
+-- Self-enrol insert that NEVER mutates an existing row (unlike AddCourseMember's
+-- DO UPDATE SET role = EXCLUDED.role). On conflict it does a no-op update
+-- (role = the existing row's own role) purely so RETURNING yields the existing
+-- row in the same statement. This makes EnrollSelf atomic: concurrent calls
+-- cannot silently promote/demote, and a pre-existing member's role is preserved.
+INSERT INTO course_members (course_id, user_id, role)
+VALUES ($1, $2, $3)
+ON CONFLICT (course_id, user_id) DO UPDATE
+  SET role = course_members.role
+RETURNING *;
+
 -- name: RemoveCourseMember :execrows
 DELETE FROM course_members
 WHERE course_id = $1 AND user_id = $2;
