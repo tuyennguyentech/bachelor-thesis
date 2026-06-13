@@ -44,7 +44,7 @@
   },
   {
     "org_slug": "open-learn",
-    "owner_email": "carol@dyadia.local",
+    "owner_email": "son@dyadia.local",
     "title": "Machine Learning từ đầu",
     "description": "Xây dựng nền tảng vững chắc về Machine Learning: từ toán học đến triển khai mô hình thực tế.",
     "status": "published",
@@ -179,7 +179,7 @@
   },
   {
     "org_slug": "open-learn",
-    "owner_email": "carol@dyadia.local",
+    "owner_email": "henry@dyadia.local",
     "title": "Git và Version Control",
     "description": "Thành thạo Git từ cơ bản đến nâng cao: branching strategy, rebase, conflict resolution và workflow nhóm.",
     "status": "draft",

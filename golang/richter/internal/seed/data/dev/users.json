@@ -34,5 +34,16 @@
   { "email": "nam@dyadia.local",    "password": "Password123!", "first_name": "Nam",    "last_name": "Bùi",    "role": "normal", "status": "active" },
   { "email": "yen@dyadia.local",    "password": "Password123!", "first_name": "Yến",    "last_name": "Ngô",    "role": "normal", "status": "pending" },
   { "email": "tung@dyadia.local",   "password": "Password123!", "first_name": "Tùng",   "last_name": "Cao",    "role": "normal", "status": "active" },
-  { "email": "mai@dyadia.local",    "password": "Password123!", "first_name": "Mai",    "last_name": "Lý",     "role": "normal", "status": "active" }
+  { "email": "mai@dyadia.local",    "password": "Password123!", "first_name": "Mai",    "last_name": "Lý",     "role": "normal", "status": "active" },
+
+  { "email": "son@dyadia.local",    "password": "Password123!", "first_name": "Sơn",    "last_name": "Phạm",   "role": "normal", "status": "active" },
+  { "email": "huong@dyadia.local",  "password": "Password123!", "first_name": "Hương",  "last_name": "Trần",   "role": "normal", "status": "active" },
+  { "email": "khanh@dyadia.local",  "password": "Password123!", "first_name": "Khánh",  "last_name": "Nguyễn", "role": "normal", "status": "active" },
+  { "email": "vy@dyadia.local",     "password": "Password123!", "first_name": "Vy",     "last_name": "Đỗ",     "role": "normal", "status": "active" },
+  { "email": "trang@dyadia.local",  "password": "Password123!", "first_name": "Trang",  "last_name": "Hồ",     "role": "normal", "status": "active" },
+  { "email": "dat@dyadia.local",    "password": "Password123!", "first_name": "Đạt",    "last_name": "Vương",  "role": "normal", "status": "active" },
+  { "email": "ngan@dyadia.local",   "password": "Password123!", "first_name": "Ngân",   "last_name": "Phùng",  "role": "normal", "status": "active" },
+  { "email": "bao@dyadia.local",    "password": "Password123!", "first_name": "Bảo",    "last_name": "Lưu",    "role": "normal", "status": "active" },
+  { "email": "chi@dyadia.local",    "password": "Password123!", "first_name": "Chi",    "last_name": "Tạ",     "role": "normal", "status": "active" },
+  { "email": "vinh@dyadia.local",   "password": "Password123!", "first_name": "Vinh",   "last_name": "Hà",     "role": "normal", "status": "active" }
 ]

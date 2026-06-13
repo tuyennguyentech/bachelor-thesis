@@ -300,7 +300,7 @@
   },
   {
     "org_slug": "hust-cs",
-    "owner_email": "carol@dyadia.local",
+    "owner_email": "frank@dyadia.local",
     "title": "Lập trình hướng đối tượng với Java",
     "description": "Nắm vững các nguyên lý OOP và áp dụng vào phát triển ứng dụng thực tế với ngôn ngữ Java.",
     "status": "published",
@@ -512,7 +512,7 @@
   },
   {
     "org_slug": "hust-cs",
-    "owner_email": "carol@dyadia.local",
+    "owner_email": "khanh@dyadia.local",
     "title": "Mạng máy tính",
     "description": "Nghiên cứu kiến trúc, giao thức và bảo mật trong mạng máy tính hiện đại.",
     "status": "draft",

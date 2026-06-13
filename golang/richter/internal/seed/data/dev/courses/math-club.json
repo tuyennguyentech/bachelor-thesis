@@ -1,7 +1,7 @@
 [
   {
     "org_slug": "math-club",
-    "owner_email": "eve@dyadia.local",
+    "owner_email": "alice@dyadia.local",
     "title": "Giải tích 1",
     "description": "Nền tảng giải tích: giới hạn, đạo hàm, tích phân và ứng dụng trong khoa học kỹ thuật.",
     "status": "published",
@@ -108,7 +108,7 @@
   },
   {
     "org_slug": "math-club",
-    "owner_email": "carol@dyadia.local",
+    "owner_email": "bob@dyadia.local",
     "title": "Toán rời rạc",
     "description": "Nền tảng toán học cho khoa học máy tính: logic, tổ hợp, đồ thị và lý thuyết số.",
     "status": "published",
@@ -141,7 +141,7 @@
   },
   {
     "org_slug": "math-club",
-    "owner_email": "eve@dyadia.local",
+    "owner_email": "huong@dyadia.local",
     "title": "Giải tích số",
     "description": "Phương pháp số để giải các bài toán toán học: phương trình, nội suy, tích phân số.",
     "status": "draft",
