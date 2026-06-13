@@ -71,10 +71,10 @@ func TestExtractAudioFromMP4(t *testing.T) {
 	t.Logf("extracted %d bytes of 16kHz mono WAV", len(audioBytes))
 }
 
-// TestWhisperResponseShape verifies that the verbose_json response from the
+// TestSTTResponseShape verifies that the verbose_json response from the
 // faster-whisper-server is parsed into transcript text and segment timestamps.
 // This is a pure struct / JSON unit test — no network call is made.
-func TestWhisperResponseShape(t *testing.T) {
+func TestSTTResponseShape(t *testing.T) {
 	t.Parallel()
 	raw := `{
 		"text": "  Binary search is efficient.  ",

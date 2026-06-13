@@ -24,9 +24,19 @@ password = "changeme123"
 first_name = "System"
 last_name = "Admin"
 
-[whisper]
+[stt]
 endpoint = "speaches:8000"
 model = "Systran/faster-whisper-small"
+
+# Text-to-speech via Speaches' OpenAI-compatible /v1/audio/speech. Each language
+# maps to a Piper model + voice. The vi/en models are pre-pulled at compose up by
+# scripts/init/speaches/preload-tts.sh.
+[tts]
+endpoint = "http://speaches:8000"
+vi_model = "speaches-ai/piper-vi_VN-vais1000-medium"
+vi_voice = "vais1000"
+en_model = "speaches-ai/piper-en_US-lessac-medium"
+en_voice = "lessac"
 
 [gemini]
 api_key = ""
@@ -67,40 +77,41 @@ student_upload_window = "1m"
 # clamped to 0 by the service layer. Defaults match sane production
 # values; override via env RICHTER_AI_<KEY>.
 # ── PHIÊN ÂM VIDEO DÀI (> 1h) ─────────────────────────────────────────────
-# Audio được tách thẳng thành các đoạn WAV ≤ whisper_segment_seconds (1 lần
+# Audio được tách thẳng thành các đoạn WAV ≤ stt_segment_seconds (1 lần
 # ffmpeg, ghi ra ĐĨA, KHÔNG bao giờ giữ WAV nguyên bài trong RAM), rồi phiên
 # âm từng đoạn như 1 request riêng và ghép lại (offset timestamp theo độ dài
 # thực mỗi đoạn). Nhờ vậy thời gian + bộ nhớ mỗi request luôn có cận, xử lý
 # được video dài tuỳ ý. Các *_timeout dưới đây vì thế là cận CHO MỖI ĐOẠN.
 # 0 = tắt cắt đoạn (1 request cho cả bài — chỉ an toàn với clip ngắn).
-whisper_segment_seconds        = 600
-whisper_client_timeout         = "30m"
-whisper_idle_conn_timeout      = "90s"
+stt_segment_seconds        = 600
+stt_client_timeout         = "30m"
+stt_idle_conn_timeout      = "90s"
 # 0 = tắt. speaches /v1/audio/transcriptions KHÔNG streaming: chỉ gửi header
 # SAU khi phiên âm xong cả đoạn, nên header-timeout sẽ giết nhầm đoạn chậm mà
-# vẫn khoẻ. Dùng whisper_request_timeout làm cận thực sự thay cho nó.
-whisper_response_header_timeout = "0s"
-whisper_max_idle_conns_per_host = 10
+# vẫn khoẻ. Dùng stt_request_timeout làm cận thực sự thay cho nó.
+stt_response_header_timeout = "0s"
+stt_max_idle_conns_per_host = 10
 download_timeout               = "10m"
 audio_extract_timeout          = "15m"
-whisper_request_timeout        = "30m"
-whisper_progress_interval      = "20s"
-# Cap concurrent in-flight Whisper requests across the process to
+stt_request_timeout        = "30m"
+stt_progress_interval      = "20s"
+# Cap concurrent in-flight STT requests across the process to
 # prevent the default speaches deployment from being overwhelmed
 # under parallel transcribe (most common cause of "timeout awaiting
 # response headers" failures). 0 = unlimited.
-whisper_max_concurrent         = 1
-# Semaphore chặn TTS (Piper) đồng thời ở richter — cặp với PIPER_NUM_WORKERS.
-# 0 = unlimited. Default; override bằng RICHTER_AI_PIPER_MAX_CONCURRENT trong .env.
-piper_max_concurrent           = 0
+stt_max_concurrent         = 1
+# Semaphore chặn TTS đồng thời ở richter (TTS phục vụ bởi Speaches qua
+# /v1/audio/speech). 0 = unlimited. Default; override bằng
+# RICHTER_AI_TTS_MAX_CONCURRENT trong .env.
+tts_max_concurrent             = 0
 # ── ĐỘ ĐỒNG THỜI AI LOCAL — cấu hình TẬP TRUNG ở .env, KHÔNG chỉnh số ở file này ──
 # 2 dòng *_max_concurrent trên CHỈ là default. Mỗi service AI local có 1 CẶP:
 # cap ở richter (app-side semaphore) + số workers ở service. Đặt trong .env, để cặp bằng nhau:
-#   Whisper: RICHTER_AI_WHISPER_MAX_CONCURRENT  +  WHISPER__NUM_WORKERS
-#   Piper:   RICHTER_AI_PIPER_MAX_CONCURRENT    +  PIPER_NUM_WORKERS
+#   Whisper (STT): RICHTER_AI_STT_MAX_CONCURRENT  +  WHISPER__NUM_WORKERS
+#   TTS (Speaches): RICHTER_AI_TTS_MAX_CONCURRENT  (Speaches phục vụ cả STT lẫn TTS)
 # richter đọc RICHTER_AI_* qua viper (SetEnvPrefix("richter") + '.'→'_' + AutomaticEnv,
-#   ⇒ override [ai].whisper_max_concurrent / [ai].piper_max_concurrent);
-# speaches/piper lấy WHISPER__NUM_WORKERS / PIPER_NUM_WORKERS qua compose nội suy ${...} từ .env.
+#   ⇒ override [ai].stt_max_concurrent / [ai].tts_max_concurrent);
+# speaches lấy WHISPER__NUM_WORKERS qua compose nội suy ${...} từ .env.
 #
 # QUAN TRỌNG về nơi env có hiệu lực:
 #  • Container thật / CI (compose `env_file: .env` hoặc `environment: ${...}`): nhận env trực tiếp.
@@ -109,11 +120,11 @@ piper_max_concurrent           = 0
 #    `go run` đọc env của SHELL HOST. ⇒ phải nạp .env vào shell trước khi chạy:
 #        set -a; source .env; set +a
 #    (hoặc thêm `source .env` vào container-shell.sh). Không nạp thì default ở trên được dùng.
-# Tổng ngân sách wall-clock cho cả pipeline (download + ffmpeg + Whisper).
+# Tổng ngân sách wall-clock cho cả pipeline (download + ffmpeg + STT).
 # 0 = unlimited — KHUYẾN NGHỊ cho video dài: đặt số cố định sẽ chặn nhầm video
 # dài hơn ngưỡng đó (vd 33m sẽ giết 1 video 1h khi đang phiên âm dở). Mỗi
 # stage đã có cận riêng (download_timeout, audio_extract_timeout, và
-# whisper_request_timeout cho TỪNG đoạn) nên không stage nào treo vô hạn.
+# stt_request_timeout cho TỪNG đoạn) nên không stage nào treo vô hạn.
 # Chỉ đặt > 0 nếu muốn áp trần cứng cho tổng thời gian xử lý.
 pipeline_timeout               = "0s"
 # Maximum video file size accepted at download time.
@@ -126,6 +137,14 @@ temp_dir                       = ""
 chunking_timeout               = "3m"
 interaction_gen_timeout        = "2m"
 tts_request_timeout            = "2m"
+# Interactive audio-grading STT bound (a student waiting) — must NOT inherit the
+# 30m video-transcription timeout. 90s is generous (CPU STT ~10s, GPU ~1.5s).
+audio_grade_stt_timeout        = "90s"
+# Watch-coverage anti-tamper: CUMULATIVE marked coverage <= grace + max_rate ×
+# real seconds since first watch. max_rate must exceed the max legit playback
+# speed (4.0 covers up to 4x) so honest fast viewers are not undercounted.
+watch_coverage_max_rate                = 4.0
+watch_coverage_initial_grace_seconds   = 30
 background_task_timeout        = "5s"
 list_limit_chunks              = 500
 list_limit_interactions        = 5000

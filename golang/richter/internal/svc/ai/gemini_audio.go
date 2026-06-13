@@ -24,7 +24,7 @@ type AudioGradingResult struct {
 
 func (s *gradingService) GradeAudio(ctx context.Context, audioMP3 []byte, language, passageMarkdown, question, expectedAnswer string) (*AudioGradingResult, error) {
 	// 1. Write the student audio bytes to a temp file so we can stream it
-	// into the Whisper multipart request without holding a second copy in RAM.
+	// into the STT multipart request without holding a second copy in RAM.
 	audioTmp, err := os.CreateTemp("", "richter-grade-audio-*")
 	if err != nil {
 		return nil, fmt.Errorf("gemini audio grade: create temp audio file: %w", err)
@@ -37,13 +37,19 @@ func (s *gradingService) GradeAudio(ctx context.Context, audioMP3 []byte, langua
 	}
 	audioTmp.Close()
 
-	// 2. Call Whisper to transcribe the audio.
-	transcript, _, werr := s.transcription.whisperTranscribe(ctx, audioTmpPath)
+	// 2. Call STT to transcribe the audio. This is an INTERACTIVE grading path
+	// (a student waiting on a result), so bound it tightly — unlike the video
+	// pipeline it must not inherit the 30-minute per-request STT timeout. A short
+	// spoken answer transcribes in ~1.5s on GPU / ~10s on CPU; 90s is a generous
+	// ceiling that fails fast on a hung/malformed upload.
+	sttCtx, sttCancel := s.transcription.aiCtx(ctx, s.transcription.aiCfg.AudioGradeSTTTimeout)
+	transcript, _, werr := s.transcription.sttTranscribe(sttCtx, audioTmpPath)
+	sttCancel()
 	if werr != nil {
 		return nil, fmt.Errorf("gemini audio grade: whisper transcription: %w", werr)
 	}
 
-	if strings.TrimSpace(transcript) == "" || isWhisperHallucination(transcript, language) {
+	if strings.TrimSpace(transcript) == "" || isSTTHallucination(transcript, language) {
 		return &AudioGradingResult{
 			Transcript:         "",
 			PronunciationScore: 0.0,
@@ -207,7 +213,7 @@ func audioGradingResponseSchema() *genai.Schema {
 	}
 }
 
-func isWhisperHallucination(transcript string, language string) bool {
+func isSTTHallucination(transcript string, language string) bool {
 	t := strings.ToLower(strings.TrimSpace(transcript))
 
 	// Globally remove any punctuation/special characters and collapse spaces

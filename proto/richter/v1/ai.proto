@@ -324,9 +324,10 @@ message UpdateWatchProgressRequest {
   // Current playback position in seconds.
   float position_seconds = 2 [(buf.validate.field).float.gte = 0];
   // Half-open interval [from,to) of continuous playback just completed; server
-  // accumulates an authoritative coverage set. Both 0 = pure resume/seek save.
-  float watched_from_seconds = 3;
-  float watched_to_seconds = 4;
+  // accumulates a coverage set, rate-limited by real elapsed time (anti-tamper).
+  // Both 0 = pure resume/seek save.
+  float watched_from_seconds = 3 [(buf.validate.field).float.gte = 0];
+  float watched_to_seconds = 4 [(buf.validate.field).float.gte = 0];
 }
 
 message UpdateWatchProgressResponse {}

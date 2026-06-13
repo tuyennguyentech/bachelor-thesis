@@ -8,8 +8,8 @@ import (
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc/ai/segment"
 	"example.com/sql/gen"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // RunExtract is the worker entry point invoked by the FDB task runner for
@@ -18,7 +18,7 @@ import (
 //  1. Per-lesson mutex (rejects double-clicks with a friendly message).
 //  2. Mark PG analysis row as PROCESSING (with a stuck-cleanup defer).
 //  3. Clear stale FDB transcript + segments for the lesson.
-//  4. Hand off to WhisperRunner (Whisper via ffmpeg pipeline in the ai package).
+//  4. Hand off to STTRunner (STT via ffmpeg pipeline in the ai package).
 //  5. Persist transcript text + segments to FDB.
 //  6. Reap old PG chunks + interactions so the next chunk step starts clean.
 //  7. Mark PG analysis row as TRANSCRIPT_EXTRACTED.
@@ -31,7 +31,7 @@ func (s *Service) RunExtract(
 	lessonIDStr := lessonID.String()
 
 	// Per-lesson serialization: a double-click of "Phân tích" would
-	// otherwise race Whisper + ffmpeg + FDB writes. If another request
+	// otherwise race STT + ffmpeg + FDB writes. If another request
 	// is mid-analysis we return immediately so the existing run owns
 	// the pipeline; the client already shows a spinner for the first run.
 	lock, ok := s.Locks.TryAcquire(lessonIDStr)

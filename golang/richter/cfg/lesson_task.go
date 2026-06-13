@@ -10,7 +10,7 @@ import (
 type LessonTaskCfg struct {
 	// Workers is the number of concurrent task workers in the pool.
 	// 0 = auto = runtime.NumCPU() (Go's best practice for CPU-bound
-	// work; Whisper transcription is the dominant cost). Set a positive
+	// work; STT transcription is the dominant cost). Set a positive
 	// integer to pin the worker count for production sizing.
 	Workers int `mapstructure:"workers"`
 	// MaxActivePerUser caps how many active tasks a single user may

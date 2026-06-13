@@ -309,7 +309,6 @@ func insertTestTask(t *testing.T, lessonID, kind, status string) gen.Task {
 	return row
 }
 
-
 // ── TestAIAuthz ───────────────────────────────────────────────────────────────
 
 func TestAIAuthz(t *testing.T) {
@@ -1153,8 +1152,8 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 		// an error message that does NOT contain "bỏ qua".
 		forceCtx, forceCancel := context.WithTimeout(ctx, 5*time.Second)
 		startResp, err := e.aiTeacher.StartLessonTask(forceCtx, &richterv1.StartLessonTaskRequest{
-			LessonId:              e.lessonID,
-			Kind:                  richterv1.LessonTaskKind_LESSON_TASK_KIND_GENERATE_INTERACTIONS,
+			LessonId:             e.lessonID,
+			Kind:                 richterv1.LessonTaskKind_LESSON_TASK_KIND_GENERATE_INTERACTIONS,
 			GenerateInteractions: &richterv1.GenerateInteractionsRequest{LessonId: e.lessonID, ForceRegenerate: true},
 		})
 		forceCancel()
@@ -1257,7 +1256,7 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 			LessonId: e.lessonID,
 			Kind:     richterv1.LessonTaskKind_LESSON_TASK_KIND_GENERATE_INTERACTIONS,
 			GenerateInteractions: &richterv1.GenerateInteractionsRequest{
-				LessonId:       e.lessonID,
+				LessonId:        e.lessonID,
 				ForceRegenerate: true,
 				Difficulty:      "medium",
 				FocusPrompt:     "Test focus",
@@ -1740,12 +1739,12 @@ func testUploadVideoToS3(t *testing.T, ctx context.Context, client *minio.Client
 // Skip conditions:
 //   - testdata/edu-sample.mp4 does not exist (run the script in testdata/README.md)
 //   - Gemini API key not set (needed for chunking and Q&A generation)
-//   - whisper.endpoint not set in richter.test.toml (needed for transcription)
+//   - stt.endpoint not set in richter.test.toml (needed for transcription)
 func TestAIPipelineFullFlow(t *testing.T) {
 	t.Parallel()
-	whisperCfg, err := do.Invoke[*cfg.WhisperCfg](internal.Injector)
-	if err != nil || whisperCfg.Endpoint == "" {
-		t.Skip("skipped: whisper.endpoint not configured — set whisper.endpoint in richter.test.toml")
+	sttCfg, err := do.Invoke[*cfg.STTCfg](internal.Injector)
+	if err != nil || sttCfg.Endpoint == "" {
+		t.Skip("skipped: stt.endpoint not configured — set [stt] endpoint in richter.test.toml")
 	}
 	geminiCfg, err := do.Invoke[*cfg.GeminiCfg](internal.Injector)
 	if err != nil || geminiCfg.APIKey == "" {
@@ -2307,23 +2306,23 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 	t.Run("ListAllTasks/Admin/Success", func(t *testing.T) {
 		adminToken := getAdminToken(t, e.url)
 		aiAdmin := richterv1connect.NewAIServiceClient(httpClientWithToken(adminToken), e.url)
-		
+
 		pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
 		tq := taskqueue.NewPostgresDB(pool)
-		
+
 		parsedLessonID, _ := uuid.Parse(e.lessonID)
 		lessonIDpg := pgtype.UUID{Bytes: [16]byte(parsedLessonID), Valid: true}
-		
+
 		parsedOwnerID, _ := uuid.Parse(e.ownerID)
 		ownerIDpg := pgtype.UUID{Bytes: [16]byte(parsedOwnerID), Valid: true}
-		
+
 		task1IDRaw, _ := uuid.NewV7()
 		task1ID := pgtype.UUID{Bytes: [16]byte(task1IDRaw), Valid: true}
 		_, err := tq.CreateTask(ctx, task1ID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "ai_listall_probe_task", []byte("hello"))
 		if err != nil {
 			t.Fatalf("failed to create task: %v", err)
 		}
-		
+
 		res, err := aiAdmin.ListAllTasks(ctx, &richterv1.ListAllTasksRequest{
 			Limit: 10,
 		})
@@ -2333,7 +2332,7 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 		if len(res.Tasks) == 0 {
 			t.Fatal("expected at least 1 task in response")
 		}
-		
+
 		if res.TotalActive < 1 {
 			t.Errorf("expected TotalActive to be at least 1 (due to created pending task), got %d", res.TotalActive)
 		}
@@ -2343,7 +2342,7 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 		if res.TotalFailedOrCanceled < 0 {
 			t.Errorf("expected TotalFailedOrCanceled >= 0, got %d", res.TotalFailedOrCanceled)
 		}
-		
+
 		found := false
 		for _, tsk := range res.Tasks {
 			if tsk.Id == task1ID.String() {

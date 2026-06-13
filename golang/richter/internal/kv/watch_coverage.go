@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
@@ -20,6 +21,11 @@ import (
 // realistic lesson length (~90 KB ≈ 200 hours of video).
 const nsWatchCov = "watch_cov"
 
+// nsWatchCovTs stores the server-side unix-millis timestamp of the FIRST
+// AddWatchCoverage call per {user,lesson} (written once), used to bound the
+// cumulative coverage budget against real elapsed time (anti-tamper).
+const nsWatchCovTs = "watch_cov_ts"
+
 // watchCovKey builds the per-{user,lesson} key tuple for the coverage bitmap.
 func watchCovKey(sub, lessonID string) tuple.Tuple {
 	return tuple.Tuple{sub, lessonID}
@@ -36,12 +42,20 @@ func watchCovKey(sub, lessonID string) tuple.Tuple {
 // durationSec <= 0 the duration is unknown; bits are still recorded (unclamped
 // on the high end) so a later WatchCoverageFraction with a known duration can
 // use them.
-func AddWatchCoverage(kvSvc *KVSvc, sub, lessonID string, fromSec, toSec float64, durationSec int) error {
+// nowUnixMs is the server's current time in unix milliseconds. maxRate and
+// initialGraceSeconds bound the CUMULATIVE coverage (anti-tamper): total marked
+// seconds <= initialGraceSeconds + maxRate × real-seconds since the first call.
+// maxRate <= 0 disables the limit. Callers pass time.Now().UnixMilli() and the
+// AiCfg tunables.
+func AddWatchCoverage(kvSvc *KVSvc, sub, lessonID string, fromSec, toSec float64, durationSec int, nowUnixMs int64, maxRate float64, initialGraceSeconds int) error {
 	if kvSvc == nil {
 		return fmt.Errorf("kv: nil KVSvc")
 	}
 	if !(toSec > fromSec) {
 		return fmt.Errorf("kv: watch coverage requires to (%v) > from (%v)", toSec, fromSec)
+	}
+	if fromSec < 0 {
+		return fmt.Errorf("kv: watch coverage from (%v) must be >= 0", fromSec)
 	}
 	if durationSec > 0 && (toSec-fromSec) > float64(durationSec) {
 		return fmt.Errorf("kv: watch interval %v..%v exceeds duration %d", fromSec, toSec, durationSec)
@@ -60,6 +74,7 @@ func AddWatchCoverage(kvSvc *KVSvc, sub, lessonID string, fromSec, toSec float64
 	}
 
 	rawKey := kvSvc.RawKey(nsWatchCov, watchCovKey(sub, lessonID))
+	tsKey := kvSvc.RawKey(nsWatchCovTs, watchCovKey(sub, lessonID))
 	_, err := kvSvc.Transact(func(tr fdb.Transaction) (any, error) {
 		bm := tr.Get(rawKey).MustGet()
 		needBytes := (to + 7) / 8
@@ -68,8 +83,51 @@ func AddWatchCoverage(kvSvc *KVSvc, sub, lessonID string, fromSec, toSec float64
 			copy(grown, bm)
 			bm = grown
 		}
-		for i := from; i < to; i++ {
-			bm[i/8] |= 1 << uint(i%8)
+		setBit := func(i int) bool {
+			if bm[i/8]&(1<<uint(i%8)) == 0 {
+				bm[i/8] |= 1 << uint(i%8)
+				return true
+			}
+			return false
+		}
+
+		if maxRate <= 0 {
+			// Anti-tamper disabled: record every reported bucket.
+			for i := from; i < to; i++ {
+				setBit(i)
+			}
+		} else {
+			// CUMULATIVE anti-tamper budget: total marked coverage may not exceed
+			// initialGraceSeconds + maxRate × real-seconds elapsed SINCE THE FIRST
+			// watch of this {user,lesson}. Bounding the cumulative total (not the
+			// per-call delta) means honest viewers never lose coverage to call
+			// spacing, clock jitter, batched/late reports, or pauses — only the
+			// growth rate is capped, which still defeats one-shot forgery (a single
+			// from=0,to=duration claim happens at elapsed≈0 so only ~grace credits).
+			// The timestamp is the FIRST-seen time, written once.
+			firstSeenMs := nowUnixMs
+			if tsBytes := tr.Get(tsKey).MustGet(); len(tsBytes) == 8 {
+				firstSeenMs = int64(binary.BigEndian.Uint64(tsBytes))
+			} else {
+				tsOut := make([]byte, 8)
+				binary.BigEndian.PutUint64(tsOut, uint64(nowUnixMs))
+				tr.Set(tsKey, tsOut)
+			}
+			elapsedSec := 0.0
+			if d := nowUnixMs - firstSeenMs; d > 0 {
+				elapsedSec = float64(d) / 1000.0
+			}
+			allowedTotal := float64(initialGraceSeconds) + maxRate*elapsedSec
+			covered := 0
+			for _, b := range bm {
+				covered += bits.OnesCount8(b)
+			}
+			budget := int(allowedTotal) - covered
+			for i := from; i < to && budget > 0; i++ {
+				if setBit(i) {
+					budget--
+				}
+			}
 		}
 		tr.Set(rawKey, bm)
 		return nil, nil

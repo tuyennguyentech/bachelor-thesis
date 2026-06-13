@@ -1,5 +1,5 @@
 // Package transcript owns the lesson-level transcript pipeline: extract
-// audio → Whisper transcription, segment editing, chunk pipeline, and the
+// audio → STT transcription, segment editing, chunk pipeline, and the
 // thin CRUD read/update methods exposed to the dashboard. The HTTP handler
 // methods on *ai.AISvc are thin pass-throughs into this package.
 package transcript
@@ -22,11 +22,11 @@ import (
 // to the task worker. Returning a non-nil error aborts the pipeline.
 type ProgressFn func(step richterv1.AnalysisProgressStep, msg string) error
 
-// WhisperRunner is the audio → transcript pipeline. The ai package wires
-// transcriptionService.runWhisperAnalyze here. Keeping it as a function
+// STTRunner is the audio → transcript pipeline. The ai package wires
+// transcriptionService.runSTTAnalyze here. Keeping it as a function
 // type (rather than an interface on the concrete type) lets this package
 // stay decoupled from the ai package's internals.
-type WhisperRunner func(ctx context.Context, videoKey string, progress ProgressFn) (string, []segment.Segment, error)
+type STTRunner func(ctx context.Context, videoKey string, progress ProgressFn) (string, []segment.Segment, error)
 
 // LessonLock is the handle returned by TryAcquireLessonLock. Callers must
 // pass it to ReleaseLessonLock when done. Stored as `any` so this package
@@ -48,7 +48,7 @@ type Deps struct {
 	Log      *log.LogSvc
 	AiCfg    *cfg.AiCfg
 
-	Transcription WhisperRunner
+	Transcription STTRunner
 	Chunk         ChunkRunner
 	Locks         LessonLocker
 
@@ -62,7 +62,7 @@ type Deps struct {
 
 	// Auth: must return connect.CodePermissionDenied for non-teachers.
 	RequireTeacherRole func(ctx context.Context, lessonID pgtype.UUID) error
-	RequireOrgMember  *authz.AuthzSvc
+	RequireOrgMember   *authz.AuthzSvc
 
 	// Best-effort error persistence: store error_msg on the lesson
 	// analysis row so the dashboard can show it.

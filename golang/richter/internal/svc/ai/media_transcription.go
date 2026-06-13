@@ -26,55 +26,55 @@ import (
 )
 
 type transcriptionService struct {
-	s3client   *minio.Client
-	s3cfg      *cfg.S3Cfg
-	whisperCfg *cfg.WhisperCfg
-	aiCfg      *cfg.AiCfg
-	// whisperSem caps concurrent Whisper requests. nil = unlimited
-	// (when aiCfg.WhisperMaxConcurrent <= 0). The semaphore is built
+	s3client *minio.Client
+	s3cfg    *cfg.S3Cfg
+	sttCfg   *cfg.STTCfg
+	aiCfg    *cfg.AiCfg
+	// sttSem caps concurrent STT requests. nil = unlimited
+	// (when aiCfg.STTMaxConcurrent <= 0). The semaphore is built
 	// once on construction so we never allocate per request.
-	whisperSem chan struct{}
-	// whisperClient is the tuned HTTP client for Whisper calls. Built
+	sttSem chan struct{}
+	// sttClient is the tuned HTTP client for STT calls. Built
 	// once on construction and reused so the underlying Transport's
 	// connection pool (keep-alive, HTTP/2) survives across requests.
-	whisperClient *http.Client
+	sttClient *http.Client
 }
 
-// newWhisperHTTPClient returns a tuned HTTP client for the Whisper
+// newSTTHTTPClient returns a tuned HTTP client for the STT
 // transcription service. It is separate from http.DefaultClient so the
 // global default is not changed for unrelated callers. Tunables come
 // from cfg.AiCfg; see that struct for the meaning of each field. A
 // value of 0 on a duration field means "unlimited" (Go's net/http
 // treats a zero Timeout as no timeout).
-func newWhisperHTTPClient(ai *cfg.AiCfg) *http.Client {
+func newSTTHTTPClient(ai *cfg.AiCfg) *http.Client {
 	transport := &http.Transport{
 		DisableKeepAlives: false,
 		ForceAttemptHTTP2: true,
 	}
-	if ai.WhisperMaxIdleConnsPerHost > 0 {
-		transport.MaxIdleConnsPerHost = ai.WhisperMaxIdleConnsPerHost
+	if ai.STTMaxIdleConnsPerHost > 0 {
+		transport.MaxIdleConnsPerHost = ai.STTMaxIdleConnsPerHost
 	}
-	if ai.WhisperIdleConnTimeout > 0 {
-		transport.IdleConnTimeout = ai.WhisperIdleConnTimeout
+	if ai.STTIdleConnTimeout > 0 {
+		transport.IdleConnTimeout = ai.STTIdleConnTimeout
 	}
-	if ai.WhisperResponseHeaderTimeout > 0 {
-		transport.ResponseHeaderTimeout = ai.WhisperResponseHeaderTimeout
+	if ai.STTResponseHeaderTimeout > 0 {
+		transport.ResponseHeaderTimeout = ai.STTResponseHeaderTimeout
 	}
 	client := &http.Client{Transport: transport}
-	if ai.WhisperClientTimeout > 0 {
-		client.Timeout = ai.WhisperClientTimeout
+	if ai.STTClientTimeout > 0 {
+		client.Timeout = ai.STTClientTimeout
 	}
 	return client
 }
 
-func newTranscriptionService(s3client *minio.Client, s3cfg *cfg.S3Cfg, whisperCfg *cfg.WhisperCfg, aiCfg *cfg.AiCfg) *transcriptionService {
-	s := &transcriptionService{s3client: s3client, s3cfg: s3cfg, whisperCfg: whisperCfg, aiCfg: aiCfg}
-	s.whisperClient = newWhisperHTTPClient(aiCfg)
-	if aiCfg.WhisperMaxConcurrent > 0 {
+func newTranscriptionService(s3client *minio.Client, s3cfg *cfg.S3Cfg, sttCfg *cfg.STTCfg, aiCfg *cfg.AiCfg) *transcriptionService {
+	s := &transcriptionService{s3client: s3client, s3cfg: s3cfg, sttCfg: sttCfg, aiCfg: aiCfg}
+	s.sttClient = newSTTHTTPClient(aiCfg)
+	if aiCfg.STTMaxConcurrent > 0 {
 		// Buffered channel acts as a counting semaphore: each in-flight
 		// request takes one slot, releases on return. Blocks excess
 		// callers until a slot frees up. Sized to the configured cap.
-		s.whisperSem = make(chan struct{}, aiCfg.WhisperMaxConcurrent)
+		s.sttSem = make(chan struct{}, aiCfg.STTMaxConcurrent)
 	}
 	return s
 }
@@ -157,7 +157,7 @@ func (s *transcriptionService) downloadVideo(ctx context.Context, storageKey str
 //
 // IMPORTANT: the caller is responsible for removing the returned temp file via
 // defer os.Remove(audioPath) once it is no longer needed. The file is NOT removed
-// here so it can be streamed directly into the Whisper request without a copy.
+// here so it can be streamed directly into the STT request without a copy.
 func extractAudio(ctx context.Context, videoPath, tempDir string) (audioPath string, err error) {
 	audioTmp, err := os.CreateTemp(tempDir, "richter-audio-*.wav")
 	if err != nil {
@@ -266,17 +266,17 @@ func extractAudioSegments(ctx context.Context, videoPath, outDir string, segment
 	return matches, nil
 }
 
-// whisperTranscribe streams the WAV audio at audioPath to the faster-whisper-server
+// sttTranscribe streams the WAV audio at audioPath to the faster-whisper-server
 // and returns the full transcript text along with fine-grained segment timestamps.
 // The audio is streamed directly from the temp file via io.Pipe so no full copy of
 // the WAV data is held in memory at any time.
-func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath string) (string, []transcriptSegment, error) {
-	if s.whisperSem != nil {
-		// Acquire a Whisper slot. If the parent ctx is cancelled while
+func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath string) (string, []transcriptSegment, error) {
+	if s.sttSem != nil {
+		// Acquire a STT slot. If the parent ctx is cancelled while
 		// we wait, release the would-be slot and bail.
 		select {
-		case s.whisperSem <- struct{}{}:
-			defer func() { <-s.whisperSem }()
+		case s.sttSem <- struct{}{}:
+			defer func() { <-s.sttSem }()
 		case <-ctx.Done():
 			return "", nil, ctx.Err()
 		}
@@ -320,7 +320,7 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath 
 			return
 		}
 
-		if err := w.WriteField("model", s.whisperCfg.Model); err != nil {
+		if err := w.WriteField("model", s.sttCfg.Model); err != nil {
 			writeErr = fmt.Errorf("write model field: %w", err)
 			return
 		}
@@ -334,7 +334,7 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath 
 		}
 	}()
 
-	url := "http://" + s.whisperCfg.Endpoint + "/v1/audio/transcriptions"
+	url := endpointWithScheme(s.sttCfg.Endpoint) + "/v1/audio/transcriptions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, pr)
 	if err != nil {
 		// Drain the pipe so the goroutine can exit cleanly.
@@ -343,7 +343,7 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath 
 	}
 	httpReq.Header.Set("Content-Type", w.FormDataContentType())
 
-	resp, err := s.whisperHTTPClient().Do(httpReq)
+	resp, err := s.sttClient.Do(httpReq)
 	if err != nil {
 		return "", nil, fmt.Errorf("call whisper API: %w", err)
 	}
@@ -351,15 +351,15 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath 
 
 	// Cap the response body at 16 MB. A 60-min lesson transcribed at typical
 	// sizes is well under 1 MB; the cap exists to prevent a malicious or
-	// mis-configured Whisper server from OOM-ing richter.
-	const maxWhisperResponseBytes = 16 << 20
-	limited := io.LimitReader(resp.Body, maxWhisperResponseBytes+1)
+	// mis-configured STT server from OOM-ing richter.
+	const maxSTTResponseBytes = 16 << 20
+	limited := io.LimitReader(resp.Body, maxSTTResponseBytes+1)
 	respBytes, err := io.ReadAll(limited)
 	if err != nil {
 		return "", nil, fmt.Errorf("read whisper response: %w", err)
 	}
-	if int64(len(respBytes)) > maxWhisperResponseBytes {
-		return "", nil, fmt.Errorf("whisper response exceeds %d bytes", maxWhisperResponseBytes)
+	if int64(len(respBytes)) > maxSTTResponseBytes {
+		return "", nil, fmt.Errorf("whisper response exceeds %d bytes", maxSTTResponseBytes)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("whisper API %d: %s", resp.StatusCode, string(respBytes))
@@ -388,15 +388,15 @@ func (s *transcriptionService) whisperTranscribe(ctx context.Context, audioPath 
 	return strings.TrimSpace(result.Text), segs, nil
 }
 
-// runWhisperAnalyze is the Whisper-based replacement for runGeminiAnalyze.
-// Pipeline: download video -> ffmpeg extract audio -> Whisper transcription.
+// runSTTAnalyze is the STT-based replacement for runGeminiAnalyze.
+// Pipeline: download video -> ffmpeg extract audio -> STT transcription.
 //
 // A per-pipeline wall-clock deadline is applied around the full pipeline via
-// aiCfg.PipelineTimeout so that a hung ffmpeg or Whisper call cannot block a
+// aiCfg.PipelineTimeout so that a hung ffmpeg or STT call cannot block a
 // worker indefinitely beyond the sum of the per-stage budgets.
-func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey string, progress transcript.ProgressFn) (transcript string, segments []transcriptSegment, err error) {
+func (s *transcriptionService) runSTTAnalyze(ctx context.Context, storageKey string, progress transcript.ProgressFn) (transcript string, segments []transcriptSegment, err error) {
 	// Wrap the entire pipeline in an outer deadline so hung sub-stages
-	// (slow ffmpeg, unresponsive Whisper) are reaped within a predictable
+	// (slow ffmpeg, unresponsive STT) are reaped within a predictable
 	// wall-clock budget. Per-stage contexts are derived from this one, so
 	// they will fire first if their individual budgets are shorter.
 	pipeCtx, pipeCancel := s.aiCtx(ctx, s.aiCfg.PipelineTimeout)
@@ -426,7 +426,7 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 	defer os.RemoveAll(segDir)
 
 	audioCtx, audioCancel := s.aiCtx(pipeCtx, s.aiCfg.AudioExtractTimeout)
-	chunks, audioErr := extractAudioSegments(audioCtx, videoPath, segDir, s.aiCfg.WhisperSegmentSeconds)
+	chunks, audioErr := extractAudioSegments(audioCtx, videoPath, segDir, s.aiCfg.STTSegmentSeconds)
 	audioCancel()
 	if audioErr != nil {
 		return "", nil, fmt.Errorf("extract audio: %w", audioErr)
@@ -437,7 +437,7 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 	_ = os.Remove(videoPath)
 
 	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING,
-		"Đang phiên âm bằng Whisper — chờ máy chủ xử lý..."); err != nil {
+		"Đang phiên âm bằng STT — chờ máy chủ xử lý..."); err != nil {
 		return "", nil, err
 	}
 
@@ -487,35 +487,35 @@ func (s *transcriptionService) runWhisperAnalyze(ctx context.Context, storageKey
 
 	transcript = strings.TrimSpace(textBuf.String())
 	if transcript == "" {
-		return "", nil, fmt.Errorf("Whisper trả về transcript rỗng — video có thể không có lời nói hoặc chất lượng âm thanh quá thấp")
+		return "", nil, fmt.Errorf("STT trả về transcript rỗng — video có thể không có lời nói hoặc chất lượng âm thanh quá thấp")
 	}
 	return transcript, allSegs, nil
 }
 
-// transcribeChunk runs one Whisper request for a single audio chunk under its
-// own WhisperRequestTimeout, emitting a progress heartbeat while it waits.
-// It is the per-chunk unit used by runWhisperAnalyze so that a long video is
+// transcribeChunk runs one STT request for a single audio chunk under its
+// own STTRequestTimeout, emitting a progress heartbeat while it waits.
+// It is the per-chunk unit used by runSTTAnalyze so that a long video is
 // transcribed as a sequence of independently bounded requests. label (e.g.
 // "phần 2/6 ") is prefixed to the progress message; pass "" for single-chunk
 // videos.
 func (s *transcriptionService) transcribeChunk(ctx context.Context, audioPath, label string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
-	whisperCtx, whisperCancel := s.aiCtx(ctx, s.aiCfg.WhisperRequestTimeout)
-	defer whisperCancel()
+	sttCtx, sttCancel := s.aiCtx(ctx, s.aiCfg.STTRequestTimeout)
+	defer sttCancel()
 
-	type whisperResult struct {
+	type sttResult struct {
 		transcript string
 		segments   []transcriptSegment
 		err        error
 	}
-	resultCh := make(chan whisperResult, 1)
+	resultCh := make(chan sttResult, 1)
 	start := time.Now()
 	go func() {
-		t, segs, err := s.whisperTranscribe(whisperCtx, audioPath)
-		resultCh <- whisperResult{transcript: t, segments: segs, err: err}
+		t, segs, err := s.sttTranscribe(sttCtx, audioPath)
+		resultCh <- sttResult{transcript: t, segments: segs, err: err}
 	}()
 
 	var progressC <-chan time.Time
-	if iv := s.aiCfg.WhisperProgressInterval; iv > 0 {
+	if iv := s.aiCfg.STTProgressInterval; iv > 0 {
 		ticker := time.NewTicker(iv)
 		defer ticker.Stop()
 		progressC = ticker.C
@@ -527,13 +527,13 @@ func (s *transcriptionService) transcribeChunk(ctx context.Context, audioPath, l
 			return r.transcript, r.segments, r.err
 		case <-progressC:
 			elapsed := time.Since(start).Truncate(time.Second)
-			msg := fmt.Sprintf("Đang phiên âm %sbằng Whisper (%s đã trôi qua)...", label, formatDuration(elapsed))
+			msg := fmt.Sprintf("Đang phiên âm %sbằng STT (%s đã trôi qua)...", label, formatDuration(elapsed))
 			if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING, msg); err != nil {
-				whisperCancel()
+				sttCancel()
 				return "", nil, err
 			}
 		case <-ctx.Done():
-			whisperCancel()
+			sttCancel()
 			return "", nil, ctx.Err()
 		}
 	}
@@ -571,12 +571,4 @@ func (s *transcriptionService) aiCtx(ctx context.Context, d time.Duration) (cont
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, d)
-}
-
-// whisperHTTPClient returns the configured Whisper HTTP client. The
-// client is built once in newTranscriptionService and cached on the
-// service so the Transport's connection pool is reused across requests
-// (a fresh client per request would defeat keep-alive/HTTP2 pooling).
-func (s *transcriptionService) whisperHTTPClient() *http.Client {
-	return s.whisperClient
 }

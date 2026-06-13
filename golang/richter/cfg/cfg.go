@@ -31,7 +31,7 @@ var (
 			do.Lazy(NewS3CfgSvc),
 			do.Lazy(NewGeminiCfgSvc),
 			do.Lazy(NewFdbCfgSvc),
-		do.Lazy(NewWhisperCfgSvc),
+			do.Lazy(NewSTTCfgSvc),
 			do.Lazy(NewTTSCfgSvc),
 			do.Lazy(NewLessonTaskCfgSvc),
 			do.Lazy(NewStorageCfgSvc),
@@ -58,22 +58,22 @@ func init() {
 }
 
 type RichterCfg struct {
-	LogCfg            `mapstructure:"log"`
-	DbCfg             `mapstructure:"db"`
-	ApiCfg            `mapstructure:"api"`
-	JwtCfg            `mapstructure:"jwt"`
-	AuthCfg           `mapstructure:"auth"`
-	AdminCfg          `mapstructure:"admin"`
-	S3Cfg             `mapstructure:"s3"`
-	GeminiCfg         `mapstructure:"gemini"`
-	FdbCfg            `mapstructure:"fdb"`
-	WhisperCfg        `mapstructure:"whisper"`
-	TTSCfg            `mapstructure:"tts"`
-	LessonTaskCfg     `mapstructure:"lesson_task"`
-	StorageCfg        `mapstructure:"storage"`
-	AiCfg             `mapstructure:"ai"`
-	InteractionsCfg   `mapstructure:"interactions"`
-	LessonsCfg        `mapstructure:"lessons"`
+	LogCfg          `mapstructure:"log"`
+	DbCfg           `mapstructure:"db"`
+	ApiCfg          `mapstructure:"api"`
+	JwtCfg          `mapstructure:"jwt"`
+	AuthCfg         `mapstructure:"auth"`
+	AdminCfg        `mapstructure:"admin"`
+	S3Cfg           `mapstructure:"s3"`
+	GeminiCfg       `mapstructure:"gemini"`
+	FdbCfg          `mapstructure:"fdb"`
+	STTCfg          `mapstructure:"stt"`
+	TTSCfg          `mapstructure:"tts"`
+	LessonTaskCfg   `mapstructure:"lesson_task"`
+	StorageCfg      `mapstructure:"storage"`
+	AiCfg           `mapstructure:"ai"`
+	InteractionsCfg `mapstructure:"interactions"`
+	LessonsCfg      `mapstructure:"lessons"`
 }
 
 func NewConfig() RichterCfg {
@@ -85,7 +85,7 @@ func NewConfig() RichterCfg {
 		S3Cfg:           NewS3Cfg(),
 		GeminiCfg:       NewGeminiCfg(),
 		FdbCfg:          NewFdbCfg(),
-		WhisperCfg:      NewWhisperCfg(),
+		STTCfg:          NewSTTCfg(),
 		TTSCfg:          NewTTSCfg(),
 		LessonTaskCfg:   NewLessonTaskCfg(),
 		StorageCfg:      NewStorageCfg(),

@@ -16,14 +16,14 @@ import (
 	"example.com/richter/cfg"
 )
 
-// TestWhisperSem_BlocksExcessConcurrentCalls verifies the counting
-// semaphore in transcriptionService serializes the in-flight Whisper
-// requests up to the configured cap. We stand up a fake Whisper
+// TestSTTSem_BlocksExcessConcurrentCalls verifies the counting
+// semaphore in transcriptionService serializes the in-flight STT
+// requests up to the configured cap. We stand up a fake STT
 // server that sleeps 200 ms per request and records the peak
-// concurrency it observes. With WhisperMaxConcurrent=1, peak must be
+// concurrency it observes. With STTMaxConcurrent=1, peak must be
 // exactly 1 even when 5 requests are fired in parallel. With cap=0
 // (unlimited), all 5 run truly in parallel and peak must be 5.
-func TestWhisperSem_BlocksExcessConcurrentCalls(t *testing.T) {
+func TestSTTSem_BlocksExcessConcurrentCalls(t *testing.T) {
 	cases := []struct {
 		name        string
 		cap         int
@@ -63,16 +63,16 @@ func TestWhisperSem_BlocksExcessConcurrentCalls(t *testing.T) {
 			// Endpoint is "host:port" — parse from the test server URL.
 			endpoint := strings.TrimPrefix(srv.URL, "http://")
 			ai := cfg.NewAiCfg()
-			ai.WhisperMaxConcurrent = tc.cap
+			ai.STTMaxConcurrent = tc.cap
 			// Don't let internal timeouts cut our test off.
-			ai.WhisperClientTimeout = 10 * time.Second
-			ai.WhisperResponseHeaderTimeout = 10 * time.Second
-			ai.WhisperRequestTimeout = 10 * time.Second
-			whisper := cfg.NewWhisperCfg()
-			whisper.Endpoint = endpoint
-			svc := newTranscriptionService(nil, nil, &whisper, &ai)
+			ai.STTClientTimeout = 10 * time.Second
+			ai.STTResponseHeaderTimeout = 10 * time.Second
+			ai.STTRequestTimeout = 10 * time.Second
+			stt := cfg.NewSTTCfg()
+			stt.Endpoint = endpoint
+			svc := newTranscriptionService(nil, nil, &stt, &ai)
 
-			// whisperTranscribe now streams the WAV from a temp file path
+			// sttTranscribe now streams the WAV from a temp file path
 			// (no longer takes an in-memory []byte), so write a dummy file.
 			audioPath := filepath.Join(t.TempDir(), "audio.wav")
 			if err := os.WriteFile(audioPath, []byte("audio"), 0o600); err != nil {
@@ -85,9 +85,9 @@ func TestWhisperSem_BlocksExcessConcurrentCalls(t *testing.T) {
 			for i := 0; i < tc.parallelism; i++ {
 				go func() {
 					defer wg.Done()
-					_, _, err := svc.whisperTranscribe(context.Background(), audioPath)
+					_, _, err := svc.sttTranscribe(context.Background(), audioPath)
 					if err != nil {
-						t.Errorf("whisperTranscribe: %v", err)
+						t.Errorf("sttTranscribe: %v", err)
 					}
 				}()
 			}
@@ -105,12 +105,12 @@ func TestWhisperSem_BlocksExcessConcurrentCalls(t *testing.T) {
 	}
 }
 
-// TestWhisperSem_CtxCancelUnblocks verifies that a waiter on the
+// TestSTTSem_CtxCancelUnblocks verifies that a waiter on the
 // semaphore unblocks with ctx.Err() when its context is cancelled
 // before a slot frees up. This protects against workers hanging on
-// Whisper indefinitely when their parent context is cancelled
+// STT indefinitely when their parent context is cancelled
 // (e.g. lesson task cancel).
-func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
+func TestSTTSem_CtxCancelUnblocks(t *testing.T) {
 	var inFlight int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&inFlight, 1)
@@ -120,13 +120,13 @@ func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
 	}))
 	defer srv.Close()
 	ai := cfg.NewAiCfg()
-	ai.WhisperMaxConcurrent = 1
-	ai.WhisperClientTimeout = 5 * time.Second
-	ai.WhisperResponseHeaderTimeout = 5 * time.Second
-	ai.WhisperRequestTimeout = 5 * time.Second
-	whisper := cfg.NewWhisperCfg()
-	whisper.Endpoint = strings.TrimPrefix(srv.URL, "http://")
-	svc := newTranscriptionService(nil, nil, &whisper, &ai)
+	ai.STTMaxConcurrent = 1
+	ai.STTClientTimeout = 5 * time.Second
+	ai.STTResponseHeaderTimeout = 5 * time.Second
+	ai.STTRequestTimeout = 5 * time.Second
+	stt := cfg.NewSTTCfg()
+	stt.Endpoint = strings.TrimPrefix(srv.URL, "http://")
+	svc := newTranscriptionService(nil, nil, &stt, &ai)
 
 	audioPath := filepath.Join(t.TempDir(), "audio.wav")
 	if err := os.WriteFile(audioPath, []byte("a"), 0o600); err != nil {
@@ -136,7 +136,7 @@ func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
 	// Saturate the slot.
 	saturationDone := make(chan struct{})
 	go func() {
-		_, _, _ = svc.whisperTranscribe(context.Background(), audioPath)
+		_, _, _ = svc.sttTranscribe(context.Background(), audioPath)
 		close(saturationDone)
 	}()
 	// Give the first request a moment to enter the semaphore.
@@ -152,10 +152,10 @@ func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	_, _, err := svc.whisperTranscribe(ctx, audioPath)
+	_, _, err := svc.sttTranscribe(ctx, audioPath)
 	waitElapsed := time.Since(waitStart)
 	if err == nil {
-		t.Fatal("expected error from cancelled-ctx whisper, got nil")
+		t.Fatal("expected error from cancelled-ctx STT, got nil")
 	}
 	if !strings.Contains(err.Error(), "context canceled") {
 		t.Errorf("err = %v, want context canceled", err)
@@ -167,15 +167,15 @@ func TestWhisperSem_CtxCancelUnblocks(t *testing.T) {
 	<-saturationDone
 }
 
-// TestWhisperSem_NilUnlimited verifies that an unconfigured (cap<=0)
+// TestSTTSem_NilUnlimited verifies that an unconfigured (cap<=0)
 // transcriptionService has no semaphore and allows truly unbounded
 // parallel calls. (Sanity test for the "0 = unlimited" semantics.)
-func TestWhisperSem_NilUnlimited(t *testing.T) {
+func TestSTTSem_NilUnlimited(t *testing.T) {
 	ai := cfg.NewAiCfg()
-	ai.WhisperMaxConcurrent = 0
-	whisper := cfg.NewWhisperCfg()
-	svc := newTranscriptionService(nil, nil, &whisper, &ai)
-	if svc.whisperSem != nil {
-		t.Fatalf("whisperSem must be nil when WhisperMaxConcurrent <= 0, got non-nil")
+	ai.STTMaxConcurrent = 0
+	stt := cfg.NewSTTCfg()
+	svc := newTranscriptionService(nil, nil, &stt, &ai)
+	if svc.sttSem != nil {
+		t.Fatalf("sttSem must be nil when STTMaxConcurrent <= 0, got non-nil")
 	}
 }

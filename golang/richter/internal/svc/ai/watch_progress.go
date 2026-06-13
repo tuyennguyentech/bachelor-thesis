@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
@@ -43,7 +44,8 @@ func (s *AISvc) UpdateWatchProgress(
 			durationSec = int(lesson.DurationSeconds.Int32)
 		}
 		if cerr := kv.AddWatchCoverage(s.kv, claims.GetSub(), lessonID.String(),
-			float64(req.GetWatchedFromSeconds()), float64(req.GetWatchedToSeconds()), durationSec); cerr != nil {
+			float64(req.GetWatchedFromSeconds()), float64(req.GetWatchedToSeconds()), durationSec,
+			time.Now().UnixMilli(), s.aiCfg.WatchCoverageMaxRate, s.aiCfg.WatchCoverageInitialGraceSeconds); cerr != nil {
 			// Coverage is best-effort telemetry; log-and-continue rather than
 			// failing the position save the client depends on.
 			s.log.WarnContext(ctx, "ai: add watch coverage failed",

@@ -18,8 +18,8 @@ import (
 	"example.com/richter/internal/svc/ai/generation"
 	"example.com/richter/internal/svc/ai/segment"
 	"example.com/richter/internal/svc/ai/transcript"
-	"example.com/richter/internal/taskqueue"
 	svcinteractions "example.com/richter/internal/svc/interactions"
+	"example.com/richter/internal/taskqueue"
 	"example.com/richter/log"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/minio/minio-go/v7"
@@ -73,26 +73,26 @@ func init() {
 }
 
 type AISvc struct {
-	pg             *db.PostgresSvc
-	kv             *kv.KVSvc
-	log            *log.LogSvc
-	authz          *authz.AuthzSvc
-	s3client       *minio.Client
-	s3cfg          *cfg.S3Cfg
-	geminiCfg      *cfg.GeminiCfg
-	whisperCfg     *cfg.WhisperCfg
-	aiCfg          *cfg.AiCfg
-	apiCfg         *cfg.ApiCfg
-	taskCfg        *cfg.LessonTaskCfg
-	ttsCfg         *cfg.TTSCfg
-	ttsClient      *PiperTTSClient
-	chunking       *chunkingService
-	chunkOps       *chunkops.Service
-	transcription  *transcriptionService
-	grading        *gradingService
-	generation     *generation.Service
-	transcript     *transcript.Service
-	tqDB           taskqueue.DB
+	pg            *db.PostgresSvc
+	kv            *kv.KVSvc
+	log           *log.LogSvc
+	authz         *authz.AuthzSvc
+	s3client      *minio.Client
+	s3cfg         *cfg.S3Cfg
+	geminiCfg     *cfg.GeminiCfg
+	sttCfg        *cfg.STTCfg
+	aiCfg         *cfg.AiCfg
+	apiCfg        *cfg.ApiCfg
+	taskCfg       *cfg.LessonTaskCfg
+	ttsCfg        *cfg.TTSCfg
+	ttsClient     TTSSynthesizer
+	chunking      *chunkingService
+	chunkOps      *chunkops.Service
+	transcription *transcriptionService
+	grading       *gradingService
+	generation    *generation.Service
+	transcript    *transcript.Service
+	tqDB          taskqueue.DB
 }
 
 // FDB namespace constants.
@@ -131,9 +131,9 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GeminiCfg: %w", err)
 	}
-	whisperCfg, err := do.Invoke[*cfg.WhisperCfg](i)
+	sttCfg, err := do.Invoke[*cfg.STTCfg](i)
 	if err != nil {
-		return nil, fmt.Errorf("WhisperCfg: %w", err)
+		return nil, fmt.Errorf("STTCfg: %w", err)
 	}
 	aiCfg, err := do.Invoke[*cfg.AiCfg](i)
 	if err != nil {
@@ -165,13 +165,13 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		return nil, fmt.Errorf("minio client: %w", err)
 	}
 
-	transcription := newTranscriptionService(s3client, s3cfg, whisperCfg, aiCfg)
+	transcription := newTranscriptionService(s3client, s3cfg, sttCfg, aiCfg)
 	svc := &AISvc{
 		pg: pg, kv: kvSvc, log: l, authz: az,
-		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, whisperCfg: whisperCfg, aiCfg: aiCfg,
+		s3client: s3client, s3cfg: s3cfg, geminiCfg: geminiCfg, sttCfg: sttCfg, aiCfg: aiCfg,
 		apiCfg:  apiCfg,
 		taskCfg: taskCfg,
-		ttsCfg: ttsCfg, ttsClient: newPiperTTSClient(ttsCfg.Endpoint, aiCfg.PiperMaxConcurrent),
+		ttsCfg:  ttsCfg, ttsClient: newSpeachesTTSClient(ttsCfg, aiCfg.TTSMaxConcurrent, aiCfg.TTSRequestTimeout),
 		chunking:      newChunkingService(geminiCfg, aiCfg, l),
 		transcription: transcription,
 		grading:       newGradingService(geminiCfg, transcription),
@@ -197,19 +197,19 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		ChunksLimit:          svc.chunksLimit,
 	})
 	svc.transcript = transcript.New(transcript.Deps{
-		Postgres:      pg,
-		KV:            kvSvc,
-		Log:           l,
-		AiCfg:         aiCfg,
+		Postgres: pg,
+		KV:       kvSvc,
+		Log:      l,
+		AiCfg:    aiCfg,
 		Transcription: func(ctx context.Context, videoKey string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
-			// WhisperRunner expects transcript.ProgressFn;
-			// runWhisperAnalyze uses the local progressFn alias
+			// STTRunner expects transcript.ProgressFn;
+			// runSTTAnalyze uses the local progressFn alias
 			// (which is task.ProgressFn). Bridge with a wrapper
 			// that has the right type for the call site.
 			adapted := func(step richterv1.AnalysisProgressStep, msg string) error {
 				return progress(step, msg)
 			}
-			return transcription.runWhisperAnalyze(ctx, videoKey, adapted)
+			return transcription.runSTTAnalyze(ctx, videoKey, adapted)
 		},
 		Chunk: func(ctx context.Context, t string, segs []byte) ([]transcript.ChunkProposal, error) {
 			raws, err := svc.chunking.runGeminiChunk(ctx, t, segs)
