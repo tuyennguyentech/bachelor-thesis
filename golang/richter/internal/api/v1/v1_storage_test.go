@@ -4,7 +4,6 @@ package v1
 
 import (
 	"context"
-	"crypto/tls"
 	"net/http"
 	"strings"
 	"testing"
@@ -205,11 +204,7 @@ func TestStorageAuthz(t *testing.T) {
 			t.Fatalf("build PUT request: %v", err)
 		}
 		req.Header.Set("Content-Type", "video/mp4")
-		// public_endpoint may be https with Caddy's internal self-signed cert in
-		// local/E2E setups; trust it for this local reachability check (consistent
-		// with the browser's ignoreHTTPSErrors and the Node fixtures' NODE_TLS).
-		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-		resp, err := client.Do(req)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("PUT to upload URL failed — public_endpoint %q unreachable: %v", s3cfg.PublicEndpoint, err)
 		}

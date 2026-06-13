@@ -15,18 +15,26 @@ const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 
 export const COOKIE_ACCESS = "dyadia_access";
 export const COOKIE_REFRESH = "dyadia_refresh";
+// Base options WITHOUT `secure` — `secure` is request-dependent and set by the
+// cookie-writing site via cookieSecure(). A static "secure in production" flag
+// would wrongly mark cookies Secure on a prod build served over plain http
+// (local browsing / E2E), where the browser then drops them.
 export const COOKIE_OPTS = {
   httpOnly: true,
   sameSite: "lax" as const,
   path: "/",
-  // Secure in production, EXCEPT when an explicit test-only override is set so
-  // the E2E suite can run against a production build over plain http (Caddy).
-  // Real deployments never set DYADIA_INSECURE_COOKIES, so they stay Secure.
-  secure:
-    process.env.NODE_ENV === "production" &&
-    process.env.DYADIA_INSECURE_COOKIES !== "true",
 };
 export const REFRESH_COOKIE_OPTS = { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 };
+
+// cookieSecure reports whether auth cookies should carry the Secure attribute:
+// true iff the user's connection is HTTPS. Caddy (and any reverse proxy) sets
+// X-Forwarded-Proto to the original scheme, so https → Secure and http → not,
+// regardless of NODE_ENV. When no proxy header is present we fall back to
+// NODE_ENV so a directly-served production deployment still stays Secure.
+export function cookieSecure(forwardedProto: string | null | undefined): boolean {
+  if (forwardedProto) return forwardedProto.split(",")[0].trim() === "https";
+  return process.env.NODE_ENV === "production";
+}
 
 // Module-level transport (no per-request auth) — refresh RPC is unauthenticated.
 const refreshTransport = createConnectTransport({

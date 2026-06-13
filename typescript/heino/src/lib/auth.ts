@@ -13,14 +13,14 @@ import {
 import { type JWTClaims } from "buf/gen/richter/jwt/v1/jwt_pb";
 import { createRichterClient } from "./connect-client";
 import {
-  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS,
+  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, cookieSecure,
   verifyAccessJwt,
 } from "./refresh";
 
 export type { JWTClaims };
 
 // Re-export so actions/auth.ts (which imports from "@/lib/auth") still works.
-export { COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS };
+export { COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, cookieSecure };
 export const verifyJwt = verifyAccessJwt;
 
 const ALLOWED_NEXT_PREFIXES = ["/admin", "/dashboard"];

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS,
+  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, cookieSecure,
   verifyAccessJwt, silentRefresh,
 } from "@/lib/refresh";
 import { isTransientError } from "@/lib/connect-error";
@@ -48,8 +48,9 @@ export async function proxy(request: NextRequest) {
       request.cookies.set(COOKIE_REFRESH, refreshed.refreshToken);
 
       const response = passThrough();
-      response.cookies.set(COOKIE_ACCESS, refreshed.accessToken, COOKIE_OPTS);
-      response.cookies.set(COOKIE_REFRESH, refreshed.refreshToken, REFRESH_COOKIE_OPTS);
+      const secure = cookieSecure(request.headers.get("x-forwarded-proto"));
+      response.cookies.set(COOKIE_ACCESS, refreshed.accessToken, { ...COOKIE_OPTS, secure });
+      response.cookies.set(COOKIE_REFRESH, refreshed.refreshToken, { ...REFRESH_COOKIE_OPTS, secure });
       return response;
     }
     if (backendDown) {

@@ -1,11 +1,11 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createRichterClient } from "@/lib/connect-client";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import { UserService, UserRole } from "buf/gen/richter/v1/users_pb";
-import { COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, getSession, verifyJwt, safeNext } from "@/lib/auth";
+import { COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, cookieSecure, getSession, verifyJwt, safeNext } from "@/lib/auth";
 import { Code, ConnectError } from "@connectrpc/connect";
 
 export type LoginState = { error?: string } | undefined;
@@ -26,8 +26,9 @@ export async function login(_state: LoginState, formData: FormData): Promise<Log
     accessToken = res.accessToken;
 
     const cookieStore = await cookies();
-    cookieStore.set(COOKIE_ACCESS, res.accessToken, COOKIE_OPTS);
-    cookieStore.set(COOKIE_REFRESH, res.refreshToken, REFRESH_COOKIE_OPTS);
+    const secure = cookieSecure((await headers()).get("x-forwarded-proto"));
+    cookieStore.set(COOKIE_ACCESS, res.accessToken, { ...COOKIE_OPTS, secure });
+    cookieStore.set(COOKIE_REFRESH, res.refreshToken, { ...REFRESH_COOKIE_OPTS, secure });
   } catch (err) {
     if (err instanceof ConnectError && err.code === Code.PermissionDenied) {
       return { error: "Tài khoản chưa được kích hoạt" };

@@ -1,7 +1,7 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import {
-  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, silentRefresh,
+  COOKIE_ACCESS, COOKIE_REFRESH, COOKIE_OPTS, REFRESH_COOKIE_OPTS, cookieSecure, silentRefresh,
 } from "@/lib/refresh";
 
 export async function POST() {
@@ -25,7 +25,8 @@ export async function POST() {
   }
 
   const res = NextResponse.json({ accessToken: outcome.accessToken });
-  res.cookies.set(COOKIE_ACCESS, outcome.accessToken, COOKIE_OPTS);
-  res.cookies.set(COOKIE_REFRESH, outcome.refreshToken, REFRESH_COOKIE_OPTS);
+  const secure = cookieSecure((await headers()).get("x-forwarded-proto"));
+  res.cookies.set(COOKIE_ACCESS, outcome.accessToken, { ...COOKIE_OPTS, secure });
+  res.cookies.set(COOKIE_REFRESH, outcome.refreshToken, { ...REFRESH_COOKIE_OPTS, secure });
   return res;
 }
