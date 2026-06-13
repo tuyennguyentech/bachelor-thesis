@@ -136,6 +136,14 @@ type AiCfg struct {
 	// nth retry waits n * GeminiRetryBackoff (linear, capped by the call's own
 	// timeout). 0 = retry immediately.
 	GeminiRetryBackoff time.Duration `mapstructure:"gemini_retry_backoff"`
+	// GeminiCacheDir, when non-empty, enables an on-disk response cache for
+	// Gemini generation calls keyed by sha256(model + prompt). A cache HIT
+	// replays the stored response without touching the network, so a test run
+	// that has been warmed once never spends quota again — this is how the test
+	// suite stays deterministic and quota-independent. Empty (the production
+	// default) disables the cache entirely. Only successful, non-empty responses
+	// are ever written, so a failed/throttled call never poisons the cache.
+	GeminiCacheDir string `mapstructure:"gemini_cache_dir"`
 }
 
 // DefaultMaxVideoBytes is the default cap for video file downloads (2 GB).

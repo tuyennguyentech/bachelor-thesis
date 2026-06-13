@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"example.com/richter/cfg"
+	"example.com/richter/internal/svc/ai/geminicache"
 	"example.com/richter/log"
 	"github.com/google/generative-ai-go/genai"
 )
@@ -83,15 +84,23 @@ Trả về JSON:
   ]
 }`)
 
-	s.log.InfoContext(ctx, "[GEMINI] ChunkTranscript: calling GenerateContent")
-	resp, err := model.GenerateContent(ctx, genai.Text(sb.String()))
-	if err != nil {
-		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-	}
+	prompt := sb.String()
+	cache := geminicache.New(s.aiCfg.GeminiCacheDir)
 
-	raw, err := geminiResponseText(resp)
-	if err != nil {
-		return nil, err
+	raw, ok := cache.Get(s.geminiCfg.Model, prompt)
+	if ok {
+		s.log.InfoContext(ctx, "[GEMINI] ChunkTranscript: cache hit (skipping GenerateContent)")
+	} else {
+		s.log.InfoContext(ctx, "[GEMINI] ChunkTranscript: calling GenerateContent")
+		resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+		if err != nil {
+			return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+		}
+		raw, err = geminiResponseText(resp)
+		if err != nil {
+			return nil, err
+		}
+		cache.Put(s.geminiCfg.Model, prompt, raw)
 	}
 
 	var result struct {

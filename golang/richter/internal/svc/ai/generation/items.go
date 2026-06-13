@@ -9,6 +9,7 @@ import (
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/cfg"
+	"example.com/richter/internal/svc/ai/geminicache"
 	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
 	"github.com/google/generative-ai-go/genai"
@@ -76,15 +77,22 @@ Trả về JSON object: {"items": [...]}`,
 		generator.GeminiSchema(),
 	)
 
-	// One generation attempt: call Gemini, parse, and build validated items.
+	cache := geminicache.New(s.aiCfg.GeminiCacheDir)
+
+	// One generation attempt: call Gemini (or replay a cached response), parse,
+	// and build validated items.
 	genOnce := func() ([]generatedItem, error) {
-		resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-		if err != nil {
-			return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-		}
-		raw, err := geminiResponseText(resp)
-		if err != nil {
-			return nil, err
+		raw, ok := cache.Get(s.geminiCfg.Model, prompt)
+		if !ok {
+			resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+			if err != nil {
+				return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+			}
+			raw, err = geminiResponseText(resp)
+			if err != nil {
+				return nil, err
+			}
+			cache.Put(s.geminiCfg.Model, prompt, raw)
 		}
 		var result struct {
 			Items []json.RawMessage `json:"items"`
@@ -201,16 +209,23 @@ func (s *Service) GenerateItemsAIChoose(
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(65536)
 
-	s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: calling GenerateContent",
-		"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-	if err != nil {
-		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-	}
-
-	raw, err := geminiResponseText(resp)
-	if err != nil {
-		return nil, err
+	cache := geminicache.New(s.aiCfg.GeminiCacheDir)
+	raw, ok := cache.Get(s.geminiCfg.Model, prompt)
+	if ok {
+		s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: cache hit (skipping GenerateContent)",
+			"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
+	} else {
+		s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: calling GenerateContent",
+			"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
+		resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+		if err != nil {
+			return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
+		}
+		raw, err = geminiResponseText(resp)
+		if err != nil {
+			return nil, err
+		}
+		cache.Put(s.geminiCfg.Model, prompt, raw)
 	}
 
 	var result struct {
