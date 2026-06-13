@@ -271,9 +271,18 @@ export default async function DashboardCoursesPage({
                       </CardContent>
 
                       <CardFooter className="pt-4 border-t bg-muted/20 flex items-center justify-between gap-2">
-                        <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 font-medium shrink-0">
-                          Đang tham gia
-                        </Badge>
+                        {cardCanManage(course) ? (
+                          // Manager (course owner / org owner-admin) accesses via
+                          // bypass — they are NOT a learner-member, so label them
+                          // "Quản lý", not "Đang tham gia".
+                          <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 font-medium shrink-0">
+                            Quản lý
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 font-medium shrink-0">
+                            Đang tham gia
+                          </Badge>
+                        )}
                         {cardCanManage(course) ? (
                           // Manager: split CTA — learn (real) or manage.
                           <div className="flex items-center gap-1.5" data-testid="course-card-manager-cta">

@@ -173,4 +173,17 @@ test.describe("Course list — no locked section for manager (userPage = alice)"
     // Manager sees "Quản lý" instead of "Vào học"
     await expect(page.getByRole("link", { name: /Quản lý/ }).first()).toBeVisible();
   });
+
+  test("admin alice card is badged 'Quản lý', NOT 'Đang tham gia' (manager ≠ member)", async ({ userPage: page }) => {
+    await page.goto(
+      `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+    await expect(card).toBeVisible();
+    // alice accesses every course via bypass (org admin/owner) but is NOT a
+    // learner-member, so the card must not mislabel her as joined.
+    await expect(card.getByText("Đang tham gia")).not.toBeVisible();
+    await expect(card.getByText("Quản lý", { exact: true }).first()).toBeVisible();
+  });
 });
