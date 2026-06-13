@@ -1808,4 +1808,42 @@ func TestCourseJoinRequestRoles(t *testing.T) {
 		_, err := cm.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{CourseId: courseID})
 		assertCode(t, err, connect.CodeAlreadyExists)
 	})
+
+	// An org ADMIN (NOT the course owner) manages the course exactly like the
+	// owner: lists pending requests and approves them. Locks in "org admin == owner
+	// for courses".
+	t.Run("OrgAdmin_ManagesLikeOwner", func(t *testing.T) {
+		adminEmail, adminPass, adminID := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, adminID, richterv1.OrganizationRole_ORGANIZATION_ROLE_ADMIN)
+		adminCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(getUserToken(t, url, adminEmail, adminPass)), url)
+
+		reqEmail, reqPass, reqID := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, reqID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+		reqCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(getUserToken(t, url, reqEmail, reqPass)), url)
+		if _, err := reqCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{CourseId: courseID}); err != nil {
+			t.Fatalf("requester CreateJoinRequest: %v", err)
+		}
+
+		// Org admin lists pending (manager access without being the owner).
+		list, err := adminCM.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{CourseId: courseID, Limit: 100, Offset: 0})
+		if err != nil {
+			t.Fatalf("org admin ListPendingJoinRequests: %v", err)
+		}
+		seen := false
+		for _, r := range list.GetRequests() {
+			if r.GetUserId() == reqID {
+				seen = true
+			}
+		}
+		if !seen {
+			t.Fatal("org admin should see the pending request (manager access like owner)")
+		}
+		// Org admin approves.
+		if _, err := adminCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{CourseId: courseID, UserId: reqID, Approve: true}); err != nil {
+			t.Fatalf("org admin ReviewJoinRequest: %v", err)
+		}
+		if got := memberRole(reqID); got != richterv1.CourseRole_COURSE_ROLE_STUDENT {
+			t.Errorf("approved member role = %v, want STUDENT", got)
+		}
+	})
 }
