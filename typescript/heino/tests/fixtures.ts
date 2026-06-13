@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { test as base, expect, type Page } from "@playwright/test";
 import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
-import type { DescService } from "@bufbuild/protobuf";
+import type { DescService, MessageInitShape } from "@bufbuild/protobuf";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import {
@@ -30,6 +30,7 @@ import {
 import {
   InteractionService,
   InteractionKind,
+  CreateManualInteractionRequestSchema,
   type CreateManualInteractionRequest,
 } from "buf/gen/richter/v1/interactions_pb";
 import {
@@ -432,10 +433,14 @@ export async function createLesson(
 export async function createInteraction(
   token: string,
   lessonId: string,
-  opts: Partial<Omit<CreateManualInteractionRequest, "lessonId">> & {
+  opts: Partial<Omit<CreateManualInteractionRequest, "lessonId" | "config">> & {
     kind?: InteractionKind;
     startSeconds?: number;
     prompt?: string;
+    // Accept the protobuf-es init shape (raw { case, value } object) for config,
+    // matching how the connect client accepts MessageInitShape, so callers can
+    // pass a plain config literal without constructing a branded message.
+    config?: MessageInitShape<typeof CreateManualInteractionRequestSchema>["config"];
   },
   baseURL?: string,
 ): Promise<string> {

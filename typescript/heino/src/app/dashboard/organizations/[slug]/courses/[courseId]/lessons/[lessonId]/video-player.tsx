@@ -169,8 +169,14 @@ export function VideoPlayer({
     durationRef.current = 0;
     lastSetCurrentTime.current = null;
     lastSavedPos.current = -1;
-    intervalFromRef.current = 0;
-    lastTickPosRef.current = 0;
+    // On a RETAKE (playerKey > 0) playback restarts at 0, so re-anchor the watch
+    // interval to 0. On the initial mount it is a resume: keep the initialPosition
+    // the refs were seeded with so the first reported interval starts at the
+    // resume point, not 0 (don't rely on the seek-detector to self-correct).
+    if ((playerKey ?? 0) > 0) {
+      intervalFromRef.current = 0;
+      lastTickPosRef.current = 0;
+    }
     seekedSinceSaveRef.current = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlayerError(null);
