@@ -120,7 +120,10 @@ test.describe("Dashboard course detail", () => {
     await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
     const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
     expect(href).toBeTruthy();
-    await page.goto(`${href}?tab=lessons`, { waitUntil: "domcontentloaded" });
+    // Strip any query (a manager card CTA links to ...?mode=learn) before adding
+    // the tab, so we don't build a malformed "?mode=learn?tab=lessons".
+    const base = href!.split("?")[0].replace(/\/$/, "");
+    await page.goto(`${base}?tab=lessons`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Nội dung")).toBeVisible();
   });
