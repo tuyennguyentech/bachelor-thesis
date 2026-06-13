@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"example.com/richter/cfg"
 	"example.com/richter/internal"
 	"example.com/richter/internal/db"
 	"example.com/sql/gen"
@@ -107,6 +108,20 @@ func (rg *runGroup) Close() {
 	rg.wg.Wait()
 }
 
+// taskActiveTimeout returns the configured stale-task budget (LessonTaskCfg.
+// ActiveTimeout from richter.base.toml) — NOT a hardcoded constant. Tests derive
+// their timing from it:
+//   - how long to wait for a worker to claim/run/complete (the integ packages
+//     share one test DB, so under the full parallel suite a correct-but-slow
+//     claim must not be mistaken for a hang; a real serialization/deadlock never
+//     fires the awaited event and still times out);
+//   - the reap staleness threshold and the amount a task's heartbeat is aged to
+//     simulate staleness — keyed off the same configured budget so a test only
+//     ever reaps its OWN deliberately-aged task, never concurrent fresh tasks.
+func taskActiveTimeout() time.Duration {
+	return do.MustInvoke[*cfg.LessonTaskCfg](internal.Injector).ActiveTimeout
+}
+
 func getOrCreateTestUserAndLesson(t *testing.T, pool *db.PostgresSvc) (pgtype.UUID, pgtype.UUID) {
 	ctx := context.Background()
 	var userID pgtype.UUID
@@ -171,22 +186,17 @@ func TestPostgresDB_TaskLifecycle(t *testing.T) {
 		t.Errorf("expected task status to be pending, got %s", task.Status)
 	}
 
-	// 2. EnqueuePendingBatch
-	enqueued, err := tq.EnqueuePendingBatch(ctx, 10)
+	// 2. Enqueue this specific task. EnqueuePendingBatch transitions the
+	// globally-oldest N pending rows, which is racy under concurrent producers
+	// (our task may fall outside the batch); EnqueueTask scopes to our own id.
+	enqueued, err := db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
+		return q.EnqueueTask(ctx, taskID)
+	})
 	if err != nil {
-		t.Fatalf("EnqueuePendingBatch: %v", err)
+		t.Fatalf("EnqueueTask: %v", err)
 	}
-	found := false
-	for _, tk := range enqueued {
-		if tk.ID == taskID {
-			found = true
-			if tk.Status != string(StatusInqueued) {
-				t.Errorf("expected status to be inqueued, got %s", tk.Status)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("task not found in enqueued batch")
+	if string(enqueued.Status) != string(StatusInqueued) {
+		t.Errorf("expected status to be inqueued, got %s", enqueued.Status)
 	}
 
 	// 3. ClaimNextInqueuedTask
@@ -427,7 +437,7 @@ func TestTaskqueue_WorkerCrashAndRecovery(t *testing.T) {
 
 	select {
 	case <-recoveryBlocked:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker 1 to claim and run task")
 	}
 
@@ -551,7 +561,7 @@ func TestTaskqueue_WorkerHeartbeatSteal(t *testing.T) {
 
 	select {
 	case <-stealBlocked:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker to claim task")
 	}
 
@@ -614,7 +624,7 @@ func TestTaskqueue_WorkerCancelPropagation(t *testing.T) {
 
 	select {
 	case <-cancelBlocked:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker to claim task")
 	}
 
@@ -650,9 +660,13 @@ func TestPostgresDB_OptimisticConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Đẩy sang inqueued
-	_, err = tq.EnqueuePendingBatch(ctx, 1)
-	if err != nil {
+	// Enqueue ONLY this test's task via the scoped EnqueueTask query.
+	// EnqueuePendingBatch promotes the globally-oldest pending rows, which under
+	// parallel test load may be another producer's task — leaving ours pending
+	// (so the type-scoped claim below finds nothing) and altering theirs.
+	if _, err = db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
+		return q.EnqueueTask(ctx, taskID)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -757,14 +771,16 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tq.EnqueuePendingBatch(ctx, 1)
-	if err != nil {
+	// Enqueue this specific task (scoped — avoids racing concurrent producers' pending tasks).
+	if _, err = db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
+		return q.EnqueueTask(ctx, taskID)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
 	case <-exec.started:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker to claim task")
 	}
 
@@ -776,15 +792,12 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 		t.Fatalf("expected status to be processing, got %s", task.Status)
 	}
 
-	err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
-		_, err := conn.Exec(ctx, `
-			UPDATE tasks
-			SET heartbeat = $2
-			WHERE id = $1`,
-			taskID, time.Now().UTC().Add(-2*time.Hour))
-		return err
-	})
-	if err != nil {
+	if err = db.WithConnectionExec(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.SetTaskHeartbeat(ctx, gen.SetTaskHeartbeatParams{
+			ID:        taskID,
+			Heartbeat: pgtype.Timestamptz{Time: time.Now().UTC().Add(-2 * taskActiveTimeout()), Valid: true},
+		})
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -792,7 +805,7 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 
 	select {
 	case <-exec.done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for executor to complete")
 	}
 
@@ -819,13 +832,20 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 		t.Errorf("expected pgx.ErrNoRows when worker 2 claims task, got: %v", err)
 	}
 
-	// Verify that scanner ignores (cannot reap) the succeeded task
-	reaped, err := tq.ReapStaleProcessingBatch(ctx, 1, 0)
+	// Verify the scanner does not reap THIS succeeded task. Two concurrency-safety
+	// points: (1) use staleAfter=1h so a global reap never touches OTHER packages'
+	// fresh processing tasks (heartbeat ~now) that share this test DB; (2) assert
+	// only on THIS task's id, never a global "0 reaped" count, which is racy under
+	// parallel test load. A succeeded task is not 'processing', so it can never be
+	// reaped regardless.
+	reaped, err := tq.ReapStaleProcessingBatch(ctx, 100, taskActiveTimeout())
 	if err != nil {
 		t.Fatalf("ReapStaleProcessingBatch failed: %v", err)
 	}
-	if len(reaped) > 0 {
-		t.Errorf("expected 0 tasks to be reaped, got %d", len(reaped))
+	for _, r := range reaped {
+		if r.ID == taskID {
+			t.Errorf("succeeded task %s must not be reaped", taskID.String())
+		}
 	}
 
 	// Verify task status remains succeeded and worker_id is cleared as per MarkSucceeded behavior
@@ -875,18 +895,32 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tq.EnqueuePendingBatch(ctx1, 1)
-	if err != nil {
+	// Enqueue this specific task (scoped — avoids racing concurrent producers' pending tasks).
+	if _, err = db.WithConnection(pool, ctx1, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
+		return q.EnqueueTask(ctx1, taskID)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
 	case <-exec1.started:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker 1 to claim task")
 	}
 
-	_, err = tq.ReapStaleProcessingBatch(ctx1, 1, 0)
+	// Age ONLY this task's heartbeat (via the scoped SetTaskHeartbeat query) so it
+	// — not a concurrent package's fresh processing task — is the one reaped. A
+	// global reap with staleAfter=0 would reap any processing task, corrupting
+	// other tests' tasks or (batchSize 1) picking one of theirs and leaving ours.
+	if err = db.WithConnectionExec(pool, ctx1, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.SetTaskHeartbeat(ctx1, gen.SetTaskHeartbeatParams{
+			ID:        taskID,
+			Heartbeat: pgtype.Timestamptz{Time: time.Now().UTC().Add(-2 * taskActiveTimeout()), Valid: true},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tq.ReapStaleProcessingBatch(ctx1, 100, taskActiveTimeout())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -920,14 +954,14 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 
 	select {
 	case <-exec2.started:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker 2 to claim task")
 	}
 
 	close(exec1.release)
 	select {
 	case <-exec1.done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker 1 executor to finish")
 	}
 
@@ -947,7 +981,7 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	close(exec2.release)
 	select {
 	case <-exec2.done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker 2 executor to finish")
 	}
 
@@ -1047,10 +1081,14 @@ func TestTaskqueue_TasksRunInParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2. Enqueue both
-	_, err = tq.EnqueuePendingBatch(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
+	// 2. Enqueue both (scoped to these two ids — EnqueuePendingBatch's global
+	// oldest-N batch could promote concurrent producers' tasks instead).
+	for _, id := range []pgtype.UUID{task1ID, task2ID} {
+		if _, err = db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
+			return q.EnqueueTask(ctx, id)
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 3. Start worker
@@ -1065,7 +1103,7 @@ func TestTaskqueue_TasksRunInParallel(t *testing.T) {
 	select {
 	case <-coord.bothStarted:
 		// Success! Both tasks are running in parallel
-	case <-time.After(3 * time.Second):
+	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for tasks to run in parallel; they might be serialized")
 	}
 

@@ -288,8 +288,13 @@ func TestUserLifecycle(t *testing.T) {
 	})
 
 	t.Run("ListUsers", func(t *testing.T) {
+		// Filter by the created user's email. A plain paginated list is racy on a
+		// shared test DB — concurrent tests create users that push this one off
+		// the first page — so query-by-email returns exactly this user
+		// deterministically while still exercising the ListUsers RPC.
 		res, err := c.ListUsers(ctx, &richterv1.ListUsersRequest{
 			Limit: 10,
+			Query: &email,
 		})
 		if err != nil {
 			t.Fatalf("failed to list users: %v", err)

@@ -74,6 +74,20 @@ FROM ranked
 WHERE tasks.id = ranked.id
 RETURNING tasks.*;
 
+-- name: EnqueueTask :one
+-- Ensure ONE specific task is inqueued, assigning the next queue_seq if it was
+-- still pending. Unlike EnqueuePendingBatch (which transitions the globally-
+-- oldest pending rows), this targets a single id, so callers/tests can enqueue
+-- their own task without racing — or transitioning — other producers' pending
+-- tasks. Idempotent: a task already inqueued (e.g. the background scanner got
+-- there first) is returned unchanged, keeping its existing queue_seq.
+UPDATE tasks
+SET status = 'inqueued',
+    queue_seq = COALESCE(tasks.queue_seq, (SELECT COALESCE(MAX(t2.queue_seq), 0) + 1 FROM tasks t2 WHERE t2.status = 'inqueued')),
+    updated_at = now()
+WHERE tasks.id = $1 AND tasks.status IN ('pending', 'inqueued')
+RETURNING tasks.*;
+
 -- name: ReapStaleProcessingBatch :many
 -- Scanner primitive: processing + heartbeat stale -> inqueued.
 WITH base AS (
@@ -156,6 +170,14 @@ RETURNING *;
 UPDATE tasks
 SET heartbeat = now(), updated_at = now()
 WHERE id = $1 AND worker_id = $2 AND status = 'processing';
+
+-- name: SetTaskHeartbeat :exec
+-- Set a task's heartbeat to an explicit timestamp. Used by tests to simulate a
+-- stale processing task deterministically (age only THIS task) without waiting
+-- out the real heartbeat timeout or racing the global scanner.
+UPDATE tasks
+SET heartbeat = $2
+WHERE id = $1;
 
 -- name: MarkSucceeded :exec
 -- Worker primitive: terminal success transition. Sets output_payload
