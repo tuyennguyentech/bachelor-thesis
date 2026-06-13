@@ -1411,6 +1411,25 @@ func TestEnrollSelf(t *testing.T) {
 		if res.Member.Role != richterv1.CourseRole_COURSE_ROLE_TEACHER {
 			t.Errorf("self-enrol role: want TEACHER (manager default), got %v", res.Member.Role)
 		}
+		// After enrolling, the manager must now appear in the member list (the
+		// reported symptom: a bypass manager was absent from the list until they
+		// materialised a row).
+		list, err := orgAdminCM.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{CourseId: courseID, Limit: 100, Offset: 0})
+		if err != nil {
+			t.Fatalf("ListCourseMembers after EnrollSelf: %v", err)
+		}
+		found := false
+		for _, m := range list.GetMembers() {
+			if m.GetUserId() == orgAdminID {
+				found = true
+				if m.GetRole() != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+					t.Errorf("enrolled manager listed as %v, want TEACHER", m.GetRole())
+				}
+			}
+		}
+		if !found {
+			t.Error("enrolled manager does not appear in ListCourseMembers")
+		}
 	})
 
 	t.Run("Idempotent", func(t *testing.T) {
@@ -1686,4 +1705,107 @@ func TestCourseManagerCanSubmitAttempt(t *testing.T) {
 	if res.Attempt.TotalScore != float32(len(ints)) {
 		t.Errorf("manager total_score: want %d (all correct), got %v", len(ints), res.Attempt.TotalScore)
 	}
+}
+
+// TestCourseJoinRequestRoles covers the requested_role path of the join-request
+// flow (course_join_requests.requested_role, migration 00035): explicit STUDENT
+// vs TEACHER requests, the role surfacing in the pending list, the approved
+// member receiving the REQUESTED role, the unspecified-defaults-to-STUDENT rule,
+// and the already-a-member guard. It touches every column the regression broke,
+// so a missing/renamed requested_role column fails here.
+func TestCourseJoinRequestRoles(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	ownerEmail, ownerPass, ownerID := createActiveUser(t, c.users)
+	orgID := createCMTestOrg(t, c, ownerID)
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+	ownerCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(getUserToken(t, url, ownerEmail, ownerPass)), url)
+
+	// memberRole returns a user's role in the course member list (UNSPECIFIED if absent).
+	memberRole := func(userID string) richterv1.CourseRole {
+		res, err := ownerCM.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{CourseId: courseID, Limit: 100, Offset: 0})
+		if err != nil {
+			t.Fatalf("ListCourseMembers: %v", err)
+		}
+		for _, m := range res.GetMembers() {
+			if m.GetUserId() == userID {
+				return m.GetRole()
+			}
+		}
+		return richterv1.CourseRole_COURSE_ROLE_UNSPECIFIED
+	}
+
+	// requestAs provisions a fresh org member and submits a join request as them.
+	requestAs := func(orgRole richterv1.OrganizationRole, requested richterv1.CourseRole) (string, *richterv1.CourseJoinRequest) {
+		email, pass, id := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, id, orgRole)
+		cm := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(getUserToken(t, url, email, pass)), url)
+		res, err := cm.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{CourseId: courseID, RequestedRole: requested})
+		if err != nil {
+			t.Fatalf("CreateJoinRequest(requested=%v): %v", requested, err)
+		}
+		return id, res.GetRequest()
+	}
+
+	t.Run("RequestTeacher_Listed_ApprovedAsTeacher", func(t *testing.T) {
+		uid, req := requestAs(richterv1.OrganizationRole_ORGANIZATION_ROLE_TEACHER, richterv1.CourseRole_COURSE_ROLE_TEACHER)
+		if req.GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("create: requested_role = %v, want TEACHER", req.GetRequestedRole())
+		}
+		list, err := ownerCM.ListPendingJoinRequests(ctx, &richterv1.ListPendingJoinRequestsRequest{CourseId: courseID, Limit: 100, Offset: 0})
+		if err != nil {
+			t.Fatalf("ListPendingJoinRequests: %v", err)
+		}
+		var seen *richterv1.CourseJoinRequest
+		for _, r := range list.GetRequests() {
+			if r.GetUserId() == uid {
+				seen = r
+			}
+		}
+		if seen == nil {
+			t.Fatalf("request for %s not found in pending list", uid)
+		}
+		if seen.GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("pending: requested_role = %v, want TEACHER", seen.GetRequestedRole())
+		}
+		if _, err := ownerCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{CourseId: courseID, UserId: uid, Approve: true}); err != nil {
+			t.Fatalf("ReviewJoinRequest: %v", err)
+		}
+		if got := memberRole(uid); got != richterv1.CourseRole_COURSE_ROLE_TEACHER {
+			t.Errorf("approved member role = %v, want TEACHER (requested role honoured)", got)
+		}
+	})
+
+	t.Run("RequestStudent_ApprovedAsStudent", func(t *testing.T) {
+		uid, req := requestAs(richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT, richterv1.CourseRole_COURSE_ROLE_STUDENT)
+		if req.GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_STUDENT {
+			t.Errorf("requested_role = %v, want STUDENT", req.GetRequestedRole())
+		}
+		if _, err := ownerCM.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{CourseId: courseID, UserId: uid, Approve: true}); err != nil {
+			t.Fatalf("ReviewJoinRequest: %v", err)
+		}
+		if got := memberRole(uid); got != richterv1.CourseRole_COURSE_ROLE_STUDENT {
+			t.Errorf("approved member role = %v, want STUDENT", got)
+		}
+	})
+
+	t.Run("RequestUnspecified_DefaultsToStudent", func(t *testing.T) {
+		_, req := requestAs(richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT, richterv1.CourseRole_COURSE_ROLE_UNSPECIFIED)
+		if req.GetRequestedRole() != richterv1.CourseRole_COURSE_ROLE_STUDENT {
+			t.Errorf("unspecified default requested_role = %v, want STUDENT", req.GetRequestedRole())
+		}
+	})
+
+	t.Run("AlreadyMember_AlreadyExists", func(t *testing.T) {
+		email, pass, id := createActiveUser(t, c.users)
+		addOrgMember(t, c, orgID, id, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{CourseId: courseID, UserId: id, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT}); err != nil {
+			t.Fatalf("setup AddCourseMember: %v", err)
+		}
+		cm := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(getUserToken(t, url, email, pass)), url)
+		_, err := cm.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{CourseId: courseID})
+		assertCode(t, err, connect.CodeAlreadyExists)
+	})
 }
