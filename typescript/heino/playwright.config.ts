@@ -20,6 +20,10 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
+    // E2E runs over https://caddy (real Secure cookies). Caddy uses an internal
+    // self-signed cert, so trust it at the browser layer — TLS + Secure-cookie
+    // behaviour is still exercised faithfully; only cert-chain trust is relaxed.
+    ignoreHTTPSErrors: true,
   },
   projects: [
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },

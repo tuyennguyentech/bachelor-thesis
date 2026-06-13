@@ -1,4 +1,14 @@
-:80 {
+# Caddy serves the dev/test stack on both HTTP (:80, all hosts) and HTTPS
+# (https://caddy, internal self-signed cert). E2E runs over https://caddy so the
+# browser exercises the real production cookie path (Secure cookies require TLS) —
+# no security feature is disabled for tests. auto_https disable_redirects keeps
+# plain http://caddy working for anything that still relies on it.
+{
+	auto_https disable_redirects
+}
+
+# Shared reverse-proxy rules for the whole stack.
+(stack) {
 	handle_path /api/storage/* {
 		# Allow cross-origin PUT/GET for presigned S3 URLs from browser
 		header Access-Control-Allow-Origin "*"
@@ -38,4 +48,16 @@
 	}
 
 	reverse_proxy heino:3000
+}
+
+# HTTPS for the "caddy" hostname with an internal (self-signed) cert. E2E uses
+# https://caddy so Secure cookies behave exactly as in production.
+https://caddy {
+	tls internal
+	import stack
+}
+
+# Plain HTTP on :80 for all hosts (unchanged) — kept for any non-test access.
+:80 {
+	import stack
 }

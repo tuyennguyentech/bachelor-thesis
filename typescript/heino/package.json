@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e": "NODE_TLS_REJECT_UNAUTHORIZED=0 playwright test",
+    "test:e2e:ui": "NODE_TLS_REJECT_UNAUTHORIZED=0 playwright test --ui"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.0",
