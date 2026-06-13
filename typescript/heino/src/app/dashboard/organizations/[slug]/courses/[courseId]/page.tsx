@@ -5,7 +5,7 @@ import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, CourseModuleService, LessonService, type CourseModule, type Lesson } from "buf/gen/richter/v1/courses_pb";
-import { CourseMemberService, CourseRole, type CourseMember } from "buf/gen/richter/v1/course_members_pb";
+import { CourseMemberService, CourseRole, type CourseMember, type CourseJoinRequest } from "buf/gen/richter/v1/course_members_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -48,9 +48,20 @@ import { CourseMemberActionsMenu } from "./course-member-actions-menu";
 import { CourseWorkspaceSidebar, type CourseTab } from "./course-workspace";
 import { CourseLockScreen } from "./course-lock-screen";
 import { JoinRequestsTab } from "./join-requests-tab";
+import { CourseModeToggle } from "./course-mode-toggle";
 import { QuickCreateTrigger } from "@/components/dashboard/quick-create/QuickCreateTrigger";
 
-const CAN_MANAGE_ORG_ROLES = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
+// Org roles that grant course-management bypass on their OWN, matching the
+// backend RequireCourseMember/requireCourseManager rules: only org OWNER/ADMIN
+// (and the course owner / sys-admin) bypass. An org TEACHER does NOT manage a
+// course by org-role alone — they manage only courses they OWN or are an
+// explicit course-manager (TEACHER) member of. This keeps the FE consistent
+// with backend authz (an org-teacher on a non-member course is locked, not a
+// broken manage view).
+const CAN_MANAGE_ORG_ROLES = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
+// Org-level teachers (and above) may request the manager (TEACHER) role on a
+// locked course; a plain learner can only ask to learn (STUDENT).
+const CAN_REQUEST_MANAGER_ORG_ROLES = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const CAN_CHANGE_STATUS = [OrganizationRole.OWNER, OrganizationRole.ADMIN];
 const MEMBERS_LIMIT = 50;
 
@@ -60,11 +71,13 @@ function stripLessonPrefix(title: string): string {
   return title.replace(/^\s*Bài\s+\d+\s*[:.\-–]\s*/i, "").trim() || title;
 }
 
-function courseRoleBadge(role: CourseRole) {
+function courseRoleBadge(role: CourseRole, isOwner: boolean) {
+  if (isOwner)
+    return <Badge variant="outline" className="border-violet-500 text-violet-600">Chủ khóa học</Badge>;
   if (role === CourseRole.TEACHER)
-    return <Badge variant="outline" className="border-blue-500 text-blue-600">Giảng viên</Badge>;
+    return <Badge variant="outline" className="border-blue-500 text-blue-600">Quản lý</Badge>;
   if (role === CourseRole.STUDENT)
-    return <Badge variant="outline">Học viên</Badge>;
+    return <Badge variant="outline">Thành viên</Badge>;
   return <Badge variant="secondary">Không xác định</Badge>;
 }
 
@@ -84,6 +97,12 @@ export default async function CourseWorkspacePage({
 
   const membersPage = Math.max(1, parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "1", 10) || 1);
   const membersOffset = (membersPage - 1) * MEMBERS_LIMIT;
+
+  // Course-level "Vào học" signal. `mode=learn` renders the course→lesson flow
+  // as a student would see it (read-only list + progress, real persisted
+  // attempts). Only meaningful for a manager; a plain student is always a
+  // learner. Distinct from a lesson's `?preview=1` (non-persisted quick peek).
+  const rawMode = Array.isArray(sp.mode) ? sp.mode[0] : sp.mode;
 
   const { claims, token } = await requireAnyUser();
 
@@ -115,9 +134,36 @@ export default async function CourseWorkspacePage({
   if (!course) notFound();
   if (course.organizationId !== org.id) notFound();
 
+  // ── Resolve my OWN course membership (presence + role) ──────────────────────
+  // Exact and page-independent (unlike scanning listCourseMembers). Drives both
+  // canManage (course-manager membership) and the first-entry vs re-entry CTA.
+  let isCourseMember = false;
+  let isCourseManagerMember = false;
+  {
+    const memberClient = createRichterClient(CourseMemberService, token);
+    try {
+      const res = await memberClient.getMyCourseMembership({ courseId: course.id });
+      isCourseMember = res.isMember;
+      isCourseManagerMember = res.isMember && res.role === CourseRole.TEACHER;
+    } catch (err) {
+      console.error("Failed to resolve self-membership:", err);
+    }
+  }
+
   // Course owner can also manage (regardless of org role)
   const isCourseOwner = course.ownerId === claims.sub;
-  const canManage = canManageViaOrg || isCourseOwner;
+  // canManage matches the backend: course owner, org OWNER/ADMIN, or an explicit
+  // course-manager (TEACHER) member. An org TEACHER who is not a course member
+  // is NOT a manager here — they are locked and use the request-to-manage flow.
+  const canManage = isCourseOwner || canManageViaOrg || isCourseManagerMember;
+  const canRequestManager = CAN_REQUEST_MANAGER_ORG_ROLES.includes(member.role);
+
+  // A manager in "learn mode" is a REAL student for rendering/persistence: NOT
+  // a manager view (no Studio) and NOT a preview (attempts persist). Only a
+  // manager can toggle this; a plain student is already a learner.
+  const learnMode = canManage && rawMode === "learn";
+  // When a manager is in learn mode, render exactly as a student would see it.
+  const renderAsManager = canManage && !learnMode;
 
   // ── Fetch my join request status if locked ──────────────────────────────────
   let joinRequest = null;
@@ -168,9 +214,10 @@ export default async function CourseWorkspacePage({
       }
       modulesWithLessons = modules.map((m) => ({ ...m, lessons: lessonsByModule.get(m.id) ?? [] }));
 
-      // For students, resolve which lessons have at least one attempt. No bulk RPC
-      // exists, so fan out GetMyAttempt once per lesson in a single batch.
-      if (!canManage && allLessons.length > 0) {
+      // For students (incl. a manager in learn mode), resolve which lessons have
+      // at least one attempt. No bulk RPC exists, so fan out GetMyAttempt once
+      // per lesson in a single batch.
+      if (!renderAsManager && allLessons.length > 0) {
         const interactionClient = createRichterClient(InteractionService, token);
         await Promise.all(
           allLessons.map((l) =>
@@ -210,8 +257,8 @@ export default async function CourseWorkspacePage({
   }
 
   // ── Fetch pending join requests (tab=join-requests) ───────────────────────
-  let pendingRequests: any[] = [];
-  if (activeTab === "join-requests" && canManage) {
+  let pendingRequests: CourseJoinRequest[] = [];
+  if (activeTab === "join-requests" && renderAsManager) {
     const memberClient = createRichterClient(CourseMemberService, token);
     try {
       const res = await memberClient.listPendingJoinRequests({
@@ -226,6 +273,11 @@ export default async function CourseWorkspacePage({
   }
 
   const redirectAfterDelete = `/dashboard/organizations/${slug}/courses`;
+
+  // Lesson links carry `mode=learn` so a manager who entered learn mode stays a
+  // real student on the lesson page (real StudentLessonView + persisted submit).
+  const lessonHref = (lessonId: string) =>
+    `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lessonId}${learnMode ? "?mode=learn" : ""}`;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -281,6 +333,7 @@ export default async function CourseWorkspacePage({
             courseTitle={course.title}
             courseDescription={course.description}
             joinRequest={joinRequest}
+            canRequestManager={canRequestManager}
           />
         </main>
       ) : (
@@ -290,7 +343,8 @@ export default async function CourseWorkspacePage({
             courseId={courseId}
             courseTitle={course.title}
             activeTab={activeTab}
-            canManage={canManage}
+            canManage={renderAsManager}
+            mode={learnMode ? "learn" : "manage"}
           />
 
           <main className="flex-1 min-w-0 overflow-auto p-4 lg:p-6 bg-background">
@@ -305,8 +359,30 @@ export default async function CourseWorkspacePage({
                       <p className="text-sm text-muted-foreground">{course.description}</p>
                     )}
                   </div>
-                  {canManage && courseStatusBadge(course.status)}
+                  <div className="flex items-center gap-3 shrink-0">
+                    {/* Manager-only: switch between authoring and real learning. */}
+                    {canManage && (
+                      <CourseModeToggle
+                        slug={slug}
+                        courseId={course.id}
+                        mode={learnMode ? "learn" : "manage"}
+                        isMember={isCourseMember}
+                      />
+                    )}
+                    {renderAsManager && courseStatusBadge(course.status)}
+                  </div>
                 </div>
+
+                {/* Learn-mode banner: a manager is doing REAL, persisted learning. */}
+                {learnMode && (
+                  <div className="flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300">
+                    <GraduationCapIcon className="size-4 shrink-0" />
+                    <span>
+                      Bạn đang ở chế độ học. Kết quả làm bài sẽ được lưu lại như học viên thật. Chuyển sang
+                      &ldquo;Quản lý&rdquo; để chỉnh sửa nội dung.
+                    </span>
+                  </div>
+                )}
 
                 {/* ── COURSE STATISTICS GRID ── */}
                 <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 bg-muted/20 p-4 rounded-xl border">
@@ -365,7 +441,7 @@ export default async function CourseWorkspacePage({
                   )}
                 </div>
 
-                {canManage && (
+                {renderAsManager && (
                   <>
                     <div className="rounded-md border p-4 flex flex-col gap-4 bg-background">
                       <h2 className="font-medium">Thông tin chung</h2>
@@ -397,8 +473,8 @@ export default async function CourseWorkspacePage({
                   </>
                 )}
 
-                {/* Danger zone — only for owner/admin */}
-                {canChangeStatus && (
+                {/* Danger zone — only for owner/admin, hidden while learning */}
+                {renderAsManager && canChangeStatus && (
                   <div className="rounded-md border border-destructive/30 p-4 flex items-center justify-between bg-background">
                     <div>
                       <p className="font-medium text-sm">Xóa khóa học</p>
@@ -425,7 +501,7 @@ export default async function CourseWorkspacePage({
                       Nội dung ({modulesWithLessons.length} chương)
                     </h1>
                   </div>
-                  {canManage && (
+                  {renderAsManager ? (
                     <div className="flex items-center gap-2">
                       <QuickCreateTrigger
                         token={token}
@@ -435,12 +511,19 @@ export default async function CourseWorkspacePage({
                       />
                       <AddModuleDialog courseId={course.id} slug={slug} nextOrder={modulesWithLessons.length} token={token} />
                     </div>
+                  ) : canManage && (
+                    <CourseModeToggle
+                      slug={slug}
+                      courseId={course.id}
+                      mode={learnMode ? "learn" : "manage"}
+                      isMember={isCourseMember}
+                    />
                   )}
                 </div>
 
                 {modulesWithLessons.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">
-                    {canManage ? "Chưa có chương nào. Thêm chương đầu tiên để bắt đầu." : "Chưa có nội dung."}
+                    {renderAsManager ? "Chưa có chương nào. Thêm chương đầu tiên để bắt đầu." : "Chưa có nội dung."}
                   </p>
                 ) : (
                   <div className="flex flex-col gap-3">
@@ -454,7 +537,7 @@ export default async function CourseWorkspacePage({
                               {m.lessons.length} bài
                             </span>
                           </div>
-                          {canManage && (
+                          {renderAsManager && (
                             <ModuleActions
                               id={m.id}
                               courseId={courseId}
@@ -468,14 +551,14 @@ export default async function CourseWorkspacePage({
 
                         {m.lessons.map((lesson, li) => {
                           const durationMinutes = Math.round((lesson.durationSeconds || 0) / 60);
-                          const isCompleted = !canManage && completedLessonIds.has(lesson.id);
+                          const isCompleted = !renderAsManager && completedLessonIds.has(lesson.id);
                           return (
                             <div
                               key={lesson.id}
                               className="flex items-center justify-between gap-2 px-4 py-2 ml-4 rounded-md border bg-background"
                             >
                               <Link
-                                href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
+                                href={lessonHref(lesson.id)}
                                 className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80"
                               >
                                 <span className="text-sm text-muted-foreground font-mono w-6">{li + 1}.</span>
@@ -499,7 +582,7 @@ export default async function CourseWorkspacePage({
                                     Chưa có nội dung
                                   </Badge>
                                 )}
-                                {canManage && (
+                                {renderAsManager && (
                                   <LessonActions
                                     id={lesson.id}
                                     moduleId={m.id}
@@ -516,7 +599,7 @@ export default async function CourseWorkspacePage({
                           );
                         })}
 
-                        {canManage && (
+                        {renderAsManager && (
                           <div className="ml-4 mt-0.5">
                             <AddLessonDialog
                               moduleId={m.id}
@@ -535,98 +618,147 @@ export default async function CourseWorkspacePage({
             )}
 
             {/* ── Tab: Thành viên ── */}
-            {activeTab === "members" && (
-              <div className="flex flex-col gap-4 max-w-screen-2xl">
-                <div className="flex items-center justify-between">
+            {activeTab === "members" && (() => {
+              // Split into two clearly-labelled groups: managers (course owner +
+              // role TEACHER) vs learners (role STUDENT). The course owner is
+              // always a manager regardless of their stored row role.
+              const managers = members.filter(
+                (m) => m.userId === course.ownerId || m.role === CourseRole.TEACHER,
+              );
+              const learners = members.filter(
+                (m) => m.userId !== course.ownerId && m.role === CourseRole.STUDENT,
+              );
+
+              const renderRow = (m: CourseMember) => {
+                const displayName = `${m.userFirstName} ${m.userLastName}`.trim() || m.userId;
+                const isOwner = m.userId === course.ownerId;
+                return (
+                  <TableRow key={m.userId}>
+                    <TableCell>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm font-medium">{displayName}</span>
+                        {m.userEmail && (
+                          <span className="text-xs text-muted-foreground">{m.userEmail}</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>{courseRoleBadge(m.role, isOwner)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {m.createdAt
+                        ? new Date(Number(m.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
+                        : "—"}
+                    </TableCell>
+                    {renderAsManager && (
+                      <TableCell>
+                        {isOwner ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <CourseMemberActionsMenu
+                            courseId={m.courseId}
+                            userId={m.userId}
+                            displayName={displayName}
+                            token={token}
+                          />
+                        )}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              };
+
+              const renderGroup = (
+                rows: CourseMember[],
+                title: string,
+                description: string,
+                emptyText: string,
+                testid: string,
+                accent: string,
+              ) => (
+                <div className="flex flex-col gap-2" data-testid={testid}>
                   <div className="flex items-center gap-2">
-                    <UsersIcon className="size-4 text-muted-foreground" />
-                    <h1 className="font-semibold">Thành viên khóa học</h1>
+                    <div className={`h-4 w-1 rounded-full ${accent}`} />
+                    <h2 className="text-sm font-semibold">{title}</h2>
+                    <Badge variant="secondary" className="font-medium">{rows.length}</Badge>
                   </div>
-                  {canManage && (
-                    <AddCourseMemberDialog courseId={course.id} token={token} />
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground -mt-2">
-                  Danh sách người dùng đang tham gia khóa học &ldquo;{course.title}&rdquo;.
-                </p>
-
-                <div className="rounded-md border bg-background overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Thành viên</TableHead>
-                        <TableHead>Vai trò</TableHead>
-                        <TableHead>Ngày tham gia</TableHead>
-                        {canManage && <TableHead className="w-12" />}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {members.length === 0 ? (
+                  <p className="text-xs text-muted-foreground -mt-1">{description}</p>
+                  <div className="rounded-md border bg-background overflow-x-auto">
+                    <Table>
+                      <TableHeader>
                         <TableRow>
-                          <TableCell colSpan={canManage ? 4 : 3} className="p-0">
-                            <EmptyState
-                              icon={<UsersIcon className="size-5" />}
-                              title="Chưa có thành viên"
-                              description={
-                                canManage
-                                  ? "Thêm thành viên để phân quyền học hoặc dạy trong khóa học này."
-                                  : "Khóa học này chưa có thành viên khác."
-                              }
-                            />
-                          </TableCell>
+                          <TableHead>Thành viên</TableHead>
+                          <TableHead>Vai trò</TableHead>
+                          <TableHead>Ngày tham gia</TableHead>
+                          {renderAsManager && <TableHead className="w-12" />}
                         </TableRow>
-                      ) : (
-                        members.map((m) => {
-                          const displayName =
-                            `${m.userFirstName} ${m.userLastName}`.trim() || m.userId;
-                          return (
-                            <TableRow key={m.userId}>
-                              <TableCell>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-sm font-medium">{displayName}</span>
-                                  {m.userEmail && (
-                                    <span className="text-xs text-muted-foreground">{m.userEmail}</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell>{courseRoleBadge(m.role)}</TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {m.createdAt
-                                  ? new Date(Number(m.createdAt.seconds) * 1000).toLocaleDateString("vi-VN")
-                                  : "—"}
-                              </TableCell>
-                              {canManage && (
-                                <TableCell>
-                                  <CourseMemberActionsMenu
-                                    courseId={m.courseId}
-                                    userId={m.userId}
-                                    displayName={displayName}
-                                    token={token}
-                                  />
-                                </TableCell>
-                              )}
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {rows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={renderAsManager ? 4 : 3} className="p-0">
+                              <EmptyState
+                                icon={<UsersIcon className="size-5" />}
+                                title="Chưa có ai"
+                                description={emptyText}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          rows.map(renderRow)
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
+              );
 
-                <Pagination
-                  page={membersPage}
-                  hasNext={membersHasNext}
-                  buildHref={(p) =>
-                    `/dashboard/organizations/${slug}/courses/${courseId}?tab=members&page=${p}`
-                  }
-                />
-              </div>
-            )}
+              return (
+                <div className="flex flex-col gap-6 max-w-screen-2xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <UsersIcon className="size-4 text-muted-foreground" />
+                      <h1 className="font-semibold">Thành viên khóa học</h1>
+                    </div>
+                    {renderAsManager && (
+                      <AddCourseMemberDialog courseId={course.id} token={token} />
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground -mt-4">
+                    Danh sách người dùng đang tham gia khóa học &ldquo;{course.title}&rdquo;.
+                  </p>
+
+                  {renderGroup(
+                    managers,
+                    "Quản lý",
+                    "Người có thể quản lý nội dung và vừa có thể học như học viên.",
+                    "Chưa có quản lý nào trong trang này.",
+                    "members-group-managers",
+                    "bg-blue-500",
+                  )}
+
+                  {renderGroup(
+                    learners,
+                    "Thành viên",
+                    "Học viên — chỉ tham gia học trong khóa học này.",
+                    "Chưa có học viên nào trong trang này.",
+                    "members-group-learners",
+                    "bg-emerald-500",
+                  )}
+
+                  <Pagination
+                    page={membersPage}
+                    hasNext={membersHasNext}
+                    buildHref={(p) =>
+                      `/dashboard/organizations/${slug}/courses/${courseId}?tab=members&page=${p}${learnMode ? "&mode=learn" : ""}`
+                    }
+                  />
+                </div>
+              );
+            })()}
 
             {/* ── Tab: Duyệt yêu cầu ── */}
             {activeTab === "join-requests" && (
               <div className="flex flex-col gap-4 max-w-screen-2xl">
-                {canManage ? (
+                {renderAsManager ? (
                   <JoinRequestsTab
                     slug={slug}
                     courseId={course.id}
@@ -643,7 +775,7 @@ export default async function CourseWorkspacePage({
             {/* ── Tab: Kết quả học tập ── */}
             {activeTab === "results" && (
               <div className="flex flex-col gap-4 max-w-screen-2xl">
-                {canManage ? (
+                {renderAsManager ? (
                   <>
                     <h1 className="font-semibold">Kết quả học viên</h1>
                     <div className="overflow-x-auto">

@@ -3,10 +3,11 @@
 import { useTransition, useState } from "react";
 import { CheckIcon, XIcon, UserCheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { reviewJoinRequestAction } from "@/app/actions/course-members";
-import type { CourseJoinRequest } from "buf/gen/richter/v1/course_members_pb";
+import { CourseRole, type CourseJoinRequest } from "buf/gen/richter/v1/course_members_pb";
 
 interface JoinRequestsTabProps {
   slug: string;
@@ -36,7 +37,7 @@ export function JoinRequestsTab({ slug, courseId, requests }: JoinRequestsTabPro
         <h1 className="font-semibold">Duyệt yêu cầu tham gia</h1>
       </div>
       <p className="text-sm text-muted-foreground -mt-2">
-        Danh sách người dùng đang gửi yêu cầu tham gia khóa học này. phê duyệt sẽ tự động thêm họ vào lớp với vai trò học viên.
+        Danh sách người dùng đang gửi yêu cầu tham gia khóa học này. Phê duyệt sẽ tự động thêm họ vào lớp với vai trò họ đã yêu cầu.
       </p>
 
       <div className="rounded-md border bg-background">
@@ -44,6 +45,7 @@ export function JoinRequestsTab({ slug, courseId, requests }: JoinRequestsTabPro
           <TableHeader>
             <TableRow>
               <TableHead>Người yêu cầu</TableHead>
+              <TableHead>Vai trò yêu cầu</TableHead>
               <TableHead>Ngày yêu cầu</TableHead>
               <TableHead className="w-44 text-right">Thao tác</TableHead>
             </TableRow>
@@ -51,7 +53,7 @@ export function JoinRequestsTab({ slug, courseId, requests }: JoinRequestsTabPro
           <TableBody>
             {requests.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} className="p-0">
+                <TableCell colSpan={4} className="p-0">
                   <EmptyState
                     icon={<UserCheckIcon className="size-5" />}
                     title="Không có yêu cầu nào"
@@ -64,6 +66,7 @@ export function JoinRequestsTab({ slug, courseId, requests }: JoinRequestsTabPro
                 const displayName =
                   `${r.userFirstName} ${r.userLastName}`.trim() || r.userId;
                 const loading = isPending && processingUser === r.userId;
+                const isManagerRequest = r.requestedRole === CourseRole.TEACHER;
                 return (
                   <TableRow key={r.userId}>
                     <TableCell>
@@ -73,6 +76,15 @@ export function JoinRequestsTab({ slug, courseId, requests }: JoinRequestsTabPro
                           <span className="text-xs text-muted-foreground">{r.userEmail}</span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {isManagerRequest ? (
+                        <Badge variant="outline" className="border-blue-500 text-blue-600">
+                          Xin làm Quản lý
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">Xin vào học</Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {r.createdAt

@@ -116,6 +116,8 @@ interface LessonCourseSidebarProps {
   currentLessonId: string;
   modules: CourseModule[];
   lessons: Lesson[];
+  /** When "learn", keep links in learn mode (manager learning as a student). */
+  mode?: "learn" | "manage";
 }
 
 export function LessonCourseSidebar({
@@ -125,7 +127,10 @@ export function LessonCourseSidebar({
   currentLessonId,
   modules,
   lessons,
+  mode,
 }: LessonCourseSidebarProps) {
+  const learnSuffix = mode === "learn" ? "?mode=learn" : "";
+  const courseHref = `/dashboard/organizations/${slug}/courses/${courseId}${mode === "learn" ? "?mode=learn" : ""}`;
   const lessonsByModule = new Map<string, Lesson[]>();
   for (const lesson of lessons) {
     const moduleLessons = lessonsByModule.get(lesson.moduleId) ?? [];
@@ -142,7 +147,7 @@ export function LessonCourseSidebar({
     <div className="flex flex-col">
       <div className="border-b p-3 bg-muted/15">
         <Button variant="ghost" size="sm" asChild className="mb-2 h-7 gap-1 px-2 text-[10px] uppercase font-semibold text-muted-foreground hover:text-foreground">
-          <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
+          <Link href={courseHref}>
             <ChevronLeftIcon className="size-3" />
             Cấu trúc khóa học
           </Link>
@@ -222,7 +227,7 @@ export function LessonCourseSidebar({
                   ) : (
                     <Link
                       key={lesson.id}
-                      href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}`}
+                      href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}${learnSuffix}`}
                       className="flex items-center rounded-lg border border-transparent px-3 py-2.5 text-sm transition-all hover:bg-muted/50 hover:border-border/40 group"
                     >
                       {content}

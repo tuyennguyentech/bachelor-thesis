@@ -56,7 +56,17 @@ export default async function DashboardCoursesPage({
   if (!org) notFound();
 
   const { member } = await requireOrgMember(org.id);
+  // canManage = org-level capability that includes TEACHER: may create courses
+  // and see drafts. Whether a teacher can MANAGE a given course, though, is
+  // per-course (owner or course-manager member), so course access/locking below
+  // uses canManageOrgAdmin (OWNER/ADMIN only) + per-course ownership — mirroring
+  // the backend, where an org TEACHER is not a blanket course-management bypass.
   const canManage = CAN_MANAGE.includes(member.role);
+  const canManageOrgAdmin = [OrganizationRole.OWNER, OrganizationRole.ADMIN].includes(member.role);
+  // A course is manageable from a card when the viewer bypasses at the org level
+  // or owns that course. (Course-manager TEACHER members still manage it from the
+  // course page; on the list they appear as accessible.)
+  const cardCanManage = (c: Course) => canManageOrgAdmin || c.ownerId === claims.sub;
 
   const courseClient = createRichterClient(CourseService, token);
   let courses: Course[] = [];
@@ -80,7 +90,7 @@ export default async function DashboardCoursesPage({
 
   // ── Student progress: completed-lesson count per course (non-managers only) ──
   const progressMap = new Map<string, MyCourseProgress>();
-  if (!canManage) {
+  if (!canManageOrgAdmin) {
     try {
       const interactionClient = createRichterClient(InteractionService, token);
       const { courses: progress } = await interactionClient.listMyCourseProgress({
@@ -119,8 +129,11 @@ export default async function DashboardCoursesPage({
   const visibleCourses = canManage
     ? courses
     : courses.filter((c) => c.status !== CourseStatus.DRAFT);
-  const accessibleCourses = visibleCourses.filter((c) => c.canAccess || canManage);
-  const lockedCourses = visibleCourses.filter((c) => !c.canAccess && !canManage);
+  // Accessibility/locking is per-course: org OWNER/ADMIN bypass everything, but
+  // an org TEACHER only accesses courses they may actually open (canAccess), so
+  // courses they neither own nor belong to surface as "locked" → request-to-manage.
+  const accessibleCourses = visibleCourses.filter((c) => c.canAccess || canManageOrgAdmin);
+  const lockedCourses = visibleCourses.filter((c) => !c.canAccess && !canManageOrgAdmin);
 
   return (
     <div className="flex flex-col gap-4">
@@ -219,7 +232,7 @@ export default async function DashboardCoursesPage({
                           <div className="rounded-md bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400">
                             <BookOpenIcon className="size-5" />
                           </div>
-                          {canManage && courseStatusBadge(course.status)}
+                          {cardCanManage(course) && courseStatusBadge(course.status)}
                         </div>
                         <CardTitle className="mt-4 text-base font-semibold group-hover:text-primary transition-colors line-clamp-1">
                           {course.title}
@@ -242,7 +255,7 @@ export default async function DashboardCoursesPage({
                             {details?.lessonsCount === undefined ? "—" : `${details.lessonsCount} bài`}
                           </span>
                         </div>
-                        {!canManage && (
+                        {!cardCanManage(course) && (
                           <div className="flex flex-col gap-1 pt-0.5">
                             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                               <div
@@ -257,16 +270,34 @@ export default async function DashboardCoursesPage({
                         )}
                       </CardContent>
 
-                      <CardFooter className="pt-4 border-t bg-muted/20 flex items-center justify-between">
-                        <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 font-medium">
+                      <CardFooter className="pt-4 border-t bg-muted/20 flex items-center justify-between gap-2">
+                        <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 font-medium shrink-0">
                           Đang tham gia
                         </Badge>
-                        <Button size="sm" className="gap-1.5 transition-all group-hover:translate-x-0.5" asChild>
-                          <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
-                            {canManage ? "Quản lý" : lessonsDone > 0 ? "Tiếp tục học" : "Vào học"}
-                            <ArrowRightIcon className="size-3.5" />
-                          </Link>
-                        </Button>
+                        {cardCanManage(course) ? (
+                          // Manager: split CTA — learn (real) or manage.
+                          <div className="flex items-center gap-1.5" data-testid="course-card-manager-cta">
+                            <Button size="sm" variant="outline" className="gap-1 transition-all" asChild>
+                              <Link href={`/dashboard/organizations/${slug}/courses/${course.id}?mode=learn`} data-testid="card-learn">
+                                <GraduationCapIcon className="size-3.5" />
+                                Vào học
+                              </Link>
+                            </Button>
+                            <Button size="sm" className="gap-1 transition-all group-hover:translate-x-0.5" asChild>
+                              <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-manage">
+                                Quản lý
+                                <ArrowRightIcon className="size-3.5" />
+                              </Link>
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button size="sm" className="gap-1.5 transition-all group-hover:translate-x-0.5" asChild>
+                            <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-learn">
+                              {lessonsDone > 0 ? "Tiếp tục học" : "Vào học"}
+                              <ArrowRightIcon className="size-3.5" />
+                            </Link>
+                          </Button>
+                        )}
                       </CardFooter>
                     </Card>
                     );
@@ -328,8 +359,8 @@ export default async function DashboardCoursesPage({
                           Chưa tham gia
                         </Badge>
                         <Button size="sm" variant="outline" className="gap-1.5 border-dashed" asChild>
-                          <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`}>
-                            Yêu cầu
+                          <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-request-join">
+                            Yêu cầu tham gia
                             <ArrowRightIcon className="size-3.5" />
                           </Link>
                         </Button>

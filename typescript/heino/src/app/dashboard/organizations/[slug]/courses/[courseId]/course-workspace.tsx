@@ -22,6 +22,8 @@ interface CourseWorkspaceShellProps {
   courseTitle: string;
   activeTab: CourseTab;
   canManage: boolean;
+  /** Preserve the course-level "learn" signal across tab navigation. */
+  mode?: "learn" | "manage";
   children: ReactNode;
 }
 
@@ -46,9 +48,12 @@ export function CourseWorkspaceSidebar({
   courseTitle,
   activeTab,
   canManage,
+  mode,
 }: Omit<CourseWorkspaceShellProps, "children">) {
   const visibleTabs = TAB_ITEMS.filter((t) => !t.managerOnly || canManage);
   const orgCoursesHref = `/dashboard/organizations/${slug}/courses`;
+  const modeSuffix = mode === "learn" ? "&mode=learn" : "";
+  const tabHref = (id: CourseTab) => `?tab=${id}${modeSuffix}`;
 
   return (
     <>
@@ -62,7 +67,7 @@ export function CourseWorkspaceSidebar({
           return (
             <Link
               key={id}
-              href={`?tab=${id}`}
+              href={tabHref(id)}
               className={cn(
                 "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors",
                 active
@@ -111,7 +116,7 @@ export function CourseWorkspaceSidebar({
           return (
             <Link
               key={id}
-              href={`?tab=${id}`}
+              href={tabHref(id)}
               className={cn(
                 "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
                 active

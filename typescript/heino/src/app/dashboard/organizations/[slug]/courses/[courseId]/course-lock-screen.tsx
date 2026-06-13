@@ -1,12 +1,24 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { LockIcon, ClockIcon, XCircleIcon, ChevronLeftIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { createJoinRequestAction } from "@/app/actions/course-members";
-import { JoinRequestStatus, type CourseJoinRequest } from "buf/gen/richter/v1/course_members_pb";
+import {
+  CourseRole,
+  JoinRequestStatus,
+  type CourseJoinRequest,
+} from "buf/gen/richter/v1/course_members_pb";
 
 interface CourseLockScreenProps {
   slug: string;
@@ -14,7 +26,18 @@ interface CourseLockScreenProps {
   courseTitle: string;
   courseDescription?: string;
   joinRequest: CourseJoinRequest | null;
+  /**
+   * When true the requester is an org-level teacher who is allowed to ask for
+   * the manager (TEACHER) role, so we expose a role selector. A plain learner
+   * can only request the STUDENT role.
+   */
+  canRequestManager: boolean;
 }
+
+const ROLE_LABEL: Record<number, string> = {
+  [CourseRole.STUDENT]: "Vào học (Thành viên)",
+  [CourseRole.TEACHER]: "Làm quản lý (Quản lý)",
+};
 
 export function CourseLockScreen({
   slug,
@@ -22,16 +45,25 @@ export function CourseLockScreen({
   courseTitle,
   courseDescription,
   joinRequest,
+  canRequestManager,
 }: CourseLockScreenProps) {
   const [isPending, startTransition] = useTransition();
+  const [requestedRole, setRequestedRole] = useState(String(CourseRole.STUDENT));
+  const [error, setError] = useState<string | null>(null);
 
   const handleRequestJoin = () => {
+    const role = (parseInt(requestedRole, 10) as CourseRole) || CourseRole.STUDENT;
+    setError(null);
     startTransition(async () => {
-      await createJoinRequestAction(slug, courseId);
+      const res = await createJoinRequestAction(slug, courseId, role);
+      if (res && "error" in res && res.error) {
+        setError(res.error);
+      }
     });
   };
 
   const status = joinRequest?.status ?? JoinRequestStatus.UNSPECIFIED;
+  const canSubmit = status === JoinRequestStatus.UNSPECIFIED || status === JoinRequestStatus.REJECTED;
 
   return (
     <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center p-4 bg-muted/30">
@@ -66,7 +98,11 @@ export function CourseLockScreen({
               <div className="space-y-1">
                 <p className="text-sm font-semibold">Đang chờ phê duyệt</p>
                 <p className="text-xs text-muted-foreground/80 leading-relaxed">
-                  Yêu cầu của bạn đã được gửi. Vui lòng chờ giảng viên hoặc quản trị viên phê duyệt.
+                  Yêu cầu của bạn đã được gửi
+                  {joinRequest && joinRequest.requestedRole === CourseRole.TEACHER
+                    ? " với vai trò quản lý"
+                    : ""}
+                  . Vui lòng chờ giảng viên hoặc quản trị viên phê duyệt.
                 </p>
               </div>
             </div>
@@ -83,16 +119,46 @@ export function CourseLockScreen({
               </div>
             </div>
           )}
+
+          {/* Role selector — only an org teacher may choose to request the manager role. */}
+          {canSubmit && canRequestManager && (
+            <div className="space-y-1.5">
+              <Label htmlFor="request-role">Bạn muốn tham gia với vai trò</Label>
+              <Select value={requestedRole} onValueChange={setRequestedRole}>
+                <SelectTrigger id="request-role" data-testid="request-role-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={String(CourseRole.STUDENT)}>
+                    {ROLE_LABEL[CourseRole.STUDENT]}
+                  </SelectItem>
+                  <SelectItem value={String(CourseRole.TEACHER)}>
+                    {ROLE_LABEL[CourseRole.TEACHER]}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </CardContent>
 
         <CardFooter className="flex flex-col gap-3 px-6 sm:px-8 pb-8 pt-4">
-          {status === JoinRequestStatus.UNSPECIFIED || status === JoinRequestStatus.REJECTED ? (
+          {error && (
+            <p className="w-full text-center text-xs text-destructive" role="alert" data-testid="request-join-error">
+              {error}
+            </p>
+          )}
+          {canSubmit ? (
             <Button
               className="w-full h-11 text-sm font-medium rounded-xl shadow-md transition-all active:scale-[0.98]"
               onClick={handleRequestJoin}
               disabled={isPending}
+              data-testid="request-join-submit"
             >
-              {isPending ? "Đang gửi yêu cầu..." : status === JoinRequestStatus.REJECTED ? "Gửi lại yêu cầu tham gia" : "Yêu cầu tham gia khóa học"}
+              {isPending
+                ? "Đang gửi yêu cầu..."
+                : status === JoinRequestStatus.REJECTED
+                  ? "Gửi lại yêu cầu tham gia"
+                  : "Yêu cầu tham gia khóa học"}
             </Button>
           ) : (
             <Button className="w-full h-11 text-sm font-medium rounded-xl" disabled variant="secondary">

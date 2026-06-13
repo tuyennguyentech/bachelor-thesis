@@ -103,8 +103,18 @@ export default async function LessonDetailPage({
   const canManage = CAN_MANAGE.includes(member.role);
 
   const sp = await searchParams;
-  const isPreview = sp.preview === "1" && canManage;
-  const effectiveCanManage = canManage && !isPreview;
+  // Course-level "Vào học" signal threaded from the course page. A manager in
+  // learn mode is treated as a REAL student here: they get the StudentLessonView
+  // (not the Studio) AND their attempts persist (NOT a preview). This is the key
+  // distinction from `?preview=1`, which is a non-persisted quick peek that lives
+  // inside the Studio (preview === "1" gates off ALL persistence in
+  // StudentLessonView). `mode=learn` takes precedence: a manager who chose to
+  // learn never enters preview.
+  const learnMode = sp.mode === "learn" && canManage;
+  const isPreview = !learnMode && sp.preview === "1" && canManage;
+  // A manager in learn mode renders the student player AND persists attempts:
+  // not effectiveCanManage (no Studio) and not isPreview (so submit is saved).
+  const effectiveCanManage = canManage && !isPreview && !learnMode;
   const activeTab = normalizeTab(typeof sp.tab === "string" ? sp.tab : undefined);
 
   const courseClient = createRichterClient(CourseService, token);
@@ -253,9 +263,12 @@ export default async function LessonDetailPage({
   const currentIndex = orderedLessons.findIndex((l) => l.id === lessonId);
   const nextLesson =
     currentIndex >= 0 ? orderedLessons[currentIndex + 1] : undefined;
+  // Keep the manager in learn mode as they advance through lessons / go back.
+  const learnSuffix = learnMode ? "?mode=learn" : "";
   const nextLessonHref = nextLesson
-    ? `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${nextLesson.id}`
+    ? `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${nextLesson.id}${learnSuffix}`
     : undefined;
+  const backToCourseHref = `/dashboard/organizations/${slug}/courses/${courseId}${learnMode ? "?mode=learn" : ""}`;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -275,7 +288,7 @@ export default async function LessonDetailPage({
       <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4 lg:px-6 z-10">
         <div className="flex min-w-0 items-center gap-3">
           <Button variant="ghost" size="sm" asChild className="gap-1 px-2">
-            <Link href={`/dashboard/organizations/${slug}/courses/${courseId}`}>
+            <Link href={backToCourseHref}>
               <ChevronLeftIcon className="size-4" />
               <span className="hidden sm:inline">Khóa học</span>
             </Link>
@@ -315,6 +328,7 @@ export default async function LessonDetailPage({
                 currentLessonId={lessonId}
                 modules={courseModules}
                 lessons={courseLessons}
+                mode={learnMode ? "learn" : "manage"}
               />
             }
           >
@@ -346,6 +360,27 @@ export default async function LessonDetailPage({
                 </div>
               </div>
 
+              {/* Learn-mode banner: manager doing REAL persisted learning. */}
+              {learnMode && (
+                <div
+                  data-testid="lesson-learn-banner"
+                  className="flex items-center justify-between rounded-md border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-4 py-2 text-sm"
+                >
+                  <span className="font-medium text-emerald-800 dark:text-emerald-300">
+                    Bạn đang học khóa học này. Kết quả làm bài được lưu lại như học viên thật.
+                  </span>
+                  <Link href="?">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs border-emerald-400 text-emerald-800 hover:bg-emerald-100 dark:text-emerald-300 dark:border-emerald-600 dark:hover:bg-emerald-900/30"
+                    >
+                      Quay lại Studio
+                    </Button>
+                  </Link>
+                </div>
+              )}
+
               {/* Preview banner */}
               {isPreview && (
                 <div className="flex items-center justify-between rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 px-4 py-2 text-sm">
@@ -359,8 +394,8 @@ export default async function LessonDetailPage({
                 </div>
               )}
 
-              {/* Teacher/Admin navigation tabs */}
-              {canManage && !isPreview && (
+              {/* Teacher/Admin navigation tabs (hidden in preview AND learn mode) */}
+              {canManage && !isPreview && !learnMode && (
                 <div className="flex border-b border-muted">
                   <Link
                     href="?tab=content"
