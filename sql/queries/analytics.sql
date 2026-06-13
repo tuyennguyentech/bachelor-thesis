@@ -15,12 +15,16 @@ SELECT
   u.middle_name,
   u.last_name,
   u.email,
-  -- lessons_completed: lessons meeting per-lesson score + watch thresholds
-  -- (0 in a threshold column means "use default": 0.6 score / 0.8 watch).
+  -- lessons_completed: lessons meeting the per-lesson score + watch thresholds.
+  -- The columns store the real thresholds directly (default 0.6/0.8 lives in the
+  -- column DEFAULT, migration 00034), so 0 means "0% — no requirement".
+  -- The thresholds are 'real' (float32); a student at an EXACT boundary (e.g. 80%)
+  -- would otherwise fail '>=' because float32(0.8) promotes to 0.80000001 > 0.8.
+  -- A 0.001 (0.1%) tolerance absorbs that rounding without loosening intent.
   COUNT(DISTINCT CASE
     WHEN la.max_score > 0
-     AND la.total_score >= la.max_score * COALESCE(NULLIF(l.min_score_fraction,0), 0.6)
-     AND COALESCE(la.video_watch_fraction,0) >= COALESCE(NULLIF(l.min_watch_fraction,0), 0.8)
+     AND la.total_score >= la.max_score * (l.min_score_fraction - 0.001)
+     AND COALESCE(la.video_watch_fraction,0) >= l.min_watch_fraction - 0.001
     THEN la.lesson_id END)::int               AS lessons_completed,
   (
     SELECT COUNT(*)::int

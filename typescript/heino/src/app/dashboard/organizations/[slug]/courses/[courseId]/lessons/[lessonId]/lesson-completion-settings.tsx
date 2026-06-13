@@ -13,19 +13,19 @@ interface Props {
   orderIndex: number;
   language: string;
   maxAttempts: number;
-  /** lesson.minWatchFraction (0..1); 0 means "use default". */
+  /** lesson.minWatchFraction (0..1) — the real threshold (0 = no requirement). */
   minWatchFraction: number;
-  /** lesson.minScoreFraction (0..1); 0 means "use default". */
+  /** lesson.minScoreFraction (0..1) — the real threshold (0 = no requirement). */
   minScoreFraction: number;
 }
 
-const DEFAULT_WATCH_PCT = 80;
-const DEFAULT_SCORE_PCT = 60;
-
-/** Convert a stored fraction (0..1) to a whole percent, treating 0 as the default. */
-function toPercent(fraction: number, fallback: number): number {
-  if (!fraction || fraction <= 0) return fallback;
-  return Math.round(fraction * 100);
+/**
+ * Convert a stored fraction (0..1) to a whole percent. The column stores the
+ * real threshold (defaults 0.8/0.6 live in the DB, migration 00034), so 0 maps
+ * to 0% — it is NOT treated as "use default".
+ */
+function toPercent(fraction: number): number {
+  return Math.round(Math.min(1, Math.max(0, fraction)) * 100);
 }
 
 function clampPct(v: number): number {
@@ -48,12 +48,8 @@ export function LessonCompletionSettings({
   minWatchFraction,
   minScoreFraction,
 }: Props) {
-  const [watchPct, setWatchPct] = useState(() =>
-    toPercent(minWatchFraction, DEFAULT_WATCH_PCT),
-  );
-  const [scorePct, setScorePct] = useState(() =>
-    toPercent(minScoreFraction, DEFAULT_SCORE_PCT),
-  );
+  const [watchPct, setWatchPct] = useState(() => toPercent(minWatchFraction));
+  const [scorePct, setScorePct] = useState(() => toPercent(minScoreFraction));
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
