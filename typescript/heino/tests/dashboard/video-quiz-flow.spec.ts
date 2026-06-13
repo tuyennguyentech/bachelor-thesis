@@ -782,7 +782,7 @@ test.describe.serial("Full pipeline with audio fixture", () => {
       return taskPanelVisible || progressVisible || readyVisible;
     }, { timeout: 30_000 }).toBe(true);
     await expect(
-      page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')),
+      page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')).first(),
     ).toBeVisible({ timeout: 120_000 });
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
     await expect(page.getByTestId("workflow-step-body")).toContainText("Tạo bài tập");
@@ -957,7 +957,7 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     // intentionally clears generated exercises and moves the workflow to the
     // exercise step, so the stable completion signal is the AI-create button.
     await expect(
-      page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')),
+      page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).or(page.locator('[data-testid="chunk-error"]')).first(),
     ).toBeVisible({ timeout: 120_000 });
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
   });
