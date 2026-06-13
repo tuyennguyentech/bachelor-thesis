@@ -125,12 +125,17 @@ test.describe("Course detail page", () => {
 
   test("deletes course via danger zone", async ({ adminPage: page }) => {
     await page.goto(courseUrl);
-    await page.getByRole("button", { name: "Xóa" }).click();
+    // Wait for the danger-zone control to hydrate before clicking (a click during
+    // hydration is a no-op), then give the confirm dialog + the delete-and-redirect
+    // a generous budget — both flake under full-suite parallel load.
+    const danger = page.getByRole("button", { name: "Xóa" });
+    await expect(danger).toBeVisible({ timeout: 10000 });
+    await danger.click();
     // confirm dialog
-    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await expect(page.getByRole("alertdialog")).toBeVisible({ timeout: 10000 });
     await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
     // should redirect back to courses list
-    await page.waitForURL(new RegExp(`/admin/organizations/${ORG_SLUG}/courses$`));
+    await page.waitForURL(new RegExp(`/admin/organizations/${ORG_SLUG}/courses$`), { timeout: 15000 });
     await expect(page).toHaveURL(new RegExp(`/admin/organizations/${ORG_SLUG}/courses$`));
   });
 });

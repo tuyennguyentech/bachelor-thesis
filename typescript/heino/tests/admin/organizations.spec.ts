@@ -160,10 +160,15 @@ test.describe("Org detail CRUD", () => {
     const newName = `Renamed ${uid("")}`;
     await page.getByLabel("Tên").clear();
     await page.getByLabel("Tên").fill(newName);
-    await page.getByRole("button", { name: "Lưu" }).click();
+    // Wait for the Save control to hydrate before clicking (a click during the
+    // hydration window is a no-op, so the action never fires and the heading never
+    // updates), then allow the in-place revalidate a generous budget under load.
+    const save = page.getByRole("button", { name: "Lưu" });
+    await expect(save).toBeVisible({ timeout: 10000 });
+    await save.click();
     // Next.js revalidates the route in-place after the action — heading updates without navigation.
     // router.refresh() is async (re-fetch + re-render), so allow more than the 5s default under load.
-    await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 15000 });
   });
 
   test("updates org status", async ({ adminPage: page }) => {

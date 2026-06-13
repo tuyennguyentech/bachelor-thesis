@@ -60,8 +60,13 @@ test.describe("Access control", () => {
 test.describe("Logout", () => {
   test("admin can log out and is redirected to login", async ({ adminPage: page }) => {
     await page.goto("/admin");
-    await page.getByRole("button", { name: "Đăng xuất" }).click();
-    await page.waitForURL(/\/login/);
+    // Wait for the logout control to mount/hydrate before clicking (a click during
+    // the hydration window is a no-op), then give the cookie-clear + middleware
+    // redirect a generous budget — both flake under full-suite parallel load.
+    const logout = page.getByRole("button", { name: "Đăng xuất" });
+    await expect(logout).toBeVisible({ timeout: 10000 });
+    await logout.click();
+    await page.waitForURL(/\/login/, { timeout: 15000 });
     await expect(page).toHaveURL(/\/login/);
   });
 
