@@ -163,9 +163,12 @@ test.describe("Course workspace — ?tab=members", () => {
   test("member table shows column headers", async ({ userPage: page }) => {
     const href = await goToCourseWorkspace(page);
     await page.goto(`${href}?tab=members`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("columnheader", { name: "Thành viên" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Ngày tham gia" })).toBeVisible();
+    // Members render as two grouped tables (managers / learners); scope the
+    // header assertions to the managers group to avoid duplicate-header ambiguity.
+    const managers = page.getByTestId("members-group-managers");
+    await expect(managers.getByRole("columnheader", { name: "Thành viên" })).toBeVisible();
+    await expect(managers.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
+    await expect(managers.getByRole("columnheader", { name: "Ngày tham gia" })).toBeVisible();
   });
 
   test("student sees members table but NOT Thêm thành viên", async ({ studentPage: page }) => {

@@ -58,7 +58,8 @@ async function goToDsaCourseResults(page: Page): Promise<void> {
   const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
   const href = await card.getByRole("link").first().getAttribute("href");
   if (!href) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" link not found`);
-  await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
+  // Strip any query (the manager card CTA links to ...?mode=learn) before adding the tab.
+  await page.goto(`${href.split("?")[0].replace(/\/$/, "")}?tab=results`, { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Kết quả học viên")).toBeVisible();
 }
 
@@ -227,7 +228,8 @@ test.describe("Pure student does NOT see teacher analytics", () => {
     const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
     const href = await card.getByRole("link").first().getAttribute("href");
     if (!href) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" link not found`);
-    await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
+    // Strip any query (the manager card CTA links to ...?mode=learn) before adding the tab.
+    await page.goto(`${href.split("?")[0].replace(/\/$/, "")}?tab=results`, { waitUntil: "domcontentloaded" });
 
     // canManage=false → the course results section is not rendered.
     await expect(page.getByText("Kết quả học viên")).not.toBeVisible();

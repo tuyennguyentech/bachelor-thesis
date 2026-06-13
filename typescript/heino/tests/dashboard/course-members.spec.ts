@@ -46,27 +46,37 @@ test.describe("Course members page — table content (manager view)", () => {
     await expect(page.getByRole("heading", { name: "Thành viên khóa học" })).toBeVisible();
   });
 
-  test("shows table column headers", async ({ userPage: page }) => {
+  test("shows the two member groups (Quản lý / Thành viên)", async ({ userPage: page }) => {
     await goToCourseMembersPage(page);
-    await expect(page.getByRole("columnheader", { name: "Thành viên" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Ngày tham gia" })).toBeVisible();
+    // Members are split into a managers group and a learners group, each a
+    // labelled table. Scope to the group testids to avoid the two identical
+    // column-header sets clashing under strict mode.
+    const managers = page.getByTestId("members-group-managers");
+    const learners = page.getByTestId("members-group-learners");
+    await expect(managers).toBeVisible();
+    await expect(learners).toBeVisible();
+    await expect(managers.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
+    await expect(managers.getByRole("columnheader", { name: "Ngày tham gia" })).toBeVisible();
   });
 
-  test("bob appears in members table as Học viên", async ({ userPage: page }) => {
+  test("bob appears in the learners group as Thành viên", async ({ userPage: page }) => {
     await goToCourseMembersPage(page);
-    // Bob's email is shown under his name in the table cell
-    await expect(page.getByRole("table").getByText("bob@dyadia.local")).toBeVisible();
-    // His role badge reads "Học viên"
-    const bobRow = page.getByRole("row").filter({ hasText: "bob@dyadia.local" });
-    await expect(bobRow.getByText("Học viên")).toBeVisible();
+    const learners = page.getByTestId("members-group-learners");
+    // Bob (course STUDENT) is a learner; his email is shown under his name.
+    await expect(learners.getByText("bob@dyadia.local")).toBeVisible();
+    // His role badge reads "Thành viên" (exact — the row's actions-menu sr-only
+    // label "Mở menu thao tác thành viên" also contains the substring).
+    const bobRow = learners.getByRole("row").filter({ hasText: "bob@dyadia.local" });
+    await expect(bobRow.getByText("Thành viên", { exact: true })).toBeVisible();
   });
 
-  test("carol appears in members table as Giảng viên", async ({ userPage: page }) => {
+  test("carol (course owner) appears in the managers group as Chủ khóa học", async ({ userPage: page }) => {
     await goToCourseMembersPage(page);
-    await expect(page.getByRole("table").getByText("carol@dyadia.local")).toBeVisible();
-    const carolRow = page.getByRole("row").filter({ hasText: "carol@dyadia.local" });
-    await expect(carolRow.getByText("Giảng viên")).toBeVisible();
+    const managers = page.getByTestId("members-group-managers");
+    await expect(managers.getByText("carol@dyadia.local")).toBeVisible();
+    // Carol owns the DSA course, so her badge is the owner badge, not "Quản lý".
+    const carolRow = managers.getByRole("row").filter({ hasText: "carol@dyadia.local" });
+    await expect(carolRow.getByText("Chủ khóa học")).toBeVisible();
   });
 });
 
@@ -108,8 +118,7 @@ test.describe("Course members page — student access", () => {
     await expect(page.getByRole("heading", { name: "Thành viên khóa học" })).toBeVisible();
     // No management controls
     await expect(page.getByRole("button", { name: "Thêm thành viên" })).not.toBeVisible();
-    // No actions column (4th column header is empty and only shown for managers)
-    // The table still shows members
-    await expect(page.getByRole("table")).toBeVisible();
+    // The member groups still render (read-only); learners group is visible.
+    await expect(page.getByTestId("members-group-learners")).toBeVisible();
   });
 });

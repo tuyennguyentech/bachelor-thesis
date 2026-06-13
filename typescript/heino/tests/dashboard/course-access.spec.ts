@@ -112,11 +112,11 @@ test.describe("Course list — locked course cards (studentPage = bob)", () => {
     await expect(page.getByText("Yêu cầu tham gia").first()).toBeVisible();
   });
 
-  test("locked course card has a 'Yêu cầu' link (navigates to lock screen)", async ({ studentPage: page }) => {
+  test("locked course card has a 'Yêu cầu tham gia' link (navigates to lock screen)", async ({ studentPage: page }) => {
     await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
 
-    // The locked card footer has a "Yêu cầu" link (not a disabled button)
-    const requestLink = page.getByRole("link", { name: /^Yêu cầu$/ }).first();
+    // The locked card footer has a "Yêu cầu tham gia" link (not a disabled button)
+    const requestLink = page.getByTestId("card-request-join").first();
     await expect(requestLink).toBeVisible();
 
     // It should link to a course detail page
@@ -124,11 +124,11 @@ test.describe("Course list — locked course cards (studentPage = bob)", () => {
     expect(href).toMatch(/\/courses\//);
   });
 
-  test("clicking 'Yêu cầu' on locked course navigates to the course lock screen", async ({ studentPage: page }) => {
+  test("clicking 'Yêu cầu tham gia' on locked course navigates to the course lock screen", async ({ studentPage: page }) => {
     await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
 
     // Navigate using href to avoid Radix/Firefox flakiness
-    const requestLink = page.getByRole("link", { name: /^Yêu cầu$/ }).first();
+    const requestLink = page.getByTestId("card-request-join").first();
     const href = await requestLink.getAttribute("href");
     await page.goto(href!, { waitUntil: "domcontentloaded" });
 

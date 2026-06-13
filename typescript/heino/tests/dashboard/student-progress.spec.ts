@@ -136,8 +136,10 @@ test.describe("Course detail — Kết quả học viên section (manager view)"
     const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
     const href = await card.getByRole("link").first().getAttribute("href");
     if (!href) throw new Error(`Course "${SEED_DSA_COURSE_TITLE}" link not found`);
-    // Navigate to the results tab of the course workspace
-    await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
+    // Strip any query (the manager card CTA links to ...?mode=learn) before
+    // appending the tab, so we don't build a malformed "?mode=learn?tab=results".
+    const base = href.split("?")[0].replace(/\/$/, "");
+    await page.goto(`${base}?tab=results`, { waitUntil: "domcontentloaded" });
     return page.url();
   }
 
