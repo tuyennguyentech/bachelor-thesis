@@ -26,8 +26,11 @@ func (s *Service) GenerateItems(
 	difficulty string,
 	focusPrompt string,
 ) ([]generatedItem, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
+	if s.aiCfg.InteractionGenTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.aiCfg.InteractionGenTimeout)
+		defer cancel()
+	}
 
 	model := client.GenerativeModel(s.geminiCfg.Model)
 	model.SetTemperature(0.3)
@@ -73,51 +76,84 @@ Trả về JSON object: {"items": [...]}`,
 		generator.GeminiSchema(),
 	)
 
-	s.log.InfoContext(ctx, "[GEMINI] GenerateItems: calling GenerateContent", "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-	if err != nil {
-		return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-	}
-
-	raw, err := geminiResponseText(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("parse gemini response: %w", err)
-	}
-
-	items := make([]generatedItem, 0, len(result.Items))
-	for i, rawItem := range result.Items {
-		if chunk.QuestionCountConfig > 0 && len(items) >= int(chunk.QuestionCountConfig) {
-			break
-		}
-		prompt, explanation, _, configJSON, err := generator.ParseGeminiItem(rawItem)
+	// One generation attempt: call Gemini, parse, and build validated items.
+	genOnce := func() ([]generatedItem, error) {
+		resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 		if err != nil {
-			s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
-			continue
+			return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
 		}
-		startSecs := generatedInteractionCheckpointSeconds(chunk)
-		if ttsProv, ok := generator.(svcinteractions.TTSProvider); ok {
-			if text := ttsProv.AudioSourceText(configJSON); text != "" {
-				configJSON, err = s.embedAudio(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
-				if err != nil {
-					s.log.WarnContext(ctx, "ai: TTS synthesis failed, skipping item", "index", i, "err", err)
-					continue
+		raw, err := geminiResponseText(resp)
+		if err != nil {
+			return nil, err
+		}
+		var result struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			return nil, fmt.Errorf("parse gemini response: %w", err)
+		}
+		items := make([]generatedItem, 0, len(result.Items))
+		for i, rawItem := range result.Items {
+			if chunk.QuestionCountConfig > 0 && len(items) >= int(chunk.QuestionCountConfig) {
+				break
+			}
+			prompt, explanation, _, configJSON, err := generator.ParseGeminiItem(rawItem)
+			if err != nil {
+				s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
+				continue
+			}
+			startSecs := generatedInteractionCheckpointSeconds(chunk)
+			if ttsProv, ok := generator.(svcinteractions.TTSProvider); ok {
+				if text := ttsProv.AudioSourceText(configJSON); text != "" {
+					configJSON, err = s.embedAudio(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
+					if err != nil {
+						s.log.WarnContext(ctx, "ai: TTS synthesis failed, skipping item", "index", i, "err", err)
+						continue
+					}
 				}
 			}
+			items = append(items, generatedItem{
+				prompt:      prompt,
+				explanation: explanation,
+				startSecs:   startSecs,
+				configJSON:  configJSON,
+				kindStr:     kindStr,
+			})
 		}
-		items = append(items, generatedItem{
-			prompt:      prompt,
-			explanation: explanation,
-			startSecs:   startSecs,
-			configJSON:  configJSON,
-			kindStr:     kindStr,
-		})
+		return items, nil
+	}
+
+	// Retry transient failures / degraded empty results with linear backoff, so
+	// real multi-user bursts past Gemini's per-minute quota recover instead of
+	// failing the task. A non-empty chunk that yields 0 items is a degraded
+	// response and is retried; an empty transcript legitimately yields 0.
+	attempts := max(s.aiCfg.GeminiMaxAttempts, 1)
+	transcriptEmpty := strings.TrimSpace(transcript) == ""
+	s.log.InfoContext(ctx, "[GEMINI] GenerateItems: calling GenerateContent", "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
+	var items []generatedItem
+	for attempt := 1; attempt <= attempts; attempt++ {
+		var err error
+		items, err = genOnce()
+		if err == nil && (len(items) > 0 || transcriptEmpty) {
+			return items, nil
+		}
+		retryable := isTransientGeminiError(err) || (err == nil && len(items) == 0)
+		if !retryable || attempt == attempts {
+			if err != nil {
+				return nil, err
+			}
+			// Exhausted: Gemini kept returning 0 items for a non-empty chunk — a
+			// throttled/degraded response. Surface as a quota-style error so
+			// callers treat it as "provider temporarily unavailable".
+			return nil, fmt.Errorf("Gemini API trả về 0 câu hỏi sau %d lần thử (có thể do vượt quota / quá tải). Vui lòng thử lại sau.", attempts)
+		}
+		s.log.WarnContext(ctx, "[GEMINI] GenerateItems: transient/empty result, retrying",
+			"attempt", attempt, "max", attempts, "items", len(items), "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * s.aiCfg.GeminiRetryBackoff):
+		}
 	}
 	return items, nil
 }

@@ -126,6 +126,16 @@ type AiCfg struct {
 	// service (e.g. read entire transcript for re-chunking). 0 = use
 	// safe default (10000).
 	ListLimitLessonOps int `mapstructure:"list_limit_lesson_ops"`
+	// GeminiMaxAttempts is the TOTAL number of times a Gemini generation call
+	// is attempted when it hits a TRANSIENT condition — HTTP 429 (rate limit),
+	// 503 (overloaded), 5xx, or a degraded empty result. Under real multi-user
+	// load, bursts exceed the per-minute quota; retrying with backoff lets the
+	// transient limit clear instead of failing the task. 0/1 = no retry.
+	GeminiMaxAttempts int `mapstructure:"gemini_max_attempts"`
+	// GeminiRetryBackoff is the base delay between Gemini retry attempts; the
+	// nth retry waits n * GeminiRetryBackoff (linear, capped by the call's own
+	// timeout). 0 = retry immediately.
+	GeminiRetryBackoff time.Duration `mapstructure:"gemini_retry_backoff"`
 }
 
 // DefaultMaxVideoBytes is the default cap for video file downloads (2 GB).
@@ -183,6 +193,8 @@ func NewAiCfg() AiCfg {
 		ListLimitChunks:                  500,
 		ListLimitInteractions:            5000,
 		ListLimitLessonOps:               10000,
+		GeminiMaxAttempts:                4,
+		GeminiRetryBackoff:               8 * time.Second,
 	}
 }
 

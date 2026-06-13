@@ -149,6 +149,11 @@ background_task_timeout        = "5s"
 list_limit_chunks              = 500
 list_limit_interactions        = 5000
 list_limit_lesson_ops          = 10000
+# Retry transient Gemini failures (429 rate-limit / 503 overloaded / 5xx /
+# degraded empty result) with linear backoff so real multi-user bursts past the
+# per-minute quota recover instead of failing the task.
+gemini_max_attempts            = 4
+gemini_retry_backoff           = "8s"
 
 [interactions]
 # 0 = unlimited (no deadline).

@@ -266,6 +266,28 @@ func extractStatusCode(msg string) string {
 	return "rate limit"
 }
 
+// isTransientGeminiError reports whether a Gemini generation failure is worth
+// retrying: a rate-limit / overload / 5xx, OR a DEGRADED response (no candidates,
+// empty content, stopped unexpectedly) that real APIs return under load. These
+// clear on a retry; a genuine programming error (bad schema, parse of a valid
+// non-empty body) does not match and so fails fast.
+func isTransientGeminiError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, marker := range []string{
+		"429", "quota", "rate limit", "ratelimit", "RESOURCE_EXHAUSTED",
+		"503", "overloaded", "500", "502", "504", "UNAVAILABLE",
+		"empty gemini response", "no candidates", "no content parts", "stopped unexpectedly",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func friendlyGeminiError(err error) error {
 	if err == nil {
 		return nil
