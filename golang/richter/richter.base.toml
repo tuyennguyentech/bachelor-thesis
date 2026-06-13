@@ -154,13 +154,6 @@ list_limit_lesson_ops          = 10000
 # per-minute quota recover instead of failing the task.
 gemini_max_attempts            = 4
 gemini_retry_backoff           = "8s"
-# On-disk cache for Gemini structured-generation responses (chunking + item
-# generation), keyed by sha256(model + prompt). Empty = DISABLED (the production
-# default — never cache live traffic). Set to a directory in test configs so the
-# AI test suite replays recorded responses instead of spending quota: the first
-# run that succeeds records a cassette, every later run with the same fixtures
-# replays it offline. Override per-env with RICHTER_AI_GEMINI_CACHE_DIR.
-gemini_cache_dir               = ""
 
 [interactions]
 # 0 = unlimited (no deadline).

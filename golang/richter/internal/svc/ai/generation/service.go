@@ -10,10 +10,10 @@ import (
 	"example.com/richter/cfg"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
+	"example.com/richter/internal/svc/ai/genengine"
 	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/richter/log"
 	"example.com/sql/gen"
-	"github.com/google/generative-ai-go/genai"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -36,6 +36,7 @@ type Deps struct {
 	Log                  *log.LogSvc
 	GeminiCfg            *cfg.GeminiCfg
 	AiCfg                *cfg.AiCfg
+	Engine               genengine.Engine
 	FetchChunkTranscript FetchChunkTranscriptFunc
 	EmbedAudio           EmbedAudioFunc
 	ChunksLimit          func() int32
@@ -47,6 +48,7 @@ type Service struct {
 	log                  *log.LogSvc
 	geminiCfg            *cfg.GeminiCfg
 	aiCfg                *cfg.AiCfg
+	engine               genengine.Engine
 	fetchChunkTranscript FetchChunkTranscriptFunc
 	embedAudio           EmbedAudioFunc
 	chunksLimit          func() int32
@@ -59,6 +61,7 @@ func New(deps Deps) *Service {
 		log:                  deps.Log,
 		geminiCfg:            deps.GeminiCfg,
 		aiCfg:                deps.AiCfg,
+		engine:               deps.Engine,
 		fetchChunkTranscript: deps.FetchChunkTranscript,
 		embedAudio:           deps.EmbedAudio,
 		chunksLimit:          deps.ChunksLimit,
@@ -110,26 +113,8 @@ func (s *Service) Run(
 		}
 	}
 
-	needsGemini := req.GetForceRegenerate() || req.GetChunkId() != ""
-	if !needsGemini {
-		for _, chunk := range chunks {
-			if !chunkHasInteractions[chunk.ID.String()] {
-				needsGemini = true
-				break
-			}
-		}
-	}
-
-	var geminiClient *genai.Client
-	if needsGemini {
-		geminiClient, err = newGeminiClient(ctx, s.geminiCfg)
-		if err != nil {
-			_ = send(richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR, err.Error(), 0, total)
-			return nil
-		}
-		defer geminiClient.Close()
-	}
-
+	// Item generation goes through the injected engine (s.engine) — real Gemini
+	// or the mock, selected by config. No client is created here.
 	savedThisRun := 0
 	for i, chunk := range chunks {
 		select {
@@ -153,7 +138,7 @@ func (s *Service) Run(
 		}
 
 		plan := resolveGenerationPlan(chunk, lesson, reqKinds, req.GetCountPerChunk(), req.GetStrategy())
-		allItems := s.generateForChunk(ctx, geminiClient, chunk, chunkTranscript, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt(), plan)
+		allItems := s.generateForChunk(ctx, chunk, chunkTranscript, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt(), plan)
 		if len(allItems) == 0 {
 			continue
 		}
@@ -220,7 +205,6 @@ func (s *Service) loadTargetChunks(ctx context.Context, lessonID pgtype.UUID, ch
 
 func (s *Service) generateForChunk(
 	ctx context.Context,
-	geminiClient *genai.Client,
 	chunk gen.LessonTranscriptChunk,
 	chunkTranscript string,
 	lessonLanguage string,
@@ -230,7 +214,7 @@ func (s *Service) generateForChunk(
 ) []generatedItem {
 	var allItems []generatedItem
 	if plan.useAIChoose {
-		items, genErr := s.GenerateItemsAIChoose(ctx, geminiClient, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lessonLanguage, difficulty, focusPrompt)
+		items, genErr := s.GenerateItemsAIChoose(ctx, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lessonLanguage, difficulty, focusPrompt)
 		if genErr != nil {
 			s.log.WarnContext(ctx, "ai: AI_CHOOSE generation failed", "chunk_id", chunk.ID.String(), "err", genErr)
 		} else {
@@ -258,7 +242,7 @@ func (s *Service) generateForChunk(
 			}
 			chunkCopy := chunk
 			chunkCopy.QuestionCountConfig = batchCount
-			items, genErr := s.GenerateItems(ctx, geminiClient, chunkCopy, chunkTranscript, geminiGen, kindStr, lessonLanguage, difficulty, focusPrompt)
+			items, genErr := s.GenerateItems(ctx, chunkCopy, chunkTranscript, geminiGen, kindStr, lessonLanguage, difficulty, focusPrompt)
 			if genErr != nil {
 				s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "count", batchCount, "err", genErr)
 			} else {

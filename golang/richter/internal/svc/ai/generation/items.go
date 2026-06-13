@@ -8,17 +8,13 @@ import (
 	"time"
 
 	richterv1 "example.com/buf/gen/richter/v1"
-	"example.com/richter/cfg"
-	"example.com/richter/internal/svc/ai/geminicache"
+	"example.com/richter/internal/svc/ai/genengine"
 	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
 )
 
 func (s *Service) GenerateItems(
 	ctx context.Context,
-	client *genai.Client,
 	chunk gen.LessonTranscriptChunk,
 	transcript string,
 	generator svcinteractions.GeminiGenerator,
@@ -32,11 +28,6 @@ func (s *Service) GenerateItems(
 		ctx, cancel = context.WithTimeout(ctx, s.aiCfg.InteractionGenTimeout)
 		defer cancel()
 	}
-
-	model := client.GenerativeModel(s.geminiCfg.Model)
-	model.SetTemperature(0.3)
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(65536)
 
 	var customInstructions strings.Builder
 	if difficulty != "" {
@@ -77,22 +68,18 @@ Trả về JSON object: {"items": [...]}`,
 		generator.GeminiSchema(),
 	)
 
-	cache := geminicache.New(s.aiCfg.GeminiCacheDir)
-
-	// One generation attempt: call Gemini (or replay a cached response), parse,
-	// and build validated items.
+	// One generation attempt: ask the engine (real Gemini or mock), parse, and
+	// build validated items.
 	genOnce := func() ([]generatedItem, error) {
-		raw, ok := cache.Get(s.geminiCfg.Model, prompt)
-		if !ok {
-			resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-			if err != nil {
-				return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-			}
-			raw, err = geminiResponseText(resp)
-			if err != nil {
-				return nil, err
-			}
-			cache.Put(s.geminiCfg.Model, prompt, raw)
+		raw, err := s.engine.Generate(ctx, genengine.Request{
+			Prompt:          prompt,
+			Temperature:     0.3,
+			MaxOutputTokens: 65536,
+			JSONOutput:      true,
+			Purpose:         genengine.ItemsPurpose(kindStr),
+		})
+		if err != nil {
+			return nil, friendlyGeminiError(err)
 		}
 		var result struct {
 			Items []json.RawMessage `json:"items"`
@@ -168,7 +155,6 @@ Trả về JSON object: {"items": [...]}`,
 
 func (s *Service) GenerateItemsAIChoose(
 	ctx context.Context,
-	client *genai.Client,
 	chunk gen.LessonTranscriptChunk,
 	transcript string,
 	allowedKinds []richterv1.InteractionKind,
@@ -197,35 +183,24 @@ func (s *Service) GenerateItemsAIChoose(
 	if len(specs) == 1 {
 		chunkCopy := chunk
 		chunkCopy.QuestionCountConfig = totalCount
-		return s.GenerateItems(ctx, client, chunkCopy, transcript, specs[0].generator, specs[0].kindStr, lessonLanguage, difficulty, focusPrompt)
+		return s.GenerateItems(ctx, chunkCopy, transcript, specs[0].generator, specs[0].kindStr, lessonLanguage, difficulty, focusPrompt)
 	}
 
 	prompt := buildAIChoosePrompt(chunk, transcript, totalCount, specs, difficulty, focusPrompt, lessonLanguage)
 	ctx, cancel := aiCtx(ctx, s.aiCfg.InteractionGenTimeout)
 	defer cancel()
 
-	model := client.GenerativeModel(s.geminiCfg.Model)
-	model.SetTemperature(0.3)
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(65536)
-
-	cache := geminicache.New(s.aiCfg.GeminiCacheDir)
-	raw, ok := cache.Get(s.geminiCfg.Model, prompt)
-	if ok {
-		s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: cache hit (skipping GenerateContent)",
-			"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
-	} else {
-		s.log.InfoContext(ctx, "[GEMINI] GenerateItemsAIChoose: calling GenerateContent",
-			"chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
-		resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-		if err != nil {
-			return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-		}
-		raw, err = geminiResponseText(resp)
-		if err != nil {
-			return nil, err
-		}
-		cache.Put(s.geminiCfg.Model, prompt, raw)
+	s.log.InfoContext(ctx, "[GENAI] GenerateItemsAIChoose: generating",
+		"engine", s.engine.Name(), "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
+	raw, err := s.engine.Generate(ctx, genengine.Request{
+		Prompt:          prompt,
+		Temperature:     0.3,
+		MaxOutputTokens: 65536,
+		JSONOutput:      true,
+		Purpose:         genengine.PurposeItemsAIChoose,
+	})
+	if err != nil {
+		return nil, friendlyGeminiError(err)
 	}
 
 	var result struct {
@@ -283,15 +258,4 @@ func (s *Service) GenerateItemsAIChoose(
 		})
 	}
 	return items, nil
-}
-
-func newGeminiClient(ctx context.Context, cfg *cfg.GeminiCfg) (*genai.Client, error) {
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
-	}
-	c, err := genai.NewClient(ctx, option.WithAPIKey(cfg.APIKey))
-	if err != nil {
-		return nil, fmt.Errorf("create gemini client: %w", err)
-	}
-	return c, nil
 }

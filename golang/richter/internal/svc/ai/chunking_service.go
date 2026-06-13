@@ -9,19 +9,19 @@ import (
 	"time"
 
 	"example.com/richter/cfg"
-	"example.com/richter/internal/svc/ai/geminicache"
+	"example.com/richter/internal/svc/ai/genengine"
 	"example.com/richter/log"
-	"github.com/google/generative-ai-go/genai"
 )
 
 type chunkingService struct {
 	geminiCfg *cfg.GeminiCfg
 	aiCfg     *cfg.AiCfg
+	engine    genengine.Engine
 	log       *log.LogSvc
 }
 
-func newChunkingService(geminiCfg *cfg.GeminiCfg, aiCfg *cfg.AiCfg, logSvc *log.LogSvc) *chunkingService {
-	return &chunkingService{geminiCfg: geminiCfg, aiCfg: aiCfg, log: logSvc}
+func newChunkingService(geminiCfg *cfg.GeminiCfg, aiCfg *cfg.AiCfg, engine genengine.Engine, logSvc *log.LogSvc) *chunkingService {
+	return &chunkingService{geminiCfg: geminiCfg, aiCfg: aiCfg, engine: engine, log: logSvc}
 }
 
 // transcriptChunkRaw is the boundary-only Gemini response for a chunk.
@@ -45,17 +45,6 @@ func (s *chunkingService) aiCtx(ctx context.Context, d time.Duration) (context.C
 func (s *chunkingService) runGeminiChunk(ctx context.Context, transcript string, segmentsJSON []byte) ([]transcriptChunkRaw, error) {
 	ctx, cancel := s.aiCtx(ctx, s.aiCfg.ChunkingTimeout)
 	defer cancel()
-
-	client, err := newGeminiClient(ctx, s.geminiCfg)
-	if err != nil {
-		return nil, err
-	}
-	defer client.Close()
-
-	model := client.GenerativeModel(s.geminiCfg.Model)
-	model.SetTemperature(0.2)
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(32768)
 
 	var sb strings.Builder
 	sb.WriteString(`Bạn là trợ lý giáo dục. Dựa trên nội dung phiên âm bài giảng và các mốc thời gian dưới đây, hãy phân chia bài giảng thành các đoạn lớn theo chủ đề/nội dung gắn kết (thường 3-7 đoạn).
@@ -84,23 +73,16 @@ Trả về JSON:
   ]
 }`)
 
-	prompt := sb.String()
-	cache := geminicache.New(s.aiCfg.GeminiCacheDir)
-
-	raw, ok := cache.Get(s.geminiCfg.Model, prompt)
-	if ok {
-		s.log.InfoContext(ctx, "[GEMINI] ChunkTranscript: cache hit (skipping GenerateContent)")
-	} else {
-		s.log.InfoContext(ctx, "[GEMINI] ChunkTranscript: calling GenerateContent")
-		resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-		if err != nil {
-			return nil, friendlyGeminiError(fmt.Errorf("generate content: %w", err))
-		}
-		raw, err = geminiResponseText(resp)
-		if err != nil {
-			return nil, err
-		}
-		cache.Put(s.geminiCfg.Model, prompt, raw)
+	s.log.InfoContext(ctx, "[GENAI] ChunkTranscript: generating", "engine", s.engine.Name())
+	raw, err := s.engine.Generate(ctx, genengine.Request{
+		Prompt:          sb.String(),
+		Temperature:     0.2,
+		MaxOutputTokens: 32768,
+		JSONOutput:      true,
+		Purpose:         genengine.PurposeChunk,
+	})
+	if err != nil {
+		return nil, friendlyGeminiError(err)
 	}
 
 	var result struct {

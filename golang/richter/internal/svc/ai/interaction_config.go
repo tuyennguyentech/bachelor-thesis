@@ -113,16 +113,10 @@ func (s *AISvc) doRegenerateInteraction(
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("chunk has no transcript content"))
 	}
 
-	geminiClient, err := newGeminiClient(ctx, s.geminiCfg)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	defer geminiClient.Close()
-
 	chunkForRegen := chunk
 	chunkForRegen.QuestionCountConfig = 1
 	kindStr := svcinteractions.KindToDBString(newKind)
-	items, err := s.generation.GenerateItems(ctx, geminiClient, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language, "", customPrompt)
+	items, err := s.generation.GenerateItems(ctx, chunkForRegen, chunkTranscript, geminiGen, kindStr, lesson.Language, "", customPrompt)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("AI generation failed: %w", err))
 	}

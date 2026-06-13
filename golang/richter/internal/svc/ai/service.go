@@ -15,6 +15,7 @@ import (
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/kv"
 	"example.com/richter/internal/svc/ai/chunkops"
+	"example.com/richter/internal/svc/ai/genengine"
 	"example.com/richter/internal/svc/ai/generation"
 	"example.com/richter/internal/svc/ai/segment"
 	"example.com/richter/internal/svc/ai/transcript"
@@ -165,6 +166,11 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		return nil, fmt.Errorf("minio client: %w", err)
 	}
 
+	// The LLM engine behind chunking + item generation. Selected by
+	// geminiCfg.Engine ("gemini" → real API, "mock" → canned responses for tests).
+	genEngine := genengine.New(geminiCfg)
+	l.Info("ai: generation engine selected", "engine", genEngine.Name())
+
 	transcription := newTranscriptionService(s3client, s3cfg, sttCfg, aiCfg)
 	svc := &AISvc{
 		pg: pg, kv: kvSvc, log: l, authz: az,
@@ -172,7 +178,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		apiCfg:  apiCfg,
 		taskCfg: taskCfg,
 		ttsCfg:  ttsCfg, ttsClient: newSpeachesTTSClient(ttsCfg, aiCfg.TTSMaxConcurrent, aiCfg.TTSRequestTimeout),
-		chunking:      newChunkingService(geminiCfg, aiCfg, l),
+		chunking:      newChunkingService(geminiCfg, aiCfg, genEngine, l),
 		transcription: transcription,
 		grading:       newGradingService(geminiCfg, transcription),
 		tqDB:          tqDB,
@@ -182,6 +188,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		Log:                  l,
 		GeminiCfg:            geminiCfg,
 		AiCfg:                aiCfg,
+		Engine:               genEngine,
 		FetchChunkTranscript: func(chunkID string) string { return segment.FetchChunkTranscript(kvSvc, chunkID) },
 		EmbedAudio:           svc.synthesiseAndEmbed,
 		ChunksLimit:          svc.chunksLimit,

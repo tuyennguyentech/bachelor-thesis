@@ -11,7 +11,6 @@ import (
 	"example.com/richter/internal/db"
 	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/sql/gen"
-	"github.com/google/generative-ai-go/genai"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -305,43 +304,6 @@ func friendlyGeminiError(err error) error {
 		return fmt.Errorf("Vượt hạn mức Gemini API (%s). Vui lòng thử lại sau vài phút.", extractStatusCode(msg))
 	}
 	return err
-}
-
-func geminiResponseText(resp *genai.GenerateContentResponse) (string, error) {
-	if len(resp.Candidates) == 0 {
-		return "", fmt.Errorf("empty gemini response: no candidates")
-	}
-	cand := resp.Candidates[0]
-	if cand.FinishReason != 0 && cand.FinishReason != genai.FinishReasonStop {
-		return "", fmt.Errorf("gemini stopped unexpectedly (finish_reason=%v) — try a shorter input or increase max_output_tokens", cand.FinishReason)
-	}
-	if cand.Content == nil || len(cand.Content.Parts) == 0 {
-		return "", fmt.Errorf("empty gemini response: no content parts")
-	}
-	var b strings.Builder
-	for _, p := range cand.Content.Parts {
-		if txt, ok := p.(genai.Text); ok {
-			b.WriteString(string(txt))
-		}
-	}
-	raw := strings.TrimSpace(b.String())
-	if raw == "" {
-		return "", fmt.Errorf("empty gemini response: no text content")
-	}
-	if strings.HasPrefix(raw, "```") {
-		if after, found := strings.CutPrefix(raw, "```json"); found {
-			raw = after
-		} else {
-			raw, _ = strings.CutPrefix(raw, "```")
-		}
-		if idx := strings.LastIndex(raw, "\n```"); idx != -1 {
-			raw = raw[:idx]
-		} else if idx := strings.LastIndex(raw, "```"); idx != -1 {
-			raw = raw[:idx]
-		}
-		raw = strings.TrimSpace(raw)
-	}
-	return raw, nil
 }
 
 func generatedInteractionCheckpointSeconds(chunk gen.LessonTranscriptChunk) float32 {
