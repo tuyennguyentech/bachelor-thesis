@@ -73,7 +73,11 @@ func TestMockEngineResponsesAreSchemaValid(t *testing.T) {
 		}
 	}
 
-	// The AI-choose response must carry one parseable item of every kind.
+	// The AI-choose response must carry one parseable item of every kind, and —
+	// critically — each item must carry a routable "kind" field, because the
+	// AI_CHOOSE path (the DEFAULT strategy) routes by it: an item with no/unknown
+	// kind is silently dropped. This guards the bug where the mock produced
+	// kind-less items that AI_CHOOSE discarded entirely.
 	aiRaw, err := m.Generate(ctx, genengine.Request{Purpose: genengine.PurposeItemsAIChoose})
 	if err != nil {
 		t.Fatalf("mock ai-choose generate: %v", err)
@@ -86,6 +90,31 @@ func TestMockEngineResponsesAreSchemaValid(t *testing.T) {
 	}
 	if len(aiWrap.Items) != len(itemKinds) {
 		t.Fatalf("mock ai-choose returned %d items, want %d (one per kind)", len(aiWrap.Items), len(itemKinds))
+	}
+	wantKinds := make(map[string]richterv1.InteractionKind, len(itemKinds))
+	for _, k := range itemKinds {
+		wantKinds[svcinteractions.KindToDBString(k)] = k
+	}
+	seenKinds := make(map[string]bool)
+	for i, it := range aiWrap.Items {
+		var kh struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(it, &kh); err != nil || kh.Kind == "" {
+			t.Fatalf("ai-choose item %d has no routable \"kind\" field — AI_CHOOSE would drop it: %s", i, it)
+		}
+		kind, ok := wantKinds[kh.Kind]
+		if !ok {
+			t.Fatalf("ai-choose item %d has unknown kind %q", i, kh.Kind)
+		}
+		gen := svcinteractions.Get(kind).(svcinteractions.GeminiGenerator)
+		if _, _, _, _, perr := gen.ParseGeminiItem(it); perr != nil {
+			t.Errorf("ai-choose item %d (kind %s) failed the real parser: %v\n%s", i, kh.Kind, perr, it)
+		}
+		seenKinds[kh.Kind] = true
+	}
+	if len(seenKinds) != len(itemKinds) {
+		t.Errorf("ai-choose covered %d distinct kinds, want %d", len(seenKinds), len(itemKinds))
 	}
 }
 

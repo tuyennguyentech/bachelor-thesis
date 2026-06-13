@@ -66,8 +66,13 @@ var mockResponses = map[Purpose]string{
 		mockReading + `,` + mockListening + `]}`,
 }
 
+// Each item carries a "kind" field. The per-kind generators ignore it (they
+// don't DisallowUnknownFields), but the AI_CHOOSE path REQUIRES it to route each
+// item to its handler — without it, AI_CHOOSE (the default strategy) silently
+// drops every mock item.
 const (
 	mockSingleChoice = `{
+		"kind": "mcq",
 		"question_text": "Mock: 2 + 2 bằng mấy?",
 		"options": ["3", "4", "5"],
 		"correct_answer": 1,
@@ -76,6 +81,7 @@ const (
 	}`
 
 	mockMultipleChoice = `{
+		"kind": "multiple_choice",
 		"question_text": "Mock: chọn các số chẵn.",
 		"options": ["1", "2", "3", "4"],
 		"correct_answers": [1, 3],
@@ -84,6 +90,7 @@ const (
 	}`
 
 	mockFillBlank = `{
+		"kind": "fill_blank",
 		"prompt": "Mock: điền vào chỗ trống.",
 		"explanation": "Đáp án mẫu cho kiểm thử tự động.",
 		"start_seconds": 2.0,
@@ -97,6 +104,7 @@ const (
 	}`
 
 	mockReading = `{
+		"kind": "reading",
 		"prompt": "Mock: đọc đoạn văn và trả lời.",
 		"explanation": "Đáp án mẫu cho kiểm thử tự động.",
 		"start_seconds": 2.5,
@@ -107,6 +115,7 @@ const (
 	}`
 
 	mockListening = `{
+		"kind": "listening",
 		"prompt": "Mock: nghe và trả lời.",
 		"explanation": "Đáp án mẫu cho kiểm thử tự động.",
 		"start_seconds": 3.0,
