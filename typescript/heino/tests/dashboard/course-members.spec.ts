@@ -122,3 +122,46 @@ test.describe("Course members page — student access", () => {
     await expect(page.getByTestId("members-group-learners")).toBeVisible();
   });
 });
+
+// ── Full add-member lifecycle (manager proactively adds, then removes) ───────
+
+test.describe("Course members page — add member lifecycle (manager)", () => {
+  // A manager PROACTIVELY adds a member (not just approving join requests). alice
+  // (org admin) adds noah — a hust-cs member NOT in DSA — as a learner, confirms he
+  // appears, then removes him so the shared seed stays clean for retries/parallel runs.
+  const NEW_MEMBER_EMAIL = "noah@dyadia.local";
+
+  test("add by email → noah appears as Thành viên → remove for cleanup", async ({ userPage: page }) => {
+    await goToCourseMembersPage(page);
+    const learners = page.getByTestId("members-group-learners");
+    // Precondition: noah is not already a DSA member.
+    await expect(learners.getByText(NEW_MEMBER_EMAIL)).toHaveCount(0);
+
+    let added = false;
+    try {
+      // Open the proactive add dialog and add noah (default role = Học viên).
+      await page.getByRole("button", { name: "Thêm thành viên" }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel("Email").fill(NEW_MEMBER_EMAIL);
+      await dialog.getByRole("button", { name: "Thêm" }).click();
+      // Dialog closes; the table refreshes (router.refresh) with noah present.
+      await expect(dialog).not.toBeVisible({ timeout: 15000 });
+      await expect(learners.getByText(NEW_MEMBER_EMAIL)).toBeVisible({ timeout: 15000 });
+      added = true;
+      const noahRow = learners.getByRole("row").filter({ hasText: NEW_MEMBER_EMAIL });
+      await expect(noahRow.getByText("Thành viên", { exact: true })).toBeVisible();
+    } finally {
+      // Cleanup: remove noah via his row actions menu.
+      if (added) {
+        const noahRow = learners.getByRole("row").filter({ hasText: NEW_MEMBER_EMAIL });
+        if (await noahRow.count()) {
+          await noahRow.getByRole("button", { name: "Mở menu thao tác thành viên" }).click();
+          await page.getByRole("menuitem", { name: "Xóa khỏi khóa học" }).click();
+          await page.getByRole("button", { name: "Xóa", exact: true }).click();
+          await expect(learners.getByText(NEW_MEMBER_EMAIL)).not.toBeVisible({ timeout: 10000 });
+        }
+      }
+    }
+  });
+});

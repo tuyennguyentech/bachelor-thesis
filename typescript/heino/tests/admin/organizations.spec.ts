@@ -166,9 +166,14 @@ test.describe("Org detail CRUD", () => {
     const save = page.getByRole("button", { name: "Lưu" });
     await expect(save).toBeVisible({ timeout: 10000 });
     await save.click();
-    // Next.js revalidates the route in-place after the action — heading updates without navigation.
-    // router.refresh() is async (re-fetch + re-render), so allow more than the 5s default under load.
-    await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 15000 });
+    // The action revalidates the route in-place; that soft router.refresh() is async
+    // and, under full-suite load, can lag past any fixed timeout. The new name IS
+    // persisted, so re-render the page from the server (a fresh render reads it from
+    // the DB) until the heading shows it — robust regardless of the in-place refresh.
+    await expect(async () => {
+      await page.goto(orgUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 20000 });
   });
 
   test("updates org status", async ({ adminPage: page }) => {

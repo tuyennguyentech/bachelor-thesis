@@ -26,6 +26,7 @@ import {
   TranscriptReadyState,
 } from "./analysis-progress-card";
 import { WorkflowNextAction } from "./analysis-actions";
+import { PipelineAutoProgressCard } from "./pipeline-auto-progress";
 import type { GenRunState } from "./use-lesson-analysis-state";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import type { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -157,9 +158,7 @@ export interface AnalysisWorkflowShellProps {
   isBusy: boolean;
 
   // Pipeline statuses
-  step2Status: import("./analysis-workflow-ui").PipelineStepStatus;
   step3Status: import("./analysis-workflow-ui").PipelineStepStatus;
-  step4Status: import("./analysis-workflow-ui").PipelineStepStatus;
   step5Status: import("./analysis-workflow-ui").PipelineStepStatus;
 
   // Handlers
@@ -312,26 +311,44 @@ function AIConfigPanel({
 export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   const router = useRouter();
 
+  // While transcription is (re)running, the transcript is being rebuilt and any
+  // existing chunks/exercises are STALE (the backend only clears them after the
+  // slow Whisper step finishes). So the downstream steps must NOT read "done" off
+  // those stale artifacts — otherwise the UI shows "Phiên âm đang chạy" AND
+  // "Bài tập: 14 câu (done)" at the same time. `transcribing` rewinds the stepper
+  // to the transcript step and locks everything after it.
+  const transcribing = props.isExtracting || props.isSyncing;
+  // A lesson that already has generated exercises is fully processed — its earlier
+  // pipeline stages must read "done" even if their intermediate artifacts (segments,
+  // chunks) were never persisted or were cleared. Otherwise a lesson with exercises
+  // but 0 chunks shows step 3 "not done" + step 4 "locked", which looks stuck even
+  // though it's complete. `questionsGenerated` is the strongest "fully done" signal —
+  // but NOT while a re-transcription is in flight (those exercises are about to be
+  // regenerated).
+  const isComplete = props.questionsGenerated && !transcribing;
   const uploadStatus: WorkflowStatus = !props.videoStorageKey ? "active" : "done";
   const transcriptStatus: WorkflowStatus =
     !props.videoStorageKey ? "locked" :
     props.extractState.phase === "error" ? "error" :
-    props.isExtracting ? "running" :
-    props.hasSegments || props.hasTranscriptContent ? "done" :
+    transcribing ? "running" :
+    props.hasSegments || props.hasTranscriptContent || props.hasChunks || isComplete ? "done" :
     props.activeStep === "transcript" ? "active" : "ready";
   const chunkStatus: WorkflowStatus =
-    !props.hasTranscriptContent ? "locked" :
+    transcribing ? "locked" :
+    !props.hasTranscriptContent && !isComplete ? "locked" :
     props.chunkState.phase === "error" ? "error" :
     props.isChunking ? "running" :
-    props.hasChunks ? "done" :
+    props.hasChunks || isComplete ? "done" :
     props.activeStep === "chunks" ? "active" : "ready";
   const exerciseStatus: WorkflowStatus =
-    !props.hasChunks ? "locked" :
+    transcribing ? "locked" :
+    !props.hasChunks && !isComplete ? "locked" :
     props.genState.phase === "error" ? "error" :
     props.isGenerating ? "running" :
     props.questionsGenerated ? "done" :
     props.activeStep === "exercises" ? "active" : "ready";
-  const previewStatus: WorkflowStatus = (props.questionsGenerated || props.interactions.length > 0) ? "ready" : "locked";
+  const previewStatus: WorkflowStatus =
+    !transcribing && (props.questionsGenerated || props.interactions.length > 0) ? "ready" : "locked";
 
   const segmentsCount = props.segments.length;
   const chunksCount = props.chunks.length;
@@ -367,7 +384,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     {
       key: "chunks",
       title: "Phân đoạn",
-      subtitle: props.isChunking || props.isChunkSyncing ? "Đang xử lý" : props.hasChunks ? `${chunksCount} đoạn` : props.hasTranscriptContent ? "Sẵn sàng" : "Chưa sẵn sàng",
+      subtitle: transcribing ? "Chờ phiên âm" : props.isChunking || props.isChunkSyncing ? "Đang xử lý" : props.hasChunks ? `${chunksCount} đoạn` : props.hasTranscriptContent ? "Sẵn sàng" : "Chưa sẵn sàng",
       status: chunkStatus,
       icon: <ListTreeIcon className="size-3.5" />,
       targetStep: "chunks",
@@ -375,7 +392,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     {
       key: "exercises",
       title: "Bài tập",
-      subtitle: props.isGenerating ? "Đang tạo" : props.questionsGenerated ? `${props.interactions.length} câu` : props.hasChunks ? "Sẵn sàng" : "Chưa tạo",
+      subtitle: transcribing ? "Chờ phiên âm" : props.isGenerating ? "Đang tạo" : props.questionsGenerated ? `${props.interactions.length} câu` : props.hasChunks ? "Sẵn sàng" : "Chưa tạo",
       status: exerciseStatus,
       icon: <SparklesIcon className="size-3.5" />,
       targetStep: "exercises",
@@ -411,6 +428,11 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   const activeGenTask = props.lessonTasks.find(
     (t) => t.kind === LessonTaskKind.GENERATE_INTERACTIONS && isLessonTaskActive(t),
   );
+  // Quick Create starts a single durable RUN_PIPELINE task that runs every stage
+  // server-side. Surface its live progress (read-only) so the user just watches.
+  const activePipelineTask = props.lessonTasks.find(
+    (t) => t.kind === LessonTaskKind.RUN_PIPELINE && isLessonTaskActive(t),
+  );
 
   const stepMeta = buildStepMeta({
     activeStep: props.activeStep,
@@ -422,6 +444,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
 
   return (
     <div className="flex flex-col gap-3">
+      {activePipelineTask && <PipelineAutoProgressCard task={activePipelineTask} />}
       <VideoProcessingStepper
         steps={workflowSteps}
         currentStep={props.activeStep}
@@ -490,9 +513,6 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
             </div>
             <VideoUpload
               lessonId={props.lessonId}
-              moduleId={props.moduleId}
-              courseId={props.courseId}
-              slug={props.slug}
               hasVideo={!!props.videoStorageKey}
               token={props.token}
             />

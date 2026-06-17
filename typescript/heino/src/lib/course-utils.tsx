@@ -9,11 +9,3 @@ export function courseStatusBadge(status: CourseStatus) {
   return <Badge variant="secondary">Lưu trữ</Badge>;
 }
 
-export function courseStatusLabel(status: CourseStatus): string {
-  switch (status) {
-    case CourseStatus.PUBLISHED: return "Đã xuất bản";
-    case CourseStatus.DRAFT:     return "Nháp";
-    case CourseStatus.ARCHIVED:  return "Lưu trữ";
-    default:                     return "Không xác định";
-  }
-}

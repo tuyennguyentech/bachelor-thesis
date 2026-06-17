@@ -1,5 +1,4 @@
 import type { FC } from "react";
-export { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 
 export interface McqOption {
@@ -94,9 +93,6 @@ export interface StudentViewProps<Config, Response> {
   /** Optional: interaction UUID — used by renderers that need to call back to the server
    * for this specific interaction (e.g. reading AFTER_EACH inline grading). */
   interactionId?: string;
-  /** Optional: true when the teacher is previewing the lesson. Renderers that would
-   * otherwise burn AI quota (e.g. reading PreviewGrade) should skip server calls. */
-  isPreview?: boolean;
   /** Optional: the InteractionKind of this interaction, useful for components shared across multiple kinds */
   kind?: InteractionKind;
   /** Optional: report a server-side or async grade back to the parent view. */

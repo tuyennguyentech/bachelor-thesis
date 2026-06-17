@@ -17,6 +17,8 @@ interface ExerciseChunkListProps {
   filteredChunks: TranscriptChunk[];
   interactions: LessonInteraction[];
   isAddingDisabled: boolean;
+  /** Gate for the manual "Thêm" affordance only (independent of AI generation). */
+  addDisabled: boolean;
   lessonId: string;
   localChunks: TranscriptChunk[];
   onCloseAdd: () => void;
@@ -43,6 +45,7 @@ export function ExerciseChunkList({
   filteredChunks,
   interactions,
   isAddingDisabled,
+  addDisabled,
   lessonId,
   localChunks,
   onCloseAdd,
@@ -77,6 +80,7 @@ export function ExerciseChunkList({
           lessonId={lessonId}
           token={token}
           disabled={isAddingDisabled}
+          addDisabled={addDisabled}
           addSaving={addSaving}
           addError={addError}
           onOpenGenerate={() => onOpenGenerate(chunk.id)}

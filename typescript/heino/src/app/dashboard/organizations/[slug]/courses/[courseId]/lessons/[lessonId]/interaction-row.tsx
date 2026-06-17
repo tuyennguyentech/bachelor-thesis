@@ -18,6 +18,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { getRenderer, extractConfig } from "@/interactions/registry";
 import type { McqConfig, FillBlankConfig, ListeningConfig, ReadingConfig, WritingConfig } from "@/interactions/types";
 import { RegenerateModal } from "./regenerate-modal";
+import { formatTime } from "@/lib/format";
 
 // ── Kind badge utilities ───────────────────────────────────────────────────────
 
@@ -294,11 +295,6 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
 }
 
 // ── Interaction row ───────────────────────────────────────────────────────────
-
-function formatTime(s: number) {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
 
 interface Props {
   interaction: LessonInteraction;

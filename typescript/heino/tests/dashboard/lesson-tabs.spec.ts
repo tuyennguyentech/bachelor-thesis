@@ -59,6 +59,15 @@ test.describe("Lesson tab — Bài giảng (content)", () => {
     await expect(page.getByText("Studio bài giảng")).toBeVisible();
   });
 
+  test("manager does NOT see the learner-only 'Chưa hoàn thành' status", async ({ teacherPage: page }) => {
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
+    await page.goto(`${lessonHref}?tab=content`, { waitUntil: "domcontentloaded" });
+    // A manager never loads a personal attempt, so the completion status would always
+    // read a misleading "Chưa hoàn thành" — it must be hidden for managers.
+    await expect(page.getByText("Chưa hoàn thành")).toHaveCount(0);
+    await expect(page.getByText("Đã hoàn thành")).toHaveCount(0);
+  });
+
   test("?tab=content shows Chế độ học viên preview link", async ({ teacherPage: page }) => {
     const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
     await page.goto(`${lessonHref}?tab=content`, { waitUntil: "domcontentloaded" });
@@ -123,7 +132,7 @@ test.describe("Lesson tab — Kết quả & Thống kê (results)", () => {
 
     // The results section wrapper has data-testid="lesson-attempts"
     await expect(page.getByTestId("lesson-attempts")).toBeVisible();
-    await expect(page.getByText("Kết quả & Thống kê học viên")).toBeVisible();
+    await expect(page.getByText("Bảng kết quả học viên")).toBeVisible();
   });
 
   test("?tab=results shows bob's attempt row (seeded attempt with metrics)", async ({ userPage: page }) => {
@@ -152,17 +161,18 @@ test.describe("Lesson tab — Kết quả & Thống kê (results)", () => {
 // ── Tab 1: no-video placeholder shows upload shortcut button ──────────────
 
 test.describe("Lesson tab — Bài giảng, no-video placeholder", () => {
-  test("shows 'Tải lên & xử lý video' button linking to ?tab=processing when lesson has no video", async ({ teacherPage: page }) => {
+  test("shows quick-create + manual-processing entry points when lesson has no video", async ({ teacherPage: page }) => {
     // SEED_DSA_LESSON_RECURRENCE has no video_key in seed data → no-video placeholder renders
     const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_RECURRENCE);
     await page.goto(`${lessonHref}?tab=content`, { waitUntil: "domcontentloaded" });
 
-    // The button must be visible inside the no-video placeholder
-    const uploadBtn = page.getByRole("link", { name: /Tải lên.*xử lý video/i });
-    await expect(uploadBtn).toBeVisible();
+    // Quick-create (auto) entry point for this existing video-less lesson.
+    await expect(page.getByTestId("quick-create-lesson-trigger")).toBeVisible();
 
-    // The link href must contain tab=processing (not a full navigation check — just href)
-    const href = await uploadBtn.getAttribute("href");
+    // Manual processing link still available, pointing at ?tab=processing.
+    const manualBtn = page.getByRole("link", { name: /Xử lý thủ công/i });
+    await expect(manualBtn).toBeVisible();
+    const href = await manualBtn.getAttribute("href");
     expect(href).toContain("tab=processing");
   });
 });

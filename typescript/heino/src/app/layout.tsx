@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "vidstack/styles/base.css";
 import "vidstack/styles/defaults.css";
@@ -8,15 +7,12 @@ import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Font: match how soict.hust.edu.vn actually renders. Its Flatsome theme declares
+// `body{font-family:"Roboto"}` but the Roboto webfont never loads there, so the
+// site you see is the plain Arial/Helvetica fallback (Liberation Sans on Linux).
+// We therefore use the same Arial-first system stack instead of a real Roboto
+// webfont — no download, identical look to the live site. The stack lives in
+// globals.css (`--font-sans`); nothing to load here.
 
 export const metadata: Metadata = {
   title: "Dyadia",
@@ -31,7 +27,7 @@ export default function RootLayout({
   return (
     <html
       lang="vi"
-      className={cn("h-full antialiased font-sans", geistSans.variable, geistMono.variable)}
+      className={cn("h-full antialiased font-sans")}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-background">

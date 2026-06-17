@@ -18,7 +18,6 @@ export type CourseTab = "overview" | "lessons" | "members" | "results" | "join-r
 
 interface CourseWorkspaceShellProps {
   slug: string;
-  courseId: string;
   courseTitle: string;
   activeTab: CourseTab;
   canManage: boolean;
@@ -44,7 +43,6 @@ const TAB_ITEMS: TabItem[] = [
 
 export function CourseWorkspaceSidebar({
   slug,
-  courseId,
   courseTitle,
   activeTab,
   canManage,
@@ -57,9 +55,11 @@ export function CourseWorkspaceSidebar({
 
   return (
     <>
-      {/* Mobile: horizontal scrollable tab strip (below md) */}
+      {/* Mobile: horizontal scrollable tab strip (below md). Must NOT use
+          basis-full — the parent is flex-col on mobile, so basis-full would make
+          this nav take the full column height and hide <main> entirely. */}
       <nav
-        className="flex w-full min-w-0 shrink-0 basis-full gap-1 overflow-x-auto border-b px-2 md:hidden"
+        className="flex w-full min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1 md:hidden"
         aria-label="Course tabs"
       >
         {visibleTabs.map(({ id, label, icon: Icon }) => {

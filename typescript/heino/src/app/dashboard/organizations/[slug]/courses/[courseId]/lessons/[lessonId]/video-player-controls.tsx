@@ -3,6 +3,7 @@
 import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
+import { formatTime } from "@/lib/format";
 
 interface VideoPlayerControlsProps {
   allowFullscreen: boolean;
@@ -21,13 +22,6 @@ interface VideoPlayerControlsProps {
   onVolumeChange: (value: number) => void;
   paused: boolean;
   volume: number;
-}
-
-function formatTime(seconds: number) {
-  if (!Number.isFinite(seconds)) return "0:00";
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
 }
 
 export function VideoPlayerControls({

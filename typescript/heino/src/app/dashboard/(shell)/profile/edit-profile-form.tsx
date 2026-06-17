@@ -55,19 +55,19 @@ export function EditProfileForm({ firstName, lastName, middleName, userId, token
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       {error && <p className="text-sm text-destructive">{error}</p>}
       {success && <p className="text-sm text-green-600">Đã lưu thay đổi</p>}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="lastName">Họ</Label>
           <Input id="lastName" name="lastName" defaultValue={lastName} required />
         </div>
         <div className="space-y-1.5">
+          <Label htmlFor="middleName">Tên đệm</Label>
+          <Input id="middleName" name="middleName" defaultValue={middleName ?? ""} />
+        </div>
+        <div className="space-y-1.5">
           <Label htmlFor="firstName">Tên</Label>
           <Input id="firstName" name="firstName" defaultValue={firstName} required />
         </div>
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="middleName">Tên đệm</Label>
-        <Input id="middleName" name="middleName" defaultValue={middleName ?? ""} />
       </div>
       <div className="flex justify-end">
         <Button type="submit" size="sm" disabled={!hydrated || pending}>

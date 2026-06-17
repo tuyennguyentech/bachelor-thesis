@@ -190,11 +190,11 @@ test.describe("Course detail — Kết quả học viên section (manager view)"
     const bobRow = page.getByRole("row").filter({ hasText: "bob@dyadia.local" });
     await expect(bobRow).toBeVisible();
 
-    // The Tương tác cell renders either:
-    //   - a colored Badge (bg-green-100, bg-amber-100, or bg-red-100) when lessonsCompleted > 0
-    //   - a "—" dash span when lessonsCompleted = 0 (all attempts below 50% threshold)
-    // Either way the 5th TableCell must exist and contain something non-empty.
-    const engagementCell = bobRow.locator("td").nth(3);
+    // Columns: Học viên | Tiến độ | Điểm TB | % xem | Tương tác |
+    // Hoạt động gần nhất — so the Tương tác cell is td index 4. It renders either:
+    //   - a colored Badge (bg-green-100, bg-amber-100, or bg-red-100) when the student has attempts
+    //   - a "—" dash span when the student has no attempt
+    const engagementCell = bobRow.locator("td").nth(4);
     await expect(engagementCell).toBeVisible();
     // If a colored badge is present, verify it. Otherwise the dash is acceptable.
     const hasBadge = await bobRow.locator(".bg-green-100, .bg-amber-100, .bg-red-100").count() > 0;

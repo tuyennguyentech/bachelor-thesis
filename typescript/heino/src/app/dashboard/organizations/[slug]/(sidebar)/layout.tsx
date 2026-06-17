@@ -25,7 +25,7 @@ function orgStatusText(status: OrganizationStatus): string {
 
 function memberStatusText(status: MemberStatus): string {
   if (status === MemberStatus.ACTIVE) return "Đang hoạt động";
-  if (status === MemberStatus.INVITED) return "Đã mời";
+  if (status === MemberStatus.INVITED) return "Chờ chấp nhận";
   return "Tạm khóa";
 }
 

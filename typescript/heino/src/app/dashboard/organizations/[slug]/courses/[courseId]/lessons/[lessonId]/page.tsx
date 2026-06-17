@@ -30,11 +30,11 @@ import {
 import { AnalyzeButton } from "./analyze-button";
 import { LessonAttempts } from "./lesson-attempts";
 import { LessonHeatmap } from "./lesson-heatmap";
-import { LessonCompletionSettings } from "./lesson-completion-settings";
 import { VideoPlayer } from "./video-player";
 import { StudentLessonView } from "./student-lesson-view";
 import { extractLocalResponse } from "@/interactions/registry";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
+import { QuickCreateTrigger } from "@/components/dashboard/quick-create/QuickCreateTrigger";
 import { LessonCourseSidebar, LessonWorkspaceShell } from "./lesson-workspace";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
@@ -210,19 +210,19 @@ export default async function LessonDetailPage({
     effectiveCanManage
       ? interactionClient
           .lessonHeatmap({ lessonId })
-          .then((r) => ({ cells: r.cells }))
+          .then((r) => ({ cells: r.cells, breakdowns: r.breakdowns, error: false }))
           .catch((err) => {
             console.error("[lesson/page] lessonHeatmap failed:", err);
-            return { cells: [] };
+            return { cells: [], breakdowns: [], error: true };
           })
       : Promise.resolve(null),
     effectiveCanManage
       ? interactionClient
           .getLessonQuestionAnalytics({ lessonId })
-          .then((r) => ({ kindAccuracy: r.kindAccuracy, mcqStats: r.mcqStats }))
+          .then((r) => ({ kindAccuracy: r.kindAccuracy, questionStats: r.questionStats }))
           .catch((err) => {
             console.error("[lesson/page] getLessonQuestionAnalytics failed:", err);
-            return { kindAccuracy: [], mcqStats: [] };
+            return { kindAccuracy: [], questionStats: [] };
           })
       : Promise.resolve(null),
   ]);
@@ -351,7 +351,10 @@ export default async function LessonDetailPage({
                   {interactions.length > 0 && (
                     <span>{interactions.length} câu hỏi</span>
                   )}
-                  {interactions.length > 0 && (
+                  {/* Completion status is a LEARNER signal. A manager (manage or
+                      preview mode) never loads a personal attempt, so they'd always
+                      see a misleading "Chưa hoàn thành" — hide it for them. */}
+                  {interactions.length > 0 && !effectiveCanManage && !isPreview && (
                     <>
                       <span>·</span>
                       <span>{previousResult ? "Đã hoàn thành" : "Chưa hoàn thành"}</span>
@@ -443,7 +446,7 @@ export default async function LessonDetailPage({
                 // STUDENT or PREVIEW VIEW:
                 videoUrl ? (
                   <StudentLessonView
-                    key={`${isPreview ? "preview" : "student"}:${lesson.videoStorageKey}:${videoVersion}`}
+                    key={`${isPreview ? "preview" : "student"}:${lesson.id}:${lesson.videoStorageKey}:${videoVersion}`}
                     videoUrl={withFirstFramePoster(videoUrl)}
                     videoStorageKey={lesson.videoStorageKey || undefined}
                     nextLessonHref={nextLessonHref}
@@ -472,8 +475,8 @@ export default async function LessonDetailPage({
                 <>
                   {/* ── Tab 1: Bài giảng (Video + Transcript) ── */}
                   <div className={activeTab !== "content" ? "hidden" : "flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200"}>
-                    <section className="w-full overflow-hidden rounded-2xl border border-border/80 bg-card/40 backdrop-blur-md shadow-xl transition-all duration-300">
-                      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3 bg-muted/15">
+                    <section className="w-full overflow-hidden rounded-md border bg-card shadow-sm">
+                      <div className="flex items-center justify-between gap-3 border-b px-4 py-3 bg-muted/15">
                         <div className="flex min-w-0 items-center gap-2">
                           <VideoIcon className="size-4 shrink-0 text-primary" />
                           <h2 className="truncate text-sm font-semibold tracking-tight">Studio bài giảng</h2>
@@ -490,7 +493,7 @@ export default async function LessonDetailPage({
                       {videoUrl ? (
                         <div className="p-4 flex flex-col gap-4">
                           <VideoPlayer
-                            key={`${lesson.videoStorageKey}:${videoVersion}`}
+                            key={`${lesson.id}:${lesson.videoStorageKey}:${videoVersion}`}
                             videoUrl={withFirstFramePoster(videoUrl)}
                             segments={analysis?.transcriptSegments ?? []}
                             transcript={analysis?.transcript ?? ""}
@@ -509,13 +512,34 @@ export default async function LessonDetailPage({
                               <VideoIcon className="size-10 opacity-40 text-primary" />
                             </div>
                             <p className="text-sm font-semibold text-foreground/90">Chưa có video. Tải video lên để bắt đầu tạo nội dung.</p>
-                            <p className="text-xs text-muted-foreground max-w-[280px]">Vui lòng tải video lên ở Bước 1 của quy trình phía dưới để bắt đầu thiết kế bài học.</p>
-                            <Button asChild variant="default" size="sm" className="gap-1.5 mt-1">
-                              <Link href="?tab=processing">
-                                <SparklesIcon className="size-3.5" />
-                                Tải lên & xử lý video
-                              </Link>
-                            </Button>
+                            <p className="text-xs text-muted-foreground max-w-[300px]">
+                              Chọn <strong>Tạo nhanh</strong> để tải video + tự động chạy toàn bộ
+                              quy trình, hoặc tự xử lý từng bước thủ công.
+                            </p>
+                            <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+                              <QuickCreateTrigger
+                                token={token}
+                                modules={[]}
+                                courseId={courseId}
+                                slug={slug}
+                                existingLesson={{ id: lesson.id, title: lesson.title }}
+                                label="Tạo nhanh (tự động)"
+                              />
+                              {/* On the always-black video placeholder a theme `outline`
+                                  button is dark-on-black in light mode. Force a glassy
+                                  light-on-dark treatment so it stays legible in both themes. */}
+                              <Button
+                                asChild
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                              >
+                                <Link href="?tab=processing">
+                                  <SparklesIcon className="size-3.5" />
+                                  Xử lý thủ công
+                                </Link>
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -527,9 +551,9 @@ export default async function LessonDetailPage({
                       pipeline state (activeStep, polling timers, chunk edits) survives
                       tab switches. Visibility is controlled by the `hidden` class only. */}
                   <div className={activeTab !== "processing" ? "hidden" : "flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200"}>
-                    <section className="rounded-2xl border border-border/80 bg-card/30 backdrop-blur-md p-5 shadow-lg transition-all duration-300">
+                    <section className="rounded-md border bg-card p-5 shadow-sm">
                       <div className="mb-4 flex items-start gap-2.5">
-                        <div className="rounded-lg bg-primary/10 p-2 text-primary animate-pulse">
+                        <div className="rounded-lg bg-primary/10 p-2 text-primary">
                           <SparklesIcon className="size-4" />
                         </div>
                         <div>
@@ -541,7 +565,7 @@ export default async function LessonDetailPage({
                       </div>
                       <div className="border-t border-border/40 pt-4">
                         <AnalyzeButton
-                          key={`${lesson.videoStorageKey ?? "no-video"}:${videoVersion}`}
+                          key={`${lesson.id}:${lesson.videoStorageKey ?? "no-video"}:${videoVersion}`}
                           lessonId={lesson.id}
                           initialChunks={initialChunks}
                           initialSegments={analysis?.transcriptSegments ?? []}
@@ -552,6 +576,7 @@ export default async function LessonDetailPage({
                           initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
                           initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
                           initialLanguage={lesson.language || "vi"}
+                          initialAudioLanguage={lesson.audioLanguage}
                           initialMaxAttempts={lesson.maxAttempts}
                           title={lesson.title}
                           description={lesson.description}
@@ -569,38 +594,36 @@ export default async function LessonDetailPage({
                   {/* ── Tab 3: Kết quả & Thống kê ── */}
                   {activeTab === "results" && attemptsData && (
                     <div className="flex flex-col gap-4 animate-in fade-in duration-200">
-                      <LessonCompletionSettings
-                        lessonId={lesson.id}
-                        title={lesson.title}
-                        description={lesson.description}
-                        orderIndex={lesson.orderIndex}
-                        language={lesson.language || "vi"}
-                        maxAttempts={lesson.maxAttempts ?? 0}
-                        minWatchFraction={lesson.minWatchFraction ?? 0}
-                        minScoreFraction={lesson.minScoreFraction ?? 0}
-                      />
-
-                      {heatmapData && heatmapData.cells.length > 0 && (
-                        <div className="rounded-md border p-4 flex flex-col gap-3">
+                      {heatmapData && (
+                        <div className="rounded-md border p-4 flex flex-col gap-3" data-testid="lesson-heatmap-panel">
                           <div className="flex items-center gap-2">
                             <BarChart2Icon className="size-4 text-muted-foreground" />
-                            <h2 className="font-medium text-sm">Bản đồ nhiệt theo phân đoạn</h2>
+                            <h2 className="font-medium text-sm">
+                              {heatmapData.cells.some((c) => c.responseCount > 0)
+                                ? "Bản đồ nhiệt theo phân đoạn"
+                                : "Bản đồ nhiệt theo câu hỏi"}
+                            </h2>
                           </div>
-                          <LessonHeatmap cells={heatmapData.cells} />
+                          <LessonHeatmap
+                            cells={heatmapData.cells}
+                            breakdowns={heatmapData.breakdowns}
+                            questions={questionAnalytics?.questionStats}
+                            error={heatmapData.error}
+                          />
                         </div>
                       )}
 
                       <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
                         <div className="flex items-center gap-2">
                           <BarChart2Icon className="size-4 text-muted-foreground" />
-                          <h2 className="font-medium text-sm">Kết quả &amp; Thống kê học viên</h2>
+                          <h2 className="font-medium text-sm">Bảng kết quả học viên</h2>
                         </div>
                         <LessonAttempts
                           attempts={attemptsData.attempts}
                           total={attemptsData.total}
                           maxAttempts={lesson.maxAttempts}
                           perKind={questionAnalytics?.kindAccuracy}
-                          questions={questionAnalytics?.mcqStats}
+                          questions={questionAnalytics?.questionStats}
                         />
                       </div>
                     </div>

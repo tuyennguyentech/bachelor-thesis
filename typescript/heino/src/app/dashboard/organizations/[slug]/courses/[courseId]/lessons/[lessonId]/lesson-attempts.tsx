@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { AlertTriangleIcon, CheckCircle2Icon } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -10,15 +11,18 @@ import {
 import type {
   StudentAttemptSummary,
   KindAccuracy,
-  McqInteractionStats,
+  QuestionStat,
 } from "buf/gen/richter/v1/interactions_pb";
+import { formatScore } from "@/lib/format";
+import { ScoreBar } from "@/components/score-viz";
+import { InfoHint } from "@/components/ui/info-hint";
 
 interface Props {
   attempts: StudentAttemptSummary[];
   total: number;
   maxAttempts?: number;
   perKind?: KindAccuracy[];
-  questions?: McqInteractionStats[];
+  questions?: QuestionStat[];
 }
 
 /** Vietnamese label + accent colour per DB interaction-kind string. */
@@ -52,10 +56,6 @@ function ratioColor(ratio: number): string {
   if (ratio >= 0.8) return "text-green-600 dark:text-green-400";
   if (ratio >= 0.5) return "text-yellow-600 dark:text-yellow-400";
   return "text-red-600 dark:text-red-400";
-}
-
-function formatScore(n: number): string {
-  return Number(n.toFixed(2)).toString();
 }
 
 /** Convert milliseconds to a human-readable seconds string, e.g. "12.3s". */
@@ -104,54 +104,133 @@ function engagementBadge(score: number): { label: string; className: string } {
   };
 }
 
-/** A per-kind accuracy pill strip, styled like exercise-overview's KIND_BADGES. */
-function KindAccuracyStrip({ perKind }: { perKind: KindAccuracy[] }) {
-  const shown = perKind.filter((k) => k.responseCount > 0);
-  if (shown.length === 0) return null;
+// Below this composite engagement score (0–100) a student is flagged as needing
+// attention — matches the backend `engagementWarnThreshold`.
+const ENGAGEMENT_WARN = 40;
+// A question whose class accuracy is below this is "hard" — matches the backend
+// heatmap gap threshold.
+const HARD_QUESTION_THRESHOLD = 0.6;
+
+/**
+ * A one-glance "what to act on" band. Answers the teacher's first question —
+ * who is struggling and which question is hardest — without scanning every row.
+ * Computed from the already-loaded attempts + question stats (no extra request).
+ */
+function NeedsAttentionBand({
+  attempts,
+  questions,
+}: {
+  attempts: StudentAttemptSummary[];
+  questions: QuestionStat[];
+}) {
+  const atRisk = attempts.filter((a) => a.engagementScore < ENGAGEMENT_WARN);
+  const hardest = questions
+    .filter((q) => q.responseCount > 0 && q.accuracy < HARD_QUESTION_THRESHOLD)
+    .sort((a, b) => a.accuracy - b.accuracy)[0];
+
+  if (atRisk.length === 0 && !hardest) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-300">
+        <CheckCircle2Icon className="size-4 shrink-0" />
+        <span>Cả lớp đang theo kịp tốt — không có học viên hay câu hỏi nào đáng lo.</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-wrap gap-2" data-testid="kind-accuracy-strip">
-      {shown.map((k) => {
-        const { label, color } = kindLabel(k.kind);
-        return (
-          <span
-            key={k.kind}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${color}`}
-          >
-            {label}
-            <span className="rounded-full bg-background/50 px-1.5 py-0.5 text-xs font-bold">
-              {Math.round(k.accuracy * 100)}%
-            </span>
-            <span className="text-[10px] opacity-70">({k.responseCount})</span>
-          </span>
-        );
-      })}
+    <div className="flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50/70 px-3 py-2 text-sm dark:border-amber-800/60 dark:bg-amber-950/20">
+      <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-300">
+        <AlertTriangleIcon className="size-4 shrink-0" />
+        Cần chú ý
+      </div>
+      <ul className="ml-6 list-disc text-amber-900/90 dark:text-amber-200/90">
+        {atRisk.length > 0 && (
+          <li>
+            <span className="font-semibold">{atRisk.length}</span> học viên có mức tương tác thấp
+            (&lt; {ENGAGEMENT_WARN}): {atRisk.slice(0, 3).map((a) => a.displayName).join(", ")}
+            {atRisk.length > 3 ? `, +${atRisk.length - 3} nữa` : ""}.
+          </li>
+        )}
+        {hardest && (
+          <li>
+            Câu khó nhất: <span className="font-medium">“{hardest.prompt}”</span> — chỉ{" "}
+            <span className="font-semibold">{Math.round(hardest.accuracy * 100)}%</span> trả lời đúng.
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
 
-/** Cards of MCQ questions with per-option answer distribution bars. */
-function QuestionAnalysisPanel({ questions }: { questions: McqInteractionStats[] }) {
+/** A per-kind accuracy pill strip, styled like exercise-overview's KIND_BADGES. */
+function KindAccuracyStrip({ perKind }: { perKind: KindAccuracy[] }) {
+  // Sort weakest-first so the skill the class most needs re-teaching is on top,
+  // and use score-tier colours so low accuracy reads red at a glance.
+  const shown = perKind
+    .filter((k) => k.responseCount > 0)
+    .sort((a, b) => a.accuracy - b.accuracy);
+  // A "by-type comparison" needs ≥2 types — a single lone bar is content-free
+  // (the overall score + per-question cards already convey it). Matches the
+  // student-side gate in lesson-result.tsx.
+  if (shown.length < 2) return null;
+  return (
+    <div className="rounded-md border bg-card p-4" data-testid="kind-accuracy-strip">
+      <h3 className="mb-2 inline-flex items-center gap-1 text-sm font-medium">
+        Độ chính xác theo loại câu hỏi
+        <InfoHint text="Tỉ lệ trả lời đúng theo từng loại câu hỏi, xếp loại yếu nhất lên đầu để biết kỹ năng nào cần dạy lại." />
+      </h3>
+      <div className="flex flex-col gap-2">
+        {shown.map((k) => (
+          <ScoreBar
+            key={k.kind}
+            label={kindLabel(k.kind).label}
+            frac={k.accuracy}
+            right={`${Math.round(k.accuracy * 100)}% · ${k.responseCount}`}
+            labelClass="w-32"
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-question analysis for EVERY answered question (all kinds, not just
+ * single-choice MCQ). Single-choice questions show the per-option answer
+ * distribution; the other kinds (multiple choice, fill, reading, listening) show
+ * the prompt + correct % + response count.
+ */
+function QuestionAnalysisPanel({ questions }: { questions: QuestionStat[] }) {
   if (questions.length === 0) return null;
   return (
     <div className="flex flex-col gap-3" data-testid="question-analysis">
       <h3 className="text-sm font-medium">Phân tích câu hỏi</h3>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className={`grid gap-3${questions.length > 1 ? " sm:grid-cols-2" : ""}`}>
         {questions.map((q) => {
           const totalChosen = q.options.reduce((acc, o) => acc + o.chosenCount, 0);
-          const correctChosen = q.options
-            .filter((o) => o.isCorrect)
-            .reduce((acc, o) => acc + o.chosenCount, 0);
-          const accuracy = totalChosen > 0 ? correctChosen / totalChosen : 0;
+          const { label: kindText, color: kindColor } = kindLabel(q.kind);
           return (
-            <div key={q.interactionId} className="rounded-md border bg-background p-3">
+            <div key={q.interactionId} className="rounded-md border bg-background p-3" data-testid="question-analysis-card">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium leading-snug">{q.prompt}</p>
+                <div className="min-w-0">
+                  <span className={`mb-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${kindColor}`}>
+                    {kindText}
+                  </span>
+                  <p className="text-sm font-medium leading-snug">{q.prompt}</p>
+                </div>
                 <span
-                  className={`shrink-0 font-mono text-xs font-semibold ${ratioColor(accuracy)}`}
+                  className={`shrink-0 font-mono text-xs font-semibold ${ratioColor(q.accuracy)}`}
                 >
-                  {Math.round(accuracy * 100)}%
+                  {Math.round(q.accuracy * 100)}%
                 </span>
               </div>
+              {q.options.length === 0 ? (
+                // The accuracy % is already shown in the top-right ratio; here we
+                // add only the response count so the number isn't printed twice.
+                <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+                  {q.responseCount} lượt trả lời
+                </p>
+              ) : (
               <div className="mt-2 flex flex-col gap-1.5">
                 {q.options.map((o) => {
                   const sharePct =
@@ -187,6 +266,7 @@ function QuestionAnalysisPanel({ questions }: { questions: McqInteractionStats[]
                   );
                 })}
               </div>
+              )}
             </div>
           );
         })}
@@ -210,6 +290,8 @@ export function LessonAttempts({ attempts, total, maxAttempts, perKind, question
 
   return (
     <div className="flex flex-col gap-4">
+      <NeedsAttentionBand attempts={attempts} questions={questions ?? []} />
+
       {perKind && perKind.length > 0 && <KindAccuracyStrip perKind={perKind} />}
 
       <div className="flex flex-col gap-3">
@@ -219,16 +301,49 @@ export function LessonAttempts({ attempts, total, maxAttempts, perKind, question
             <TableHeader>
               <TableRow>
                 <TableHead>Học viên</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead className="text-center">Số lần nộp</TableHead>
-                <TableHead className="text-right">Điểm</TableHead>
-                <TableHead className="text-right">Tỉ lệ trả lời</TableHead>
-                <TableHead className="text-right">TG trả lời TB</TableHead>
-                <TableHead className="text-right">Tổng TG làm</TableHead>
-                <TableHead className="text-right">Nghe lại TB</TableHead>
-                <TableHead className="text-right">% xem video</TableHead>
-                <TableHead className="text-right">Điểm TT</TableHead>
-                <TableHead className="text-right">Thời gian</TableHead>
+                <TableHead className="text-center">
+                  <span className="inline-flex items-center gap-1">
+                    Số lần nộp
+                    <InfoHint text="Số lượt học viên đã nộp bài (trên giới hạn lượt nộp của bài học, nếu có)." />
+                  </span>
+                </TableHead>
+                <TableHead className="text-right">
+                  <span className="inline-flex items-center gap-1">
+                    Điểm
+                    <InfoHint text="Điểm đạt được trên tổng điểm của bài (lượt nộp gần nhất)." />
+                  </span>
+                </TableHead>
+                <TableHead className="hidden text-right xl:table-cell">
+                  <span className="inline-flex items-center gap-1">
+                    TG/câu
+                    <InfoHint text="Thời gian trả lời trung bình cho mỗi câu hỏi." />
+                  </span>
+                </TableHead>
+                <TableHead className="hidden text-right lg:table-cell">
+                  <span className="inline-flex items-center gap-1">
+                    Tổng TG
+                    <InfoHint text="Tổng thời gian trả lời các câu hỏi (không tính thời gian xem video)." />
+                  </span>
+                </TableHead>
+                <TableHead className="hidden text-right xl:table-cell">
+                  <span className="inline-flex items-center gap-1">
+                    Nghe lại
+                    <InfoHint text="Số lần nghe lại trung bình ở các câu hỏi nghe (listening)." />
+                  </span>
+                </TableHead>
+                <TableHead className="hidden text-right lg:table-cell">
+                  <span className="inline-flex items-center gap-1">
+                    % xem
+                    <InfoHint text="Tỉ lệ thời lượng video học viên đã xem." />
+                  </span>
+                </TableHead>
+                <TableHead className="text-right">
+                  <span className="inline-flex items-center gap-1">
+                    Tương tác
+                    <InfoHint text="Điểm tương tác tổng hợp 0–100: 50% mức xem video + 50% điểm bài làm. Xanh ≥ 70, vàng 40–69, đỏ < 40." />
+                  </span>
+                </TableHead>
+                <TableHead className="text-right">Nộp lúc</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -239,40 +354,40 @@ export function LessonAttempts({ attempts, total, maxAttempts, perKind, question
                 const badge = engagementBadge(a.engagementScore);
                 return (
                   <TableRow key={a.userId}>
-                    <TableCell className="font-medium">{a.displayName}</TableCell>
-                    <TableCell className="text-muted-foreground">{a.email}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium">{a.displayName}</span>
+                        {a.email && <span className="text-xs text-muted-foreground">{a.email}</span>}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-center text-muted-foreground font-mono text-xs">
                       {a.attemptCount}{maxAttempts && maxAttempts > 0 ? ` / ${maxAttempts}` : ""}
                     </TableCell>
                     <TableCell className={`text-right font-medium font-mono ${scoreColor(a.totalScore, a.maxScore)}`}>
                       {formatScore(a.totalScore)}/{formatScore(a.maxScore)}
                     </TableCell>
-                    <TableCell className={`text-right text-xs font-mono ${ratioColor(a.responseRate)}`}>
-                      {Math.round(a.responseRate * 100)}%
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground text-xs font-mono">
+                    <TableCell className="hidden text-right text-muted-foreground text-xs font-mono xl:table-cell">
                       {formatAvgTimeMs(a.avgTimeToAnswerMs)}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground text-xs font-mono">
+                    <TableCell className="hidden text-right text-muted-foreground text-xs font-mono lg:table-cell">
                       {formatTimeOnTaskMs(a.timeOnTaskMs)}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground text-xs font-mono">
+                    <TableCell className="hidden text-right text-muted-foreground text-xs font-mono xl:table-cell">
                       {a.avgReplayCount.toFixed(1)}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground text-xs font-mono">
+                    <TableCell className="hidden text-right text-muted-foreground text-xs font-mono lg:table-cell">
                       {formatWatchFraction(a.videoWatchFraction)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {a.engagementScore > 0 ? (
-                        <Badge
-                          variant="outline"
-                          className={`font-mono text-xs px-1.5 py-0 ${badge.className}`}
-                        >
-                          {badge.label}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground font-mono">—</span>
-                      )}
+                      {/* Every row is a submitted attempt, so an engagement of 0
+                          is a real "fully disengaged" signal, not missing data —
+                          show the red badge rather than hiding it behind a dash. */}
+                      <Badge
+                        variant="outline"
+                        className={`font-mono text-xs px-1.5 py-0 ${badge.className}`}
+                      >
+                        {badge.label}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground text-xs font-mono">
                       {submittedDate

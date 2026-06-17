@@ -128,6 +128,14 @@ export const test = base.extend<{
 
 export const SEED_HUST_CS_SLUG = "hust-cs";
 export const SEED_DSA_COURSE_TITLE = "Cấu trúc dữ liệu và Giải thuật";
+// A hust-cs course alice (org ADMIN) is NOT a member of — she bypasses access
+// but is not auto-enrolled, so its card surfaces a "Tham gia" self-join button.
+export const SEED_HUST_CS_COURSE_ALICE_NOT_JOINED = "Hệ điều hành";
+// A second course alice is NOT in, reserved for the self-join MUTATION test so it
+// never collides with the read-only assertions on SEED_HUST_CS_COURSE_ALICE_NOT_JOINED.
+// frank owns it (alice gets a removable member row for UI cleanup) and no other spec
+// references it, so the temporary self-enrol/cleanup never disturbs another test.
+export const SEED_HUST_CS_COURSE_ALICE_NOT_JOINED_2 = "Cơ sở dữ liệu";
 export const SEED_DSA_LESSON_BIG_O = "Bài 1: Big-O, Omega, Theta notation";
 export const SEED_DSA_LESSON_RECURRENCE = "Bài 2: Phân tích đệ quy với Master Theorem";
 

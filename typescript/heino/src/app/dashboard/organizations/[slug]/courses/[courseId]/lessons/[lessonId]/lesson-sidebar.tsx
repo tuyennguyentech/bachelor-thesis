@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FileTextIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { TranscriptSegment, TranscriptChunk } from "buf/gen/richter/v1/ai_pb";
 import { InteractiveTranscript } from "./interactive-transcript";
+import { formatTime } from "@/lib/format";
 
 interface Props {
   chunks: TranscriptChunk[];
@@ -13,12 +14,6 @@ interface Props {
 }
 
 type Tab = "outline" | "transcript";
-
-function formatTime(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
 
 function seekTo(seconds: number, videoRef: React.RefObject<HTMLVideoElement | null>) {
   // Direct path: video element is local.

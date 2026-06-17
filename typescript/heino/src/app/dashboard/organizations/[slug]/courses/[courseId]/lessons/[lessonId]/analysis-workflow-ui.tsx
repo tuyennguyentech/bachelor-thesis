@@ -483,45 +483,6 @@ export function WorkflowActionPanel({
   );
 }
 
-export function WorkflowStatusSummary({
-  tone,
-  title,
-  description,
-  technicalDetail,
-  testId,
-}: {
-  tone: "success" | "warning" | "error";
-  title: string;
-  description: string;
-  technicalDetail?: string;
-  testId?: string;
-}) {
-  const toneClass = {
-    success: "border-green-500/40 bg-green-500/10 text-green-800 dark:text-green-300",
-    warning: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
-    error: "border-destructive/40 bg-destructive/10 text-destructive",
-  }[tone];
-
-  return (
-    <div className={`rounded-md border px-3 py-2 text-xs ${toneClass}`} data-testid={testId}>
-      <div className="flex items-start gap-2">
-        {tone === "success" ? <CheckIcon className="mt-0.5 size-3.5 shrink-0" /> :
-          tone === "warning" ? <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" /> :
-          <XIcon className="mt-0.5 size-3.5 shrink-0" />}
-        <div className="min-w-0">
-          <p className="font-medium">{title}</p>
-          <p className="mt-0.5 opacity-90">{description}</p>
-          {technicalDetail && (
-            <details className="mt-1">
-              <summary className="cursor-pointer font-medium">Chi tiết lỗi</summary>
-              <p className="mt-1 break-words font-mono opacity-80">{technicalDetail}</p>
-            </details>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function WorkflowReadyState({
   icon,

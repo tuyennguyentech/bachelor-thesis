@@ -1,9 +1,26 @@
-import { test, expect, loginAs, USER_PASSWORD } from "../fixtures";
+import { test, expect, loginAs, USER_PASSWORD, SEED_DSA_COURSE_TITLE } from "../fixtures";
 
 const HENRY_EMAIL = "henry@dyadia.local";
 
 // alice@dyadia.local is a member of hust-cs (admin role)
 const SEED_MEMBER_ORG = "hust-cs";
+
+/**
+ * Return the detail href of a STABLE seeded course (DSA, which alice manages) by
+ * searching with ?q=. The unfiltered courses list is NOT reliable here: other
+ * specs create courses in hust-cs during a full parallel run, so "the first card"
+ * is non-deterministic. Searching by title pins us to a known course regardless.
+ */
+async function seededCourseHref(page: import("@playwright/test").Page): Promise<string> {
+  await page.goto(
+    `/dashboard/organizations/${SEED_MEMBER_ORG}/courses?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
+    { waitUntil: "domcontentloaded" },
+  );
+  const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+  const href = await card.getByRole("link").first().getAttribute("href");
+  if (!href) throw new Error(`No detail link on seeded course card "${SEED_DSA_COURSE_TITLE}"`);
+  return href;
+}
 
 test.describe("Dashboard organizations list", () => {
   test("shows page heading", async ({ userPage: page }) => {
@@ -11,23 +28,24 @@ test.describe("Dashboard organizations list", () => {
     await expect(page.getByRole("heading", { name: "Tổ chức của tôi" })).toBeVisible();
   });
 
-  test("shows table columns", async ({ userPage: page }) => {
+  test("renders membership cards with role + status", async ({ userPage: page }) => {
     await page.goto("/dashboard/organizations");
-    await expect(page.getByRole("columnheader", { name: "Tên tổ chức" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Vai trò" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Trạng thái" })).toBeVisible();
+    const card = page.getByTestId("org-card").filter({ hasText: "HUST Computer Science" });
+    await expect(card).toBeVisible();
+    // alice is an admin in hust-cs → roleName returns "Quản trị viên"
+    await expect(card.getByText("Quản trị viên")).toBeVisible();
   });
 
   test("shows seeded org membership", async ({ userPage: page }) => {
     await page.goto("/dashboard/organizations");
     // alice's org shows by its display name
-    await expect(page.getByRole("cell", { name: "HUST Computer Science" })).toBeVisible();
+    await expect(page.getByText("HUST Computer Science")).toBeVisible();
   });
 
-  test("navigate button goes to org detail", async ({ userPage: page }) => {
+  test("clicking a membership card goes to org detail", async ({ userPage: page }) => {
     await page.goto("/dashboard/organizations");
-    const row = page.getByRole("row").filter({ hasText: "HUST Computer Science" });
-    await row.getByRole("link").click();
+    const card = page.getByTestId("org-card").filter({ hasText: "HUST Computer Science" });
+    await card.click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}`));
   });
 
@@ -78,7 +96,12 @@ test.describe("Dashboard org courses", () => {
   const COURSES_URL = `/dashboard/organizations/${SEED_MEMBER_ORG}/courses`;
 
   test("shows courses heading and table columns", async ({ userPage: page }) => {
-    await page.goto(COURSES_URL);
+    // Filter to a course alice manages so the "Khóa học của bạn" section renders
+    // regardless of how many courses other specs created in this shared org during
+    // a parallel run (the unfiltered page-1 list can be all freshly-created courses).
+    await page.goto(`${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`, {
+      waitUntil: "domcontentloaded",
+    });
     await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
     // Courses render as cards; alice (admin of hust-cs) sees her courses under "Khóa học của bạn"
     await expect(page.getByRole("heading", { name: "Khóa học của bạn" })).toBeVisible();
@@ -103,35 +126,29 @@ test.describe("Dashboard org courses", () => {
   });
 
   test("course card links to course detail", async ({ userPage: page }) => {
-    await page.goto(COURSES_URL);
-    // read the first course card's link href and navigate (Radix asChild+Link is flaky to click in Firefox)
-    const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
-    expect(href).toBeTruthy();
-    await page.goto(href!);
+    const href = await seededCourseHref(page);
+    await page.goto(href);
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses/`));
   });
 });
 
 test.describe("Dashboard course detail", () => {
   test("shows course title, status badge, and module list", async ({ userPage: page }) => {
-    // Read the course href and navigate directly (the row chevron is a Radix
-    // Button-asChild-Link which is flaky to click in Firefox). The module list
-    // ("Nội dung (N chương)") lives in the "Bài học" tab of the course workspace.
-    await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
-    const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
-    expect(href).toBeTruthy();
+    // The module list ("Nội dung (N chương)") lives in the "Bài học" tab.
+    const href = await seededCourseHref(page);
     // Strip any query (a manager card CTA links to ...?mode=learn) before adding
     // the tab, so we don't build a malformed "?mode=learn?tab=lessons".
-    const base = href!.split("?")[0].replace(/\/$/, "");
+    const base = href.split("?")[0].replace(/\/$/, "");
     await page.goto(`${base}?tab=lessons`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByText("Nội dung")).toBeVisible();
+    // The "Bài học" tab heading is "Nội dung (N chương)". Match the heading
+    // specifically — a bare getByText("Nội dung") also matches the "Chưa có nội
+    // dung" empty-lesson badges (substring), which trips strict mode.
+    await expect(page.getByRole("heading", { name: /Nội dung/ })).toBeVisible();
   });
 
   test("back button navigates to courses list", async ({ userPage: page }) => {
-    await page.goto(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses`);
-    const href = await page.locator('[data-slot="card"]').first().getByRole("link").first().getAttribute("href");
-    await page.goto(href!);
+    const href = await seededCourseHref(page);
+    await page.goto(href);
     // The course workspace sidebar has a "Danh sách khóa học" back link
     await page.getByRole("link", { name: "Danh sách khóa học" }).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/organizations/${SEED_MEMBER_ORG}/courses$`));

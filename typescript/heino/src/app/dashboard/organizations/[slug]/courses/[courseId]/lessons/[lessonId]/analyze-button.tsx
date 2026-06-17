@@ -23,6 +23,7 @@ interface Props {
   initialFeedbackMode?: FeedbackMode;
   initialDefaultInteractionConfig?: ChunkInteractionConfig;
   initialLanguage?: string;
+  initialAudioLanguage?: string;
   initialMaxAttempts?: number;
   title: string;
   description: string;
@@ -45,6 +46,7 @@ export function AnalyzeButton({
   initialFeedbackMode = FeedbackMode.AFTER_SUBMIT,
   initialDefaultInteractionConfig,
   initialLanguage = "vi",
+  initialAudioLanguage = "",
   initialMaxAttempts = 0,
   title,
   description,
@@ -70,8 +72,8 @@ export function AnalyzeButton({
       initialErrorMsg,
       initialInteractions,
       initialFeedbackMode,
-      initialDefaultInteractionConfig,
       initialLanguage,
+      initialAudioLanguage,
       initialMaxAttempts,
       title,
       description,
@@ -81,7 +83,7 @@ export function AnalyzeButton({
     [
       lessonId, aiClient, lessonClient, initialChunks, initialSegments, initialTranscript,
       initialStatus, initialErrorMsg, initialInteractions, initialFeedbackMode,
-      initialDefaultInteractionConfig, initialLanguage, initialMaxAttempts,
+      initialLanguage, initialAudioLanguage, initialMaxAttempts,
       title, description, orderIndex, videoStorageKey,
     ],
   );
@@ -91,10 +93,15 @@ export function AnalyzeButton({
   return (
     <div className="flex flex-col gap-3">
       <LessonSettingsBar
+        lessonId={lessonId}
+        aiClient={aiClient}
         videoStorageKey={videoStorageKey}
         language={s.language}
         onLanguageChange={s.setLanguage}
         savingLanguage={s.savingLanguage}
+        audioLanguage={s.audioLanguage}
+        onAudioLanguageChange={s.setAudioLanguage}
+        savingAudioLanguage={s.savingAudioLanguage}
         maxAttempts={s.maxAttempts}
         onMaxAttemptsChange={s.setMaxAttempts}
         savingMaxAttempts={s.savingMaxAttempts}
@@ -144,9 +151,7 @@ export function AnalyzeButton({
         isChunkSyncing={s.isSyncingChunk}
         isGenerating={s.isGenerating}
         isBusy={s.isBusy}
-        step2Status={s.step2Status}
         step3Status={s.step3Status}
-        step4Status={s.step4Status}
         step5Status={s.step5Status}
         onStartExtract={s.startExtract}
         onStartChunk={s.handleChunk}

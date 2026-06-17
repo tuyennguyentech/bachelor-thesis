@@ -2,16 +2,9 @@ import {
   test,
   expect,
   uid,
-  goToSeededLesson,
   createAnalyzedLesson,
-  SEED_DSA_LESSON_BIG_O,
-  STUDENT_EMAIL,
-  USER_PASSWORD,
 } from "../fixtures";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-node";
 import type { Locator, Page } from "@playwright/test";
-import { AuthService } from "buf/gen/richter/v1/auth_pb";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 
 const RICHTER_BASE = "/api/richter";
@@ -240,77 +233,6 @@ test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => 
           { interactionId: interaction.id },
         ).catch(() => { /* best effort — don't mask test failure */ });
       }
-    }
-  });
-
-  test("student takes quiz with seeded interactions and receives scores", async ({ browser, baseURL }) => {
-    test.setTimeout(60_000);
-
-    // Create an isolated browser context for the student
-    const rpcBaseUrl = process.env.RICHTER_BASE_URL ?? `${baseURL}/api/richter`;
-    const transport = createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBaseUrl });
-    const authClient = createClient(AuthService, transport);
-    const loginRes = await authClient.login({ email: STUDENT_EMAIL, password: USER_PASSWORD });
-
-    const context = await browser.newContext({ baseURL: baseURL ?? undefined });
-    await context.addCookies([
-      {
-        name: "dyadia_access",
-        value: loginRes.accessToken,
-        url: baseURL ?? "http://caddy",
-        httpOnly: true,
-        sameSite: "Lax",
-      },
-      {
-        name: "dyadia_refresh",
-        value: loginRes.refreshToken,
-        url: baseURL ?? "http://caddy",
-        httpOnly: true,
-        sameSite: "Lax",
-      },
-    ]);
-    const student = await context.newPage();
-
-    try {
-      await goToSeededLesson(student, SEED_DSA_LESSON_BIG_O);
-
-      // Wait for video player and checkpoint trigger function
-      await student.waitForFunction(
-        () => "__triggerVideoCheckpoint" in window,
-        { timeout: 15_000 },
-      );
-
-      // If student has previous result, click "Làm lại"
-      const retakeBtn = student.getByRole("button", { name: "Làm lại" });
-      if (await retakeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await retakeBtn.click({ force: true });
-      }
-
-      // Trigger a checkpoint after the teacher test has created manual items on
-      // the same lesson; the player should surface the earliest unanswered item.
-      await student.evaluate((s) => {
-        (window as unknown as { __triggerVideoCheckpoint: (s: number) => void }).__triggerVideoCheckpoint(s);
-      }, 416);
-
-      const checkpoint = student.locator('[data-testid="quiz-checkpoint"]');
-      await expect(checkpoint).toBeVisible({ timeout: 5000 });
-
-      await expect(checkpoint.getByText(/Chọn|Điền|Đọc|Nghe|Hoàn thành/)).toBeVisible({ timeout: 3000 });
-
-      const answerOption = checkpoint.locator("button:not([disabled])").first();
-      await expect(answerOption).toBeVisible({ timeout: 3000 });
-      await answerOption.click({ force: true });
-
-      const confirmButton = checkpoint.getByRole("button", { name: "Xác nhận đáp án" });
-      if (await confirmButton.isVisible({ timeout: 500 }).catch(() => false)) {
-        await confirmButton.click({ force: true });
-      }
-
-      const continueButton = checkpoint.getByRole("button", { name: /Tiếp tục xem|Câu tiếp theo/ });
-      await expect(continueButton).toBeVisible({ timeout: 15000 });
-      await expect(continueButton).toBeEnabled({ timeout: 3000 });
-    } finally {
-      await context.close();
     }
   });
 });

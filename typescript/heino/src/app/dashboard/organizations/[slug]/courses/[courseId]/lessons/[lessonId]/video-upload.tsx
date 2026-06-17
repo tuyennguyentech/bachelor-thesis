@@ -26,9 +26,6 @@ const ALLOWED_CONTENT_TYPES = new Set([
 
 interface Props {
   lessonId: string;
-  moduleId: string;
-  courseId: string;
-  slug: string;
   hasVideo: boolean;
   token: string;
 }

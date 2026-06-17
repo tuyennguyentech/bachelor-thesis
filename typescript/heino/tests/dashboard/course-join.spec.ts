@@ -382,3 +382,48 @@ test.describe("Course join-requests tab — student access denied", () => {
     ).toBeVisible();
   });
 });
+
+// ── Course list — a requested course card shows a distinct "pending" state ──
+
+test.describe("Course list — pending join request state (fresh student)", () => {
+  // Isolated fresh student so the "not requested → requested" transition is clean
+  // and never collides with bob's seeded state.
+  let freshEmail: string;
+  let freshToken: string;
+
+  test.beforeAll(async ({ baseURL }) => {
+    freshEmail = `pending-card-${uid("")}@test.local`;
+    const { token: adminToken } = await getAdminAuth(baseURL);
+    const freshUserId = await createUser(adminToken, { email: freshEmail }, baseURL);
+    const orgId = await getOrgId(adminToken, SEED_HUST_CS_SLUG, baseURL);
+    await addOrgMember(adminToken, orgId, freshUserId, OrganizationRole.STUDENT, baseURL);
+    freshToken = await getToken(freshEmail, USER_PASSWORD, baseURL);
+  });
+
+  test("a requested course shows 'Đang chờ duyệt', distinct from the un-requested card", async ({ page, baseURL }) => {
+    test.setTimeout(60_000);
+    await loginAs(page, freshEmail, USER_PASSWORD, baseURL ?? "http://caddy");
+
+    // A fresh student is a member of nothing → the seeded OOP course shows under
+    // "Khóa học khác" with a "Yêu cầu tham gia" CTA and NO pending marker yet.
+    const listUrl = `${COURSES_URL}?q=${encodeURIComponent(LOCKED_COURSE_TITLE)}`;
+    await page.goto(listUrl, { waitUntil: "domcontentloaded" });
+    const card = page.locator('[data-slot="card"]').filter({ hasText: LOCKED_COURSE_TITLE }).first();
+    await expect(card.getByTestId("card-request-join")).toBeVisible();
+    await expect(card.getByTestId("card-request-pending")).toHaveCount(0);
+
+    // Read the course id from the card link and submit a join request via API.
+    const href = await card.getByTestId("card-request-join").getAttribute("href");
+    const courseId = href!.split("/courses/")[1].split(/[?#]/)[0];
+    await submitJoinRequest(freshToken, courseId, baseURL);
+
+    // Reload: the SAME course now shows the PENDING state — visibly different from
+    // before ("Đang chờ duyệt" + "Đã gửi yêu cầu"), and "Yêu cầu tham gia" is gone.
+    await page.goto(listUrl, { waitUntil: "domcontentloaded" });
+    const pendingCard = page.locator('[data-slot="card"]').filter({ hasText: LOCKED_COURSE_TITLE }).first();
+    await expect(pendingCard.getByTestId("card-request-pending")).toBeVisible({ timeout: 10_000 });
+    await expect(pendingCard.getByText("Đang chờ duyệt")).toBeVisible();
+    await expect(pendingCard.getByText("Đã gửi yêu cầu")).toBeVisible();
+    await expect(pendingCard.getByTestId("card-request-join")).toHaveCount(0);
+  });
+});

@@ -10,11 +10,7 @@ import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { ConnectError } from "@connectrpc/connect";
-
-function formatTime(s: number) {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
+import { formatTime } from "@/lib/format";
 
 interface Props {
   open: boolean;

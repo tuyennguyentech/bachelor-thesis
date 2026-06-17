@@ -84,6 +84,10 @@ export async function requireOrgMember(
     throw err;
   }
 
+  // An invited (not-yet-accepted) member who navigates straight to the org is
+  // sent to their org list, where the pending invitation card lets them accept —
+  // far less confusing than a generic 403/404.
+  if (member.status === MemberStatus.INVITED) redirect("/dashboard/organizations");
   if (member.status !== MemberStatus.ACTIVE) redirect("/unauthorized");
   if (roles.length > 0 && !roles.includes(member.role)) redirect("/unauthorized");
 

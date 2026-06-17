@@ -13,6 +13,7 @@ interface UseLessonAnalysisSettingsInput {
   description: string;
   initialFeedbackMode: FeedbackMode;
   initialLanguage: string;
+  initialAudioLanguage: string;
   initialMaxAttempts: number;
   lessonId: string;
   orderIndex: number;
@@ -23,6 +24,7 @@ export function useLessonAnalysisSettings({
   description,
   initialFeedbackMode,
   initialLanguage,
+  initialAudioLanguage,
   initialMaxAttempts,
   lessonId,
   orderIndex,
@@ -30,15 +32,19 @@ export function useLessonAnalysisSettings({
 }: UseLessonAnalysisSettingsInput) {
   const [feedbackMode, setFeedbackModeState] = useState<FeedbackMode>(initialFeedbackMode);
   const [language, setLanguageState] = useState<string>(initialLanguage);
+  const [audioLanguage, setAudioLanguageState] = useState<string>(initialAudioLanguage);
   const [maxAttempts, setMaxAttemptsState] = useState<number>(initialMaxAttempts);
   const [savingFeedback, startSaveFeedback] = useTransition();
   const [savingLanguage, startSaveLanguage] = useTransition();
+  const [savingAudioLanguage, startSaveAudioLanguage] = useTransition();
   const [savingMaxAttempts, startSaveMaxAttempts] = useTransition();
   const languageRef = useRef(language);
+  const audioLanguageRef = useRef(audioLanguage);
   const maxAttemptsRef = useRef(maxAttempts);
   const feedbackModeRef = useRef(feedbackMode);
 
   useEffect(() => { languageRef.current = language; }, [language]);
+  useEffect(() => { audioLanguageRef.current = audioLanguage; }, [audioLanguage]);
   useEffect(() => { maxAttemptsRef.current = maxAttempts; }, [maxAttempts]);
   useEffect(() => { feedbackModeRef.current = feedbackMode; }, [feedbackMode]);
 
@@ -68,6 +74,22 @@ export function useLessonAnalysisSettings({
     });
   }, [description, lessonId, orderIndex, startSaveLanguage, title]);
 
+  const setAudioLanguage = useCallback((lang: string) => {
+    const previous = audioLanguageRef.current;
+    setAudioLanguageState(lang);
+    startSaveAudioLanguage(async () => {
+      const res = await updateLessonLanguageAction({
+        lessonId, title, description, orderIndex,
+        language: languageRef.current, maxAttempts: maxAttemptsRef.current,
+        audioLanguage: lang,
+      });
+      if (!res.ok) {
+        setAudioLanguageState(previous);
+        toast.error(res.error);
+      }
+    });
+  }, [description, lessonId, orderIndex, startSaveAudioLanguage, title]);
+
   const setMaxAttempts = useCallback((val: number) => {
     const previous = maxAttemptsRef.current;
     setMaxAttemptsState(val);
@@ -85,12 +107,15 @@ export function useLessonAnalysisSettings({
   return {
     feedbackMode,
     language,
+    audioLanguage,
     maxAttempts,
     savingFeedback,
     savingLanguage,
+    savingAudioLanguage,
     savingMaxAttempts,
     setFeedbackMode,
     setLanguage,
+    setAudioLanguage,
     setMaxAttempts,
   };
 }

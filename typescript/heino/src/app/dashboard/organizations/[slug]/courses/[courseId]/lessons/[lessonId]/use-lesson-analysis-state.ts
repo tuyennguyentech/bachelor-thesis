@@ -1,11 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toUserMessage } from "@/lib/connect-error";
 import {
   AnalysisStatus,
-  type ChunkInteractionConfig,
   type TranscriptChunk,
   type TranscriptSegment,
   type LessonTask,
@@ -54,8 +52,8 @@ export interface UseLessonAnalysisStateInput {
   initialErrorMsg?: string;
   initialInteractions: LessonInteraction[];
   initialFeedbackMode: FeedbackMode;
-  initialDefaultInteractionConfig?: ChunkInteractionConfig;
   initialLanguage: string;
+  initialAudioLanguage: string;
   initialMaxAttempts: number;
   title: string;
   description: string;
@@ -79,10 +77,6 @@ export interface UseLessonAnalysisState {
   extractState: StreamRunState;
   chunkState: StreamRunState;
   genState: GenRunState;
-  setChunkState: React.Dispatch<React.SetStateAction<StreamRunState>>;
-  setChunkTimings: React.Dispatch<React.SetStateAction<StepTimings>>;
-  setGenState: React.Dispatch<React.SetStateAction<GenRunState>>;
-  setGenWarnings: React.Dispatch<React.SetStateAction<string[]>>;
   extractTimings: StepTimings;
   chunkTimings: StepTimings;
   now: number;
@@ -92,10 +86,13 @@ export interface UseLessonAnalysisState {
   setFeedbackMode: (m: FeedbackMode) => void;
   language: string;
   setLanguage: (l: string) => void;
+  audioLanguage: string;
+  setAudioLanguage: (l: string) => void;
   maxAttempts: number;
   setMaxAttempts: (n: number) => void;
   savingFeedback: boolean;
   savingLanguage: boolean;
+  savingAudioLanguage: boolean;
   savingMaxAttempts: boolean;
 
   // UI flags
@@ -121,9 +118,7 @@ export interface UseLessonAnalysisState {
   isSyncingChunk: boolean;
   isMutating: boolean;
   isBusy: boolean;
-  step2Status: PipelineStepStatus;
   step3Status: PipelineStepStatus;
-  step4Status: PipelineStepStatus;
   step5Status: PipelineStepStatus;
 
   // Handlers
@@ -164,6 +159,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     initialInteractions,
     initialFeedbackMode,
     initialLanguage,
+    initialAudioLanguage,
     initialMaxAttempts,
     title,
     description,
@@ -171,7 +167,6 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     videoStorageKey,
   } = input;
 
-  const router = useRouter();
   const { tasks: lessonTasks, activeTasks, lastError: taskPollError, refreshTasks, startTask, cancelTask } = useLessonTasks({
     aiClient,
     lessonId,
@@ -226,17 +221,21 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
   const {
     feedbackMode,
     language,
+    audioLanguage,
     maxAttempts,
     savingFeedback,
     savingLanguage,
+    savingAudioLanguage,
     savingMaxAttempts,
     setFeedbackMode,
     setLanguage,
+    setAudioLanguage,
     setMaxAttempts,
   } = useLessonAnalysisSettings({
     description,
     initialFeedbackMode,
     initialLanguage,
+    initialAudioLanguage,
     initialMaxAttempts,
     lessonId,
     orderIndex,
@@ -286,6 +285,10 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
   // ── Reset on PENDING status (new video uploaded) ──────────────────────────
   useEffect(() => {
     if (initialStatus !== AnalysisStatus.PENDING && initialStatus !== undefined) return;
+    // Belt-and-suspenders: never wipe chunks/interactions that actually exist. A
+    // transient PENDING/undefined status (e.g. a flaky GetLessonAnalysis) must not
+    // erase real generated data and flip the stepper back to "fresh upload".
+    if (initialChunks.length > 0 || initialInteractions.length > 0) return;
     setSegments([]);
     setChunks([]);
     setInteractionsState([]);
@@ -304,7 +307,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
       hasInteractions: false,
       hasTranscript: false,
     } satisfies StepperAction);
-  }, [initialStatus, videoStorageKey]);
+  }, [initialStatus, videoStorageKey, initialChunks.length, initialInteractions.length]);
 
   // ── Sync polling for stuck "syncing" phases ───────────────────────────────
   // The "syncing" phase is entered on page load when the BE is still
@@ -338,7 +341,9 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
           if (isSyncingExtract) setExtractState({ phase: "done" });
           if (isSyncingChunk) setChunkState({ phase: "done" });
           dispatchStep({ type: "ADVANCE_AFTER_EXTRACT", hasChunks: freshChunks.length > 0 } satisfies StepperAction);
-          router.refresh();
+          // No router.refresh(): local state already reflects the freshly-loaded
+          // segments/chunks. A soft RSC refresh here would wedge the page-level
+          // ?tab= <Link> navigation (see useAnalysisTaskTracker for the rationale).
         } else if (analysis.status === AnalysisStatus.ERROR) {
           const msg = analysis.errorMsg || "Thao tác thất bại.";
           if (isSyncingExtract) setExtractState({ phase: "error", failedAt: null, message: msg });
@@ -352,7 +357,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
       }
     }, analysisConfig.syncingPollMs || 5000);
     return () => window.clearInterval(id);
-  }, [aiClient, isSyncingChunk, isSyncingExtract, lessonId, router]);
+  }, [aiClient, isSyncingChunk, isSyncingExtract, lessonId]);
 
   // ── React to task state transitions (extracted) ──────────────────────────
   useAnalysisTaskTracker({
@@ -481,28 +486,17 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     || isGenerating || isGeneratingStarting || isGeneratingStale
     || chunkMutations.isReloadingChunks || isMutating || activeTasks.length > 0;
 
-  const step2Status: PipelineStepStatus =
-    isExtracting || isExtractingStarting || isExtractingStale || isSyncing ? "active" :
-    extractState.phase === "error" ? "error" :
-    hasTranscriptContent ? "done" : "available";
-
   const step3Status: PipelineStepStatus = hasSegments ? "available" : "locked";
-
-  const step4Status: PipelineStepStatus =
-    !hasTranscriptContent ? "locked" :
-    isChunking || isChunkStarting || isChunkStale || isChunkSyncing ? "active" :
-    chunkState.phase === "error" ? "error" :
-    hasChunks ? "done" : "available";
-
   const step5Status: PipelineStepStatus = hasChunks ? "available" : "locked";
 
   return {
     activeStep: stepper.activeStep,
     setActiveStep,
     segments, setSegments, chunks, interactions: interactionsState, setInteractions,
-    extractState, chunkState, setChunkState, setChunkTimings, setGenState, setGenWarnings,
+    extractState, chunkState,
     genState, extractTimings, chunkTimings, now,
     feedbackMode, setFeedbackMode, language, setLanguage, maxAttempts, setMaxAttempts,
+    audioLanguage, setAudioLanguage, savingAudioLanguage,
     savingFeedback, savingLanguage, savingMaxAttempts,
     mutatingChunkId: chunkMutations.mutatingChunkId,
     mutatingOp: chunkMutations.mutatingOp,
@@ -514,7 +508,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     hasSegments, hasChunks, hasTranscriptContent, questionsGenerated,
     isExtracting, isChunking, isGenerating, isSyncingExtract: isSyncing, isSyncingChunk: isChunkSyncing,
     isMutating, isBusy,
-    step2Status, step3Status, step4Status, step5Status,
+    step3Status, step5Status,
     startExtract, handleChunk, handleGenerate,
     handleMergeWithPrev: chunkMutations.handleMergeWithPrev,
     handleMergeWithNext: chunkMutations.handleMergeWithNext,

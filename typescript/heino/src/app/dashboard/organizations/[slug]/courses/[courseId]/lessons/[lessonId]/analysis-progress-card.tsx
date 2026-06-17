@@ -1,7 +1,6 @@
 "use client";
 
 import React, { memo } from "react";
-import { useRouter } from "next/navigation";
 import { LockIcon, Loader2Icon, PlayIcon, RefreshCwIcon, FileTextIcon, ListTreeIcon } from "lucide-react";
 import {
   type HeroState,
@@ -355,7 +354,6 @@ export const TranscriptEditorSection = memo(function TranscriptEditorSection({
   onSegmentSaved,
   status,
 }: TranscriptEditorSectionProps) {
-  const router = useRouter();
   return (
     <WorkflowTaskSection
       title="Chỉnh sửa transcript"
@@ -374,10 +372,12 @@ export const TranscriptEditorSection = memo(function TranscriptEditorSection({
             disabled={isBusy}
             aiClient={aiClient}
             onUpdated={onSegmentUpdated}
-            onSaved={() => {
-              onSegmentSaved();
-              router.refresh();
-            }}
+            // No router.refresh() here: onSegmentUpdated already updates local
+            // segment state, and a soft RSC refresh of this heavy page wedges the
+            // client router's transition lane — making the page tabs (?tab=...)
+            // unclickable until a manual reload. Same fix already applied to the
+            // task tracker + sync poller.
+            onSaved={() => onSegmentSaved()}
           />
         ))}
       </div>

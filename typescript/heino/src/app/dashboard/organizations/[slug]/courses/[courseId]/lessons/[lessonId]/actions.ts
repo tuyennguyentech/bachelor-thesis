@@ -2,7 +2,7 @@
 
 import { Code, ConnectError } from "@connectrpc/connect";
 import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
-import { AIService, type GenerateInteractionsRequest, LessonTaskKind } from "buf/gen/richter/v1/ai_pb";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
 import { LessonService } from "buf/gen/richter/v1/courses_pb";
 import { createRichterClient } from "@/lib/connect-client";
 import { getSession } from "@/lib/auth";
@@ -47,6 +47,7 @@ export async function updateLessonLanguageAction({
   orderIndex,
   language,
   maxAttempts,
+  audioLanguage,
 }: {
   lessonId: string;
   title: string;
@@ -54,9 +55,12 @@ export async function updateLessonLanguageAction({
   orderIndex: number;
   language: string;
   maxAttempts: number;
+  // Spoken/audio language of the video. Omitted ("") => the backend keeps the
+  // existing value, so saving the OUTPUT language never clears the audio one.
+  audioLanguage?: string;
 }): Promise<ActionResult> {
   return withLessonClient(async (client) => {
-    await client.updateLesson({ id: lessonId, title, description, orderIndex, language, maxAttempts });
+    await client.updateLesson({ id: lessonId, title, description, orderIndex, language, maxAttempts, audioLanguage: audioLanguage ?? "" });
   });
 }
 
@@ -89,39 +93,6 @@ export async function updateLessonFeedbackModeAction({
 }): Promise<ActionResult> {
   return withLessonClient(async (client) => {
     await client.updateLessonFeedbackMode({ id: lessonId, feedbackMode });
-  });
-}
-
-export async function updateLessonCompletionAction({
-  lessonId,
-  title,
-  description,
-  orderIndex,
-  language,
-  maxAttempts,
-  minWatchFraction,
-  minScoreFraction,
-}: {
-  lessonId: string;
-  title: string;
-  description: string;
-  orderIndex: number;
-  language: string;
-  maxAttempts: number;
-  minWatchFraction: number;
-  minScoreFraction: number;
-}): Promise<ActionResult> {
-  return withLessonClient(async (client) => {
-    await client.updateLesson({
-      id: lessonId,
-      title,
-      description,
-      orderIndex,
-      language,
-      maxAttempts,
-      minWatchFraction,
-      minScoreFraction,
-    });
   });
 }
 
@@ -169,39 +140,3 @@ export async function adjustLessonChunkBoundaryAction({
   });
 }
 
-export async function startLessonTaskAction({
-  lessonId,
-  kind,
-  generateInteractions,
-}: {
-  lessonId: string;
-  kind: LessonTaskKind;
-  generateInteractions?: Partial<GenerateInteractionsRequest>;
-}): Promise<ActionResult<{ taskId: string }>> {
-  return withAIClient(async (client) => {
-    const res = await client.startLessonTask({
-      lessonId,
-      kind,
-      generateInteractions: generateInteractions
-        ? {
-            lessonId,
-            chunkId: generateInteractions.chunkId ?? "",
-            forceRegenerate: generateInteractions.forceRegenerate ?? false,
-            interactionKind: generateInteractions.interactionKind ?? 0,
-            interactionKinds: generateInteractions.interactionKinds ?? [],
-            countPerChunk: generateInteractions.countPerChunk ?? 0,
-            strategy: generateInteractions.strategy ?? 0,
-            difficulty: generateInteractions.difficulty ?? "",
-            focusPrompt: generateInteractions.focusPrompt ?? "",
-          }
-        : undefined,
-    });
-    return { taskId: res.task?.id ?? "" };
-  });
-}
-
-export async function cancelLessonTaskAction({ taskId }: { taskId: string }): Promise<ActionResult> {
-  return withAIClient(async (client) => {
-    await client.cancelLessonTask({ taskId });
-  });
-}

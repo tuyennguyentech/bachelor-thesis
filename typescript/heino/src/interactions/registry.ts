@@ -31,8 +31,6 @@ export function getRenderer(kind: InteractionKind): InteractionRenderer<any, any
   return r;
 }
 
-export const interactionRegistry = registry;
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function extractConfig(interaction: LessonInteraction): any | null {
   if (interaction.config.case === "mcq") {

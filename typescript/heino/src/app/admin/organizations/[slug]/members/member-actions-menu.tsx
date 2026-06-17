@@ -94,9 +94,9 @@ export function MemberActionsMenu({
             <DropdownMenuSubTrigger>Đổi trạng thái</DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               {[
-                { label: "Hoạt động", value: MemberStatus.ACTIVE },
-                { label: "Đã mời",   value: MemberStatus.INVITED },
-                { label: "Tạm khóa", value: MemberStatus.SUSPENDED },
+                { label: "Hoạt động",     value: MemberStatus.ACTIVE },
+                { label: "Chờ chấp nhận", value: MemberStatus.INVITED },
+                { label: "Tạm khóa",      value: MemberStatus.SUSPENDED },
               ].map(({ label, value }) => (
                 <DropdownMenuItem
                   key={value}

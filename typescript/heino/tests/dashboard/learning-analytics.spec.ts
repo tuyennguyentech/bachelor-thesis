@@ -5,9 +5,9 @@
  * (?tab=results) tab and the course workspace results tab:
  *   - lesson-heatmap: per-chunk score heatmap (testid `lesson-heatmap`)
  *   - kind-accuracy-strip + question-analysis panels in lesson-attempts
- *   - lesson-attempts new columns: "Tỉ lệ trả lời", "Tổng TG làm", "Nghe lại TB"
+ *   - lesson-attempts columns: "Số lần nộp", "Điểm", "TG/câu", "% xem", "Tương tác"
  *   - lesson-completion-settings: two percent inputs (watch% / score%)
- *   - course-results: "% trả lời" column + at-risk section (testid `at-risk-section`)
+ *   - course-results: "% xem" column + at-risk section (testid `at-risk-section`)
  *
  * Seed reference (golang/richter/internal/seed/data/dev/quiz_attempts.json):
  *   The DSA Big-O lesson (hust-cs) has 5 seeded attempts (bob, dave, eve, grace,
@@ -43,7 +43,7 @@ async function goToBigOResultsTab(page: Page): Promise<string> {
   await page.goto(`${lessonHref}?tab=results`, { waitUntil: "domcontentloaded" });
   // The results tab body (lesson-attempts container) is rendered server-side
   // when effectiveCanManage && attemptsData is present.
-  await expect(page.getByRole("heading", { name: "Điều kiện hoàn thành" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bảng kết quả học viên" })).toBeVisible();
   return lessonHref;
 }
 
@@ -78,6 +78,17 @@ test.describe("Lesson analytics — heatmap & question analytics (teacher view)"
     // The legend ("≥ 80%") confirms the heatmap rendered fully, not the
     // "Chưa đủ dữ liệu" empty fallback.
     await expect(heatmap.getByText("≥ 80%")).toBeVisible();
+  });
+
+  test("hovering a heatmap segment reveals its detail tooltip", async ({ teacherPage: page }) => {
+    await goToBigOResultsTab(page);
+    const heatmap = page.getByTestId("lesson-heatmap");
+    await expect(heatmap).toBeVisible();
+    // Hover the first segment cell → a rich tooltip with respondent count appears
+    // (real React hover, not a native title).
+    await heatmap.locator(".h-14").first().hover();
+    await expect(heatmap.getByText("Lượt trả lời").first()).toBeVisible({ timeout: 5000 });
+    await expect(heatmap.getByText(/Đoạn 1/).first()).toBeVisible();
   });
 
   test("org admin (alice) also sees lesson-heatmap on results tab", async ({ userPage: page }) => {
@@ -117,10 +128,15 @@ test.describe("Lesson attempts table — new analytics columns (teacher view)", 
     const attempts = page.getByTestId("lesson-attempts");
     await expect(attempts).toBeVisible();
 
-    // New columns added to lesson-attempts.tsx.
-    await expect(attempts.getByRole("columnheader", { name: "Tỉ lệ trả lời" })).toBeVisible();
-    await expect(attempts.getByRole("columnheader", { name: "Tổng TG làm" })).toBeVisible();
-    await expect(attempts.getByRole("columnheader", { name: "Nghe lại TB" })).toBeVisible();
+    // Always-visible columns (the secondary behavioural metrics are now hidden on
+    // narrow viewports to de-clutter, so assert the ones shown at every width).
+    // "Tỉ lệ trả lời" was removed — it was ~always 100% (answering is required to
+    // submit), so it carried no information.
+    await expect(attempts.getByRole("columnheader", { name: "Số lần nộp" })).toBeVisible();
+    await expect(attempts.getByRole("columnheader", { name: "Điểm", exact: true })).toBeVisible();
+    await expect(attempts.getByRole("columnheader", { name: "Tương tác" })).toBeVisible();
+    // The removed column must not reappear.
+    await expect(attempts.getByRole("columnheader", { name: "Tỉ lệ trả lời" })).toHaveCount(0);
   });
 
   test("attempts table lists a seeded student row (bob)", async ({ teacherPage: page }) => {
@@ -131,68 +147,124 @@ test.describe("Lesson attempts table — new analytics columns (teacher view)", 
   });
 });
 
-// ── Lesson completion settings ──────────────────────────────────────────────
-
-test.describe("Lesson completion settings (teacher view)", () => {
-  test("two percent inputs are visible with default-ish values", async ({ teacherPage: page }) => {
-    await goToBigOResultsTab(page);
-
-    const watchInput = page.locator("#min-watch-pct");
-    const scoreInput = page.locator("#min-score-pct");
-    await expect(watchInput).toBeVisible();
-    await expect(scoreInput).toBeVisible();
-
-    // Inputs are number type and editable (not disabled).
-    await expect(watchInput).toHaveAttribute("type", "number");
-    await expect(scoreInput).toHaveAttribute("type", "number");
-    await expect(watchInput).toBeEnabled();
-    await expect(scoreInput).toBeEnabled();
-
-    // Labels confirm the meaning of each input.
-    await expect(page.getByText("Xem video tối thiểu (%)")).toBeVisible();
-    await expect(page.getByText("Điểm tối thiểu (%)")).toBeVisible();
-  });
-
-  test("editing a percent input and saving shows no error", async ({ teacherPage: page }) => {
-    await goToBigOResultsTab(page);
-
-    const watchInput = page.locator("#min-watch-pct");
-    await expect(watchInput).toBeVisible();
-
-    // Set a deterministic valid value, then save.
-    await watchInput.fill("75");
-    await expect(watchInput).toHaveValue("75");
-
-    await page.getByRole("button", { name: "Lưu" }).click();
-
-    // Success: the "Đã lưu" confirmation appears. The action also revalidates,
-    // so wait for the in-place confirmation rather than re-navigating.
-    await expect(page.getByText("Đã lưu")).toBeVisible({ timeout: 10_000 });
-    // No red error text under the form.
-    await expect(page.locator("p.text-red-600")).toHaveCount(0);
-  });
-});
-
-// ── Course results — % trả lời column + at-risk section ─────────────────────
+// ── Course results — columns + at-risk section ──────────────────────────────
 
 test.describe("Course results analytics (teacher view)", () => {
-  test('results table has the "% trả lời" column', async ({ teacherPage: page }) => {
+  test('results table has the "% xem" column and no meaningless "% trả lời"', async ({ teacherPage: page }) => {
     await goToDsaCourseResults(page);
-    await expect(page.getByRole("columnheader", { name: "% trả lời" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "% xem" })).toBeVisible();
+    // "% trả lời" was removed (always 100% — questions are required to submit).
+    await expect(page.getByRole("columnheader", { name: "% trả lời" })).toHaveCount(0);
   });
 
-  test("at-risk section renders or is gracefully absent", async ({ teacherPage: page }) => {
+  test("results tab shows the class score-distribution histogram", async ({ teacherPage: page }) => {
+    await goToDsaCourseResults(page);
+    // The distribution lives in its own sub-tab now.
+    await page.getByTestId("results-subtab-distribution").click();
+    const hist = page.getByTestId("score-distribution");
+    await expect(hist).toBeVisible();
+    await expect(hist.getByText("Phân bố điểm")).toBeVisible();
+    // The five score bands are labelled.
+    await expect(hist.getByText("0–19")).toBeVisible();
+    await expect(hist.getByText("80–100")).toBeVisible();
+  });
+
+  test("results tab shows the engagement × score quadrant scatter", async ({ teacherPage: page }) => {
+    await goToDsaCourseResults(page);
+    // The scatter lives in its own sub-tab now.
+    await page.getByTestId("results-subtab-scatter").click();
+    const scatter = page.getByTestId("engagement-scatter");
+    await expect(scatter).toBeVisible();
+    await expect(scatter.getByText("Tương tác × Điểm")).toBeVisible();
+    // The SVG plot renders (matched by its aria-label, not the heading icon).
+    await expect(scatter.getByRole("img", { name: "Biểu đồ tương tác và điểm" })).toBeVisible();
+  });
+
+  test("three result sub-tabs switch content (list default)", async ({ teacherPage: page }) => {
+    await goToDsaCourseResults(page);
+    // Default sub-tab = Danh sách kết quả → the results table is visible, charts are not.
+    await expect(page.getByRole("table")).toBeVisible();
+    await expect(page.getByTestId("score-distribution")).toHaveCount(0);
+    await expect(page.getByTestId("engagement-scatter")).toHaveCount(0);
+
+    // Phân bố điểm → histogram visible, table gone.
+    await page.getByTestId("results-subtab-distribution").click();
+    await expect(page.getByTestId("score-distribution")).toBeVisible();
+    await expect(page.getByRole("table")).toHaveCount(0);
+
+    // Tương tác × Điểm → scatter visible, histogram gone.
+    await page.getByTestId("results-subtab-scatter").click();
+    await expect(page.getByTestId("engagement-scatter")).toBeVisible();
+    await expect(page.getByTestId("score-distribution")).toHaveCount(0);
+
+    // Back to Danh sách kết quả → table returns.
+    await page.getByTestId("results-subtab-list").click();
+    await expect(page.getByRole("table")).toBeVisible();
+  });
+
+  test("scatter dot hover reveals a tooltip with score + engagement", async ({ teacherPage: page }) => {
+    await goToDsaCourseResults(page);
+    await page.getByTestId("results-subtab-scatter").click();
+    const scatter = page.getByTestId("engagement-scatter");
+    await expect(scatter).toBeVisible();
+    // Hover the first plotted learner dot — a positioned tooltip appears with the
+    // exact điểm % and tương tác value (real React hover, not a native title).
+    await scatter.locator("circle[data-dot]").first().hover();
+    await expect(scatter.getByText(/Điểm:/).first()).toBeVisible({ timeout: 5000 });
+    await expect(scatter.getByText(/Tương tác:/).first()).toBeVisible();
+  });
+
+  test("scatter renders axis tick marks (0 / 40 / 70 / 100 guides)", async ({ teacherPage: page }) => {
+    await goToDsaCourseResults(page);
+    await page.getByTestId("results-subtab-scatter").click();
+    const scatter = page.getByTestId("engagement-scatter");
+    // Axis tick value labels are present (so a reader can read off the scale).
+    for (const t of ["40", "80", "100"]) {
+      await expect(scatter.getByText(t, { exact: true }).first()).toBeVisible();
+    }
+  });
+
+  test("Trung bình/Tổng toggle swaps the summary + table columns", async ({ teacherPage: page }) => {
     await goToDsaCourseResults(page);
 
-    const atRisk = page.getByTestId("at-risk-section");
-    if ((await atRisk.count()) > 0) {
-      // When present it shows the red "Cần chú ý (n)" header.
+    // Default = "Trung bình" (average): average columns present, total ones absent.
+    await expect(page.getByRole("columnheader", { name: "Điểm TB" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "% xem" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Thời gian", exact: true })).toHaveCount(0);
+
+    // Switch to "Tổng" (total): raw-total columns appear, average ones disappear.
+    await page.getByTestId("results-mode-total").click();
+    await expect(page.getByRole("columnheader", { name: "Thời gian", exact: true })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "% xem" })).toHaveCount(0);
+    // The removed response-count column must not appear in either mode.
+    await expect(page.getByRole("columnheader", { name: "Câu trả lời", exact: true })).toHaveCount(0);
+    // Total summary chip labels are shown.
+    await expect(page.getByText("Bài hoàn thành")).toBeVisible();
+    await expect(page.getByText("Điểm đạt được")).toBeVisible();
+
+    // Toggle back to average restores the original columns.
+    await page.getByTestId("results-mode-average").click();
+    await expect(page.getByRole("columnheader", { name: "% xem" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Thời gian", exact: true })).toHaveCount(0);
+  });
+
+  test("at-risk lives in its own tab (card grid) or is gracefully absent", async ({ teacherPage: page }) => {
+    await goToDsaCourseResults(page);
+
+    // The at-risk panel is now a dedicated sub-tab that only appears when there
+    // ARE at-risk students; the inline always-on box is gone.
+    const tab = page.getByTestId("results-subtab-at-risk");
+    if ((await tab.count()) > 0) {
+      await tab.click();
+      const atRisk = page.getByTestId("at-risk-section");
       await expect(atRisk).toBeVisible();
-      await expect(atRisk.getByText(/Cần chú ý \(\d+\)/)).toBeVisible();
+      await expect(atRisk.getByText(/học viên cần chú ý/)).toBeVisible();
+      // Each at-risk student is a card in the responsive grid.
+      await expect(page.getByTestId("at-risk-card").first()).toBeVisible();
     } else {
-      // Conditional section is absent for this seed — assert the table still
-      // renders with the response-rate column so the page is functional.
-      await expect(page.getByRole("columnheader", { name: "% trả lời" })).toBeVisible();
+      // No at-risk students in this seed — the tab is absent; assert the table
+      // still renders with the watch-rate column so the page is functional.
+      await expect(page.getByRole("columnheader", { name: "% xem" })).toBeVisible();
     }
   });
 
@@ -200,7 +272,7 @@ test.describe("Course results analytics (teacher view)", () => {
     // org-admin alice (hust-cs ADMIN); the sys-admin fixture is not a member
     // of hust-cs and would hit the 403 org gate.
     await goToDsaCourseResults(page);
-    await expect(page.getByRole("columnheader", { name: "% trả lời" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "% xem" })).toBeVisible();
   });
 });
 
@@ -216,8 +288,6 @@ test.describe("Pure student does NOT see teacher analytics", () => {
 
     await expect(page.getByTestId("lesson-heatmap")).toHaveCount(0);
     await expect(page.getByTestId("lesson-attempts")).toHaveCount(0);
-    // Completion-settings teacher control must also be absent.
-    await expect(page.getByRole("heading", { name: "Điều kiện hoàn thành" })).not.toBeVisible();
   });
 
   test("eve does not see Kết quả học viên on the DSA course workspace", async ({ pureStudentPage: page }) => {
@@ -234,5 +304,115 @@ test.describe("Pure student does NOT see teacher analytics", () => {
     // canManage=false → the course results section is not rendered.
     await expect(page.getByText("Kết quả học viên")).not.toBeVisible();
     await expect(page.getByTestId("at-risk-section")).toHaveCount(0);
+  });
+});
+
+// ── Reactive drill-downs: click a chart slice → list who is in it ────────────
+test.describe("Analytics drill-downs (teacher view)", () => {
+  test("clicking a heatmap segment lists the students who answered it", async ({ teacherPage: page }) => {
+    await goToBigOResultsTab(page);
+    const heatmap = page.getByTestId("lesson-heatmap");
+    await expect(heatmap).toBeVisible();
+    // Click a segment cell that has data (shows a "%"), so its breakdown is non-empty.
+    const cell = heatmap.locator('[data-testid="heatmap-cell"]').filter({ hasText: "%" }).first();
+    await cell.click();
+    const drill = page.getByTestId("heatmap-drilldown");
+    await expect(drill).toBeVisible({ timeout: 8000 });
+    // The panel header names the segment + a học-viên count.
+    await expect(drill.getByText(/Đoạn \d+/)).toBeVisible();
+    await expect(drill.getByText(/\d+ học viên/)).toBeVisible();
+    // At least one student row (email present in the seed).
+    await expect(drill.getByText(/@/).first()).toBeVisible();
+    // Close button collapses it.
+    await drill.getByTestId("heatmap-drilldown-close").click();
+    await expect(page.getByTestId("heatmap-drilldown")).toHaveCount(0);
+  });
+
+  test("clicking a histogram band lists the students in that score range", async ({ userPage: page }) => {
+    await goToDsaCourseResults(page);
+    await page.getByTestId("results-subtab-distribution").click();
+    await expect(page.getByTestId("score-distribution")).toBeVisible();
+    // Click bands from the middle outwards until one opens a drill-down (a band
+    // with ≥1 student). The seed guarantees at least one populated band.
+    let opened = false;
+    for (const b of [2, 3, 1, 4, 0]) {
+      await page.locator(`[data-testid="score-distribution"] rect[data-band="${b}"]`).click({ force: true });
+      if (await page.getByTestId("chart-drilldown").isVisible().catch(() => false)) {
+        opened = true;
+        break;
+      }
+    }
+    expect(opened).toBe(true);
+    const drill = page.getByTestId("chart-drilldown");
+    await expect(drill.getByText(/Khoảng điểm/)).toBeVisible();
+    await expect(drill.getByText(/@/).first()).toBeVisible();
+    await drill.getByTestId("chart-drilldown-close").click();
+    await expect(page.getByTestId("chart-drilldown")).toHaveCount(0);
+  });
+
+  test("clicking a scatter dot lists the students at that position", async ({ userPage: page }) => {
+    await goToDsaCourseResults(page);
+    await page.getByTestId("results-subtab-scatter").click();
+    await expect(page.getByTestId("engagement-scatter")).toBeVisible();
+    const dot = page.locator('[data-testid="engagement-scatter"] circle[data-dot]').first();
+    await dot.click({ force: true });
+    const drill = page.getByTestId("chart-drilldown");
+    await expect(drill).toBeVisible({ timeout: 8000 });
+    await expect(drill.getByText(/@/).first()).toBeVisible();
+    // Close, then a SINGLE click on the same dot must reopen it — the selection
+    // is fully controlled, so closing doesn't leave a stale highlight that would
+    // turn the next click into a no-op (regression guard for the desync bug).
+    await drill.getByTestId("chart-drilldown-close").click();
+    await expect(page.getByTestId("chart-drilldown")).toHaveCount(0);
+    await dot.click({ force: true });
+    await expect(page.getByTestId("chart-drilldown")).toBeVisible({ timeout: 8000 });
+  });
+});
+
+// ── Bug fixes: at-risk tooltip + per-lesson audio language selector ──────────
+test.describe("Analytics/processing bug fixes (teacher view)", () => {
+  test("at-risk square reveals the lesson name in a real (non-native) tooltip", async ({ userPage: page }) => {
+    await goToDsaCourseResults(page);
+    const tab = page.getByTestId("results-subtab-at-risk");
+    if ((await tab.count()) === 0) {
+      test.skip(true, "no at-risk students in the seed — tooltip path not exercised");
+    }
+    await tab.click();
+    const square = page.getByTestId("at-risk-square").first();
+    if ((await square.count()) === 0) {
+      test.skip(true, "at-risk student has no low-streak squares");
+    }
+    await square.hover();
+    const tip = page.getByRole("tooltip").first();
+    await expect(tip).toBeVisible({ timeout: 5000 });
+    await expect(tip).toContainText("tương tác");
+  });
+
+  test("lesson processing tab exposes a separate audio-language selector", async ({ teacherPage: page }) => {
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    const audioSel = page.getByTestId("audio-language-select");
+    await expect(audioSel).toBeVisible({ timeout: 30000 });
+    // It is DISTINCT from the question/output language and offers vi/en + auto.
+    await expect(audioSel.locator("option")).toHaveCount(3);
+  });
+
+  test("lesson processing tab offers a guarded 'reset everything' action", async ({ teacherPage: page }) => {
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    const resetBtn = page.getByTestId("reset-lesson-button");
+    await expect(resetBtn).toBeVisible({ timeout: 30000 });
+    await resetBtn.click();
+
+    // The confirm dialog must spell out exactly what gets wiped and must NOT act
+    // until the user confirms. The actual destructive wipe is covered by the Go
+    // integration test (TestAIResetLessonContent) — here we only verify the
+    // guard, then cancel so seed data is left intact.
+    const dialog = page.getByTestId("reset-lesson-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Không thể hoàn tác");
+    await expect(dialog).toContainText("học viên");
+    await dialog.getByRole("button", { name: "Huỷ" }).click();
+    await expect(dialog).toBeHidden();
   });
 });

@@ -6,6 +6,7 @@ import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_p
 import { getRenderer, extractConfig } from "@/interactions/registry";
 import type { InteractionGrade } from "@/interactions/types";
 import { cn } from "@/lib/utils";
+import { formatTime } from "@/lib/format";
 
 interface Props {
   interaction: LessonInteraction;
@@ -21,15 +22,8 @@ interface Props {
   hasNextInCheckpoint?: boolean;
   token?: string;
   lessonId?: string;
-  isPreview?: boolean;
   onGrade?: (grade: InteractionGrade) => void;
   onReplayCount?: (count: number) => void;
-}
-
-function formatTime(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 const KIND_META: Partial<Record<InteractionKind, {
@@ -82,7 +76,6 @@ export function InteractionCheckpoint({
   hasNextInCheckpoint,
   token,
   lessonId,
-  isPreview,
   onGrade,
   onReplayCount,
 }: Props) {
@@ -157,7 +150,6 @@ export function InteractionCheckpoint({
         token={token}
         lessonId={lessonId}
         interactionId={interaction.id}
-        isPreview={isPreview}
         kind={interaction.kind}
         onGrade={onGrade}
         onReplayCount={onReplayCount}

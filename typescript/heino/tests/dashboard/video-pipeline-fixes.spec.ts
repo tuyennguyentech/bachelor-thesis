@@ -90,43 +90,59 @@ test.describe("Video pipeline review fixes", () => {
     await expect(overlay.getByRole("button", { name: /thử lại/i })).toBeVisible();
   });
 
-  test("P3-2: clicking an outline chunk in the student sidebar seeks the video", async ({ studentPage: page }) => {
-    await openLessonAsStudent(page);
+  // Reset to a fresh attempt so all checkpoints are unanswered (a forward gate exists).
+  async function ensureFreshAttempt(page: import("@playwright/test").Page) {
+    const retakeBtn = page.getByRole("button", { name: "Làm lại" });
+    if (await retakeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await retakeBtn.click();
+    }
+  }
 
-    // The student sidebar's outline tab is only present when chunks exist.
-    // DSA lessons are seeded with analysis, so chunks should be available.
-    // Use exact match to avoid the "Thu gọn dàn bài" collapse button.
+  test("P3-2: a learner cannot scrub past an unanswered checkpoint via the outline", async ({ studentPage: page }) => {
+    // Udemy-style navigation with checkpoint gating: a learner may jump around the
+    // lesson freely BUT cannot fast-forward past a checkpoint whose exercise is not
+    // yet done — the scrub snaps to that checkpoint and surfaces it.
+    await openLessonAsStudent(page);
+    await ensureFreshAttempt(page);
+
     const outlineTab = page.getByRole("button", { name: "Dàn bài", exact: true });
     await outlineTab.click();
-
-    // Find a chunk button with a non-zero start time. Skip chunk 0 because
-    // it might overlap the natural initial seek position.
     const chunkButtons = page.locator("[data-testid^='outline-chunk-']");
     const count = await chunkButtons.count();
     if (count === 0) {
       test.skip(true, "Lesson has no chunks to test against — analysis may not have run on the seed video");
       return;
     }
-    let targetSeconds = 0;
-    let targetIdx = -1;
-    for (let i = 0; i < count; i++) {
-      const secs = Number(await chunkButtons.nth(i).getAttribute("data-start-seconds"));
-      if (Number.isFinite(secs) && secs > 5) {
-        targetSeconds = secs;
-        targetIdx = i;
-        break;
-      }
-    }
-    expect(targetIdx).toBeGreaterThanOrEqual(0);
+    // The LAST chunk is guaranteed to sit past the first unanswered checkpoint.
+    const targetSeconds = Number(await chunkButtons.nth(count - 1).getAttribute("data-start-seconds"));
+    expect(targetSeconds).toBeGreaterThan(5);
 
-    // The VideoPlayer is mounted inside StudentLessonView. The student
-    // sidebar's `seekTo` writes directly to the shared video ref AND
-    // dispatches a `seek-video` window event as a fallback.
     const video = page.locator("video").first();
     await expect(video).toBeVisible();
-    await chunkButtons.nth(targetIdx).click();
+    await chunkButtons.nth(count - 1).click();
+
+    // The jump is gated by the first unanswered checkpoint: that checkpoint surfaces
+    // and the video does NOT reach the clicked (far) chunk.
+    await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 5000 });
+    const t = await video.evaluate((el: HTMLVideoElement) => el.currentTime);
+    expect(t).toBeLessThan(targetSeconds - 5);
+  });
+
+  test("P3-2b: a learner CAN seek forward up to the next checkpoint", async ({ studentPage: page }) => {
+    // The seeded Big-O lesson's first checkpoint is at 208s. Seeking forward to a
+    // point BEFORE it (no unanswered checkpoint in between) is allowed — the learner
+    // is not forced to watch sequentially, they just cannot cross a checkpoint.
+    await openLessonAsStudent(page);
+    await ensureFreshAttempt(page);
+
+    const video = page.locator("video").first();
+    await expect(video).toBeVisible();
+    await video.evaluate((el: HTMLVideoElement) => { el.pause(); el.currentTime = 100; });
+    // 100 < first checkpoint (208): the forward seek is honoured, not snapped back.
     await expect.poll(async () => {
       return await video.evaluate((el: HTMLVideoElement) => el.currentTime);
-    }, { timeout: 5000 }).toBeCloseTo(targetSeconds, 0);
+    }, { timeout: 3000 }).toBeGreaterThan(50);
+    // And no checkpoint is forced (none lies between 0 and 100).
+    await expect(page.locator('[data-testid="quiz-checkpoint"]')).toHaveCount(0);
   });
 });

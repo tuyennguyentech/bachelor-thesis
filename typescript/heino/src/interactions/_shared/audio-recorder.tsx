@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2Icon, MicIcon, SquareIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
+import { RecordedAudio } from "./recorded-audio";
 
 type RecorderState = "idle" | "requesting" | "recording" | "recorded" | "uploading" | "done" | "error";
 
@@ -180,12 +181,7 @@ export function AudioRecorder({ lessonId, token, disabled, initialAudioKey, onCo
 
       {/* Preview player */}
       {previewUrl && (
-        <audio
-          src={previewUrl}
-          controls
-          className="w-full max-w-sm h-9"
-          data-testid="recording-player"
-        />
+        <RecordedAudio key={previewUrl} src={previewUrl} className="w-full max-w-sm h-9" testId="recording-player" />
       )}
 
       {/* Status */}

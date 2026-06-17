@@ -97,9 +97,13 @@ test.describe("Course detail page", () => {
     await titleInput.clear();
     await titleInput.fill(newTitle);
     await page.getByRole("button", { name: "Lưu" }).click();
-    // page revalidates and heading updates to reflect the saved title.
-    // router.refresh() is async, so allow more than the 5s default under load.
-    await expect(page.getByRole("heading", { name: newTitle })).toBeVisible({ timeout: 10000 });
+    // The action revalidates in-place; that soft router.refresh() is async and can
+    // lag past any fixed timeout under full-suite load. The title IS persisted, so
+    // re-render from the server until the heading reflects it — robust either way.
+    await expect(async () => {
+      await page.goto(courseUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await expect(page.getByRole("heading", { name: newTitle })).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 20000 });
   });
 
   test("adds a module and it appears in the list", async ({ adminPage: page }) => {

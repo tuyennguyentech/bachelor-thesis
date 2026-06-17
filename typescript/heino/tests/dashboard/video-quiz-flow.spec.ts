@@ -475,6 +475,10 @@ test.describe("Student quiz form", () => {
     await goToSeededLesson(page, SEEDED_LESSON);
     await expect(page.getByText("🎯 Kết quả")).toBeVisible();
     await expect(page.getByRole("button", { name: "Làm lại" })).toBeVisible();
+    // The per-question result strip ("Từng câu") gives a glanceable per-question map.
+    const strip = page.getByTestId("result-question-strip");
+    await expect(strip).toBeVisible();
+    await expect(strip.getByText("Từng câu")).toBeVisible();
   });
 
   test("student can retake quiz: answer all checkpoints + submit → new score", async ({
@@ -571,21 +575,6 @@ test.describe("Video quiz checkpoint", () => {
     await expect(checkpoint.getByText("✓ Đã ghi nhận đáp án")).toBeVisible();
   });
 
-  test("Tiếp tục xem dismisses checkpoint", async ({ studentPage: page }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
-    await ensureRetakeState(page);
-    await expect(page.locator("video").first()).toBeVisible();
-
-    await triggerCheckpoint(page, 210);
-
-    const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
-    await expect(checkpoint).toBeVisible({ timeout: 3_000 });
-    // Must answer before "Tiếp tục xem" is enabled
-    await checkpoint.locator("button").first().click();
-    await page.getByRole("button", { name: "Tiếp tục xem" }).click();
-    await expect(checkpoint).not.toBeVisible();
-  });
-
   test("checkpoint does not reappear for same question after dismiss", async ({
     studentPage: page,
   }) => {
@@ -675,6 +664,50 @@ test.describe("Video quiz checkpoint", () => {
     );
     expect(time).toBeLessThan(220);
   });
+
+  test("checkpoint renders as an in-frame overlay, not a separate dialog", async ({
+    studentPage: page,
+  }) => {
+    await goToSeededLesson(page, SEEDED_LESSON);
+    await ensureRetakeState(page);
+    await expect(page.locator("video").first()).toBeVisible();
+
+    await triggerCheckpoint(page, 210);
+
+    // The interaction overlay must be a DOM descendant of the player frame, so it
+    // stays INSIDE the video in both normal and fullscreen — not a body-portalled
+    // dialog (the bug: in fullscreen it dropped below; in normal it popped a dialog).
+    const frame = page.getByTestId("lesson-player-frame");
+    await expect(frame.getByTestId("quiz-checkpoint-overlay")).toBeVisible({ timeout: 3_000 });
+    await expect(frame.locator('[data-testid="quiz-checkpoint"]')).toBeVisible();
+    // No portalled Radix dialog is used for the checkpoint.
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+  });
+
+  test("student can seek forward up to the next unanswered checkpoint", async ({
+    studentPage: page,
+  }) => {
+    await goToSeededLesson(page, SEEDED_LESSON);
+    await ensureRetakeState(page);
+    await expect(page.locator("video").first()).toBeVisible();
+
+    // The first checkpoint is at 208s. Seeking to just before it is ALLOWED — the
+    // gate only blocks crossing an unanswered checkpoint, not seeking up to it.
+    await page.evaluate(() => {
+      const v = document.querySelector("video") as HTMLVideoElement | null;
+      if (v) v.currentTime = 200;
+    });
+    await page.waitForTimeout(600);
+
+    const time = await page.evaluate(
+      () => (document.querySelector("video") as HTMLVideoElement | null)?.currentTime ?? 0,
+    );
+    // Stays where we put it (~200), NOT snapped forward to the 208 gate.
+    expect(time).toBeGreaterThan(195);
+    expect(time).toBeLessThan(206);
+    // No checkpoint shown — we stopped short of it.
+    await expect(page.locator('[data-testid="quiz-checkpoint"]')).not.toBeVisible();
+  });
 });
 
 // ── 9. Teacher student progress ────────────────────────────────────────────
@@ -684,7 +717,7 @@ test.describe("Student progress (teacher view)", () => {
     const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
     // Attempts table is in the ?tab=results tab; navigate there directly
     await page.goto(`${lessonHref}?tab=results`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Kết quả & Thống kê học viên")).toBeVisible();
+    await expect(page.getByText("Bảng kết quả học viên")).toBeVisible();
 
     // bob and dave both have seeded attempts for Big-O lesson
     const attemptsSection = page.getByTestId("lesson-attempts");
@@ -708,7 +741,7 @@ test.describe("Student progress (teacher view)", () => {
     );
     // Attempts table is in the ?tab=results tab; navigate there directly
     await page.goto(`${url}?tab=results`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Kết quả & Thống kê học viên")).toBeVisible();
+    await expect(page.getByText("Bảng kết quả học viên")).toBeVisible();
     await expect(page.getByText("Chưa có học viên nào nộp bài.")).toBeVisible();
   });
 });
@@ -790,7 +823,10 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     // Step 3: Generate questions
     await page.getByTestId("workflow-step-exercises").click();
     await page.getByRole("button", { name: /Bắt đầu tạo|Tạo thêm/ }).click();
-    // Fill the custom AI configuration to verify custom generation payload mapping
+    // Fill the custom AI configuration to verify custom generation payload mapping.
+    // The dialog now defaults every kind to 0 (managers choose explicitly), so each
+    // of the five kinds is bumped to 1 here → "Tạo 5 bài tập".
+    await page.getByRole("button", { name: "Tăng Trắc nghiệm 1 đáp án" }).click();
     await page.getByRole("button", { name: "Tăng Trắc nghiệm nhiều đáp án" }).click();
     await page.getByRole("button", { name: "Tăng Điền đáp án" }).click();
     await page.getByRole("button", { name: "Tăng Bài đọc" }).click();
@@ -915,20 +951,18 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     // Firefox throws NS_BINDING_ABORTED if we navigate while the RSC refresh is still in flight.
     await page.waitForLoadState("domcontentloaded");
 
-    // Navigate to ?tab=content to verify VideoPlayer also shows updated segment text.
-    // Firefox may abort the navigation if an in-flight RSC refresh is racing; swallow it
-    // and let the assertions below confirm the tab settled correctly.
-    try {
-      await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
-    } catch (err) {
-      if (!String(err).includes("NS_BINDING_ABORTED")) throw err;
-      // Page still settles; wait for load to complete before proceeding.
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-    }
-    await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible();
-    await expect(page.locator('[data-testid="transcript-segment-0"]').first()).toContainText(newText, {
-      timeout: 10_000,
-    });
+    // Verify the VideoPlayer (content tab) also shows the updated segment text. The
+    // segment save triggers a router.refresh(); under parallel load that soft refresh
+    // can race the navigation (Firefox aborts it with NS_BINDING_ABORTED), landing on
+    // a stale render. Re-navigate until the fresh server render — which reads the saved
+    // segment from the DB — shows the new text.
+    await expect(async () => {
+      await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await expect(page.locator('[data-testid="interactive-transcript"]')).toBeVisible({ timeout: 3_000 });
+      await expect(page.locator('[data-testid="transcript-segment-0"]').first()).toContainText(newText, {
+        timeout: 3_000,
+      });
+    }).toPass({ timeout: 30_000 });
   });
 
   // NOTE: this test must run before "after video replacement" — the replacement

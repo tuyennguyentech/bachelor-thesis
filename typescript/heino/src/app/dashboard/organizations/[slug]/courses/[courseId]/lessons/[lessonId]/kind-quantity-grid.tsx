@@ -70,16 +70,13 @@ export function emptyQuantities(): KindQuantities {
   };
 }
 
-export function defaultQuantities(): KindQuantities {
-  return {
-    ...emptyQuantities(),
-    [InteractionKind.SINGLE_CHOICE]: 1,
-  };
-}
-
 export function fromConfig(cfg: ChunkInteractionConfig | undefined): KindQuantities {
   const result = emptyQuantities();
-  if (!cfg) return defaultQuantities();
+  // No saved config → open with everything at 0 so the manager consciously
+  // chooses how many of each kind to generate (the generate button stays
+  // disabled until the total is > 0). Previously this pre-filled 1 single-choice,
+  // which silently biased every fresh "Tạo bài tập bằng AI" run toward 1 MCQ.
+  if (!cfg) return result;
 
   const validKinds = cfg.kinds.filter((k): k is typeof KNOWN_KINDS[number] => KNOWN_KINDS.includes(k as typeof KNOWN_KINDS[number]));
   for (const k of validKinds) result[k] = (result[k] ?? 0) + 1;

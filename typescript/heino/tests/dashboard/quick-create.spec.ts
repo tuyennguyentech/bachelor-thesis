@@ -21,7 +21,6 @@ import {
   TEACHER_EMAIL,
   USER_PASSWORD,
   getTeacherAuth,
-  authedClient,
   createAuthedTransport,
   createCourse,
   createCourseModule,
@@ -29,6 +28,7 @@ import {
   SEED_HUST_CS_SLUG,
 } from "../fixtures";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
+import { LessonService } from "buf/gen/richter/v1/courses_pb";
 
 const TEST_VIDEO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
 
@@ -74,6 +74,15 @@ test("QuickCreate: dialog opens and shows required fields", async ({ teacherPage
   // The video label is not linked via htmlFor (file input is hidden + accessed via data-testid),
   // so we check the label text directly instead of using getByLabel.
   await expect(page.getByText(/Video bài giảng/)).toBeVisible();
+  // Config parity with the real "tạo bài tập" step: language, per-kind quantities,
+  // attempts, and feedback mode are all configurable here.
+  await expect(page.getByTestId("qc-language")).toBeVisible();
+  // Quick-create must also expose the spoken-audio language (parity with manual
+  // config) — otherwise an English video transcribes as Vietnamese.
+  await expect(page.getByTestId("qc-audio-language")).toBeVisible();
+  await expect(page.getByText("Số lượng theo loại")).toBeVisible();
+  await expect(page.getByText(/Số lần làm/)).toBeVisible();
+  await expect(page.getByText("Hiện kết quả")).toBeVisible();
 });
 
 // ── Test: submit disabled until title + video ─────────────────────────────────
@@ -86,26 +95,46 @@ test("QuickCreate: submit button disabled until title and video selected", async
   await page.getByTestId("quick-create-trigger").click();
   await expect(page.getByRole("dialog")).toBeVisible();
 
-  const submitBtn = page.getByRole("button", { name: /Tạo.*Phân tích/i });
+  const submitBtn = page.getByRole("button", { name: /Tạo.*chạy ngay/i });
   await expect(submitBtn).toBeDisabled();
 
   // Fill title — still disabled (no video)
   await page.getByLabel(/Tiêu đề bài học/).fill(uid("QC-Lesson-Submit-Test"));
   await expect(submitBtn).toBeDisabled();
 
-  // Pick video — should enable
+  // Pick video — STILL disabled: Quick Create now opens with every kind at 0
+  // (the manager consciously chooses how many questions per kind), so the total
+  // quantity is 0 and there is nothing to generate yet.
   await page.getByTestId("qc-video-input").setInputFiles(TEST_VIDEO);
+  await expect(submitBtn).toBeDisabled();
+
+  // Add one question of a kind → now enabled.
+  await page.getByRole("button", { name: "Tăng Trắc nghiệm 1 đáp án" }).click();
   await expect(submitBtn).toBeEnabled({ timeout: 5_000 });
 });
 
-// ── Test: full pipeline (slow) ────────────────────────────────────────────────
+// ── Test: trigger is discoverable on the default (overview) tab ───────────────
+
+test("QuickCreate: trigger is visible on the course overview (default) tab", async ({ teacherPage: page, baseURL }) => {
+  const { courseId } = await setupIsolatedCourse(baseURL);
+  await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
+  // Land on the course's DEFAULT tab (Tổng quan / overview) — no ?tab= — which is
+  // where a manager arrives first. The quick-create flow must be discoverable here
+  // (the course has a module, so the lesson can be attached).
+  await page.goto(`/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expect(page.getByTestId("quick-create-trigger")).toBeVisible({ timeout: 10_000 });
+});
+
+// ── Test: submit hands off to the processing tab (no blocking modal) ──────────
 
 test.slow();
 test(
-  "QuickCreate: full pipeline runs to done and navigates to lesson",
+  "QuickCreate: submit uploads then navigates to the processing tab with auto-progress",
   async ({ teacherPage: page, baseURL }) => {
     const lessonTitle = uid("QC-Pipeline-Test");
-    const { courseUrl, token } = await setupIsolatedCourse(baseURL);
+    const { courseUrl } = await setupIsolatedCourse(baseURL);
     await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
     await page.goto(courseUrl, { waitUntil: "domcontentloaded" });
 
@@ -114,59 +143,46 @@ test(
 
     await page.getByLabel(/Tiêu đề bài học/).fill(lessonTitle);
     await page.getByTestId("qc-video-input").setInputFiles(TEST_VIDEO);
-
-    // Wait for video to be selected
     await expect(page.getByText(/edu-sample-en\.mp4/)).toBeVisible({ timeout: 5_000 });
 
-    // Submit
-    await page.getByRole("button", { name: /Tạo.*Phân tích/i }).click();
+    // Quick Create opens with all kinds at 0; pick at least one so the pipeline
+    // has something to generate (submit stays disabled while the total is 0).
+    await page.getByRole("button", { name: "Tăng Trắc nghiệm 1 đáp án" }).click();
 
-    // The uploading phase may be very brief for small test videos (66 KB uploads near-instantly).
-    // Wait for either the upload phase or the running phase (whichever is first visible).
-    await expect(
-      page.getByText(/Đang tải video lên|Đang xử lý bài học/),
-    ).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("button", { name: /Tạo.*chạy ngay/i }).click();
 
-    // Wait for running phase (pipeline starts) — this may already be visible from above
-    await expect(page.getByText(/Đang xử lý bài học/)).toBeVisible({ timeout: 90_000 });
-
-    // Poll until the dialog shows done or error (3-stage strip visible)
-    await expect(page.getByText(/Phiên âm/)).toBeVisible({ timeout: 30_000 });
-
-    // Wait for completion (done phase)
-    await expect(page.getByText(/Hoàn thành!/)).toBeVisible({ timeout: 300_000 });
-
-    // Navigate to lesson
-    await page.getByRole("button", { name: /Vào bài học/ }).click();
-
-    // Should navigate to the lesson page
-    await expect(page).toHaveURL(/\/lessons\//, { timeout: 15_000 });
-    await expect(page.getByText(lessonTitle).first()).toBeVisible({ timeout: 10_000 });
+    // After upload, the dialog hands off to the lesson's processing tab — no
+    // blocking modal. The durable RUN_PIPELINE task is already running there.
+    await expect(page).toHaveURL(/\/lessons\/.*tab=processing/, { timeout: 120_000 });
+    // The read-only auto-progress card proves the pipeline auto-runs server-side
+    // (the user does not click each step).
+    await expect(page.getByTestId("pipeline-auto-progress")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Đang xử lý tự động/)).toBeVisible();
   },
 );
 
-// ── Test: cancel mid-pipeline ─────────────────────────────────────────────────
+// ── Test: video tab of a video-less lesson offers quick-create + manual ───────
 
-test("QuickCreate: cancel button stops pipeline and closes dialog", async ({ teacherPage: page, baseURL }) => {
-  const lessonTitle = uid("QC-Cancel-Test");
-  const { courseUrl, token } = await setupIsolatedCourse(baseURL);
+test("QuickCreate: video-less lesson shows quick-create + manual buttons", async ({ teacherPage: page, baseURL }) => {
+  const { courseId, moduleId, token } = await setupIsolatedCourse(baseURL);
   await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
-  await page.goto(courseUrl, { waitUntil: "domcontentloaded" });
 
-  await page.getByTestId("quick-create-trigger").click();
+  // Create a lesson with NO video via the API, then open its content tab.
+  const lessonClient = createClient(LessonService, createAuthedTransport(token, baseURL));
+  const created = await lessonClient.createLesson({ moduleId, title: uid("QC-NoVideo"), orderIndex: 0 });
+  const lessonId = created.lesson!.id;
+
+  await page.goto(
+    `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}/lessons/${lessonId}`,
+    { waitUntil: "domcontentloaded" },
+  );
+
+  // Two entry points: quick-create (auto) and manual processing.
+  await expect(page.getByTestId("quick-create-lesson-trigger")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("link", { name: /Xử lý thủ công/ })).toBeVisible();
+
+  // The quick-create button opens the dialog scoped to this existing lesson.
+  await page.getByTestId("quick-create-lesson-trigger").click();
   await expect(page.getByRole("dialog")).toBeVisible();
-
-  await page.getByLabel(/Tiêu đề bài học/).fill(lessonTitle);
-  await page.getByTestId("qc-video-input").setInputFiles(TEST_VIDEO);
-  await expect(page.getByText(/edu-sample-en\.mp4/)).toBeVisible({ timeout: 5_000 });
-  await page.getByRole("button", { name: /Tạo.*Phân tích/i }).click();
-
-  // Wait until we're in the running phase (pipeline started)
-  await expect(page.getByText(/Đang xử lý bài học/)).toBeVisible({ timeout: 90_000 });
-
-  // Click cancel
-  await page.getByRole("button", { name: /Hủy tác vụ/ }).click();
-
-  // Dialog should close
-  await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/Tạo nhanh:/)).toBeVisible();
 });

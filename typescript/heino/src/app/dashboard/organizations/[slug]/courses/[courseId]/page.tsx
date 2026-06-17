@@ -1,4 +1,5 @@
 // Course Workspace — full-screen, escapes org (sidebar) layout
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAnyUser, requireOrgMember } from "@/lib/auth";
@@ -28,6 +29,9 @@ import {
   ClockIcon,
   GraduationCapIcon,
   CheckCircle2,
+  TrendingUpIcon,
+  PlayIcon,
+  BarChart2Icon,
 } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { logout } from "@/app/actions/auth";
@@ -40,9 +44,14 @@ import { ModuleActions } from "@/app/admin/organizations/[slug]/courses/[courseI
 import { AddLessonDialog } from "@/app/admin/organizations/[slug]/courses/[courseId]/modules/[moduleId]/add-lesson-dialog";
 import { LessonActions } from "@/app/admin/organizations/[slug]/courses/[courseId]/modules/[moduleId]/lesson-actions";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
+import { cookies } from "next/headers";
+import { parseRecentAccessCookie, RECENT_ACCESS_COOKIE } from "@/lib/recent-access";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/pagination";
+import { ScoreTrend, scoreTextClass } from "@/components/score-viz";
+import { InfoHint } from "@/components/ui/info-hint";
 import { CourseResults } from "./course-results";
+import { CourseClassPulse, CourseClassPulseSkeleton } from "./course-class-pulse";
 import { AddCourseMemberDialog } from "./add-course-member-dialog";
 import { CourseMemberActionsMenu } from "./course-member-actions-menu";
 import { CourseWorkspaceSidebar, type CourseTab } from "./course-workspace";
@@ -69,6 +78,16 @@ const MEMBERS_LIMIT = 50;
 // since the row already renders its own ordinal number.
 function stripLessonPrefix(title: string): string {
   return title.replace(/^\s*Bài\s+\d+\s*[:.\-–]\s*/i, "").trim() || title;
+}
+
+// Compact Vietnamese relative time (e.g. "5 phút trước") for the "resume" card.
+function relativeViTime(ms: number): string {
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (min < 1) return "vừa xong";
+  if (min < 60) return `${min} phút trước`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} giờ trước`;
+  return `${Math.round(hr / 24)} ngày trước`;
 }
 
 function courseRoleBadge(role: CourseRole, isOwner: boolean) {
@@ -181,8 +200,16 @@ export default async function CourseWorkspacePage({
   let modulesWithLessons: (CourseModule & { lessons: Lesson[] })[] = [];
   let totalMembersCount = 0;
   let membersCountKnown = false;
-  // Lessons the current student has attempted at least once (student view only).
+  // Lessons the current student has attempted at least once (student view only),
+  // plus running score totals accumulated from the same getMyAttempt fan-out so
+  // the overview can show personal progress + average score without extra RPCs.
   const completedLessonIds = new Set<string>();
+  let myScoreSum = 0;
+  let myMaxScoreSum = 0;
+  // Per-module score totals (for per-chapter mastery) + a per-lesson score trend
+  // (for the "am I improving?" sparkline) — both from the same getMyAttempt fan-out.
+  const moduleScore = new Map<string, { score: number; max: number }>();
+  const lessonTrend: { title: string; frac: number; when: number }[] = [];
   if (course.canAccess || canManage) {
     const moduleClient = createRichterClient(CourseModuleService, token);
     const lessonClient = createRichterClient(LessonService, token);
@@ -224,7 +251,22 @@ export default async function CourseWorkspacePage({
             interactionClient
               .getMyAttempt({ lessonId: l.id })
               .then((res) => {
-                if (res.attempt) completedLessonIds.add(l.id);
+                if (res.attempt) {
+                  completedLessonIds.add(l.id);
+                  if (res.attempt.maxScore > 0) {
+                    myScoreSum += res.attempt.totalScore;
+                    myMaxScoreSum += res.attempt.maxScore;
+                    const ms = moduleScore.get(l.moduleId) ?? { score: 0, max: 0 };
+                    ms.score += res.attempt.totalScore;
+                    ms.max += res.attempt.maxScore;
+                    moduleScore.set(l.moduleId, ms);
+                    lessonTrend.push({
+                      title: stripLessonPrefix(l.title),
+                      frac: res.attempt.totalScore / res.attempt.maxScore,
+                      when: res.attempt.submittedAt ? Number(res.attempt.submittedAt.seconds) : 0,
+                    });
+                  }
+                }
               })
               .catch(() => {}),
           ),
@@ -236,6 +278,22 @@ export default async function CourseWorkspacePage({
 
     await membersPromise;
   }
+
+  // ── Derived overview metrics ───────────────────────────────────────────────
+  const totalLessons = modulesWithLessons.reduce((acc, m) => acc + m.lessons.length, 0);
+  const totalVideoMinutes = Math.round(
+    modulesWithLessons.reduce(
+      (acc, m) => acc + m.lessons.reduce((sum, l) => sum + (l.durationSeconds || 0), 0),
+      0,
+    ) / 60,
+  );
+  // Learner-only figures (meaningful when rendering as a student / learn-mode).
+  const myLessonsDone = completedLessonIds.size;
+  const myProgressPct = totalLessons > 0 ? Math.round((myLessonsDone / totalLessons) * 100) : 0;
+  const myAvgScorePct = myMaxScoreSum > 0 ? Math.round((myScoreSum / myMaxScoreSum) * 100) : null;
+  // First lesson the learner has not attempted yet — the "continue learning" target.
+  const nextLesson =
+    modulesWithLessons.flatMap((m) => m.lessons).find((l) => !completedLessonIds.has(l.id)) ?? null;
 
   // ── Fetch members (tab=members) ────────────────────────────────────────────
   let members: CourseMember[] = [];
@@ -278,6 +336,67 @@ export default async function CourseWorkspacePage({
   // real student on the lesson page (real StudentLessonView + persisted submit).
   const lessonHref = (lessonId: string) =>
     `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lessonId}${learnMode ? "?mode=learn" : ""}`;
+
+  // "Resume" target for the overview card: the lesson this user opened most
+  // recently in THIS course (from the recent-access cookie), else the next
+  // un-attempted lesson (learner), else the first lesson.
+  const cookieStore = await cookies();
+  const recentLesson = parseRecentAccessCookie(cookieStore.get(RECENT_ACCESS_COOKIE)?.value)
+    .filter(
+      (e) =>
+        e.userId === claims.sub &&
+        e.type === "lesson" &&
+        e.href.includes(`/courses/${courseId}/lessons/`),
+    )
+    .sort((a, b) => b.accessedAt - a.accessedAt)[0];
+  const firstLesson = modulesWithLessons.flatMap((m) => m.lessons)[0] ?? null;
+  const fallbackLesson = nextLesson ?? firstLesson;
+  const resumeTarget = recentLesson
+    ? {
+        // The recorded href has no query; preserve learn-mode for a manager.
+        href: `${recentLesson.href}${learnMode ? "?mode=learn" : ""}`,
+        title: stripLessonPrefix(recentLesson.title),
+        when: relativeViTime(recentLesson.accessedAt),
+        isResume: true,
+      }
+    : fallbackLesson
+      ? {
+          href: lessonHref(fallbackLesson.id),
+          title: stripLessonPrefix(fallbackLesson.title),
+          when: null,
+          isResume: false,
+        }
+      : null;
+  // Per-module stats for the overview chart. A student sees their own per-chapter
+  // PROGRESS (lessons done / total); a manager sees content WEIGHT (lessons + video
+  // minutes per chapter). The old chart showed only normalized lesson counts, which
+  // duplicated the numbers already printed and conveyed nothing actionable.
+  const moduleStats = modulesWithLessons.map((m) => {
+    const lessonCount = m.lessons.length;
+    const completed = m.lessons.filter((l) => completedLessonIds.has(l.id)).length;
+    // Lessons that actually have an uploaded video — "content readiness".
+    const withVideo = m.lessons.filter((l) => (l.durationSeconds || 0) > 0).length;
+    const durationMin = Math.round(
+      m.lessons.reduce((s, l) => s + (l.durationSeconds || 0), 0) / 60,
+    );
+    const ms = moduleScore.get(m.id);
+    // Per-chapter average score (mastery), null until the learner attempts a lesson
+    // in the chapter. Distinct from completion: "done all 5 but scored 45%".
+    const scoreFrac = ms && ms.max > 0 ? ms.score / ms.max : null;
+    return { id: m.id, title: m.title, lessonCount, completed, withVideo, durationMin, scoreFrac };
+  });
+  // Per-lesson score trend in submission order (the "am I improving?" sparkline).
+  const scoreTrend = [...lessonTrend]
+    .sort((a, b) => a.when - b.when)
+    .map((t) => ({ frac: t.frac, label: t.title }));
+  // "Bắt đầu/Tiếp tục học" is a LEARNER call-to-action. A manager in manage mode
+  // enters learning via the Vào học | Quản lý toggle, not a resume card — so the
+  // card is shown only when rendering as a student (incl. a manager in learn mode).
+  // Only surface the standalone resume card when it points at a genuinely RECENT
+  // lesson (different from the "next" lesson the progress card already links to).
+  // Otherwise it just duplicates the progress card's CTA, so we hide it and let the
+  // per-chapter chart span the full width.
+  const showResumeCard = !renderAsManager && !!resumeTarget && resumeTarget.isResume;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -340,7 +459,6 @@ export default async function CourseWorkspacePage({
         <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden bg-background">
           <CourseWorkspaceSidebar
             slug={slug}
-            courseId={courseId}
             courseTitle={course.title}
             activeTab={activeTab}
             canManage={renderAsManager}
@@ -352,14 +470,26 @@ export default async function CourseWorkspacePage({
             {/* ── Tab: Tổng quan ── */}
             {activeTab === "overview" && (
               <div className="flex flex-col gap-6 max-w-screen-2xl">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                  <div className="flex flex-col gap-1 min-w-0">
                     <h1 className="text-xl font-semibold">{course.title}</h1>
                     {course.description && (
                       <p className="text-sm text-muted-foreground">{course.description}</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
+                    {/* Quick-create surfaced on the default (overview) tab so managers
+                        discover the "upload video → auto-run pipeline → exercises"
+                        flow without first navigating to the Bài học tab. Needs a
+                        module to attach the lesson to. */}
+                    {renderAsManager && modulesWithLessons.length > 0 && (
+                      <QuickCreateTrigger
+                        token={token}
+                        modules={modulesWithLessons}
+                        courseId={course.id}
+                        slug={slug}
+                      />
+                    )}
                     {/* Manager-only: switch between authoring and real learning. */}
                     {canManage && (
                       <CourseModeToggle
@@ -384,8 +514,81 @@ export default async function CourseWorkspacePage({
                   </div>
                 )}
 
+                {/* ── Learner progress + continue-learning (student / learn-mode) ── */}
+                {!renderAsManager && totalLessons > 0 && (
+                  <div className="rounded-xl border bg-card p-5 shadow-sm flex flex-col gap-4" data-testid="my-course-progress">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <TrendingUpIcon className="size-4 text-emerald-500" />
+                        <h2 className="font-semibold">Tiến độ của bạn</h2>
+                      </div>
+                      {myAvgScorePct !== null && (
+                        <Badge variant="secondary" className="gap-1 font-normal">
+                          Điểm trung bình:{" "}
+                          <span className="font-semibold tabular-nums">{myAvgScorePct}%</span>
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          <span className="font-semibold text-foreground tabular-nums">{myLessonsDone}</span>
+                          /{totalLessons} bài học đã làm
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums">{myProgressPct}%</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-emerald-500 transition-all"
+                          style={{ width: `${myProgressPct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Score trend across lessons (in submission order) — shows whether
+                        the learner is improving or slipping, which the average hides. */}
+                    {scoreTrend.length >= 2 && (
+                      <div className="flex flex-col gap-1" data-testid="score-trend">
+                        <div className="flex items-center justify-between">
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            Xu hướng điểm qua các bài
+                            <InfoHint text="Điểm của bạn qua từng bài theo thứ tự làm, giúp thấy bạn đang tiến bộ hay đi xuống. Đường nét đứt: mốc 50% và 80%." />
+                          </span>
+                          <span className={`text-xs font-medium tabular-nums ${scoreTextClass(scoreTrend[scoreTrend.length - 1].frac)}`}>
+                            Gần nhất: {Math.round(scoreTrend[scoreTrend.length - 1].frac * 100)}%
+                          </span>
+                        </div>
+                        <ScoreTrend points={scoreTrend} />
+                      </div>
+                    )}
+
+                    {nextLesson ? (
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <p className="text-sm text-muted-foreground min-w-0">
+                          {myLessonsDone === 0 ? "Bắt đầu với" : "Tiếp theo"}:{" "}
+                          <span className="font-medium text-foreground">
+                            {stripLessonPrefix(nextLesson.title)}
+                          </span>
+                        </p>
+                        <Button asChild className="gap-2 shrink-0">
+                          <Link href={lessonHref(nextLesson.id)}>
+                            <PlayIcon className="size-4" />
+                            {myLessonsDone === 0 ? "Bắt đầu học" : "Tiếp tục học"}
+                          </Link>
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300">
+                        <CheckCircle2 className="size-4 shrink-0" />
+                        <span>Bạn đã làm hết tất cả bài học trong khóa học này. 🎉</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* ── COURSE STATISTICS GRID ── */}
-                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 bg-muted/20 p-4 rounded-xl border">
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
                   <div className="flex flex-col gap-1.5 p-4 min-w-0 bg-card rounded-lg border shadow-sm">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <BookOpenIcon className="size-4 text-blue-500" />
@@ -403,7 +606,7 @@ export default async function CourseWorkspacePage({
                     </div>
                     <div className="flex items-baseline flex-wrap gap-1 mt-1">
                       <span className="text-2xl font-bold tracking-tight text-foreground">
-                        {modulesWithLessons.reduce((acc, m) => acc + m.lessons.length, 0)}
+                        {totalLessons}
                       </span>
                       <span className="text-xs text-muted-foreground">bài học</span>
                     </div>
@@ -415,14 +618,7 @@ export default async function CourseWorkspacePage({
                     </div>
                     <div className="flex items-baseline flex-wrap gap-1 mt-1">
                       <span className="text-2xl font-bold tracking-tight text-foreground">
-                        {Math.round(
-                          modulesWithLessons.reduce(
-                            (acc, m) =>
-                              acc +
-                              m.lessons.reduce((sum, l) => sum + (l.durationSeconds || 0), 0),
-                            0
-                          ) / 60
-                        )}
+                        {totalVideoMinutes}
                       </span>
                       <span className="text-xs text-muted-foreground">phút</span>
                     </div>
@@ -440,6 +636,127 @@ export default async function CourseWorkspacePage({
                     </div>
                   )}
                 </div>
+
+                {/* ── Manager class pulse (engagement at a glance) ── */}
+                {renderAsManager && (
+                  <Suspense fallback={<CourseClassPulseSkeleton />}>
+                    <CourseClassPulse
+                      courseId={course.id}
+                      token={token}
+                      slug={slug}
+                      totalMembers={totalMembersCount}
+                    />
+                  </Suspense>
+                )}
+
+                {/* ── Quick-resume + course-structure chart (replaces the outline
+                    that duplicated the Bài học tab) ── */}
+                {totalLessons > 0 && (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {showResumeCard && resumeTarget && (
+                      <div
+                        className="rounded-md border bg-background p-4 flex flex-col gap-3"
+                        data-testid="course-resume-card"
+                      >
+                        <div className="flex items-center gap-2">
+                          <PlayIcon className="size-4 text-emerald-500" />
+                          <h2 className="font-medium">
+                            {resumeTarget.isResume ? "Tiếp tục học gần đây" : "Bắt đầu học"}
+                          </h2>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{resumeTarget.title}</p>
+                            {resumeTarget.when && (
+                              <p className="text-xs text-muted-foreground">
+                                Bạn đã mở {resumeTarget.when}
+                              </p>
+                            )}
+                          </div>
+                          <Button asChild className="gap-2 shrink-0">
+                            <Link href={resumeTarget.href}>
+                              <PlayIcon className="size-4" />
+                              {resumeTarget.isResume ? "Tiếp tục" : "Vào học"}
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div
+                      className={`rounded-md border bg-background p-4 flex flex-col gap-3${showResumeCard ? "" : " md:col-span-2"}`}
+                      data-testid="module-chart"
+                    >
+                      <div className="flex items-center gap-2">
+                        <BarChart2Icon className="size-4 text-muted-foreground" />
+                        <h2 className="font-medium">
+                          {renderAsManager ? "Nội dung theo chương" : "Tiến độ theo chương"}
+                        </h2>
+                        <InfoHint
+                          text={
+                            renderAsManager
+                              ? "Mức độ sẵn sàng nội dung của mỗi chương: số bài đã có video tải lên trên tổng số bài, kèm tổng thời lượng video."
+                              : "Tiến độ và điểm trung bình của bạn trong từng chương. Thanh = số bài đã làm; · % = điểm trung bình của chương."
+                          }
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2.5">
+                        {moduleStats.map((m, mi) => {
+                          // Manager: bar = "content readiness" = fraction of the chapter's
+                          //   lessons that have an uploaded video (always meaningful — an
+                          //   empty bar honestly means "no content authored yet", not a glitch).
+                          // Student: bar = fraction of the chapter's lessons completed.
+                          const pct =
+                            m.lessonCount > 0
+                              ? ((renderAsManager ? m.withVideo : m.completed) / m.lessonCount) * 100
+                              : 0;
+                          // Fully ready (manager: all lessons have video) / fully done (student).
+                          const chapterFull =
+                            m.lessonCount > 0 &&
+                            (renderAsManager ? m.withVideo === m.lessonCount : m.completed === m.lessonCount);
+                          return (
+                            <div key={m.id} className="flex items-center gap-2.5">
+                              <span className="text-xs text-muted-foreground w-5 shrink-0 text-right tabular-nums">
+                                {mi + 1}
+                              </span>
+                              <span className="text-xs truncate flex-1 min-w-0" title={m.title}>
+                                {m.title}
+                              </span>
+                              <div className="h-2 w-24 sm:w-36 shrink-0 rounded-full bg-muted overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${
+                                    renderAsManager
+                                      ? chapterFull
+                                        ? "bg-primary"
+                                        : "bg-primary/60"
+                                      : chapterFull
+                                        ? "bg-emerald-500"
+                                        : "bg-emerald-500/70"
+                                  }`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-muted-foreground tabular-nums w-32 shrink-0 text-right">
+                                {renderAsManager ? (
+                                  `${m.withVideo}/${m.lessonCount} bài có video · ${m.durationMin} phút`
+                                ) : (
+                                  <>
+                                    {m.completed}/{m.lessonCount} bài
+                                    {m.scoreFrac !== null && (
+                                      <span className={`ml-1 font-medium ${scoreTextClass(m.scoreFrac)}`}>
+                                        · {Math.round(m.scoreFrac * 100)}%
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {renderAsManager && (
                   <>
@@ -578,9 +895,11 @@ export default async function CourseWorkspacePage({
                                     <ClockIcon className="size-3" />~{Math.max(1, durationMinutes)} phút
                                   </Badge>
                                 ) : (
-                                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                                  // De-emphasized: most lessons start empty, so a heavy badge
+                                  // on each row reads as a wall of errors. Keep it a quiet hint.
+                                  <span className="text-[11px] italic text-muted-foreground/60">
                                     Chưa có nội dung
-                                  </Badge>
+                                  </span>
                                 )}
                                 {renderAsManager && (
                                   <LessonActions
@@ -649,9 +968,9 @@ export default async function CourseWorkspacePage({
                         : "—"}
                     </TableCell>
                     {renderAsManager && (
-                      <TableCell>
+                      <TableCell className="text-right">
                         {isOwner ? (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground/50">—</span>
                         ) : (
                           <CourseMemberActionsMenu
                             courseId={m.courseId}
@@ -688,7 +1007,11 @@ export default async function CourseWorkspacePage({
                           <TableHead>Thành viên</TableHead>
                           <TableHead>Vai trò</TableHead>
                           <TableHead>Ngày tham gia</TableHead>
-                          {renderAsManager && <TableHead className="w-12" />}
+                          {renderAsManager && (
+                            <TableHead className="w-12 text-right">
+                              <span className="sr-only">Thao tác</span>
+                            </TableHead>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>

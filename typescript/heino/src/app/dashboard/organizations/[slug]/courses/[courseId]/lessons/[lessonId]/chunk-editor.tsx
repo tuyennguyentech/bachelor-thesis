@@ -11,12 +11,7 @@ import {
   ScissorsIcon,
   Trash2Icon,
 } from "lucide-react";
-
-function formatTime(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { formatTime } from "@/lib/format";
 
 export function getChunkSegments(chunk: TranscriptChunk, allSegments: TranscriptSegment[]): TranscriptSegment[] {
   return allSegments.filter(s =>

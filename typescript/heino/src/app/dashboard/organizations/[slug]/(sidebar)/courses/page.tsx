@@ -4,6 +4,7 @@ import { requireAnyUser, requireOrgMember } from "@/lib/auth";
 import { createRichterClient } from "@/lib/connect-client";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { CourseService, Course, CourseStatus, CourseModuleService, LessonService } from "buf/gen/richter/v1/courses_pb";
+import { CourseMemberService, JoinRequestStatus } from "buf/gen/richter/v1/course_members_pb";
 import { InteractionService, MyCourseProgress } from "buf/gen/richter/v1/interactions_pb";
 import { OrganizationRole } from "buf/gen/richter/v1/organization_members_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -17,7 +18,7 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
-import { GraduationCapIcon, LockIcon, ArrowRightIcon, BookOpenIcon, SearchIcon, AlertTriangleIcon } from "lucide-react";
+import { GraduationCapIcon, LockIcon, ArrowRightIcon, BookOpenIcon, SearchIcon, AlertTriangleIcon, ClockIcon } from "lucide-react";
 import { courseStatusBadge } from "@/lib/course-utils";
 import { Pagination } from "@/components/pagination";
 import { CreateCourseDialog } from "@/app/admin/organizations/[slug]/courses/create-course-dialog";
@@ -25,6 +26,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 import { Input } from "@/components/ui/input";
+import { JoinCourseButton } from "./join-course-button";
 
 const LIMIT = 20;
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
@@ -103,24 +105,39 @@ export default async function DashboardCoursesPage({
     }
   }
 
-  // Fetch modules and lessons count for each course
+  // Fetch modules/lessons count — and, for courses the viewer can manage, whether
+  // they are an ACTUAL member (course_members row) vs merely bypass-accessible.
   const courseDetails = await Promise.all(
     courses.map(async (c) => {
       const moduleClient = createRichterClient(CourseModuleService, token);
       const lessonClient = createRichterClient(LessonService, token);
-      try {
-        const [{ modules }, { lessons }] = await Promise.all([
-          moduleClient.listCourseModules({ courseId: c.id, limit: 100, offset: 0 }),
-          lessonClient.listLessonsByCourse({ courseId: c.id, limit: 100, offset: 0 })
-        ]);
-        return {
-          courseId: c.id,
-          modulesCount: modules.length as number | undefined,
-          lessonsCount: lessons.length as number | undefined
-        };
-      } catch {
-        return { courseId: c.id, modulesCount: undefined, lessonsCount: undefined };
-      }
+      const memberClient = createRichterClient(CourseMemberService, token);
+      // Each call fails INDEPENDENTLY: a not-yet-joined course rejects
+      // listCourseModules / listLessonsByCourse with PermissionDenied, and that must
+      // not discard the join-request status (which drives the "Đang chờ duyệt" card)
+      // — so we don't wrap them in one shared try/catch.
+      const [modulesRes, lessonsRes, membership, joinReq] = await Promise.all([
+        moduleClient.listCourseModules({ courseId: c.id, limit: 100, offset: 0 }).catch(() => null),
+        lessonClient.listLessonsByCourse({ courseId: c.id, limit: 100, offset: 0 }).catch(() => null),
+        // Org owners/admins (and course owners) bypass access but are NOT
+        // auto-enrolled, so for cards they can manage we ask membership explicitly.
+        cardCanManage(c)
+          ? memberClient.getMyCourseMembership({ courseId: c.id }).catch(() => null)
+          : Promise.resolve(null),
+        // For a plain member's not-yet-joined course, surface whether they already
+        // have a PENDING join request, so the card shows "Đang chờ duyệt" instead of
+        // re-prompting "Yêu cầu tham gia".
+        !cardCanManage(c) && !c.canAccess
+          ? memberClient.getMyJoinRequestStatus({ courseId: c.id }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      return {
+        courseId: c.id,
+        modulesCount: modulesRes ? modulesRes.modules.length : undefined,
+        lessonsCount: lessonsRes ? lessonsRes.lessons.length : undefined,
+        isMember: membership ? membership.isMember : c.canAccess,
+        joinRequestPending: joinReq?.request?.status === JoinRequestStatus.PENDING,
+      };
     })
   );
   const detailsMap = new Map(courseDetails.map((d) => [d.courseId, d]));
@@ -129,11 +146,17 @@ export default async function DashboardCoursesPage({
   const visibleCourses = canManage
     ? courses
     : courses.filter((c) => c.status !== CourseStatus.DRAFT);
-  // Accessibility/locking is per-course: org OWNER/ADMIN bypass everything, but
-  // an org TEACHER only accesses courses they may actually open (canAccess), so
-  // courses they neither own nor belong to surface as "locked" → request-to-manage.
-  const accessibleCourses = visibleCourses.filter((c) => c.canAccess || canManageOrgAdmin);
-  const lockedCourses = visibleCourses.filter((c) => !c.canAccess && !canManageOrgAdmin);
+  // Sectioning is by ACTUAL membership (course_members row), NOT bypass access:
+  // org owners/admins are not auto-enrolled in every course. A course the viewer
+  // belongs to → "Khóa học của bạn" (Vào học + Vào quản lý). Otherwise →
+  // "Khóa học khác trong tổ chức", where a manager (course owner / org owner-admin)
+  // gets an instant "Tham gia" self-enrol and a plain member gets "Yêu cầu tham gia".
+  // A course owner is inherently "in" their own course (they never need to "Tham
+  // gia" it); otherwise membership is the explicit course_members row.
+  const isMemberOf = (c: Course) =>
+    c.ownerId === claims.sub || (detailsMap.get(c.id)?.isMember ?? c.canAccess);
+  const yourCourses = visibleCourses.filter(isMemberOf);
+  const otherCourses = visibleCourses.filter((c) => !isMemberOf(c));
 
   return (
     <div className="flex flex-col gap-4">
@@ -206,18 +229,18 @@ export default async function DashboardCoursesPage({
           </div>
         ) : (
           <>
-            {/* ── SECTION 1: ACCESSIBLE/JOINED COURSES ── */}
-            {accessibleCourses.length > 0 && (
+            {/* ── SECTION 1: JOINED COURSES ── */}
+            {yourCourses.length > 0 && (
               <div className="flex flex-col gap-4">
                 <div className="flex items-center gap-2">
                   <div className="h-5 w-1 rounded-full bg-blue-600" />
                   <h2 className="text-lg font-semibold tracking-tight">Khóa học của bạn</h2>
                   <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 border-none font-medium">
-                    {accessibleCourses.length}
+                    {yourCourses.length}
                   </Badge>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {accessibleCourses.map((course) => {
+                  {yourCourses.map((course) => {
                     const details = detailsMap.get(course.id);
                     const progress = progressMap.get(course.id);
                     const lessonsDone = progress?.lessonsDone ?? 0;
@@ -294,7 +317,7 @@ export default async function DashboardCoursesPage({
                             </Button>
                             <Button size="sm" className="gap-1 transition-all group-hover:translate-x-0.5" asChild>
                               <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-manage">
-                                Quản lý
+                                Vào quản lý
                                 <ArrowRightIcon className="size-3.5" />
                               </Link>
                             </Button>
@@ -315,67 +338,112 @@ export default async function DashboardCoursesPage({
               </div>
             )}
 
-            {/* ── SECTION 2: LOCKED COURSES ── */}
-            {lockedCourses.length > 0 && (
+            {/* ── SECTION 2: NOT-JOINED COURSES ── */}
+            {otherCourses.length > 0 && (
               <div className="flex flex-col gap-4 mt-2">
                 <div className="flex items-center gap-2">
                   <div className="h-5 w-1 rounded-full bg-muted-foreground/45" />
                   <h2 className="text-lg font-semibold tracking-tight text-muted-foreground">Khóa học khác trong tổ chức</h2>
                   <Badge variant="secondary" className="bg-muted text-muted-foreground border-none font-medium">
-                    {lockedCourses.length}
+                    {otherCourses.length}
                   </Badge>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {lockedCourses.map((course) => (
-                    <Card key={course.id} className="group relative flex flex-col justify-between border border-dashed bg-muted/5 opacity-85 hover:opacity-100 transition-all duration-300 hover:border-muted-foreground/30">
-                      <div className="absolute top-0 left-0 right-0 h-1 bg-muted-foreground/20" />
-                      
+                  {otherCourses.map((course) => {
+                    // A manager (course owner / org owner-admin) may self-enrol
+                    // instantly; a plain member must request approval. If that member
+                    // ALREADY has a pending request, the card reflects "Đang chờ duyệt"
+                    // (an amber, engaged state) instead of re-prompting "Yêu cầu tham gia".
+                    const canSelfJoin = cardCanManage(course);
+                    const requestPending = !canSelfJoin && (detailsMap.get(course.id)?.joinRequestPending ?? false);
+                    return (
+                    <Card key={course.id} className={`group relative flex flex-col justify-between transition-all duration-300 ${canSelfJoin ? "border bg-card hover:-translate-y-1 hover:shadow-lg hover:border-primary/50" : requestPending ? "border border-amber-300/50 bg-amber-500/[0.04] hover:-translate-y-0.5 hover:shadow-md hover:border-amber-400/60 dark:border-amber-500/30" : "border border-dashed bg-muted/5 opacity-85 hover:opacity-100 hover:border-muted-foreground/30"}`}>
+                      <div className={`absolute top-0 left-0 right-0 h-1 ${canSelfJoin ? "bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500" : requestPending ? "bg-amber-400/70" : "bg-muted-foreground/20"}`} />
+
                       <CardHeader className="pt-6">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="rounded-md bg-muted p-2 text-muted-foreground">
-                            <LockIcon className="size-5" />
-                          </div>
-                          <Badge variant="secondary" className="text-[10px] bg-muted text-muted-foreground border-none">
-                            Yêu cầu tham gia
-                          </Badge>
+                          {canSelfJoin ? (
+                            <div className="rounded-md bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400">
+                              <BookOpenIcon className="size-5" />
+                            </div>
+                          ) : requestPending ? (
+                            <div className="rounded-md bg-amber-500/10 p-2 text-amber-600 dark:text-amber-400">
+                              <ClockIcon className="size-5" />
+                            </div>
+                          ) : (
+                            <div className="rounded-md bg-muted p-2 text-muted-foreground">
+                              <LockIcon className="size-5" />
+                            </div>
+                          )}
+                          {canSelfJoin ? (
+                            cardCanManage(course) && courseStatusBadge(course.status)
+                          ) : requestPending ? (
+                            <Badge variant="secondary" className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/25 flex items-center gap-1 font-medium">
+                              <ClockIcon className="size-2.5" />
+                              Đang chờ duyệt
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px] bg-muted text-muted-foreground border-none">
+                              Yêu cầu tham gia
+                            </Badge>
+                          )}
                         </div>
-                        <CardTitle className="mt-4 text-base font-semibold text-muted-foreground line-clamp-1">
+                        <CardTitle className={`mt-4 text-base font-semibold line-clamp-1 ${canSelfJoin ? "group-hover:text-primary transition-colors" : requestPending ? "text-foreground/90" : "text-muted-foreground"}`}>
                           {course.title}
                         </CardTitle>
-                        <CardDescription className="line-clamp-2 min-h-8 mt-1 text-xs text-muted-foreground/75">
+                        <CardDescription className={`line-clamp-2 min-h-8 mt-1 text-xs ${canSelfJoin ? "" : requestPending ? "text-muted-foreground" : "text-muted-foreground/75"}`}>
                           {course.description || "Chưa có mô tả cho khóa học này."}
                         </CardDescription>
                       </CardHeader>
 
-                      <CardContent className="py-2 text-xs text-muted-foreground/60 flex flex-col gap-1.5">
+                      <CardContent className={`py-2 text-xs flex flex-col gap-1.5 ${canSelfJoin ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
                         <div className="flex items-center justify-between">
                           <span>Chương học:</span>
-                          <span className="font-medium text-foreground/80">
+                          <span className={`font-medium ${canSelfJoin ? "text-foreground" : "text-foreground/80"}`}>
                             {detailsMap.get(course.id)?.modulesCount === undefined ? "—" : `${detailsMap.get(course.id)!.modulesCount} chương`}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Bài học:</span>
-                          <span className="font-medium text-foreground/80">
+                          <span className={`font-medium ${canSelfJoin ? "text-foreground" : "text-foreground/80"}`}>
                             {detailsMap.get(course.id)?.lessonsCount === undefined ? "—" : `${detailsMap.get(course.id)!.lessonsCount} bài`}
                           </span>
                         </div>
                       </CardContent>
-                      
-                      <CardFooter className="pt-4 border-t bg-muted/10 flex items-center justify-between">
-                        <Badge variant="secondary" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 flex items-center gap-1 font-medium">
-                          <LockIcon className="size-2.5" />
-                          Chưa tham gia
-                        </Badge>
-                        <Button size="sm" variant="outline" className="gap-1.5 border-dashed" asChild>
-                          <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-request-join">
-                            Yêu cầu tham gia
-                            <ArrowRightIcon className="size-3.5" />
-                          </Link>
-                        </Button>
+
+                      <CardFooter className="pt-4 border-t bg-muted/10 flex items-center justify-between gap-2">
+                        {requestPending ? (
+                          <Badge variant="secondary" className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/25 flex items-center gap-1 font-medium shrink-0">
+                            <ClockIcon className="size-2.5" />
+                            Đã gửi yêu cầu
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 flex items-center gap-1 font-medium shrink-0">
+                            <LockIcon className="size-2.5" />
+                            Chưa tham gia
+                          </Badge>
+                        )}
+                        {canSelfJoin ? (
+                          <JoinCourseButton slug={slug} courseId={course.id} />
+                        ) : requestPending ? (
+                          <Button size="sm" variant="ghost" className="gap-1.5 text-amber-700 hover:text-amber-800 hover:bg-amber-500/10 dark:text-amber-300 dark:hover:text-amber-200" asChild>
+                            <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-request-pending">
+                              Xem trạng thái
+                              <ArrowRightIcon className="size-3.5" />
+                            </Link>
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" className="gap-1.5 border-dashed" asChild>
+                            <Link href={`/dashboard/organizations/${slug}/courses/${course.id}`} data-testid="card-request-join">
+                              Yêu cầu tham gia
+                              <ArrowRightIcon className="size-3.5" />
+                            </Link>
+                          </Button>
+                        )}
                       </CardFooter>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

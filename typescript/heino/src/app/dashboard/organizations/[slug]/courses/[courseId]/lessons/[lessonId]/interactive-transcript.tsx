@@ -6,17 +6,12 @@ import { SearchIcon, CopyIcon, CheckIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { uploadConfig } from "@/lib/client-config";
+import { formatTime } from "@/lib/format";
 
 interface Props {
   segments: TranscriptSegment[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
   maxHeightClass?: string;
-}
-
-function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 interface ButtonProps {

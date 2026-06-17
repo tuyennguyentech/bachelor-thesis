@@ -15,11 +15,7 @@ import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionRow, type InteractionFormData } from "./interaction-row";
 import { ChunkGenerateForm, type ChunkGenPhase } from "./chunk-generate-form";
 import { ChunkAddForm } from "./chunk-add-form";
-
-function formatTime(s: number) {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
+import { formatTime } from "@/lib/format";
 
 interface ChunkSectionProps {
   chunk: TranscriptChunk;
@@ -32,6 +28,13 @@ interface ChunkSectionProps {
   lessonId: string;
   token: string;
   disabled: boolean;
+  /**
+   * Gate for the MANUAL "Thêm" affordance only. Manual creation is an
+   * independent synchronous RPC that the backend lets run alongside an AI
+   * generation, so it must NOT be blocked merely because a generation is in
+   * flight — only a destructive op (deleting interactions) genuinely races it.
+   */
+  addDisabled: boolean;
   addSaving: boolean;
   addError: string | null;
   onOpenGenerate: () => void;
@@ -48,7 +51,7 @@ interface ChunkSectionProps {
 export function ChunkSection({
   chunk, interactions, expanded, onToggle,
   isGenerating, isAdding, chunkGen,
-  lessonId, token, disabled,
+  lessonId, token, disabled, addDisabled,
   addSaving, addError,
   onOpenGenerate, onCloseGenerate, onGenerate,
   onOpenAdd, onCloseAdd, onSaveAdd,
@@ -108,7 +111,7 @@ export function ChunkSection({
             variant="secondary"
             size="sm"
             className="h-8 gap-1.5 rounded-lg px-2.5"
-            disabled={disabled}
+            disabled={addDisabled}
             onClick={openAdd}
             data-testid="add-interaction-btn"
           >
@@ -136,7 +139,7 @@ export function ChunkSection({
                 Tạo bài tập AI
               </DropdownMenuItem>
               <DropdownMenuItem
-                disabled={disabled}
+                disabled={addDisabled}
                 onSelect={openAdd}
                 className="rounded-lg"
               >
@@ -174,8 +177,9 @@ export function ChunkSection({
 
           {interactions.length === 0 && !isAdding && !isGenerating && (
             <div className="flex flex-col items-center gap-2 py-6 rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10">
-              <p className="text-sm text-muted-foreground">Phân đoạn này chưa có bài tập</p>
-              <p className="text-xs text-muted-foreground/70">Đang chờ nội dung bài tập.</p>
+              <p className="text-sm text-muted-foreground">
+                Phân đoạn này chưa có bài tập — dùng nút “AI” hoặc “Thêm” ở trên để tạo.
+              </p>
             </div>
           )}
 

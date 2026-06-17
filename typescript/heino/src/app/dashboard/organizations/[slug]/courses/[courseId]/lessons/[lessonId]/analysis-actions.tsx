@@ -3,27 +3,38 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { WorkflowActionPanel } from "./analysis-workflow-ui";
-import type { GenRunState } from "./use-lesson-analysis-state";
+import { ResetLessonButton } from "./reset-lesson-button";
+import type { AIClient, GenRunState } from "./use-lesson-analysis-state";
 
 // ── Settings bar (language, max attempts) ──────────────────────────────────
 // Shown above the stepper when a video is uploaded. The actual persistence
 // is handled by the server actions wired up in `use-lesson-analysis-state`.
 
 export interface LessonSettingsBarProps {
+  lessonId: string;
+  aiClient: AIClient;
   videoStorageKey?: string;
   language: string;
   onLanguageChange: (lang: string) => void;
   savingLanguage: boolean;
+  audioLanguage: string;
+  onAudioLanguageChange: (lang: string) => void;
+  savingAudioLanguage: boolean;
   maxAttempts: number;
   onMaxAttemptsChange: (n: number) => void;
   savingMaxAttempts: boolean;
 }
 
 export function LessonSettingsBar({
+  lessonId,
+  aiClient,
   videoStorageKey,
   language,
   onLanguageChange,
   savingLanguage,
+  audioLanguage,
+  onAudioLanguageChange,
+  savingAudioLanguage,
   maxAttempts,
   onMaxAttemptsChange,
   savingMaxAttempts,
@@ -32,7 +43,7 @@ export function LessonSettingsBar({
   return (
     <div className="flex flex-wrap items-center gap-4 border-b pb-3 mb-2">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground shrink-0 font-medium">Ngôn ngữ bài giảng:</span>
+        <span className="text-xs text-muted-foreground shrink-0 font-medium" title="Ngôn ngữ của câu hỏi/bài tập được tạo ra (không phải ngôn ngữ video).">Ngôn ngữ câu hỏi:</span>
         <select
           value={language}
           onChange={(e) => onLanguageChange(e.target.value)}
@@ -43,6 +54,22 @@ export function LessonSettingsBar({
           <option value="en">🇬🇧 English</option>
         </select>
         {savingLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground shrink-0 font-medium" title="Ngôn ngữ NÓI trong video, dùng để phiên âm cho đúng. Tách biệt với ngôn ngữ câu hỏi.">Ngôn ngữ âm thanh:</span>
+        <select
+          value={audioLanguage}
+          onChange={(e) => onAudioLanguageChange(e.target.value)}
+          disabled={savingAudioLanguage}
+          data-testid="audio-language-select"
+          className="text-xs rounded border border-input bg-background px-2 py-1 focus:ring-1 focus:ring-primary focus:outline-none"
+        >
+          <option value="">Tự động (theo cấu hình)</option>
+          <option value="vi">🇻🇳 Tiếng Việt</option>
+          <option value="en">🇬🇧 English</option>
+        </select>
+        {savingAudioLanguage && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
       </div>
 
       <div className="flex items-center gap-2">
@@ -61,6 +88,8 @@ export function LessonSettingsBar({
         <span className="text-[10px] text-muted-foreground">(0 = không giới hạn)</span>
         {savingMaxAttempts && <span className="text-[10px] text-muted-foreground animate-pulse">Đang lưu...</span>}
       </div>
+
+      <ResetLessonButton lessonId={lessonId} aiClient={aiClient} />
     </div>
   );
 }

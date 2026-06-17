@@ -120,6 +120,81 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(page.getByText("Thông tin chung")).not.toBeVisible();
     await expect(page.getByText("Xóa khóa học")).not.toBeVisible();
   });
+
+  // ── Overview enrichments (per role) ──────────────────────────────────────────
+
+  test("learner sees 'Tiến độ của bạn' card with progress + a continue-learning CTA", async ({ studentPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    const progress = page.getByTestId("my-course-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress.getByRole("heading", { name: "Tiến độ của bạn" })).toBeVisible();
+    await expect(progress.getByText(/bài học đã làm/)).toBeVisible();
+    // Either a "Bắt đầu/Tiếp tục học" link (lessons remain) or the all-done banner.
+    const cta = progress.getByRole("link", { name: /Bắt đầu học|Tiếp tục học/ });
+    const done = progress.getByText(/đã làm hết tất cả bài học/);
+    await expect(cta.or(done).first()).toBeVisible();
+  });
+
+  test("learner sees 'Tiến độ theo chương' with per-chapter progress + mastery score", async ({ studentPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    const chart = page.getByTestId("module-chart");
+    await expect(chart.getByRole("heading", { name: "Tiến độ theo chương" })).toBeVisible();
+    // Each chapter row shows the learner's completion as "done/total bài".
+    await expect(chart.getByText(/\d+\/\d+ bài/).first()).toBeVisible();
+    // bob has attempts → at least one chapter shows a mastery score "· NN%".
+    await expect(chart.getByText(/· \d+%/).first()).toBeVisible();
+  });
+
+  test("learner with multiple attempts sees the score-trend sparkline", async ({ studentPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    // bob has ≥2 attempts on the DSA course → the score-trend chart renders.
+    const trend = page.getByTestId("score-trend");
+    await expect(trend).toBeVisible();
+    await expect(trend.getByText("Xu hướng điểm qua các bài")).toBeVisible();
+    // Match the chart by aria-label (the section also contains an InfoHint "?" SVG).
+    await expect(trend.getByRole("img", { name: "Xu hướng điểm" })).toBeVisible();
+  });
+
+  test("manager sees 'Nội dung theo chương' with content readiness per chapter", async ({ teacherPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    const chart = page.getByTestId("module-chart");
+    await expect(chart.getByRole("heading", { name: "Nội dung theo chương" })).toBeVisible();
+    // Manager rows show "X/N bài có video · M phút" (content readiness, not a bare
+    // duration that leaves chapters with no video looking empty/broken).
+    await expect(chart.getByText(/\d+\/\d+ bài có video · \d+ phút/).first()).toBeVisible();
+  });
+
+  test("manager does NOT see the learner progress card", async ({ userPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("my-course-progress")).not.toBeVisible();
+  });
+
+  test("manager sees the 'Nhịp độ lớp học' class pulse with class metrics", async ({ userPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    // The pulse streams in via Suspense; toBeVisible auto-waits for it.
+    await expect(page.getByRole("heading", { name: "Nhịp độ lớp học" })).toBeVisible();
+    await expect(page.getByText("Tiến độ TB")).toBeVisible();
+    await expect(page.getByText("Đã tham gia")).toBeVisible();
+  });
+
+  test("overview replaces the lesson outline with a per-chapter chart", async ({ studentPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    // The old "Nội dung khóa học" outline (duplicating the Bài học tab) is gone…
+    await expect(page.getByRole("heading", { name: "Nội dung khóa học" })).toHaveCount(0);
+    // …replaced by the per-chapter chart. A student sees their progress per chapter.
+    // (The standalone resume card is now conditional — only for a genuinely recent
+    // lesson — so it is not asserted here; the progress card already carries the CTA.)
+    const chart = page.getByTestId("module-chart");
+    await expect(chart).toBeVisible();
+    await expect(chart.getByRole("heading", { name: "Tiến độ theo chương" })).toBeVisible();
+  });
 });
 
 // ── Tab: Bài học ───────────────────────────────────────────────────────────────
@@ -187,6 +262,17 @@ test.describe("Course workspace — ?tab=results", () => {
     await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Kết quả học viên" })).toBeVisible();
     await expect(page.getByRole("table")).toBeVisible();
+  });
+
+  test("results table exposes progress + score + watch columns", async ({ userPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=results`, { waitUntil: "domcontentloaded" });
+    // "Tiến độ" = lessons attempted (the single progress metric); "% xem" surfaces
+    // the average watch fraction. Headers render even with no rows. ("% trả lời"
+    // was removed — it was ~always 100% since answering is required to submit.)
+    for (const col of ["Tiến độ", "Điểm TB", "% xem"]) {
+      await expect(page.getByRole("columnheader", { name: col, exact: true })).toBeVisible();
+    }
   });
 
   test("student sees no-permission message on results tab", async ({ studentPage: page }) => {

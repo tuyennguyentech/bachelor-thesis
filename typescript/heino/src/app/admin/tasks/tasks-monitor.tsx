@@ -239,34 +239,34 @@ export function TasksMonitor({ token }: { token: string }) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="bg-card border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Đang hoạt động (Toàn hệ thống)</CardTitle>
+            <CardTitle className="text-sm font-medium">Đang hoạt động</CardTitle>
             <Activity className="size-4 text-sky-500 animate-pulse" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-sky-500">{activeTotalCount}</div>
-            <p className="text-xs text-muted-foreground">Tổng số tác vụ đang chạy hoặc chờ trong hàng đợi</p>
+            <p className="text-xs text-muted-foreground">Đang chạy hoặc chờ trong hàng đợi</p>
           </CardContent>
         </Card>
 
         <Card className="bg-card border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Thành công (Toàn hệ thống)</CardTitle>
+            <CardTitle className="text-sm font-medium">Thành công</CardTitle>
             <CheckCircle2 className="size-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-500">{successTotalCount}</div>
-            <p className="text-xs text-muted-foreground">Tổng số tác vụ thành công trên toàn hệ thống</p>
+            <p className="text-xs text-muted-foreground">Tác vụ đã hoàn tất</p>
           </CardContent>
         </Card>
 
         <Card className="bg-card border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Thất bại / Đã huỷ (Toàn hệ thống)</CardTitle>
+            <CardTitle className="text-sm font-medium">Thất bại / Đã huỷ</CardTitle>
             <XCircle className="size-4 text-destructive" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-destructive">{failedTotalCount}</div>
-            <p className="text-xs text-muted-foreground">Tổng số tác vụ lỗi hoặc bị huỷ trên toàn hệ thống</p>
+            <p className="text-xs text-muted-foreground">Tác vụ lỗi hoặc bị huỷ</p>
           </CardContent>
         </Card>
       </div>

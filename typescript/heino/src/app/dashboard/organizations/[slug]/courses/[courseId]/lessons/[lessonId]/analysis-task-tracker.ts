@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { analysisConfig } from "@/lib/client-config";
 import {
   AnalysisProgressStep,
@@ -53,13 +52,21 @@ export interface UseAnalysisTaskTrackerInput {
 
 /**
  * Watches the polled lesson task list and propagates transitions into the
- * local workflow state machine. Owns the "task A finished, refresh + advance
- * step" cascade. Reads task state via `taskStatusByIdRef` to detect edge
+ * local workflow state machine. Owns the "task A finished, load fresh data +
+ * advance step" cascade. Reads task state via `taskStatusByIdRef` to detect edge
  * transitions (active → terminal) and dedupes terminal processing via
  * `completedTaskIdsRef`.
+ *
+ * NOTE: completion handlers update the visible workflow purely from LOCAL state
+ * (setSegments / setChunks / setInteractionsState + dispatchStep) and deliberately
+ * do NOT call router.refresh(). A soft RSC refresh of this (heavy) lesson page
+ * participates in the client router's transition lane; while it is in flight — or
+ * hung — the page-level `?tab=` <Link> navigations queue behind it, leaving the
+ * "Bài giảng" / "Kết quả & Thống kê" tabs unclickable after a task (e.g. phân
+ * đoạn) finishes. Server-rendered data re-loads fresh on the next tab navigation,
+ * so dropping the in-place refresh costs nothing and keeps navigation responsive.
  */
 export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void {
-  const router = useRouter();
   const {
     lessonId,
     lessonTasks,
@@ -116,6 +123,33 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
             chunkIndex: Math.max(0, task.progressCurrent - 1),
             totalChunks: task.progressTotal,
           });
+        } else if (task.kind === LessonTaskKind.RUN_PIPELINE) {
+          // The one-shot pipeline runs all three stages server-side under a
+          // single task. Drive the 5-step stepper off its progress_step so
+          // EXACTLY ONE stage reads "running" (prior stages "done", later ones
+          // reset). Without this the stepper falls back to artifact flags —
+          // which on a re-run are stale from the previous run — and renders two
+          // stages active at once while skipping the middle one.
+          const stage = task.progressStep;
+          if (stage.includes("GENERATING")) {
+            setExtractState({ phase: "done" });
+            setChunkState({ phase: "done" });
+            setGenState({
+              phase: "running",
+              message: task.message || "Đang tạo bài tập...",
+              chunkIndex: Math.max(0, task.progressCurrent - 1),
+              totalChunks: task.progressTotal,
+            });
+          } else if (stage.includes("CHUNKING")) {
+            setExtractState({ phase: "done" });
+            setChunkState({ phase: "running", currentStep: null });
+            setGenState({ phase: "idle" });
+          } else {
+            // TRANSCRIBING or the brief pre-stage window before the first label.
+            setExtractState({ phase: "running", currentStep: null });
+            setChunkState({ phase: "idle" });
+            setGenState({ phase: "idle" });
+          }
         }
         continue;
       }
@@ -153,7 +187,6 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
                 setChunks(fresh);
               }
               dispatchStep({ type: "ADVANCE_AFTER_EXTRACT", hasChunks: fresh.length > 0 });
-              router.refresh();
             } catch (err) {
               if (!(err instanceof ConnectError)) {
                 // network error — keep current state
@@ -165,7 +198,6 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
           void (async () => {
             await reloadChunks();
             dispatchStep({ type: "ADVANCE_AFTER_CHUNK" });
-            router.refresh();
           })();
         } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
           void (async () => {
@@ -180,7 +212,22 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
               setInteractionsState(r.analysis.interactions);
             }
             setGenState({ phase: "done" });
-            router.refresh();
+          })();
+        } else if (task.kind === LessonTaskKind.RUN_PIPELINE) {
+          // The one-shot pipeline finished every stage — load the full fresh
+          // result (transcript + chunks + interactions) and mark all stages done.
+          setExtractState({ phase: "done" });
+          setChunkState({ phase: "done" });
+          void (async () => {
+            const r = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+            const a = r?.analysis ?? null;
+            if (a) {
+              setSegments(a.transcriptSegments);
+              if (a.interactions) setInteractionsState(a.interactions);
+            }
+            if (r?.chunks) setChunks(r.chunks);
+            setGenState({ phase: "done" });
+            dispatchStep({ type: "ADVANCE_AFTER_GENERATE" });
           })();
         }
       } else if (task.status === LessonTaskStatus.FAILED || task.status === LessonTaskStatus.CANCELED) {
@@ -191,6 +238,18 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
           setChunkState({ phase: "error", failedAt: null, message: msg });
         } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
           setGenState({ phase: "error", message: msg });
+        } else if (task.kind === LessonTaskKind.RUN_PIPELINE) {
+          // Surface a pipeline failure on the stage that was live when it died
+          // (progress_step), so e.g. a chunk-stage quota error lands on the
+          // "Phân đoạn" step rather than vanishing.
+          const stage = task.progressStep;
+          if (stage.includes("GENERATING")) {
+            setGenState({ phase: "error", message: msg });
+          } else if (stage.includes("CHUNKING")) {
+            setChunkState({ phase: "error", failedAt: null, message: msg });
+          } else {
+            setExtractState({ phase: "error", failedAt: null, message: msg });
+          }
         }
       }
     }
@@ -200,7 +259,6 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
     lessonId,
     lessonTasks,
     reloadChunks,
-    router,
     setChunks,
     setExtractState,
     setChunkState,

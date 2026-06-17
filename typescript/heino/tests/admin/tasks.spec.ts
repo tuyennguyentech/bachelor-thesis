@@ -9,10 +9,12 @@ test.describe("Admin Tasks Monitor page", () => {
     // Check page header
     await expect(page.getByRole("heading", { name: "Danh sách tác vụ", level: 2 })).toBeVisible();
     
-    // Check stats cards
-    await expect(page.getByText("Đang hoạt động (Toàn hệ thống)", { exact: true })).toBeVisible();
-    await expect(page.getByText("Thành công (Toàn hệ thống)", { exact: true })).toBeVisible();
-    await expect(page.getByText("Thất bại / Đã huỷ (Toàn hệ thống)", { exact: true })).toBeVisible();
+    // Check stats cards via their unique descriptions ("Thành công" alone also
+    // appears as a task-status badge in the table, so match the card body text).
+    // Scope is stated once in the section subtitle, not repeated on every card.
+    await expect(page.getByText("Đang chạy hoặc chờ trong hàng đợi")).toBeVisible();
+    await expect(page.getByText("Tác vụ đã hoàn tất")).toBeVisible();
+    await expect(page.getByText("Tác vụ lỗi hoặc bị huỷ")).toBeVisible();
   });
 
   test("renders tasks list table", async ({ adminPage: page }) => {

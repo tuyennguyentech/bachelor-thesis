@@ -6,12 +6,7 @@ import { AIService, type TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
 import { CheckIcon, Loader2Icon, PencilIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRichterWebClient } from "@/lib/connect-webclient";
-
-function formatTime(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { formatTime } from "@/lib/format";
 
 interface SegmentRowProps {
   segment: TranscriptSegment;

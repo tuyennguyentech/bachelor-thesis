@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -24,14 +24,11 @@ import {
   UploadCloudIcon,
   FileVideo2Icon,
   Loader2Icon,
-  CheckCircleIcon,
   AlertCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   SlidersHorizontalIcon,
   XCircleIcon,
-  ArrowRightIcon,
-  RefreshCcwIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRichterWebClient } from "@/lib/connect-webclient";
@@ -40,33 +37,27 @@ import {
   LessonService,
   type CourseModule,
 } from "buf/gen/richter/v1/courses_pb";
+import { AIService, LessonTaskKind, GenerationStrategy } from "buf/gen/richter/v1/ai_pb";
+import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import {
-  AIService,
-  LessonTaskKind,
-  LessonTaskStatus,
-  type LessonTask,
-} from "buf/gen/richter/v1/ai_pb";
-import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
+  KindQuantityGrid,
+  emptyQuantities,
+  toKindsList,
+  totalQuantity,
+  type KindQuantities,
+} from "@/app/dashboard/organizations/[slug]/courses/[courseId]/lessons/[lessonId]/kind-quantity-grid";
 import { uploadConfig } from "@/lib/client-config";
-import { ConnectError, Code } from "@connectrpc/connect";
+import { ConnectError } from "@connectrpc/connect";
 
 // ── Types ───────────────────────────────────────────────────────────────────
-
+// The dialog only OWNS the pre-pipeline steps (configure → upload → start task).
+// Once the durable RUN_PIPELINE task is started, it navigates to the lesson's
+// processing tab, which renders the live, durable progress — so there is no
+// blocking "running"/"done" phase here.
 type DialogState =
   | { phase: "form" }
   | { phase: "uploading"; progress: number; fileName: string }
-  | { phase: "running"; taskId: string; lessonId: string; courseId: string }
-  | { phase: "done"; lessonId: string; courseId: string }
-  | { phase: "error"; errorMsg: string; stage: string; lessonId?: string; courseId?: string; taskId?: string };
-
-interface AIConfig {
-  difficulty: string;
-  interactionKinds: InteractionKind[];
-  countPerChunk: number;
-  focusPrompt: string;
-}
-
-// ── Constants ────────────────────────────────────────────────────────────────
+  | { phase: "error"; errorMsg: string; stage: string; lessonId?: string };
 
 const ALLOWED_CONTENT_TYPES = new Set([
   "video/mp4",
@@ -77,18 +68,35 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "video/x-matroska",
 ]);
 
-const POLL_INTERVAL_MS = 2000;
+const LANGUAGE_OPTIONS = [
+  { value: "vi", label: "🇻🇳 Tiếng Việt" },
+  { value: "en", label: "🇬🇧 English" },
+];
 
-// ── Sub-components ───────────────────────────────────────────────────────────
+const FEEDBACK_OPTIONS = [
+  { value: FeedbackMode.AFTER_SUBMIT, label: "Hiện đáp án sau khi nộp" },
+  { value: FeedbackMode.AFTER_EACH, label: "Hiện đáp án sau mỗi câu" },
+  { value: FeedbackMode.HIDDEN, label: "Ẩn đáp án" },
+];
+
+// ── Advanced AI config (collapsible) ─────────────────────────────────────────
+
+interface AdvancedConfig {
+  difficulty: string;
+  focusPrompt: string;
+  quantities: KindQuantities;
+  maxAttempts: number;
+  feedbackMode: FeedbackMode;
+}
 
 function AIConfigPanel({
   config,
   onChange,
 }: {
-  config: AIConfig;
-  onChange: (c: AIConfig) => void;
+  config: AdvancedConfig;
+  onChange: (c: AdvancedConfig) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
 
   const difficultyOptions = [
     { value: "easy", label: "Dễ", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" },
@@ -96,27 +104,8 @@ function AIConfigPanel({
     { value: "hard", label: "Khó", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-300" },
   ];
 
-  const kindOptions = [
-    { kind: InteractionKind.SINGLE_CHOICE, label: "Trắc nghiệm MCQ" },
-    { kind: InteractionKind.MULTIPLE_CHOICE, label: "Trắc nghiệm Multi" },
-    { kind: InteractionKind.FILL_BLANK, label: "Điền vào chỗ trống" },
-    { kind: InteractionKind.LISTENING, label: "Luyện nghe" },
-    { kind: InteractionKind.READING, label: "Luyện đọc hiểu" },
-  ];
-
-  const handleKindToggle = (kind: InteractionKind) => {
-    const { interactionKinds } = config;
-    if (interactionKinds.includes(kind)) {
-      if (interactionKinds.length > 1) {
-        onChange({ ...config, interactionKinds: interactionKinds.filter((k) => k !== kind) });
-      }
-    } else {
-      onChange({ ...config, interactionKinds: [...interactionKinds, kind] });
-    }
-  };
-
   return (
-    <div className="rounded-xl border border-border/60 bg-card/30 backdrop-blur-md overflow-hidden shadow-sm transition-all duration-300">
+    <div className="rounded-xl border border-border/60 bg-card/30 overflow-hidden shadow-sm">
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -124,13 +113,20 @@ function AIConfigPanel({
       >
         <div className="flex items-center gap-2">
           <SlidersHorizontalIcon className="size-4 text-primary" />
-          <span className="text-sm font-semibold text-foreground">Cài đặt AI nâng cao (Tùy chọn)</span>
+          <span className="text-sm font-semibold text-foreground">Cấu hình bài tập</span>
         </div>
         {isOpen ? <ChevronUpIcon className="size-4 text-muted-foreground" /> : <ChevronDownIcon className="size-4 text-muted-foreground" />}
       </button>
 
       {isOpen && (
-        <div className="border-t border-border/50 p-4 flex flex-col gap-4 bg-background/5 animate-in slide-in-from-top-1 duration-200">
+        <div className="border-t border-border/50 p-4 flex flex-col gap-4">
+          {/* Per-kind quantities — the same control as the real "tạo bài tập" step */}
+          <KindQuantityGrid
+            value={config.quantities}
+            onChange={(quantities) => onChange({ ...config, quantities })}
+            helperText="Số câu mỗi loại, áp dụng cho từng phân đoạn của bài giảng."
+          />
+
           {/* Difficulty */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Mức độ khó</label>
@@ -143,9 +139,7 @@ function AIConfigPanel({
                     type="button"
                     onClick={() => onChange({ ...config, difficulty: opt.value })}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-                      active
-                        ? `${opt.cls} border-primary/50 shadow-sm ring-1 ring-primary/20`
-                        : "border-border bg-transparent text-muted-foreground hover:bg-muted/40"
+                      active ? `${opt.cls} border-primary/50 ring-1 ring-primary/20` : "border-border text-muted-foreground hover:bg-muted/40"
                     }`}
                   >
                     {opt.label}
@@ -155,129 +149,53 @@ function AIConfigPanel({
             </div>
           </div>
 
-          {/* Interaction kinds */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Loại bài tập</label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {kindOptions.map((opt) => {
-                const active = config.interactionKinds.includes(opt.kind);
-                return (
-                  <button
-                    key={opt.kind}
-                    type="button"
-                    onClick={() => handleKindToggle(opt.kind)}
-                    className={`flex items-center justify-center text-center p-2.5 rounded-lg border text-xs font-medium transition-all ${
-                      active
-                        ? "border-primary/50 bg-primary/10 text-primary shadow-sm"
-                        : "border-border bg-transparent text-muted-foreground hover:bg-muted/40"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
+          {/* Max attempts + feedback mode */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-attempts" className="text-xs">Số lần làm (0 = không giới hạn)</Label>
+              <Input
+                id="qc-attempts"
+                type="number"
+                min={0}
+                max={99}
+                value={config.maxAttempts}
+                onChange={(e) => onChange({ ...config, maxAttempts: Math.max(0, Math.min(99, parseInt(e.target.value) || 0)) })}
+                className="text-sm"
+              />
             </div>
-          </div>
-
-          {/* Count per chunk */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              Số câu hỏi / đoạn (0 = mặc định)
-            </label>
-            <Input
-              type="number"
-              min={0}
-              max={20}
-              value={config.countPerChunk}
-              onChange={(e) => onChange({ ...config, countPerChunk: Math.max(0, Math.min(20, parseInt(e.target.value) || 0)) })}
-              className="w-24 text-sm"
-            />
+            <div className="space-y-1.5">
+              <Label className="text-xs">Hiện kết quả</Label>
+              <Select
+                value={String(config.feedbackMode)}
+                onValueChange={(v) => onChange({ ...config, feedbackMode: Number(v) as FeedbackMode })}
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FEEDBACK_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Focus prompt */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              Focus Prompt (Trọng tâm nội dung)
+              Trọng tâm nội dung (tùy chọn)
             </label>
             <textarea
-              rows={3}
+              rows={2}
               value={config.focusPrompt}
               onChange={(e) => onChange({ ...config, focusPrompt: e.target.value })}
               placeholder="Ví dụ: tập trung từ vựng IELTS, câu hỏi phân tích..."
-              className="w-full text-xs rounded-lg border border-input bg-background/50 px-3 py-2 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-none"
+              className="w-full text-xs rounded-lg border border-input bg-background/50 px-3 py-2 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
             />
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// 3-stage progress strip shown during pipeline run
-function PipelineProgressStrip({ task }: { task: LessonTask | null }) {
-  const stages: { key: string; label: string; step: string }[] = [
-    { key: "TRANSCRIBING", label: "Phiên âm", step: "TRANSCRIBING" },
-    { key: "CHUNKING", label: "Phân đoạn", step: "CHUNKING" },
-    { key: "GENERATING", label: "Tạo bài tập", step: "GENERATING" },
-  ];
-
-  const progressStep = task?.progressStep ?? "";
-  const isRunning = task?.status === LessonTaskStatus.RUNNING || task?.status === LessonTaskStatus.QUEUED;
-
-  function getStageStatus(stage: (typeof stages)[number]): "pending" | "active" | "done" {
-    if (!progressStep) return "pending";
-    const idx = stages.findIndex((s) => s.step === stage.step);
-    const currentIdx = stages.findIndex((s) => s.step === progressStep);
-    if (idx < currentIdx) return "done";
-    if (idx === currentIdx) return isRunning ? "active" : "done";
-    return "pending";
-  }
-
-  return (
-    <div className="flex items-center gap-2 px-1">
-      {stages.map((stage, i) => {
-        const status = getStageStatus(stage);
-        return (
-          <React.Fragment key={stage.key}>
-            <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
-              <div
-                className={cn(
-                  "size-8 rounded-full flex items-center justify-center border-2 transition-all duration-300",
-                  status === "done" && "border-emerald-500 bg-emerald-50 dark:bg-emerald-950 text-emerald-600",
-                  status === "active" && "border-primary bg-primary/10 text-primary",
-                  status === "pending" && "border-muted-foreground/30 bg-muted/30 text-muted-foreground",
-                )}
-              >
-                {status === "done" ? (
-                  <CheckCircleIcon className="size-4" />
-                ) : status === "active" ? (
-                  <Loader2Icon className="size-4 animate-spin" />
-                ) : (
-                  <span className="text-xs font-bold">{i + 1}</span>
-                )}
-              </div>
-              <span
-                className={cn(
-                  "text-xs font-medium truncate w-full text-center",
-                  status === "done" && "text-emerald-600",
-                  status === "active" && "text-primary font-semibold",
-                  status === "pending" && "text-muted-foreground",
-                )}
-              >
-                {stage.label}
-              </span>
-            </div>
-            {i < stages.length - 1 && (
-              <div
-                className={cn(
-                  "h-px flex-1 transition-all duration-500",
-                  getStageStatus(stages[i + 1]) !== "pending" ? "bg-emerald-400" : "bg-muted-foreground/20"
-                )}
-              />
-            )}
-          </React.Fragment>
-        );
-      })}
     </div>
   );
 }
@@ -291,6 +209,12 @@ export interface QuickCreateLessonDialogProps {
   modules: CourseModule[];
   courseId: string;
   slug: string;
+  /**
+   * When set, Quick Create runs against an EXISTING (video-less) lesson instead
+   * of creating a new one — used by the "tạo nhanh" button on a lesson's video
+   * tab. Title/module pickers are hidden in that mode.
+   */
+  existingLesson?: { id: string; title: string };
 }
 
 export function QuickCreateLessonDialog({
@@ -300,13 +224,15 @@ export function QuickCreateLessonDialog({
   modules,
   courseId,
   slug,
+  existingLesson,
 }: QuickCreateLessonDialogProps) {
   const router = useRouter();
 
-  // RPC clients
   const storageClient = useRichterWebClient(StorageService, token);
   const lessonClient = useRichterWebClient(LessonService, token);
   const aiClient = useRichterWebClient(AIService, token);
+
+  const isExisting = !!existingLesson;
 
   // Form state
   const [title, setTitle] = useState("");
@@ -314,21 +240,22 @@ export function QuickCreateLessonDialog({
   const [selectedModuleId, setSelectedModuleId] = useState<string>(() => modules[0]?.id ?? "");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [aiConfig, setAIConfig] = useState<AIConfig>({
+  const [language, setLanguage] = useState("vi");
+  // Spoken/audio language of the uploaded video — drives the transcription hint
+  // (separate from `language`, the question/output language). Defaults to "vi"
+  // (the common case); the teacher picks "en" for an English-audio video so the
+  // transcript isn't forced to Vietnamese.
+  const [audioLanguage, setAudioLanguage] = useState("vi");
+  const [config, setConfig] = useState<AdvancedConfig>({
     difficulty: "medium",
-    interactionKinds: [InteractionKind.SINGLE_CHOICE],
-    countPerChunk: 0,
     focusPrompt: "",
+    quantities: emptyQuantities(),
+    maxAttempts: 0,
+    feedbackMode: FeedbackMode.AFTER_SUBMIT,
   });
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Dialog state machine
   const [dialogState, setDialogState] = useState<DialogState>({ phase: "form" });
-
-  // For polling during "running" phase
-  const [liveTask, setLiveTask] = useState<LessonTask | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset on close
@@ -338,53 +265,19 @@ export function QuickCreateLessonDialog({
       setDescription("");
       setSelectedModuleId(modules[0]?.id ?? "");
       setVideoFile(null);
+      setLanguage("vi");
+      setAudioLanguage("vi");
+      setConfig({
+        difficulty: "medium",
+        focusPrompt: "",
+        quantities: emptyQuantities(),
+        maxAttempts: 0,
+        feedbackMode: FeedbackMode.AFTER_SUBMIT,
+      });
       setFormError(null);
       setDialogState({ phase: "form" });
-      setLiveTask(null);
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
     }
   }, [open, modules]);
-
-  // ── Polling while running ────────────────────────────────────────────────
-  const startPolling = useCallback(
-    (taskId: string, lessonId: string, thisCourseId: string) => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(async () => {
-        try {
-          const res = await aiClient.getLessonTask({ taskId });
-          const t = res.task;
-          if (!t) return;
-          setLiveTask(t);
-
-          if (t.status === LessonTaskStatus.SUCCEEDED) {
-            clearInterval(pollRef.current!);
-            pollRef.current = null;
-            setDialogState({ phase: "done", lessonId, courseId: thisCourseId });
-          } else if (
-            t.status === LessonTaskStatus.FAILED ||
-            t.status === LessonTaskStatus.CANCELED
-          ) {
-            clearInterval(pollRef.current!);
-            pollRef.current = null;
-            setDialogState({
-              phase: "error",
-              errorMsg: t.errorMsg || t.message || "Quy trình AI thất bại.",
-              stage: t.progressStep || "UNKNOWN",
-              lessonId,
-              courseId: thisCourseId,
-              taskId,
-            });
-          }
-        } catch {
-          // Network error — keep polling
-        }
-      }, POLL_INTERVAL_MS);
-    },
-    [aiClient],
-  );
 
   // ── File handlers ────────────────────────────────────────────────────────
   const handleDrag = (e: React.DragEvent) => {
@@ -411,34 +304,63 @@ export function QuickCreateLessonDialog({
     setVideoFile(file);
   }
 
+  // ── Navigate to the lesson's processing tab (durable progress lives there) ──
+  function goToProcessing(lessonId: string) {
+    router.push(`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lessonId}?tab=processing`);
+    onOpenChange(false);
+  }
+
   // ── Submit ───────────────────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
 
-    if (!title.trim()) { setFormError("Vui lòng nhập tiêu đề bài học."); return; }
+    if (!isExisting && !title.trim()) { setFormError("Vui lòng nhập tiêu đề bài học."); return; }
     if (!videoFile) { setFormError("Vui lòng chọn tệp video."); return; }
-    if (!selectedModuleId) { setFormError("Vui lòng chọn chương học."); return; }
+    if (!isExisting && !selectedModuleId) { setFormError("Vui lòng chọn chương học."); return; }
 
-    // ── Step 1: Create lesson ──────────────────────────────────────────────
+    // ── Step 1: Resolve the lesson (create a new one, or use the existing) ──
     let lessonId: string;
-    let createdCourseId = courseId;
+    if (isExisting) {
+      lessonId = existingLesson!.id;
+    } else {
+      try {
+        const res = await lessonClient.createLesson({
+          moduleId: selectedModuleId,
+          title: title.trim(),
+          description: description.trim(),
+          orderIndex: 0,
+          maxAttempts: config.maxAttempts,
+        });
+        lessonId = res.lesson?.id ?? "";
+        if (!lessonId) throw new Error("Không tạo được bài học");
+      } catch (err) {
+        setFormError(err instanceof ConnectError ? err.message : "Không thể tạo bài học.");
+        return;
+      }
+    }
+
+    // ── Step 2: Persist lesson settings (language + attempts + feedback) ────
+    // Language is a LESSON attribute that the question generator reads from the
+    // lesson row — Quick Create previously skipped it, silently degrading
+    // generation. Set it (and attempts/feedback) before starting the pipeline.
     try {
-      const res = await lessonClient.createLesson({
-        moduleId: selectedModuleId,
-        title: title.trim(),
+      await lessonClient.updateLesson({
+        id: lessonId,
+        title: isExisting ? existingLesson!.title : title.trim(),
         description: description.trim(),
         orderIndex: 0,
+        language,
+        audioLanguage,
+        maxAttempts: config.maxAttempts,
       });
-      lessonId = res.lesson?.id ?? "";
-      if (!lessonId) throw new Error("Không tạo được bài học");
+      await lessonClient.updateLessonFeedbackMode({ id: lessonId, feedbackMode: config.feedbackMode });
     } catch (err) {
-      const msg = err instanceof ConnectError ? err.message : "Không thể tạo bài học.";
-      setFormError(msg);
+      setFormError(err instanceof ConnectError ? err.message : "Không thể lưu cấu hình bài học.");
       return;
     }
 
-    // ── Step 2: Upload video ───────────────────────────────────────────────
+    // ── Step 3: Upload video ───────────────────────────────────────────────
     setDialogState({ phase: "uploading", progress: 0, fileName: videoFile.name });
 
     const ext = videoFile.name.split(".").pop() ?? "mp4";
@@ -457,13 +379,7 @@ export function QuickCreateLessonDialog({
       });
       uploadUrl = res.uploadUrl;
     } catch {
-      setDialogState({
-        phase: "error",
-        errorMsg: "Không lấy được đường dẫn tải lên. Kiểm tra kết nối lưu trữ.",
-        stage: "UPLOAD",
-        lessonId,
-        courseId: createdCourseId,
-      });
+      setDialogState({ phase: "error", errorMsg: "Không lấy được đường dẫn tải lên. Kiểm tra kết nối lưu trữ.", stage: "UPLOAD", lessonId });
       return;
     }
 
@@ -472,11 +388,7 @@ export function QuickCreateLessonDialog({
       const xhr = new XMLHttpRequest();
       xhr.upload.addEventListener("progress", (ev) => {
         if (ev.lengthComputable)
-          setDialogState({
-            phase: "uploading",
-            progress: Math.round((ev.loaded / ev.total) * 100),
-            fileName: videoFile.name,
-          });
+          setDialogState({ phase: "uploading", progress: Math.round((ev.loaded / ev.total) * 100), fileName: videoFile.name });
       });
       xhr.addEventListener("load", () => {
         if (xhr.status >= 200 && xhr.status < 300) resolve();
@@ -493,13 +405,7 @@ export function QuickCreateLessonDialog({
         uploadOk = true;
       })
       .catch((err: Error) => {
-        setDialogState({
-          phase: "error",
-          errorMsg: err.message,
-          stage: "UPLOAD",
-          lessonId,
-          courseId: createdCourseId,
-        });
+        setDialogState({ phase: "error", errorMsg: err.message, stage: "UPLOAD", lessonId });
       });
 
     if (!uploadOk) return;
@@ -531,28 +437,16 @@ export function QuickCreateLessonDialog({
       durationSeconds = 0;
     }
 
-    // Persist video key
     try {
-      await lessonClient.updateLessonVideo({
-        id: lessonId,
-        videoStorageKey: key,
-        durationSeconds,
-      });
+      await lessonClient.updateLessonVideo({ id: lessonId, videoStorageKey: key, durationSeconds });
     } catch {
-      setDialogState({
-        phase: "error",
-        errorMsg: "Không thể lưu thông tin video.",
-        stage: "UPLOAD",
-        lessonId,
-        courseId: createdCourseId,
-      });
+      setDialogState({ phase: "error", errorMsg: "Không thể lưu thông tin video.", stage: "UPLOAD", lessonId });
       return;
     }
 
-    // ── Step 3: Start pipeline task ────────────────────────────────────────
-    let taskId: string;
+    // ── Step 4: Start the durable pipeline task, then navigate to processing ──
     try {
-      const res = await aiClient.startLessonTask({
+      await aiClient.startLessonTask({
         lessonId,
         kind: LessonTaskKind.RUN_PIPELINE,
         generateInteractions: {
@@ -560,76 +454,44 @@ export function QuickCreateLessonDialog({
           chunkId: "",
           forceRegenerate: false,
           interactionKind: 0,
-          interactionKinds: aiConfig.interactionKinds,
-          countPerChunk: aiConfig.countPerChunk,
-          strategy: 0,
-          difficulty: aiConfig.difficulty,
-          focusPrompt: aiConfig.focusPrompt,
+          // toKindsList expands the per-kind quantities into a flat repeated list
+          // (1 entry per intended question). countPerChunk MUST equal the total so
+          // the EVEN_DISTRIBUTION reconstruction on the backend walks every entry
+          // (cfgKinds[i % len]); sending 0 collapses it to the chunk default (1)
+          // and only the first kind gets generated.
+          interactionKinds: toKindsList(config.quantities),
+          countPerChunk: totalQuantity(config.quantities),
+          strategy: GenerationStrategy.EVEN_DISTRIBUTION,
+          difficulty: config.difficulty,
+          focusPrompt: config.focusPrompt,
         },
       });
-      taskId = res.task?.id ?? "";
-      if (!taskId) throw new Error("Không nhận được task id");
     } catch (err) {
-      let errorMsg = "Không thể bắt đầu quy trình AI.";
-      if (err instanceof ConnectError) {
-        if (err.code === Code.ResourceExhausted) {
-          errorMsg = err.message;
-        } else {
-          errorMsg = err.message;
-        }
-      }
-      setDialogState({
-        phase: "error",
-        errorMsg,
-        stage: "PIPELINE_START",
-        lessonId,
-        courseId: createdCourseId,
-      });
+      setDialogState({ phase: "error", errorMsg: err instanceof ConnectError ? err.message : "Không thể bắt đầu quy trình AI.", stage: "PIPELINE_START", lessonId });
       return;
     }
 
-    setDialogState({ phase: "running", taskId, lessonId, courseId: createdCourseId });
-    startPolling(taskId, lessonId, createdCourseId);
+    // The task runs server-side (durable). Hand off to the processing tab which
+    // shows live progress and auto-runs every stage — no further clicks needed.
+    goToProcessing(lessonId);
   }
 
-  // ── Cancel ────────────────────────────────────────────────────────────────
-  async function handleCancel() {
-    if (dialogState.phase === "running" && dialogState.taskId) {
-      try {
-        await aiClient.cancelLessonTask({ taskId: dialogState.taskId });
-      } catch {
-        // Best-effort
-      }
-    }
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    onOpenChange(false);
-  }
-
-  // ── Navigate to lesson ────────────────────────────────────────────────────
-  function navigateToLesson(lessonId: string, thisCourseId: string) {
-    router.push(`/dashboard/organizations/${slug}/courses/${thisCourseId}/lessons/${lessonId}`);
-    onOpenChange(false);
-  }
-
-  const canSubmit = title.trim().length > 0 && videoFile !== null && selectedModuleId.length > 0;
+  const canSubmit = (isExisting || (title.trim().length > 0 && selectedModuleId.length > 0)) && videoFile !== null;
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <Dialog open={open} onOpenChange={(v) => {
-      if (!v && (dialogState.phase === "uploading" || dialogState.phase === "running")) {
-        // Don't close while actively running unless user confirms via Cancel button
-        return;
-      }
-      onOpenChange(v);
-    }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v && dialogState.phase === "uploading") return; // don't close mid-upload
+        onOpenChange(v);
+      }}
+    >
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ZapIcon className="size-5 text-primary" />
-            Tạo nhanh bài học
+            {isExisting ? `Tạo nhanh: ${existingLesson!.title}` : "Tạo nhanh bài học"}
           </DialogTitle>
         </DialogHeader>
 
@@ -643,47 +505,68 @@ export function QuickCreateLessonDialog({
               </div>
             )}
 
-            {/* Title */}
-            <div className="space-y-1.5">
-              <Label htmlFor="qc-title">Tiêu đề bài học <span className="text-destructive">*</span></Label>
-              <Input
-                id="qc-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ví dụ: Bài 1 - Giới thiệu về Big-O"
-                autoFocus
-              />
-            </div>
+            {!isExisting && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="qc-title">Tiêu đề bài học <span className="text-destructive">*</span></Label>
+                  <Input id="qc-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Bài 1 - Giới thiệu về Big-O" autoFocus />
+                </div>
 
-            {/* Description */}
-            <div className="space-y-1.5">
-              <Label htmlFor="qc-desc">Mô tả (tùy chọn)</Label>
-              <Input
-                id="qc-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Mô tả ngắn về nội dung bài học..."
-              />
-            </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="qc-desc">Mô tả (tùy chọn)</Label>
+                  <Input id="qc-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Mô tả ngắn về nội dung bài học..." />
+                </div>
 
-            {/* Module select */}
-            {modules.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>Chương học <span className="text-destructive">*</span></Label>
-                <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Chọn chương học" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modules.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                {modules.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label>Chương học <span className="text-destructive">*</span></Label>
+                    <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn chương học" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {modules.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>{m.title}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </>
             )}
+
+            {/* Question/output language (the generator reads it from the lesson) */}
+            <div className="space-y-1.5">
+              <Label>Ngôn ngữ câu hỏi <span className="text-destructive">*</span></Label>
+              <Select value={language} onValueChange={setLanguage}>
+                <SelectTrigger data-testid="qc-language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Audio/spoken language of the video (drives the transcription hint) */}
+            <div className="space-y-1.5">
+              <Label>Ngôn ngữ âm thanh (giọng nói trong video) <span className="text-destructive">*</span></Label>
+              <Select value={audioLanguage} onValueChange={setAudioLanguage}>
+                <SelectTrigger data-testid="qc-audio-language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Chọn đúng ngôn ngữ nói trong video để phiên âm chính xác (tách biệt với ngôn ngữ câu hỏi).
+              </p>
+            </div>
 
             {/* Video drop-zone */}
             <div className="space-y-1.5">
@@ -706,15 +589,9 @@ export function QuickCreateLessonDialog({
                   <FileVideo2Icon className="size-5 text-emerald-600 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-foreground truncate">{videoFile.name}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {(videoFile.size / (1024 * 1024)).toFixed(2)} MB
-                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{(videoFile.size / (1024 * 1024)).toFixed(2)} MB</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setVideoFile(null)}
-                    className="text-muted-foreground hover:text-destructive transition-colors"
-                  >
+                  <button type="button" onClick={() => setVideoFile(null)} className="text-muted-foreground hover:text-destructive transition-colors">
                     <XCircleIcon className="size-4" />
                   </button>
                 </div>
@@ -727,46 +604,26 @@ export function QuickCreateLessonDialog({
                   onClick={() => fileInputRef.current?.click()}
                   className={cn(
                     "relative group flex flex-col items-center justify-center p-5 border-2 border-dashed rounded-lg cursor-pointer transition-all duration-300",
-                    isDragActive
-                      ? "border-primary bg-primary/5 scale-[1.01] shadow-sm"
-                      : "border-muted-foreground/20 bg-card/60 hover:border-primary/40 hover:bg-muted/10",
+                    isDragActive ? "border-primary bg-primary/5" : "border-muted-foreground/20 bg-card/60 hover:border-primary/40 hover:bg-muted/10",
                   )}
                 >
-                  <div className={cn(
-                    "rounded-full p-2.5 transition-colors mb-2",
-                    isDragActive ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary"
-                  )}>
+                  <div className={cn("rounded-full p-2.5 transition-colors mb-2", isDragActive ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary")}>
                     <UploadCloudIcon className="size-5" />
                   </div>
-                  <p className="text-xs font-semibold text-foreground text-center">
-                    {isDragActive ? "Thả tệp vào đây" : "Kéo thả tệp video vào đây"}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-1 text-center">
-                    Hoặc nhấp để chọn · MP4, WebM, MOV, MKV...
-                  </p>
+                  <p className="text-xs font-semibold text-foreground text-center">{isDragActive ? "Thả tệp vào đây" : "Kéo thả tệp video vào đây"}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 text-center">Hoặc nhấp để chọn · MP4, WebM, MOV, MKV...</p>
                 </div>
               )}
             </div>
 
-            {/* AI config panel */}
-            <AIConfigPanel config={aiConfig} onChange={setAIConfig} />
+            {/* Advanced AI / exercise config */}
+            <AIConfigPanel config={config} onChange={setConfig} />
 
-            {/* Actions */}
             <div className="flex gap-2 justify-end pt-1">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => onOpenChange(false)}
-              >
-                Hủy
-              </Button>
-              <Button
-                type="submit"
-                disabled={!canSubmit}
-                className="gap-2"
-              >
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Hủy</Button>
+              <Button type="submit" disabled={!canSubmit || totalQuantity(config.quantities) === 0} className="gap-2">
                 <ZapIcon className="size-4" />
-                Tạo &amp; Phân tích ngay
+                Tạo &amp; chạy ngay
               </Button>
             </div>
           </form>
@@ -785,97 +642,19 @@ export function QuickCreateLessonDialog({
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span className="flex items-center gap-1.5 font-medium text-foreground">
                       <Loader2Icon className="size-3 animate-spin text-primary" />
-                      Đang tải video lên máy chủ...
+                      Đang tải video & khởi động xử lý...
                     </span>
                     <span className="font-semibold">{dialogState.progress}%</span>
                   </div>
                   <div className="relative w-full h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="absolute h-full rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 transition-all duration-300 ease-out"
-                      style={{ width: `${dialogState.progress}%` }}
-                    />
+                    <div className="absolute h-full rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 transition-all duration-300 ease-out" style={{ width: `${dialogState.progress}%` }} />
                   </div>
                 </div>
               </div>
             </div>
             <p className="text-xs text-muted-foreground text-center">
-              Vui lòng không đóng cửa sổ này trong khi tải lên...
+              Sau khi tải xong sẽ tự chuyển sang trang xử lý và chạy toàn bộ các bước.
             </p>
-          </div>
-        )}
-
-        {/* ── Phase: running ── */}
-        {dialogState.phase === "running" && (
-          <div className="flex flex-col gap-5 mt-4">
-            <div className="text-center">
-              <p className="text-sm font-semibold text-foreground">Đang xử lý bài học</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                AI đang chạy toàn bộ quy trình. Bạn có thể đóng hộp thoại và quay lại sau.
-              </p>
-            </div>
-
-            <PipelineProgressStrip task={liveTask} />
-
-            {liveTask?.message && (
-              <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                <Loader2Icon className="size-3 animate-spin shrink-0 text-primary" />
-                <span>{liveTask.message}</span>
-              </div>
-            )}
-
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void handleCancel()}
-              >
-                Hủy tác vụ
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  if (dialogState.phase === "running") {
-                    navigateToLesson(dialogState.lessonId, dialogState.courseId);
-                  }
-                }}
-              >
-                Xem bài học
-                <ArrowRightIcon className="size-3.5 ml-1" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Phase: done ── */}
-        {dialogState.phase === "done" && (
-          <div className="flex flex-col items-center gap-4 py-6">
-            <div className="size-16 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center border-2 border-emerald-200 dark:border-emerald-800">
-              <CheckCircleIcon className="size-8 text-emerald-500" />
-            </div>
-            <div className="text-center">
-              <p className="text-base font-semibold text-foreground">Hoàn thành!</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Bài học đã được tạo và phân tích xong. Câu hỏi luyện tập đã sẵn sàng.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onOpenChange(false)}
-              >
-                Đóng
-              </Button>
-              <Button
-                size="sm"
-                className="gap-2"
-                onClick={() => navigateToLesson(dialogState.lessonId, dialogState.courseId)}
-              >
-                <ArrowRightIcon className="size-4" />
-                Vào bài học
-              </Button>
-            </div>
           </div>
         )}
 
@@ -887,72 +666,15 @@ export function QuickCreateLessonDialog({
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-foreground">Đã xảy ra lỗi</p>
                 {dialogState.stage && dialogState.stage !== "UPLOAD" && (
-                  <Badge variant="outline" className="text-[10px] mt-1 mb-1.5">
-                    Giai đoạn: {dialogState.stage}
-                  </Badge>
+                  <Badge variant="outline" className="text-[10px] mt-1 mb-1.5">Giai đoạn: {dialogState.stage}</Badge>
                 )}
                 <p className="text-xs text-muted-foreground mt-1 break-words">{dialogState.errorMsg}</p>
               </div>
             </div>
-
             <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (dialogState.lessonId && dialogState.courseId) {
-                    navigateToLesson(dialogState.lessonId, dialogState.courseId);
-                  } else {
-                    onOpenChange(false);
-                  }
-                }}
-              >
-                Xem bài học
-              </Button>
-              {dialogState.taskId && (
-                <Button
-                  size="sm"
-                  className="gap-2"
-                  onClick={async () => {
-                    // Retry: start a new pipeline task
-                    if (dialogState.lessonId) {
-                      try {
-                        const res = await aiClient.startLessonTask({
-                          lessonId: dialogState.lessonId,
-                          kind: LessonTaskKind.RUN_PIPELINE,
-                          generateInteractions: {
-                            lessonId: dialogState.lessonId,
-                            chunkId: "",
-                            forceRegenerate: true,
-                            interactionKind: 0,
-                            interactionKinds: aiConfig.interactionKinds,
-                            countPerChunk: aiConfig.countPerChunk,
-                            strategy: 0,
-                            difficulty: aiConfig.difficulty,
-                            focusPrompt: aiConfig.focusPrompt,
-                          },
-                        });
-                        const newTaskId = res.task?.id ?? "";
-                        if (newTaskId) {
-                          setLiveTask(null);
-                          setDialogState({
-                            phase: "running",
-                            taskId: newTaskId,
-                            lessonId: dialogState.lessonId,
-                            courseId: dialogState.courseId ?? courseId,
-                          });
-                          startPolling(newTaskId, dialogState.lessonId, dialogState.courseId ?? courseId);
-                        }
-                      } catch (err) {
-                        const msg = err instanceof ConnectError ? err.message : "Không thể thử lại.";
-                        setDialogState({ ...dialogState, errorMsg: msg });
-                      }
-                    }
-                  }}
-                >
-                  <RefreshCcwIcon className="size-3.5" />
-                  Thử lại
-                </Button>
+              <Button variant="outline" size="sm" onClick={() => setDialogState({ phase: "form" })}>Thử lại</Button>
+              {dialogState.lessonId && (
+                <Button size="sm" onClick={() => goToProcessing(dialogState.lessonId!)}>Xem bài học</Button>
               )}
             </div>
           </div>

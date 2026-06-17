@@ -7,6 +7,7 @@ import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import type { ReviewRowProps, ReadingConfig, ReadingResponse } from "../types";
 import { ReadingFeedbackBlocks } from "./reading-feedback";
+import { RecordedAudio } from "../_shared/recorded-audio";
 
 export function ReadingReviewRow({
   index,
@@ -66,7 +67,7 @@ export function ReadingReviewRow({
           </p>
         )}
         {audioUrl ? (
-          <audio src={audioUrl} controls className="w-full max-w-sm h-9" />
+          <RecordedAudio key={audioUrl} src={audioUrl} className="w-full max-w-sm h-9" />
         ) : response?.audioObjectKey ? (
           <p className="text-xs text-muted-foreground italic">Đang tải bản ghi âm…</p>
         ) : (

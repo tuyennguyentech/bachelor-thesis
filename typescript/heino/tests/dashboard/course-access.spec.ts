@@ -9,17 +9,21 @@
  *         - Badge "Đang tham gia" in footer
  *         - Button/Link "Vào học" (student) or "Quản lý" (manager)
  *
- *   Section 2 — "Khóa học khác trong tổ chức":
- *     - Non-enrolled courses get a card with:
- *         - Badge "Chưa tham gia" in footer
- *         - Badge "Yêu cầu tham gia" in header
- *         - Button/Link "Yêu cầu" (navigates to the course's lock screen)
+ *   Section 2 — "Khóa học khác trong tổ chức" (courses the viewer has NOT joined):
+ *     - Plain member (no bypass): locked card — "Chưa tham gia" footer badge,
+ *       "Yêu cầu tham gia" header badge + link (navigates to the lock screen).
+ *     - Manager (course owner / org owner-admin): a JOINABLE card with an instant
+ *       "Tham gia" self-join button (data-testid="card-join"). Org owners/admins
+ *       are NOT auto-enrolled in every course — they self-join at will, no approval.
+ *
+ * Sectioning is by ACTUAL membership (course_members row), NOT bypass access.
  *
  * Bob (studentPage) is enrolled in "Cấu trúc dữ liệu và Giải thuật" (DSA)
  * but NOT enrolled in at least one other hust-cs course.
  *
- * Alice (userPage) is org ADMIN so `canManage=true` → she sees no locks
- * and a "Tạo khóa học" button.
+ * Alice (userPage) is org ADMIN. She is seeded as a member of SOME hust-cs courses
+ * (e.g. DSA → "Vào học" + "Vào quản lý") but NOT others (e.g. "Hệ điều hành" →
+ * "Tham gia"), so BOTH sections render for her. She also sees "Tạo khóa học".
  */
 
 import {
@@ -27,6 +31,8 @@ import {
   expect,
   SEED_HUST_CS_SLUG,
   SEED_DSA_COURSE_TITLE,
+  SEED_HUST_CS_COURSE_ALICE_NOT_JOINED,
+  SEED_HUST_CS_COURSE_ALICE_NOT_JOINED_2,
 } from "../fixtures";
 
 const COURSES_URL = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses`;
@@ -140,50 +146,128 @@ test.describe("Course list — locked course cards (studentPage = bob)", () => {
   });
 });
 
-// ── Manager does NOT see "Khóa học khác trong tổ chức" section ────────────
+// ── Manager (userPage = alice, org ADMIN) — JOINED course ────────────────────
 
-test.describe("Course list — no locked section for manager (userPage = alice)", () => {
-  test("admin alice does not see 'Khóa học khác trong tổ chức' section", async ({ userPage: page }) => {
-    await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
-
-    // Managers bypass canAccess check — locked section is not rendered
-    await expect(
-      page.getByRole("heading", { name: "Khóa học khác trong tổ chức" }),
-    ).not.toBeVisible();
-  });
-
-  test("admin alice does not see 'Chưa tham gia' badge", async ({ userPage: page }) => {
-    await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
-
-    await expect(page.getByText("Chưa tham gia")).not.toBeVisible();
-  });
-
+test.describe("Course list — manager joined course (userPage = alice)", () => {
   test("admin alice sees 'Tạo khóa học' button (canManage)", async ({ userPage: page }) => {
     await page.goto(COURSES_URL, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("button", { name: "Tạo khóa học" })).toBeVisible();
   });
 
-  test("admin alice sees 'Quản lý' link on course cards (not 'Vào học')", async ({ userPage: page }) => {
-    await page.goto(
-      `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
-      { waitUntil: "domcontentloaded" },
-    );
-    // Manager sees "Quản lý" instead of "Vào học"
-    await expect(page.getByRole("link", { name: /Quản lý/ }).first()).toBeVisible();
-  });
-
-  test("admin alice card is badged 'Quản lý', NOT 'Đang tham gia' (manager ≠ member)", async ({ userPage: page }) => {
+  test("joined DSA card shows split CTA 'Vào học' + 'Vào quản lý'", async ({ userPage: page }) => {
     await page.goto(
       `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
       { waitUntil: "domcontentloaded" },
     );
     const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
     await expect(card).toBeVisible();
-    // alice accesses every course via bypass (org admin/owner) but is NOT a
-    // learner-member, so the card must not mislabel her as joined.
-    await expect(card.getByText("Đang tham gia")).not.toBeVisible();
+    // alice is a manager-MEMBER of DSA → learn + manage CTAs.
+    await expect(card.getByTestId("card-learn")).toBeVisible();
+    await expect(card.getByRole("link", { name: /Vào quản lý/ })).toBeVisible();
+  });
+
+  test("joined DSA card is badged 'Quản lý', NOT 'Tham gia'/'Đang tham gia'", async ({ userPage: page }) => {
+    await page.goto(
+      `${COURSES_URL}?q=${encodeURIComponent(SEED_DSA_COURSE_TITLE)}`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_DSA_COURSE_TITLE }).first();
+    await expect(card).toBeVisible();
+    // Manager-member: badged "Quản lý". Not a learner ("Đang tham gia"), and
+    // since she has already joined there is no self-join ("Tham gia") affordance.
     await expect(card.getByText("Quản lý", { exact: true }).first()).toBeVisible();
+    await expect(card.getByText("Đang tham gia")).not.toBeVisible();
+    await expect(card.getByTestId("card-join")).toHaveCount(0);
+  });
+});
+
+// ── Manager (userPage = alice) — NOT-joined course shows "Tham gia" ──────────
+
+test.describe("Course list — manager not-joined course (userPage = alice)", () => {
+  const COURSES_URL_NJ = `${COURSES_URL}?q=${encodeURIComponent(SEED_HUST_CS_COURSE_ALICE_NOT_JOINED)}`;
+
+  test("alice DOES see 'Khóa học khác trong tổ chức' (she is not in every course)", async ({ userPage: page }) => {
+    await page.goto(COURSES_URL_NJ, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Khóa học", exact: true })).toBeVisible();
+    // Membership-based sectioning: a course alice has NOT joined surfaces here,
+    // even though she bypasses access as org admin.
+    await expect(
+      page.getByRole("heading", { name: "Khóa học khác trong tổ chức" }),
+    ).toBeVisible();
+  });
+
+  test("not-joined card shows a 'Tham gia' self-join button (no approval)", async ({ userPage: page }) => {
+    await page.goto(COURSES_URL_NJ, { waitUntil: "domcontentloaded" });
+    const card = page.locator('[data-slot="card"]').filter({ hasText: SEED_HUST_CS_COURSE_ALICE_NOT_JOINED }).first();
+    await expect(card).toBeVisible();
+    const joinBtn = card.getByTestId("card-join");
+    await expect(joinBtn).toBeVisible();
+    await expect(joinBtn).toHaveText(/Tham gia/);
+    // She is NOT a member yet → no learn/manage CTA. And she is a manager, so this
+    // is a direct self-join, NOT the plain-member "Yêu cầu tham gia" request flow.
+    await expect(card.getByTestId("card-manage")).toHaveCount(0);
+    await expect(card.getByTestId("card-request-join")).toHaveCount(0);
+    await expect(card.getByText("Đang tham gia")).not.toBeVisible();
+  });
+});
+
+// ── Manager (userPage = alice) — self-join lifecycle (mutation + cleanup) ────
+
+test.describe("Course list — manager self-join lifecycle (userPage = alice)", () => {
+  // Uses a SECOND not-joined course so it never collides with the read-only
+  // assertions above. try/finally removes the freshly-created membership so the
+  // seed stays clean for retries and parallel files.
+  const COURSE = SEED_HUST_CS_COURSE_ALICE_NOT_JOINED_2;
+  const LIST_URL = `${COURSES_URL}?q=${encodeURIComponent(COURSE)}`;
+
+  test("clicking 'Tham gia' enrolls alice → card flips to Vào học + Vào quản lý", async ({ userPage: page }) => {
+    // Multi-step (self-join → app-driven reload → cleanup); allow headroom for a cold backend.
+    test.setTimeout(90_000);
+    await page.goto(LIST_URL, { waitUntil: "domcontentloaded" });
+    const card = page.locator('[data-slot="card"]').filter({ hasText: COURSE }).first();
+    await expect(card.getByTestId("card-join")).toBeVisible();
+
+    let manageHref: string | null = null;
+    try {
+      // Click self-join and let the APP drive the outcome — the test does NOT reload
+      // the page itself. The button enrols then reloads the list; the card must
+      // re-section into "Khóa học của bạn" with the manage CTA on its own.
+      //
+      // Regression guard: the old button relied on a soft router.refresh() inside the
+      // click's useTransition. When that refresh did not settle, the button stuck on
+      // "Đang tham gia…" forever and the card never flipped. Asserting the flip with
+      // NO manual reload here would have hung — exactly the reported bug.
+      await card.getByTestId("card-join").click();
+      const joined = page.locator('[data-slot="card"]').filter({ hasText: COURSE }).first();
+      await expect(joined.getByTestId("card-manage")).toBeVisible({ timeout: 45000 });
+      // Now a member: split manage/learn CTA, badged "Quản lý", no self-join button.
+      await expect(joined.getByTestId("card-learn")).toBeVisible();
+      await expect(joined.getByText("Quản lý", { exact: true })).toBeVisible();
+      await expect(joined.getByTestId("card-join")).toHaveCount(0);
+      manageHref = await joined.getByTestId("card-manage").getAttribute("href");
+    } finally {
+      // Cleanup: remove alice's freshly-created membership via the members tab.
+      try {
+        if (!manageHref) {
+          await page.goto(LIST_URL, { waitUntil: "domcontentloaded" });
+          manageHref = await page
+            .locator('[data-slot="card"]').filter({ hasText: COURSE }).first()
+            .getByTestId("card-manage").getAttribute("href").catch(() => null);
+        }
+        if (manageHref) {
+          await page.goto(manageHref.split("?")[0] + "?tab=members", { waitUntil: "domcontentloaded" });
+          const managers = page.getByTestId("members-group-managers");
+          const aliceRow = managers.getByRole("row").filter({ hasText: "alice@dyadia.local" });
+          if (await aliceRow.count()) {
+            await aliceRow.getByRole("button", { name: "Mở menu thao tác thành viên" }).click();
+            await page.getByRole("menuitem", { name: "Xóa khỏi khóa học" }).click();
+            await page.getByRole("button", { name: "Xóa", exact: true }).click();
+            await expect(managers.getByText("alice@dyadia.local")).not.toBeVisible({ timeout: 10000 });
+          }
+        }
+      } catch {
+        // Best-effort cleanup; a fresh reseed precedes the next full run regardless.
+      }
+    }
   });
 });

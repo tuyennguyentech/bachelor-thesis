@@ -303,7 +303,7 @@ function TaskRow({
           {active && !stale && (
             <div className="mt-2 flex items-center gap-2 text-xs opacity-80">
               <Loader2Icon className="size-3 animate-spin" />
-              <span>Đang xử lý — không tải lại trang cho đến khi hoàn tất.</span>
+              <span>Đang xử lý ở chế độ nền — có thể rời trang hoặc tải lại, tiến trình vẫn tiếp tục.</span>
             </div>
           )}
         </div>

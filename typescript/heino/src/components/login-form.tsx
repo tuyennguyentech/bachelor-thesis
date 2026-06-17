@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
+import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
@@ -20,6 +21,7 @@ interface LoginFormProps {
 
 export function LoginForm({ className, next }: LoginFormProps) {
   const [state, action, pending] = useActionState<LoginState, FormData>(login, undefined);
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <Card className={cn("w-full", className)}>
@@ -52,14 +54,28 @@ export function LoginForm({ className, next }: LoginFormProps) {
 
             <Field>
               <FieldLabel htmlFor="password">Mật khẩu</FieldLabel>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-                className="bg-background"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  autoComplete="current-password"
+                  className="bg-background pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+                >
+                  {showPassword ? (
+                    <EyeOffIcon className="size-4" />
+                  ) : (
+                    <EyeIcon className="size-4" />
+                  )}
+                </button>
+              </div>
             </Field>
 
             <Button type="submit" disabled={pending} className="w-full">

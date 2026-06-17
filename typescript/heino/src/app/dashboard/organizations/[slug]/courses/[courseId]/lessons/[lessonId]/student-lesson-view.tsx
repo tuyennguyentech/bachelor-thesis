@@ -3,9 +3,7 @@
 import { useRef, useState, useCallback, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { VisuallyHidden } from "radix-ui";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
@@ -143,10 +141,67 @@ export function StudentLessonView({
   );
   // Which checkpoint is currently active (paused on)
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // ── In-progress draft persistence ──────────────────────────────────────────
+  // Mirror the student's answers + passed checkpoints to sessionStorage so a
+  // page refresh mid-attempt doesn't wipe their progress. (Video position
+  // already persists server-side via getWatchProgress → initialPosition.)
+  // Skipped in preview mode (teacher testing) and cleared once submitted.
+  const draftKey = `dyadia:attempt-draft:v1:${lessonId}`;
+  const draftHydratedRef = useRef(false);
+
+  // Hydrate once on mount. Reading sessionStorage in a useState initializer would
+  // diverge between SSR and the client and trigger a hydration mismatch, so we
+  // restore here (client-only) after the first paint instead.
+  useEffect(() => {
+    draftHydratedRef.current = true;
+    if (isPreview || previousResult !== null) return;
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        responses?: [string, any][];
+        passedIds?: string[];
+      };
+      if (Array.isArray(saved.responses) && saved.responses.length > 0) {
+        setResponses(new Map(saved.responses));
+      }
+      if (Array.isArray(saved.passedIds) && saved.passedIds.length > 0) {
+        setPassedIds(new Set(saved.passedIds));
+      }
+    } catch {
+      // corrupt or unavailable storage — start fresh
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist on change; clear once submitted (the submit handler / "Làm lại" empty
+  // the maps, but we must NOT remove on empty otherwise: on mount the hydrate
+  // effect's setState hasn't applied yet, so this effect would delete the draft
+  // it just restored. Writing only when there's progress, and removing only on
+  // submit, avoids that destructive window.
+  useEffect(() => {
+    if (!draftHydratedRef.current || isPreview) return;
+    try {
+      if (submitted) {
+        sessionStorage.removeItem(draftKey);
+      } else if (responses.size > 0 || passedIds.size > 0) {
+        sessionStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            responses: Array.from(responses.entries()),
+            passedIds: Array.from(passedIds),
+          }),
+        );
+      }
+    } catch {
+      // storage full/unavailable — non-fatal
+    }
+  }, [responses, passedIds, submitted, isPreview, draftKey]);
   // Whether the active checkpoint overlay is collapsed for review. Collapsing does
   // NOT clear activeId (the answer gate stays) — it only frees the scrubber so the
   // student can rewatch the already-seen region before answering.
-  const [checkpointCollapsed, setCheckpointCollapsed] = useState(false);
   const {
     isFullscreen,
     setShowFullscreenTip,
@@ -259,11 +314,6 @@ export function StudentLessonView({
     }
   }, [lessonInteractions]);
 
-  // A newly-activated checkpoint always opens expanded.
-  useEffect(() => {
-    if (activeId) setCheckpointCollapsed(false);
-  }, [activeId]);
-
   // While a checkpoint is active: the answer gate stays (activeId only clears on
   // handleContinue), but the student MAY press play to re-watch the already-seen
   // region. Playback auto-re-pauses once it reaches the high-water mark so they
@@ -293,17 +343,24 @@ export function StudentLessonView({
     };
   }, [activeId]);
 
-  // Always-on seek guard (students only): rewind/rewatch freely, but fast-forward
-  // past the legitimately-reached high-water mark is snapped back. Teachers in
-  // preview seek without restriction.
+  // Seek guard (students only): rewind/review freely, and jump FORWARD up to (but
+  // not past) the next UNANSWERED checkpoint. Scrubbing beyond that checkpoint snaps
+  // back to it and surfaces it, so a learner can navigate the lesson freely but cannot
+  // skip a quiz they have not completed (Udemy-style navigation + checkpoint gating).
+  // Once every checkpoint is answered there is no gate and seeking is unrestricted.
+  // Teachers in preview seek without restriction.
+  const nextGate = pendingCheckpoints[0];
   useEffect(() => {
-    if (isPreview) return;
+    if (isPreview || !nextGate) return;
     const video = videoRef.current;
     if (!video) return;
     const guardSeek = () => {
-      if (video.currentTime > maxWatchedSecondsRef.current + FORWARD_SEEK_SLACK_S) {
-        video.currentTime = maxWatchedSecondsRef.current;
-        prevTimeRef.current = maxWatchedSecondsRef.current;
+      if (video.currentTime > nextGate.startSeconds + FORWARD_SEEK_SLACK_S) {
+        video.currentTime = nextGate.startSeconds;
+        prevTimeRef.current = nextGate.startSeconds;
+        // Trying to scrub past an unanswered checkpoint surfaces it (the gate), so
+        // the learner must complete it before continuing past this point.
+        setActiveId((cur) => cur ?? nextGate.id);
       }
     };
     video.addEventListener("seeking", guardSeek);
@@ -312,7 +369,7 @@ export function StudentLessonView({
       video.removeEventListener("seeking", guardSeek);
       video.removeEventListener("seeked", guardSeek);
     };
-  }, [isPreview, playerKey]);
+  }, [isPreview, playerKey, nextGate]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleAnswer(id: string, response: any) {
@@ -420,7 +477,6 @@ export function StudentLessonView({
     setPassedIds(new Set());
     setResponses(new Map());
     setActiveId(null);
-    setCheckpointCollapsed(false);
     setError(null);
     setPreviewMetrics(null);
   }
@@ -543,8 +599,7 @@ export function StudentLessonView({
 
   const hasSidebar = chunks.length > 0 || segments.length > 0 || !!transcript;
 
-  // Shared checkpoint body, rendered either inside the fullscreen in-video
-  // overlay or inside the (non-fullscreen) centered Dialog. `index`/`total`
+  // Checkpoint body rendered inside the single in-frame overlay. `index`/`total`
   // label the active question's position within its cluster.
   function renderCheckpoint(index: number, total: number) {
     if (!activeInteraction) return null;
@@ -568,7 +623,6 @@ export function StudentLessonView({
           )}
           token={token}
           lessonId={lessonId}
-          isPreview={isPreview}
           onGrade={(grade) => {
             setDraftGrades((prev) => new Map(prev).set(activeInteraction.id, grade));
           }}
@@ -613,7 +667,7 @@ export function StudentLessonView({
           </div>
         )}
 
-        <div ref={containerRef} className="relative w-full rounded-md overflow-hidden border bg-black shadow-sm group [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-none">
+        <div ref={containerRef} data-testid="lesson-player-frame" className="relative w-full rounded-md overflow-hidden border bg-black shadow-sm group [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-none">
           <VideoPlayer
             playerKey={playerKey}
             videoRef={videoRef}
@@ -643,81 +697,28 @@ export function StudentLessonView({
               }}
             />
           )}
-          {/* Fullscreen path only: a portalled Dialog would hide behind a
-              fullscreened element, so keep the in-video overlay when fullscreen. */}
-          {!submitted && activeInteraction && isFullscreen && !checkpointCollapsed && (() => {
+          {/* In-frame interaction overlay — a direct child of the player
+              container (containerRef), so it stays INSIDE the video frame in
+              BOTH normal and fullscreen. At a checkpoint it covers the video;
+              the student answers to continue (forward-seeking past an unanswered
+              checkpoint stays blocked by the seek gate, not by this overlay). */}
+          {!submitted && activeInteraction && (() => {
             const cluster = lessonInteractions
               .filter((it) => it.startSeconds === activeInteraction.startSeconds)
               .sort((a, b) => a.orderIndex - b.orderIndex);
             const clusterIndex = cluster.findIndex((it) => it.id === activeInteraction.id) + 1;
             return (
-              <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 md:p-8 overflow-y-auto text-foreground animate-in fade-in duration-200">
-                <div className="w-full h-full bg-card p-6 md:p-8 overflow-y-auto flex flex-col justify-between rounded-none border-none">
-                  <div className="flex justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => setCheckpointCollapsed(true)} className="text-xs">
-                      Xem lại video
-                    </Button>
-                  </div>
+              <div
+                data-testid="quiz-checkpoint-overlay"
+                className="absolute inset-0 z-50 bg-background/95 backdrop-blur-md flex flex-col overflow-y-auto text-foreground animate-in fade-in duration-200"
+              >
+                <div className="w-full h-full bg-card p-6 md:p-8 overflow-y-auto flex flex-col justify-between">
                   {renderCheckpoint(clusterIndex, cluster.length)}
                 </div>
               </div>
             );
           })()}
-          {/* Fullscreen, collapsed-for-review: a slim banner to reopen the question. */}
-          {!submitted && activeInteraction && isFullscreen && checkpointCollapsed && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-              <Button size="sm" onClick={() => setCheckpointCollapsed(false)} className="shadow-lg">
-                Trở lại câu hỏi
-              </Button>
-            </div>
-          )}
         </div>
-
-        {/* Non-fullscreen path: render the checkpoint inside a centered modal. */}
-        {!submitted && activeInteraction && !isFullscreen && !checkpointCollapsed && (() => {
-          const cluster = lessonInteractions
-            .filter((it) => it.startSeconds === activeInteraction.startSeconds)
-            .sort((a, b) => a.orderIndex - b.orderIndex);
-          const clusterIndex = cluster.findIndex((it) => it.id === activeInteraction.id) + 1;
-          return (
-            <Dialog open>
-              <DialogContent
-                showCloseButton={false}
-                className="w-full h-full backdrop-blur-md max-w-4xl overflow-y-auto"
-                onInteractOutside={(e) => e.preventDefault()}
-                onPointerDownOutside={(e) => e.preventDefault()}
-                onEscapeKeyDown={(e) => e.preventDefault()}
-              >
-                <VisuallyHidden.Root>
-                  <DialogTitle>Câu hỏi tương tác</DialogTitle>
-                </VisuallyHidden.Root>
-                <div className="flex h-full flex-col">
-                  <div className="flex justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => setCheckpointCollapsed(true)} className="text-xs">
-                      Xem lại video
-                    </Button>
-                  </div>
-                  <div className="flex flex-1 flex-col justify-between">
-                    {renderCheckpoint(clusterIndex, cluster.length)}
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-          );
-        })()}
-
-        {/* Non-fullscreen, collapsed-for-review: a banner to reopen the question
-            while the scrubber stays reachable for rewatching the seen region. */}
-        {!submitted && activeInteraction && !isFullscreen && checkpointCollapsed && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-primary/40 bg-primary/5 px-4 py-3 animate-in fade-in slide-in-from-top-1 duration-200">
-            <p className="text-sm text-foreground">
-              Bạn đang xem lại video. Hãy trả lời câu hỏi để tiếp tục bài học.
-            </p>
-            <Button size="sm" onClick={() => setCheckpointCollapsed(false)}>
-              Trở lại câu hỏi
-            </Button>
-          </div>
-        )}
 
         <StudentLessonStatusCard
           activeInteraction={activeInteraction}

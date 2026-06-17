@@ -14,7 +14,7 @@ import { uploadConfig } from "@/lib/client-config";
 import { toUserMessage } from "@/lib/connect-error";
 import { create } from "@bufbuild/protobuf";
 import { toast } from "sonner";
-import { type InteractionFormData, buildProtoConfig } from "./interaction-row";
+import { type InteractionFormData, buildProtoConfig, InteractionRow } from "./interaction-row";
 import { type ChunkGenPhase } from "./chunk-generate-form";
 import { ExerciseChunkList } from "./exercise-chunk-list";
 import {
@@ -418,6 +418,30 @@ export function TabExercises({
   const chunksWithConfigCount = localChunks.filter(c => !!c.interactionConfig).length;
 
   if (!hasChunks) {
+    // A lesson can have exercises that aren't tied to transcript segments —
+    // e.g. questions seeded/imported directly, or chunks deleted after
+    // generation. Don't hide them behind the "complete segmentation" lock:
+    // show them in a flat, editable list so the teacher can review and edit.
+    if (interactions.length > 0) {
+      return (
+        <ChunklessExerciseList
+          interactions={interactions}
+          lessonId={lessonId}
+          token={token}
+          disabled={isActuallyBusy}
+          onUpdate={(updated) => {
+            updateInteractionsFromCurrent((prev) =>
+              prev.map((x) => (x.id === updated.id ? updated : x)),
+            );
+            router.refresh();
+          }}
+          onDelete={(id) => {
+            updateInteractionsFromCurrent((prev) => prev.filter((x) => x.id !== id));
+            router.refresh();
+          }}
+        />
+      );
+    }
     return <LockedExerciseState />;
   }
 
@@ -476,6 +500,10 @@ export function TabExercises({
         filteredChunks={filteredChunks}
         interactions={interactions}
         isAddingDisabled={disabled || isGenerating || isDeleting}
+        // Manual "Thêm" runs alongside an AI generation — it is an independent
+        // synchronous RPC the backend permits concurrently. Only an in-flight
+        // delete (which would wipe the row we just added) genuinely races it.
+        addDisabled={isDeleting}
         lessonId={lessonId}
         localChunks={localChunks}
         onCloseAdd={() => { setAddingChunkId(null); setAddError(null); }}
@@ -548,6 +576,54 @@ export function TabExercises({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/**
+ * Fallback view for a lesson that has exercises but no transcript chunks (so the
+ * normal per-segment editor can't group them). Shows every interaction in a
+ * flat, editable list instead of locking the tab behind "complete segmentation".
+ */
+function ChunklessExerciseList({
+  interactions,
+  lessonId,
+  token,
+  disabled,
+  onUpdate,
+  onDelete,
+}: {
+  interactions: LessonInteraction[];
+  lessonId: string;
+  token: string;
+  disabled: boolean;
+  onUpdate: (it: LessonInteraction) => void;
+  onDelete: (id: string) => void;
+}) {
+  const ordered = [...interactions].sort(
+    (a, b) => a.startSeconds - b.startSeconds || a.orderIndex - b.orderIndex,
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-md border border-dashed bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+        Bài học có <strong className="text-foreground">{interactions.length} câu hỏi</strong> chưa
+        gắn với phân đoạn video. Bạn vẫn có thể xem và chỉnh sửa từng câu bên dưới. Muốn nhóm bài
+        tập theo phân đoạn, hãy chạy lại <strong className="text-foreground">Bước 3: Phân đoạn</strong>.
+      </div>
+      <div className="flex flex-col gap-3">
+        {ordered.map((it, idx) => (
+          <InteractionRow
+            key={it.id}
+            interaction={it}
+            index={idx}
+            lessonId={lessonId}
+            token={token}
+            disabled={disabled}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
     </div>
   );
 }

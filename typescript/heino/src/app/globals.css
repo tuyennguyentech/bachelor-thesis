@@ -6,9 +6,13 @@
 
 @theme inline {
 
-    --font-heading: var(--font-sans);
+    /* Match soict.hust.edu.vn's actual rendering: plain Arial/Helvetica
+       (Liberation Sans on Linux) — its declared Roboto webfont never loads. */
+    --font-heading: Arial, "Helvetica Neue", Helvetica, sans-serif;
 
-    --font-sans: var(--font-sans);
+    --font-sans: Arial, "Helvetica Neue", Helvetica, sans-serif;
+
+    --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 
     --color-sidebar-ring: var(--sidebar-ring);
 
