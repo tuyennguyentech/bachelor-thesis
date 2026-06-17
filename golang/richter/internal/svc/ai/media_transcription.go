@@ -270,7 +270,7 @@ func extractAudioSegments(ctx context.Context, videoPath, outDir string, segment
 // and returns the full transcript text along with fine-grained segment timestamps.
 // The audio is streamed directly from the temp file via io.Pipe so no full copy of
 // the WAV data is held in memory at any time.
-func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath string) (string, []transcriptSegment, error) {
+func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath string, audioLang string) (string, []transcriptSegment, error) {
 	if s.sttSem != nil {
 		// Acquire a STT slot. If the parent ctx is cancelled while
 		// we wait, release the would-be slot and bail.
@@ -323,6 +323,21 @@ func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath stri
 		if err := w.WriteField("model", s.sttCfg.Model); err != nil {
 			writeErr = fmt.Errorf("write model field: %w", err)
 			return
+		}
+		// Spoken-language hint for the AUDIO (NOT the lesson's output language).
+		// The per-lesson hint (audioLang) wins; otherwise fall back to the
+		// deployment default (s.sttCfg.Language); empty = Whisper auto-detect.
+		// This keeps a Vietnamese clip from being mis-labelled English AND an
+		// English clip from being forced to Vietnamese.
+		lang := strings.TrimSpace(audioLang)
+		if lang == "" {
+			lang = strings.TrimSpace(s.sttCfg.Language)
+		}
+		if lang != "" {
+			if err := w.WriteField("language", lang); err != nil {
+				writeErr = fmt.Errorf("write language field: %w", err)
+				return
+			}
 		}
 		if err := w.WriteField("response_format", "verbose_json"); err != nil {
 			writeErr = fmt.Errorf("write response_format: %w", err)
@@ -394,7 +409,7 @@ func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath stri
 // A per-pipeline wall-clock deadline is applied around the full pipeline via
 // aiCfg.PipelineTimeout so that a hung ffmpeg or STT call cannot block a
 // worker indefinitely beyond the sum of the per-stage budgets.
-func (s *transcriptionService) runSTTAnalyze(ctx context.Context, storageKey string, progress transcript.ProgressFn) (transcript string, segments []transcriptSegment, err error) {
+func (s *transcriptionService) runSTTAnalyze(ctx context.Context, storageKey string, audioLang string, progress transcript.ProgressFn) (transcript string, segments []transcriptSegment, err error) {
 	// Wrap the entire pipeline in an outer deadline so hung sub-stages
 	// (slow ffmpeg, unresponsive STT) are reaped within a predictable
 	// wall-clock budget. Per-stage contexts are derived from this one, so
@@ -455,7 +470,7 @@ func (s *transcriptionService) runSTTAnalyze(ctx context.Context, storageKey str
 		if len(chunks) > 1 {
 			label = fmt.Sprintf("phần %d/%d ", i+1, len(chunks))
 		}
-		text, segs, cErr := s.transcribeChunk(pipeCtx, chunkPath, label, progress)
+		text, segs, cErr := s.transcribeChunk(pipeCtx, chunkPath, label, audioLang, progress)
 		if cErr != nil {
 			// Sanitize: don't leak the internal whisper URL / net/http
 			// stack. Keep a short Vietnamese message; the wrap preserves
@@ -498,7 +513,7 @@ func (s *transcriptionService) runSTTAnalyze(ctx context.Context, storageKey str
 // transcribed as a sequence of independently bounded requests. label (e.g.
 // "phần 2/6 ") is prefixed to the progress message; pass "" for single-chunk
 // videos.
-func (s *transcriptionService) transcribeChunk(ctx context.Context, audioPath, label string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
+func (s *transcriptionService) transcribeChunk(ctx context.Context, audioPath, label string, audioLang string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
 	sttCtx, sttCancel := s.aiCtx(ctx, s.aiCfg.STTRequestTimeout)
 	defer sttCancel()
 
@@ -510,7 +525,7 @@ func (s *transcriptionService) transcribeChunk(ctx context.Context, audioPath, l
 	resultCh := make(chan sttResult, 1)
 	start := time.Now()
 	go func() {
-		t, segs, err := s.sttTranscribe(sttCtx, audioPath)
+		t, segs, err := s.sttTranscribe(sttCtx, audioPath, audioLang)
 		resultCh <- sttResult{transcript: t, segments: segs, err: err}
 	}()
 

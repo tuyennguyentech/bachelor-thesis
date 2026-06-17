@@ -3,6 +3,7 @@ package interactions
 import (
 	"context"
 	"encoding/json"
+	"sort"
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
@@ -71,9 +72,41 @@ func (s *InteractionsSvc) LessonHeatmap(
 		})
 	}
 
+	// Per-chunk student breakdowns so the UI can expand a cell into "who is in
+	// this segment + how they scored" without a second request.
+	brkRows, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonChunkStudentScoresRow, error) {
+		return q.LessonChunkStudentScores(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	byChunk := make(map[string]*richterv1.ChunkStudentBreakdown)
+	chunkOrder := make([]string, 0)
+	for _, r := range brkRows {
+		cid := r.ChunkID.String()
+		b, ok := byChunk[cid]
+		if !ok {
+			b = &richterv1.ChunkStudentBreakdown{ChunkId: cid}
+			byChunk[cid] = b
+			chunkOrder = append(chunkOrder, cid)
+		}
+		b.Students = append(b.Students, &richterv1.ChunkStudentScore{
+			UserId:      r.UserID.String(),
+			DisplayName: buildDisplayName(r.FirstName, r.MiddleName, r.LastName),
+			Email:       r.Email,
+			ScoreFrac:   r.ScoreFrac,
+			Answered:    r.Answered,
+		})
+	}
+	breakdowns := make([]*richterv1.ChunkStudentBreakdown, 0, len(chunkOrder))
+	for _, cid := range chunkOrder {
+		breakdowns = append(breakdowns, byChunk[cid])
+	}
+
 	return &richterv1.LessonHeatmapResponse{
 		Cells:        cells,
 		GapThreshold: heatmapGapThreshold,
+		Breakdowns:   breakdowns,
 	}, nil
 }
 
@@ -165,7 +198,7 @@ func buildAtRiskStudents(rows []gen.ListCourseAttemptEngagementInputsRow) []*ric
 			curRun = nil
 		}
 		for _, r := range block {
-			eng := computeEngagementScore(r.WatchFraction, r.ResponseRate, r.ScoreFraction)
+			eng := computeEngagementScore(r.WatchFraction, r.ScoreFraction)
 			if eng < engagementWarnThreshold {
 				curRun = append(curRun, &richterv1.AtRiskLessonPoint{
 					LessonId:        r.LessonID.String(),
@@ -218,8 +251,9 @@ func (s *InteractionsSvc) GetLessonQuestionAnalytics(
 	}
 
 	type qaResult struct {
-		kindRows []gen.LessonAccuracyByKindRow
-		mcqRows  []gen.LessonMcqOptionDistributionRow
+		kindRows     []gen.LessonAccuracyByKindRow
+		mcqRows      []gen.LessonMcqOptionDistributionRow
+		questionRows []gen.LessonQuestionStatsRow
 		// configs: single-choice interaction config + prompt keyed by interaction id.
 		interactions map[string]gen.LessonInteraction
 		// avgWords inputs gathered across all responses in the lesson.
@@ -234,6 +268,9 @@ func (s *InteractionsSvc) GetLessonQuestionAnalytics(
 			return r, err
 		}
 		if r.mcqRows, err = q.LessonMcqOptionDistribution(ctx, lessonID); err != nil {
+			return r, err
+		}
+		if r.questionRows, err = q.LessonQuestionStats(ctx, lessonID); err != nil {
 			return r, err
 		}
 
@@ -280,8 +317,10 @@ func (s *InteractionsSvc) GetLessonQuestionAnalytics(
 		})
 	}
 
-	// (b) mcq misconception stats — group distribution rows by interaction.
-	mcqStats := buildMcqStats(res.mcqRows, res.interactions)
+	// (b) per-question stats for EVERY answered question, of any kind. Single-choice
+	// MCQ also carries its option distribution; the other kinds carry just accuracy.
+	optionsByID := optionStatsByInteraction(res.mcqRows, res.interactions)
+	questionStats := buildQuestionStats(res.questionRows, res.interactions, optionsByID)
 
 	// (c) average free-text response length in words.
 	avgWords := float64(0)
@@ -291,57 +330,92 @@ func (s *InteractionsSvc) GetLessonQuestionAnalytics(
 
 	return &richterv1.GetLessonQuestionAnalyticsResponse{
 		KindAccuracy:           kindAccuracy,
-		McqStats:               mcqStats,
+		QuestionStats:          questionStats,
 		AvgResponseLengthWords: avgWords,
 	}, nil
 }
 
-// buildMcqStats groups option-distribution rows by interaction and decorates them
-// with option text + correctness parsed from each single-choice interaction config.
-func buildMcqStats(
+// optionStatsByInteraction groups single-choice MCQ option-distribution rows by
+// interaction id, decorating each option with its text + correctness from the
+// interaction's config. Shared by the per-question analysis (QuestionStat.options).
+func optionStatsByInteraction(
 	rows []gen.LessonMcqOptionDistributionRow,
 	interactions map[string]gen.LessonInteraction,
-) []*richterv1.McqInteractionStats {
-	// Preserve interaction order of first appearance (rows are sorted by interaction_id).
-	var order []string
+) map[string][]*richterv1.McqOptionStat {
 	grouped := map[string][]gen.LessonMcqOptionDistributionRow{}
 	for _, r := range rows {
 		id := r.InteractionID.String()
-		if _, seen := grouped[id]; !seen {
-			order = append(order, id)
-		}
 		grouped[id] = append(grouped[id], r)
 	}
-
-	out := make([]*richterv1.McqInteractionStats, 0, len(order))
-	for _, id := range order {
-		it, ok := interactions[id]
+	out := make(map[string][]*richterv1.McqOptionStat, len(grouped))
+	for id, rs := range grouped {
 		cfg := singleChoiceConfig{CorrectAnswer: -1}
-		prompt := ""
-		if ok {
-			prompt = it.Prompt
+		if it, ok := interactions[id]; ok {
 			_ = json.Unmarshal(it.Config, &cfg)
 		}
-
-		opts := make([]*richterv1.McqOptionStat, 0, len(grouped[id]))
-		for _, r := range grouped[id] {
-			text := ""
-			if int(r.OptionIndex) >= 0 && int(r.OptionIndex) < len(cfg.Options) {
-				text = cfg.Options[r.OptionIndex]
-			}
+		chosen := make(map[int32]int32, len(rs))
+		for _, r := range rs {
+			chosen[r.OptionIndex] = r.ChosenCount
+		}
+		// Emit EVERY option from the config (in order), including ones nobody
+		// chose. Otherwise a correct answer that drew zero responses would vanish
+		// from the misconception view — the teacher would never see what the
+		// right answer was, or that the class missed it entirely.
+		opts := make([]*richterv1.McqOptionStat, 0, len(cfg.Options))
+		seen := make(map[int32]bool, len(cfg.Options))
+		for i, text := range cfg.Options {
+			idx := int32(i)
+			seen[idx] = true
 			opts = append(opts, &richterv1.McqOptionStat{
-				OptionIndex: r.OptionIndex,
+				OptionIndex: idx,
 				OptionText:  text,
-				ChosenCount: r.ChosenCount,
-				IsCorrect:   int(r.OptionIndex) == cfg.CorrectAnswer,
+				ChosenCount: chosen[idx],
+				IsCorrect:   i == cfg.CorrectAnswer,
 			})
 		}
-		out = append(out, &richterv1.McqInteractionStats{
+		// Preserve any chosen index outside the config range (stale/invalid
+		// selection) so its count isn't silently dropped. Falls back to the raw
+		// rows entirely when the config didn't parse (cfg.Options empty).
+		for _, r := range rs {
+			if !seen[r.OptionIndex] {
+				opts = append(opts, &richterv1.McqOptionStat{
+					OptionIndex: r.OptionIndex,
+					ChosenCount: r.ChosenCount,
+				})
+			}
+		}
+		out[id] = opts
+	}
+	return out
+}
+
+// buildQuestionStats turns per-interaction accuracy rows (all kinds) into the
+// per-question analysis list, attaching single-choice option distributions where
+// available and ordering chronologically by checkpoint time.
+func buildQuestionStats(
+	rows []gen.LessonQuestionStatsRow,
+	interactions map[string]gen.LessonInteraction,
+	optionsByID map[string][]*richterv1.McqOptionStat,
+) []*richterv1.QuestionStat {
+	out := make([]*richterv1.QuestionStat, 0, len(rows))
+	for _, r := range rows {
+		id := r.InteractionID.String()
+		it, ok := interactions[id]
+		if !ok {
+			continue // response to a since-deleted interaction
+		}
+		out = append(out, &richterv1.QuestionStat{
 			InteractionId: id,
-			Prompt:        prompt,
-			Options:       opts,
+			Kind:          it.Kind,
+			Prompt:        it.Prompt,
+			ResponseCount: r.ResponseCount,
+			Accuracy:      r.Accuracy,
+			Options:       optionsByID[id], // nil for non-single-choice kinds
 		})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return interactions[out[i].InteractionId].StartSeconds < interactions[out[j].InteractionId].StartSeconds
+	})
 	return out
 }
 
@@ -349,39 +423,35 @@ func buildMcqStats(
 // counts of free-text responses (those whose handler implements
 // TextResponseMeasurer). Returns (totalWords, contributingResponses).
 func measureLessonResponseWords(ctx context.Context, q *gen.Queries, lessonID pgtype.UUID) (int, int, error) {
-	const pageSize = int32(200)
+	const pageSize = int32(500)
 	var (
 		offset    int32
 		wordTotal int
 		wordCount int
 	)
 	for {
-		attempts, err := q.ListLessonAttempts(ctx, gen.ListLessonAttemptsParams{
+		// One batched query per page across ALL attempts — avoids an N+1
+		// per-attempt fetch that scaled with class size.
+		resps, err := q.ListLessonResponseKinds(ctx, gen.ListLessonResponseKindsParams{
 			LessonID: lessonID, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
 			return 0, 0, err
 		}
-		for _, a := range attempts {
-			resps, err := q.ListAttemptResponses(ctx, a.ID)
-			if err != nil {
-				return 0, 0, err
+		for _, resp := range resps {
+			h := Get(dbStringToKind(resp.InteractionKind))
+			measurer, ok := h.(TextResponseMeasurer)
+			if !ok {
+				continue
 			}
-			for _, resp := range resps {
-				h := Get(dbStringToKind(resp.InteractionKind))
-				measurer, ok := h.(TextResponseMeasurer)
-				if !ok {
-					continue
-				}
-				n, contributes := measurer.ResponseWordCount(resp.Response)
-				if !contributes {
-					continue
-				}
-				wordTotal += n
-				wordCount++
+			n, contributes := measurer.ResponseWordCount(resp.Response)
+			if !contributes {
+				continue
 			}
+			wordTotal += n
+			wordCount++
 		}
-		if int32(len(attempts)) < pageSize {
+		if int32(len(resps)) < pageSize {
 			break
 		}
 		offset += pageSize

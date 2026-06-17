@@ -133,7 +133,8 @@ func (s *InteractionsSvc) ListAttempts(
 			watchFrac = float64(r.VideoWatchFraction.Float32)
 		}
 		// response_rate: actual responses submitted / total interactions available.
-		// Both fields are now returned by the ListLessonAttempts query.
+		// Kept on the proto for completeness; no longer feeds engagement (it is
+		// ~always 1.0 since answering is required to submit).
 		responseRate := float64(0)
 		if r.TotalInteractions > 0 {
 			responseRate = float64(r.ResponseCount) / float64(r.TotalInteractions)
@@ -142,7 +143,7 @@ func (s *InteractionsSvc) ListAttempts(
 		if r.MaxScore > 0 {
 			scoreFrac = float64(r.TotalScore) / float64(r.MaxScore)
 		}
-		eng := computeEngagementScore(watchFrac, responseRate, scoreFrac)
+		eng := computeEngagementScore(watchFrac, scoreFrac)
 		summaries = append(summaries, &richterv1.StudentAttemptSummary{
 			UserId:             r.UserID.String(),
 			DisplayName:        name,
@@ -226,7 +227,6 @@ func (s *InteractionsSvc) ListCourseAttemptsSummary(
 	for _, r := range ar.rows {
 		eng := computeEngagementScore(
 			r.AvgVideoWatchFraction,
-			r.ResponseRate,
 			r.AvgScore,
 		)
 		var lastActive *timestamppb.Timestamp
@@ -234,15 +234,21 @@ func (s *InteractionsSvc) ListCourseAttemptsSummary(
 			lastActive = timestamppb.New(t)
 		}
 		students = append(students, &richterv1.CourseStudentSummary{
-			UserId:          r.UserID.String(),
-			DisplayName:     buildDisplayName(r.FirstName, r.MiddleName, r.LastName),
-			Email:           r.Email,
-			LessonsCompleted: r.LessonsCompleted,
-			LessonsTotal:    r.LessonsTotal,
-			AvgScore:        r.AvgScore,
-			EngagementScore: eng,
-			LastActive:      lastActive,
-			ResponseRate:    r.ResponseRate,
+			UserId:                r.UserID.String(),
+			DisplayName:           buildDisplayName(r.FirstName, r.MiddleName, r.LastName),
+			Email:                 r.Email,
+			LessonsCompleted:      r.LessonsCompleted,
+			LessonsTotal:          r.LessonsTotal,
+			AvgScore:              r.AvgScore,
+			AvgVideoWatchFraction: r.AvgVideoWatchFraction,
+			EngagementScore:       eng,
+			LastActive:            lastActive,
+			ResponseRate:          r.ResponseRate,
+			TotalScore:            r.TotalScore,
+			TotalMaxScore:         r.TotalMaxScore,
+			TotalResponses:        r.TotalResponses,
+			TotalInteractions:     r.TotalInteractions,
+			TotalTimeMs:           r.TotalTimeMs,
 		})
 	}
 
@@ -300,9 +306,14 @@ func (s *InteractionsSvc) ListMyCourseProgress(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // computeEngagementScore returns a composite 0–100 engagement score.
-// Formula: round(100 * (0.4*watch + 0.3*responseRate + 0.3*scoreFrac))
+// Formula: round(100 * (0.5*watch + 0.5*scoreFrac))
 // Each input is clamped to [0, 1]; divide-by-zero is guarded by callers passing 0.
-func computeEngagementScore(watch, responseRate, scoreFrac float64) float64 {
+//
+// Response rate (answered/total) is deliberately NOT an input: questions are
+// answered to submit, so it is ~always 1.0 and only added a constant offset that
+// inflated every score. Engagement now reflects what varies — how much of the
+// video was watched and how well the learner scored.
+func computeEngagementScore(watch, scoreFrac float64) float64 {
 	clamp := func(v float64) float64 {
 		if v < 0 {
 			return 0
@@ -312,7 +323,7 @@ func computeEngagementScore(watch, responseRate, scoreFrac float64) float64 {
 		}
 		return v
 	}
-	raw := 0.4*clamp(watch) + 0.3*clamp(responseRate) + 0.3*clamp(scoreFrac)
+	raw := 0.5*clamp(watch) + 0.5*clamp(scoreFrac)
 	return math.Round(100 * raw)
 }
 

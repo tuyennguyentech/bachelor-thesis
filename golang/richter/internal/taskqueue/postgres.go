@@ -237,23 +237,10 @@ func (p *PostgresDB) ClaimNextInqueuedTask(ctx context.Context, workerID pgtype.
 }
 
 func (p *PostgresDB) HeartbeatTask(ctx context.Context, taskID, workerID pgtype.UUID) (int64, error) {
-	var n int64
-	err := db.WithConnectionExec(p.pool, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
-		// sqlc-generated Exec returns the command tag from
-		// pgx. Exec doesn't expose it through WithConnectionExec,
-		// so we issue the UPDATE directly here to read rows
-		// affected. This is the one place we bypass the helper
-		// because we genuinely need the affected count.
-		tag, execErr := conn.Exec(ctx,
-			`UPDATE tasks
-			 SET heartbeat = now(), updated_at = now()
-			 WHERE id = $1 AND worker_id = $2 AND status = 'processing'`,
-			taskID, workerID)
-		if execErr != nil {
-			return execErr
-		}
-		n = tag.RowsAffected()
-		return nil
+	// The HeartbeatTask :execrows query returns rows affected so the worker
+	// can detect a stolen/cancelled task (affected=0).
+	n, err := db.WithConnection(p.pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (int64, error) {
+		return q.HeartbeatTask(ctx, gen.HeartbeatTaskParams{ID: taskID, WorkerID: workerID})
 	})
 	if err != nil {
 		return 0, fmt.Errorf("taskqueue: heartbeat: %w", err)
@@ -334,6 +321,16 @@ func (p *PostgresDB) UpdateTaskProgress(ctx context.Context, id pgtype.UUID, pro
 			ProgressCurrent: progressCurrent,
 			ProgressTotal:   progressTotal,
 			Message:         message,
+		})
+	})
+}
+
+func (p *PostgresDB) SetTaskCheckpoint(ctx context.Context, id pgtype.UUID, output []byte, workerID pgtype.UUID) error {
+	return db.WithConnectionExec(p.pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.SetTaskCheckpoint(ctx, gen.SetTaskCheckpointParams{
+			ID:            id,
+			OutputPayload: output,
+			WorkerID:      workerID,
 		})
 	})
 }

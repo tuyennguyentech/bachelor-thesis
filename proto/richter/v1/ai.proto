@@ -392,9 +392,21 @@ message PipelineRunTaskInput {
   bool force_regenerate = 7;
 }
 
+// Last completed stage of a pipeline_run task. Persisted to output_payload
+// after each stage so a worker crash + reclaim resumes from the next stage
+// instead of restarting (which would re-run Whisper and wipe chunks).
+enum PipelineStage {
+  PIPELINE_STAGE_UNSPECIFIED = 0;  // nothing done yet
+  PIPELINE_STAGE_TRANSCRIBED = 1;  // transcript extracted
+  PIPELINE_STAGE_CHUNKED = 2;      // transcript segmented
+  PIPELINE_STAGE_GENERATED = 3;    // interactions generated (terminal)
+}
+
 message PipelineRunTaskOutput {
   int64 completed_at = 1;
   int32 interactions = 2;  // number of interactions generated
+  // Highest stage completed so far (a resumable checkpoint).
+  PipelineStage stage = 3;
 }
 
 service AIService {
@@ -427,4 +439,14 @@ service AIService {
   // Video watch progress — stored in FoundationDB, not PostgreSQL.
   rpc UpdateWatchProgress(UpdateWatchProgressRequest) returns (UpdateWatchProgressResponse) {}
   rpc GetWatchProgress(GetWatchProgressRequest) returns (GetWatchProgressResponse) {}
+
+  // Full reset: wipe the video + transcript + chunks + generated exercises +
+  // student attempts, returning the lesson to its blank pre-quick-create state.
+  rpc ResetLessonContent(ResetLessonContentRequest) returns (ResetLessonContentResponse) {}
 }
+
+message ResetLessonContentRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message ResetLessonContentResponse {}

@@ -26,6 +26,7 @@ func (s *Service) RunExtract(
 	ctx context.Context,
 	lessonID pgtype.UUID,
 	videoKey string,
+	audioLang string,
 	progress ProgressFn,
 ) error {
 	lessonIDStr := lessonID.String()
@@ -44,7 +45,7 @@ func (s *Service) RunExtract(
 	// return transcript/segments from a previously-analyzed video.
 	segment.DeleteLessonTranscripts(s.KV, lessonIDStr)
 
-	transcriptText, segs, extractErr := s.Transcription(ctx, videoKey, progress)
+	transcriptText, segs, extractErr := s.Transcription(ctx, videoKey, audioLang, progress)
 	if extractErr != nil {
 		return extractErr
 	}

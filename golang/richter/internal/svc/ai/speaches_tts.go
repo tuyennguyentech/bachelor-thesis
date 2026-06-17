@@ -157,12 +157,10 @@ func (s *AISvc) synthesiseAndEmbed(
 	if lessonID == "" {
 		return nil, fmt.Errorf("TTS: lessonID required for lesson-scoped audio key")
 	}
-	ttsCtx, cancel := s.aiCtx(ctx, s.aiCfg.TTSRequestTimeout)
-	defer cancel()
 
-	wav, err := s.ttsClient.Synthesise(ttsCtx, text, language)
+	wav, err := s.synthesiseWithRetry(ctx, text, language)
 	if err != nil {
-		return nil, fmt.Errorf("TTS synthesise: %w", err)
+		return nil, err
 	}
 
 	key := "lessons/" + lessonID + "/ai-audio/" + uuid.New().String() + ".wav"
@@ -178,4 +176,34 @@ func (s *AISvc) synthesiseAndEmbed(
 		return nil, fmt.Errorf("TTS set key: %w", err)
 	}
 	return updated, nil
+}
+
+// synthesiseWithRetry calls the TTS backend with bounded retry-with-backoff.
+// Transient Speaches/network failures (5xx/429, timeout, empty body) are the
+// reason listening questions silently went missing in some chunks: a single
+// failed call dropped the whole item. Retrying TTSMaxAttempts times recovers
+// from transient hiccups so every chunk keeps its listening question.
+func (s *AISvc) synthesiseWithRetry(ctx context.Context, text, language string) ([]byte, error) {
+	attempts := s.aiCfg.TTSMaxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 1; ; attempt++ {
+		ttsCtx, cancel := s.aiCtx(ctx, s.aiCfg.TTSRequestTimeout)
+		wav, err := s.ttsClient.Synthesise(ttsCtx, text, language)
+		cancel()
+		if err == nil {
+			return wav, nil
+		}
+		if attempt >= attempts || ctx.Err() != nil {
+			return nil, fmt.Errorf("TTS synthesise (sau %d lần thử): %w", attempt, err)
+		}
+		s.log.WarnContext(ctx, "ai: TTS synthesise failed, retrying",
+			"attempt", attempt, "max", attempts, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * s.aiCfg.TTSRetryBackoff):
+		}
+	}
 }

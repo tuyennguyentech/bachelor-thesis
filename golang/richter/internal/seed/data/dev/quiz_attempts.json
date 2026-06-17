@@ -95,6 +95,160 @@
     "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
     "answers": [0, 1, 2, 1, 1]
   },
+  {
+    "user_email": "noah@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [1, 1, 1, 2, 1],
+    "video_watch_fraction": 0.95
+  },
+  {
+    "user_email": "carol@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [1, 1, 3, 2, 1],
+    "video_watch_fraction": 0.85
+  },
+  {
+    "user_email": "grace@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [1, 1, 0, 2, 1],
+    "video_watch_fraction": 0.78
+  },
+  {
+    "user_email": "iris@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [1, 1, 0, 0, 1],
+    "video_watch_fraction": 0.62
+  },
+  {
+    "user_email": "jack@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [3, 1, 2, 2, 0],
+    "video_watch_fraction": 0.50
+  },
+  {
+    "user_email": "peter@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [0, 0, 0, 0, 0],
+    "video_watch_fraction": 0.25
+  },
+  {
+    "user_email": "quinn@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 1: JVM, JDK, JRE và vòng đời",
+    "answers": [1, 1, 2, 1, 1],
+    "video_watch_fraction": 0.70
+  },
+
+  {
+    "user_email": "kate@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 0, 1, 1, 1, 1],
+    "video_watch_fraction": 0.92
+  },
+  {
+    "user_email": "liam@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 0, 2, 1, 1, 0],
+    "video_watch_fraction": 0.80
+  },
+  {
+    "user_email": "mia@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 1, 1, 1, 1, 1],
+    "video_watch_fraction": 0.85
+  },
+  {
+    "user_email": "noah@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [0, 0, 1, 1, 0, 1],
+    "video_watch_fraction": 0.70
+  },
+  {
+    "user_email": "carol@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 0, 0, 0, 1, 1],
+    "video_watch_fraction": 0.65
+  },
+  {
+    "user_email": "grace@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [2, 2, 2, 2, 2, 2],
+    "video_watch_fraction": 0.30
+  },
+  {
+    "user_email": "iris@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 0, 1, 1, 1, 0],
+    "video_watch_fraction": 0.88
+  },
+  {
+    "user_email": "jack@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 0, 1, 0, 0, 1],
+    "video_watch_fraction": 0.55
+  },
+  {
+    "user_email": "peter@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [0, 3, 3, 1, 1, 1],
+    "video_watch_fraction": 0.45
+  },
+  {
+    "user_email": "quinn@dyadia.local",
+    "org_slug": "hust-cs",
+    "course_title": "Lập trình hướng đối tượng với Java",
+    "module_title": "Chương 1: Nền tảng Java",
+    "lesson_title": "Bài 2: Kiểu dữ liệu và biểu thức",
+    "answers": [1, 0, 1, 1, 1, 1],
+    "video_watch_fraction": 0.95
+  },
 
   {
     "user_email": "an@dyadia.local",

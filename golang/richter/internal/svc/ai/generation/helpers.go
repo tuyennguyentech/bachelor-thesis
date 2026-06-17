@@ -359,6 +359,17 @@ func (s *Service) insertInteractionsInTx(ctx context.Context, q *gen.Queries, le
 
 func (s *Service) saveInteractionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
 	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonInteraction, error) {
+		// Idempotent per chunk: clear any prior interactions for THIS chunk before
+		// inserting the freshly generated set. Without this, any path that reaches
+		// the save step for a chunk that already has interactions (a force-regen, a
+		// resumed pipeline that re-ran a partially-generated chunk, a retry)
+		// APPENDS, accumulating duplicates — e.g. one chunk ending up with 3× its
+		// questions. Chunks we intend to keep untouched are skipped upstream
+		// (chunkHasInteractions) and never reach this function, so this delete only
+		// affects the chunk actually being (re)generated now.
+		if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
+			return nil, fmt.Errorf("clear existing interactions for chunk: %w", err)
+		}
 		return s.insertInteractionsInTx(ctx, q, lessonID, chunkID, items)
 	})
 }

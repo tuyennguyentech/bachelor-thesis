@@ -27,10 +27,14 @@ ORDER BY om.created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: ListUserMemberships :many
-SELECT *
-FROM organization_members
-WHERE user_id = $1
-ORDER BY created_at DESC
+SELECT
+  om.*,
+  o.name AS organization_name,
+  o.slug AS organization_slug
+FROM organization_members om
+JOIN organizations o ON o.id = om.organization_id
+WHERE om.user_id = $1
+ORDER BY om.created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: UpdateOrganizationMemberRole :one
@@ -55,13 +59,3 @@ FROM organization_members
 WHERE organization_id = $1
   AND role = 'owner'
   AND status = 'active';
-
--- name: BulkAddOrganizationMembers :copyfrom
-INSERT INTO organization_members (
-  organization_id,
-  user_id,
-  role,
-  status
-) VALUES (
-  $1, $2, $3, $4
-);

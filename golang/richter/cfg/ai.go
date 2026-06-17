@@ -97,6 +97,14 @@ type AiCfg struct {
 	// TTSRequestTimeout caps a single TTS call. 0 = unlimited. Also used as the
 	// backstop timeout on the TTS HTTP client (safety net for a context-less call).
 	TTSRequestTimeout time.Duration `mapstructure:"tts_request_timeout"`
+	// TTSMaxAttempts is the TOTAL number of times a TTS synthesis is attempted for
+	// a single listening item (1 = no retry). Listening is the only kind that needs
+	// TTS; a transient Speaches/upload hiccup must NOT silently drop the listening
+	// question for that chunk, so we retry with backoff like Gemini generation.
+	TTSMaxAttempts int `mapstructure:"tts_max_attempts"`
+	// TTSRetryBackoff is the base delay between TTS retry attempts (linear: nth
+	// retry waits n * TTSRetryBackoff).
+	TTSRetryBackoff time.Duration `mapstructure:"tts_retry_backoff"`
 	// AudioGradeSTTTimeout bounds the STT call on the INTERACTIVE audio-grading
 	// path (a student waiting), so it does not inherit the 30-minute per-request
 	// STT timeout meant for long video transcription. 0 = unlimited.
@@ -185,6 +193,8 @@ func NewAiCfg() AiCfg {
 		ChunkingTimeout:                  3 * time.Minute,
 		InteractionGenTimeout:            2 * time.Minute,
 		TTSRequestTimeout:                2 * time.Minute,
+		TTSMaxAttempts:                   3,
+		TTSRetryBackoff:                  4 * time.Second,
 		AudioGradeSTTTimeout:             90 * time.Second,
 		WatchCoverageMaxRate:             4.0,
 		WatchCoverageInitialGraceSeconds: 30,

@@ -1515,7 +1515,10 @@ func TestCreateManualInteractionChunkAssociation(t *testing.T) {
 		}
 	})
 
-	t.Run("WithoutChunkID/NoAssociation", func(t *testing.T) {
+	t.Run("WithoutChunkID/AttributedByTime", func(t *testing.T) {
+		// No explicit chunk_id: the interaction is attributed to the chunk its
+		// start_seconds falls in (so it still appears in the per-chunk heatmap).
+		// StartSeconds=20 falls in the only chunk's [0,60) range → chunkID.
 		res, err := teacherInteractions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
 			LessonId:     lessonID,
 			Prompt:       gofakeit.Sentence(5),
@@ -1533,8 +1536,8 @@ func TestCreateManualInteractionChunkAssociation(t *testing.T) {
 		if res.Interaction == nil {
 			t.Fatal("expected interaction in response")
 		}
-		if res.Interaction.ChunkId != "" {
-			t.Errorf("chunk_id: want empty, got %q", res.Interaction.ChunkId)
+		if res.Interaction.ChunkId != chunkID {
+			t.Errorf("chunk_id: want %q (attributed by time), got %q", chunkID, res.Interaction.ChunkId)
 		}
 	})
 }
@@ -1591,13 +1594,13 @@ func TestDeleteLessonInteractionsBulk(t *testing.T) {
 	chunkA := insertTestChunk(t, lessonID, 0, "chunk a transcript")
 	chunkB := insertTestChunk(t, lessonID, 1, "chunk b transcript")
 
-	createMCQ := func(t *testing.T, chunkID string) {
+	createMCQ := func(t *testing.T, chunkID string, startSeconds float32) {
 		t.Helper()
 		_, err := teacherInteractions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
 			LessonId:     lessonID,
 			ChunkId:      chunkID,
 			Prompt:       gofakeit.Sentence(5),
-			StartSeconds: 10,
+			StartSeconds: startSeconds,
 			Config: &richterv1.CreateManualInteractionRequest_Mcq{
 				Mcq: &richterv1.McqConfig{
 					Options:       []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}},
@@ -1610,10 +1613,12 @@ func TestDeleteLessonInteractionsBulk(t *testing.T) {
 		}
 	}
 
-	createMCQ(t, chunkA.ID.String())
-	createMCQ(t, chunkA.ID.String())
-	createMCQ(t, chunkB.ID.String())
-	createMCQ(t, "")
+	createMCQ(t, chunkA.ID.String(), 10) // chunkA [0,60)
+	createMCQ(t, chunkA.ID.String(), 10)
+	createMCQ(t, chunkB.ID.String(), 70) // chunkB [60,120)
+	// No explicit chunk_id: attributed by time to chunkB (StartSeconds=70 in [60,120)),
+	// so it survives the chunkA-scoped delete below.
+	createMCQ(t, "", 70)
 
 	list := func(t *testing.T) []*richterv1.LessonInteraction {
 		t.Helper()
@@ -1963,6 +1968,29 @@ func TestMetricsAndAnalytics(t *testing.T) {
 		if found.EngagementScore < 0 || found.EngagementScore > 100 {
 			t.Errorf("engagement_score out of [0,100], got %v", found.EngagementScore)
 		}
+		// ── Raw totals (drive the "Tổng" results mode) ──
+		// A student with at least one attempt must have a positive max score.
+		if found.TotalMaxScore <= 0 {
+			t.Errorf("total_max_score should be > 0 for a student with attempts, got %v", found.TotalMaxScore)
+		}
+		if found.TotalScore < 0 || found.TotalScore > found.TotalMaxScore {
+			t.Errorf("total_score out of [0, total_max_score], got %v / %v", found.TotalScore, found.TotalMaxScore)
+		}
+		// Invariant: avg_score must equal total_score / total_max_score exactly
+		// (both derive from the same SUMs), so the two results modes never disagree.
+		if found.TotalMaxScore > 0 {
+			derived := found.TotalScore / found.TotalMaxScore
+			if d := derived - found.AvgScore; d < -1e-6 || d > 1e-6 {
+				t.Errorf("avg_score (%v) must equal total_score/total_max_score (%v)", found.AvgScore, derived)
+			}
+		}
+		if found.TotalResponses < 0 || found.TotalResponses > found.TotalInteractions {
+			t.Errorf("total_responses out of [0, total_interactions], got %d / %d",
+				found.TotalResponses, found.TotalInteractions)
+		}
+		if found.TotalTimeMs < 0 {
+			t.Errorf("total_time_ms should be >= 0, got %v", found.TotalTimeMs)
+		}
 	})
 
 	// Student cannot call ListCourseAttemptsSummary.
@@ -2149,11 +2177,8 @@ func TestAnalyticsEmptyAndPagination(t *testing.T) {
 	for _, tok := range []string{studentAToken, studentBToken} {
 		ia := richterv1connect.NewInteractionServiceClient(httpClientWithToken(tok), url)
 		if _, err := ia.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
-			LessonId:  lessonID,
-			Responses: buildResponses(ints, correct),
-			// Completion now requires watch >= min_watch_fraction (default 0.8) in
-			// addition to score; simulate a student who watched the video so the
-			// SummaryFieldsValid subtest's lessons_completed >= 1 assertion holds.
+			LessonId:           lessonID,
+			Responses:          buildResponses(ints, correct),
 			VideoWatchFraction: 1.0,
 		}); err != nil {
 			t.Fatalf("SubmitAttempt for pagination setup: %v", err)
@@ -2229,6 +2254,56 @@ func TestAnalyticsEmptyAndPagination(t *testing.T) {
 			if s.EngagementScore < 0 || s.EngagementScore > 100 {
 				t.Errorf("student %s: engagement_score out of [0,100], got %v", uid, s.EngagementScore)
 			}
+		}
+	})
+
+	// Regression: progress (lessons_completed) counts ANY attempt regardless of
+	// score or how much of the video was watched. A student who answers and
+	// barely watches still shows 1/x — progress is not gated on a (now-removed)
+	// completion threshold.
+	t.Run("ListCourseAttemptsSummary/AttemptCountsAsProgress", func(t *testing.T) {
+		lowEmail, lowPassword, lowID := createActiveUser(t, c.users)
+		if _, err := c.members.AddOrganizationMember(ctx, &richterv1.AddOrganizationMemberRequest{
+			OrganizationId: orgID, UserId: lowID,
+			Role:   richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT,
+			Status: richterv1.MemberStatus_MEMBER_STATUS_ACTIVE,
+		}); err != nil {
+			t.Fatalf("add org member: %v", err)
+		}
+		if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+			CourseId: courseID, UserId: lowID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
+		}); err != nil {
+			t.Fatalf("enrol student: %v", err)
+		}
+		lowToken := getUserToken(t, url, lowEmail, lowPassword)
+		lowIA := richterv1connect.NewInteractionServiceClient(httpClientWithToken(lowToken), url)
+		// Answer correctly but watch nothing — must still count as progress.
+		if _, err := lowIA.SubmitAttempt(ctx, &richterv1.SubmitAttemptRequest{
+			LessonId:           lessonID,
+			Responses:          buildResponses(ints, correct),
+			VideoWatchFraction: 0.0,
+		}); err != nil {
+			t.Fatalf("SubmitAttempt: %v", err)
+		}
+
+		res, err := ownerIA.ListCourseAttemptsSummary(ctx, &richterv1.ListCourseAttemptsSummaryRequest{
+			CourseId: courseID, Limit: 50, Offset: 0,
+		})
+		if err != nil {
+			t.Fatalf("ListCourseAttemptsSummary: %v", err)
+		}
+		var low *richterv1.CourseStudentSummary
+		for _, s := range res.Students {
+			if s.UserId == lowID {
+				low = s
+				break
+			}
+		}
+		if low == nil {
+			t.Fatalf("attempted student %s missing from course summary", lowID)
+		}
+		if low.LessonsCompleted < 1 {
+			t.Errorf("an attempted lesson must count as progress: lessons_completed = %d, want >= 1", low.LessonsCompleted)
 		}
 	})
 }
@@ -2705,6 +2780,72 @@ func TestLessonHeatmap(t *testing.T) {
 		t.Errorf("chunk2 is_gap: want false (no responses), got true")
 	}
 
+	// Per-chunk student breakdowns drive the heatmap drill-down. Only chunks
+	// with answers appear; chunk2 (unanswered) must be absent.
+	brk := make(map[string][]*richterv1.ChunkStudentScore)
+	for _, b := range res.Breakdowns {
+		brk[b.ChunkId] = b.Students
+	}
+	if _, ok := brk[chunk2.ID.String()]; ok {
+		t.Errorf("chunk2 breakdown: want absent (no answers), got present")
+	}
+	// chunk0: both students, each fully correct (score_frac 1.0), 1 answered.
+	if got := brk[chunk0.ID.String()]; len(got) != 2 {
+		t.Errorf("chunk0 breakdown: want 2 students, got %d", len(got))
+	} else {
+		for _, s := range got {
+			if s.ScoreFrac != 1.0 {
+				t.Errorf("chunk0 student %s: score_frac want 1.0, got %v", s.DisplayName, s.ScoreFrac)
+			}
+			if s.Answered != 1 {
+				t.Errorf("chunk0 student %s: answered want 1, got %d", s.DisplayName, s.Answered)
+			}
+		}
+	}
+	// chunk1: both students, each wrong (score_frac 0.0).
+	if got := brk[chunk1.ID.String()]; len(got) != 2 {
+		t.Errorf("chunk1 breakdown: want 2 students, got %d", len(got))
+	} else {
+		for _, s := range got {
+			if s.ScoreFrac != 0.0 {
+				t.Errorf("chunk1 student %s: score_frac want 0.0, got %v", s.DisplayName, s.ScoreFrac)
+			}
+		}
+	}
+	// Sanity: the breakdown user_ids are the two enrolled students.
+	wantStudents := map[string]bool{studentAID: true, studentBID: true}
+	for _, s := range brk[chunk0.ID.String()] {
+		if !wantStudents[s.UserId] {
+			t.Errorf("chunk0 breakdown: unexpected user_id %s", s.UserId)
+		}
+	}
+
+	// A manual interaction created WITHOUT a chunk_id is attributed to the chunk
+	// its start_seconds falls in, so answered questions stay visible in the
+	// heatmap (previously a NULL chunk_id silently dropped them). chunk1 spans
+	// [60, 120); start_seconds 90 must land in chunk1.
+	t.Run("ManualInteractionAttributedByTime", func(t *testing.T) {
+		createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
+			LessonId:     lessonID,
+			Prompt:       "Đọc to đoạn này",
+			StartSeconds: 90,
+			// No ChunkId — must be resolved by timestamp.
+			Config: &richterv1.CreateManualInteractionRequest_Reading{
+				Reading: &richterv1.ReadingConfig{
+					Mode:            richterv1.ReadingMode_READING_MODE_PRONUNCIATION,
+					PassageMarkdown: "**Định luật** Newton.",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateManualInteraction (no chunk): %v", err)
+		}
+		if got := createRes.Interaction.ChunkId; got != chunk1.ID.String() {
+			t.Errorf("chunkless interaction at 90s: chunk_id want chunk1 (%s), got %q",
+				chunk1.ID.String(), got)
+		}
+	})
+
 	// Authz: a non-member must be denied.
 	nonMemberEmail, nonMemberPassword, _ := createActiveUser(t, c.users)
 	nonMemberToken := getUserToken(t, url, nonMemberEmail, nonMemberPassword)
@@ -3081,15 +3222,17 @@ func TestGetLessonQuestionAnalytics(t *testing.T) {
 	})
 
 	t.Run("McqOptionDistribution", func(t *testing.T) {
-		var stat *richterv1.McqInteractionStats
-		for _, m := range res.McqStats {
+		// The single-choice question's option distribution now lives on its
+		// QuestionStat.Options (mcq_stats was removed; question_stats supersedes it).
+		var stat *richterv1.QuestionStat
+		for _, m := range res.QuestionStats {
 			if m.InteractionId == mcqID {
 				stat = m
 				break
 			}
 		}
 		if stat == nil {
-			t.Fatalf("mcq_stats missing interaction %s; got %+v", mcqID, res.McqStats)
+			t.Fatalf("question_stats missing mcq interaction %s; got %+v", mcqID, res.QuestionStats)
 		}
 		if stat.Prompt != "Pick the correct option" {
 			t.Errorf("mcq prompt: want %q, got %q", "Pick the correct option", stat.Prompt)
@@ -3119,10 +3262,19 @@ func TestGetLessonQuestionAnalytics(t *testing.T) {
 		if opt2 != nil && opt2.IsCorrect {
 			t.Errorf("option 2 is_correct: want false")
 		}
-		// Only options actually chosen appear in the distribution (0 and 2).
-		for _, o := range stat.Options {
-			if o.OptionIndex == 1 || o.OptionIndex == 3 {
-				t.Errorf("unexpected option %d in distribution (never chosen)", o.OptionIndex)
+		// EVERY configured option appears in the distribution — including the two
+		// never chosen (1 "WrongB", 3 "WrongD") at chosen_count 0 — so the full
+		// option set (and notably the correct answer) is always visible in the
+		// misconception view even when nobody picked it.
+		if len(stat.Options) != 4 {
+			t.Errorf("distribution: want all 4 configured options, got %d", len(stat.Options))
+		}
+		for _, idx := range []int32{1, 3} {
+			o := byIdx[idx]
+			if o == nil {
+				t.Errorf("option %d: want present (chosen_count 0), got absent", idx)
+			} else if o.ChosenCount != 0 {
+				t.Errorf("option %d chosen_count: want 0 (never chosen), got %d", idx, o.ChosenCount)
 			}
 		}
 	})
@@ -3131,6 +3283,43 @@ func TestGetLessonQuestionAnalytics(t *testing.T) {
 		// fill words: 1 + 2 + 3 = 6 across 3 responses → avg 2.0.
 		if res.AvgResponseLengthWords < 1.99 || res.AvgResponseLengthWords > 2.01 {
 			t.Errorf("avg_response_length_words: want 2.0, got %v", res.AvgResponseLengthWords)
+		}
+	})
+
+	// QuestionStats is the per-question analysis covering ALL kinds (the fix for
+	// "Phân tích câu hỏi only shows MCQ"). Before, mcq_stats excluded fill_blank /
+	// reading / listening / multiple_choice; now question_stats must include them.
+	t.Run("QuestionStatsCoversAllKinds", func(t *testing.T) {
+		byID := map[string]*richterv1.QuestionStat{}
+		for _, q := range res.QuestionStats {
+			byID[q.InteractionId] = q
+		}
+		// Both the MCQ and the fill_blank question must appear.
+		mcqQ, ok := byID[mcqID]
+		if !ok {
+			t.Fatalf("question_stats missing the mcq; got %d entries %+v", len(res.QuestionStats), res.QuestionStats)
+		}
+		fbQ, ok := byID[fbID]
+		if !ok {
+			t.Fatalf("question_stats missing the fill_blank (the bug: non-MCQ kinds were dropped); got %+v", res.QuestionStats)
+		}
+		// MCQ carries an option distribution + its kind.
+		if mcqQ.Kind != "mcq" || len(mcqQ.Options) == 0 {
+			t.Errorf("mcq question: kind=%q options=%d, want kind=mcq with options", mcqQ.Kind, len(mcqQ.Options))
+		}
+		// fill_blank carries accuracy + response_count but NO option distribution.
+		if fbQ.Kind != "fill_blank" {
+			t.Errorf("fill_blank question kind: want fill_blank, got %q", fbQ.Kind)
+		}
+		if len(fbQ.Options) != 0 {
+			t.Errorf("fill_blank should have no option distribution, got %d", len(fbQ.Options))
+		}
+		if fbQ.ResponseCount != 3 {
+			t.Errorf("fill_blank response_count: want 3, got %d", fbQ.ResponseCount)
+		}
+		// 1 of 3 correct ("alpha") → ~0.333.
+		if fbQ.Accuracy < 0.32 || fbQ.Accuracy > 0.34 {
+			t.Errorf("fill_blank accuracy: want ~0.333, got %v", fbQ.Accuracy)
 		}
 	})
 

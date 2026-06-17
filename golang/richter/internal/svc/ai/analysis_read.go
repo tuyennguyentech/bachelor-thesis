@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"time"
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal/db"
@@ -103,6 +104,18 @@ func (s *AISvc) GetLessonAnalysis(
 		s.log.ErrorContext(ctx, "ai: failed to list lesson chunks", svc.LogAttrs("ListLessonTranscriptChunks", err)...)
 	}
 	normalizeGeneratedInteractionStartSeconds(ints, chunks)
+
+	// Artifact-based floor: a lesson that already has generated interactions is
+	// fully analyzed regardless of how its task rows look. Manual/per-chunk
+	// generation creates NO quiz_gen task, and a stale or cancelled "latest" task
+	// can otherwise leave the derived status at CHUNKS_READY/PENDING — which makes
+	// the FE treat the lesson as unfinished, wipe its real chunks, and flip the
+	// stepper between steps 3 and 4 across reloads. Only raise the status when no
+	// stage is actively failing or in flight, so a genuine re-run still shows
+	// progress/errors. Applies only to the task-derived path.
+	if len(latest) > 0 {
+		analysis.Status = applyArtifactFloor(time.Now(), analysis.Status, latest, len(chunks) > 0, len(ints) > 0)
+	}
 
 	lessonIDStr := lessonID.String()
 	// Only load FDB transcript/segments when the transcribe step
@@ -218,5 +231,79 @@ func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.
 	if hasSucceededInteractions && !hasFailedUpstream {
 		out.Status = gen.LessonAnalysisStatusDone
 	}
+
+	// pipeline_run is the COMPOSITE Quick-Create task: it runs transcribe → chunk
+	// → quiz_gen inside a SINGLE durable task and does NOT create separate
+	// transcribe/chunk/quiz_gen task rows. So for a Quick-Create lesson the
+	// per-stage logic above never fires and the status would stay at the PENDING
+	// default — which makes the FE treat the lesson as a brand-new upload and WIPE
+	// the freshly-generated chunks/interactions (the "stuck at Phiên âm on reload"
+	// bug). Derive the status from the pipeline task itself instead:
+	//   succeeded  → DONE (fully analyzed)
+	//   in flight  → PROCESSING (NOT pending: keeps the generated data on screen)
+	//   failed     → ERROR
+	pipelineState := ""
+	for _, t := range latest {
+		if t.TaskType == "pipeline_run" {
+			pipelineState = t.Status
+		}
+	}
+	switch pipelineState {
+	case string(taskqueue.StatusSucceeded):
+		if !hasFailedUpstream {
+			out.Status = gen.LessonAnalysisStatusDone
+		}
+	case string(taskqueue.StatusProcessing), string(taskqueue.StatusInqueued), string(taskqueue.StatusPending):
+		if out.Status == gen.LessonAnalysisStatusPending {
+			out.Status = gen.LessonAnalysisStatusProcessing
+		}
+	case string(taskqueue.StatusFailed):
+		if out.Status == gen.LessonAnalysisStatusPending {
+			out.Status = gen.LessonAnalysisStatusError
+		}
+	}
 	return out
+}
+
+// processingStaleAfter: a "processing" task whose heartbeat is older than this is
+// treated as a dead worker. Set comfortably above the reaper's stale threshold so
+// the floor only intervenes for genuinely orphaned tasks, never during a normal
+// heartbeat gap of a live worker.
+const processingStaleAfter = 90 * time.Second
+
+// applyArtifactFloor raises a task-derived analysis status to reflect artifacts
+// that actually exist in the DB (chunks / interactions), which the per-task
+// derivation can miss (per-chunk/manual generation creates no quiz_gen task; a
+// cancelled or tied "latest" row can understate progress). It NEVER lowers the
+// status, and it does not override an active failure or in-flight re-run — so a
+// genuine reprocess still surfaces progress/errors rather than snapping to DONE.
+func applyArtifactFloor(now time.Time, status gen.LessonAnalysisStatus, latest []taskqueue.Task, hasChunks, hasInteractions bool) gen.LessonAnalysisStatus {
+	for _, t := range latest {
+		switch t.Status {
+		case string(taskqueue.StatusFailed),
+			string(taskqueue.StatusInqueued),
+			string(taskqueue.StatusPending):
+			// Failing or queued to (re)run — keep the derived status so the FE
+			// shows the error / in-flight progress, not a stale DONE.
+			return status
+		case string(taskqueue.StatusProcessing):
+			// A processing task with a FRESH heartbeat is genuinely running, so
+			// keep the in-flight status. But a STALE heartbeat means the worker
+			// died mid-task (e.g. a crash): the reaper will requeue it, and
+			// meanwhile the artifacts that DO exist are the truth — a dead task
+			// must not pin the UI in "processing" forever.
+			if t.Heartbeat.Valid && now.Sub(t.Heartbeat.Time) < processingStaleAfter {
+				return status
+			}
+		}
+	}
+	if hasInteractions {
+		return gen.LessonAnalysisStatusDone
+	}
+	if hasChunks &&
+		(status == gen.LessonAnalysisStatusPending ||
+			status == gen.LessonAnalysisStatusTranscriptExtracted) {
+		return gen.LessonAnalysisStatusChunksReady
+	}
+	return status
 }

@@ -21,8 +21,7 @@ LIMIT $2 OFFSET $3;
 
 -- name: UpdateLesson :one
 UPDATE lessons
-SET title = $2, description = $3, order_index = $4, language = $5, max_attempts = $6,
-    min_watch_fraction = $7, min_score_fraction = $8
+SET title = $2, description = $3, order_index = $4, language = $5, max_attempts = $6, audio_language = $7
 WHERE id = $1
 RETURNING *;
 

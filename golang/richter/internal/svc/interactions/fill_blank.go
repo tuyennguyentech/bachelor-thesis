@@ -215,13 +215,11 @@ func (h *fillBlankHandler) ApplyConfig(p *richterv1.LessonInteraction, configJSO
 			Hint:          b.Hint,
 		})
 	}
-	template := cfg.Template
-	if stripAnswers {
-		template = cfg.Template
-	}
+	// The template (e.g. "... {{0}} ...") holds no answers — only the blanks'
+	// accepted values do, and those are already cleared above when stripAnswers.
 	p.Config = &richterv1.LessonInteraction_FillBlank{
 		FillBlank: &richterv1.FillBlankConfig{
-			Template: template,
+			Template: cfg.Template,
 			Blanks:   blanks,
 		},
 	}

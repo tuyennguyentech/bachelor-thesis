@@ -407,6 +407,146 @@ func setupRecoveryRegistry() {
 	})
 }
 
+// ── Resumable checkpoint (pipeline_run-style two-stage executor) ──────────────
+var (
+	resumeStageA  int
+	resumeStageB  int
+	resumeMu      sync.Mutex
+	resumeBlocked = make(chan struct{})
+	resumeTQ      DB
+)
+
+var registerResumeOnce sync.Once
+
+func pgFromUUIDStr(s string) pgtype.UUID {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: [16]byte(u), Valid: true}
+}
+
+// setupResumeRegistry registers a two-stage executor that checkpoints after
+// stage A (via SetTaskCheckpoint), then crashes mid-stage-B on its first run.
+// On reclaim it must read the checkpoint from env.PriorOutput and skip stage A.
+func setupResumeRegistry() {
+	registerResumeOnce.Do(func() {
+		Register("test_resume_task", func() Executor {
+			return &testExecutor{
+				executeFunc: func(ctx context.Context, env *Env) ([]byte, error) {
+					stageADone := string(env.PriorOutput) == "A" || string(env.PriorOutput) == "B"
+					if !stageADone {
+						resumeMu.Lock()
+						resumeStageA++
+						first := resumeStageA == 1
+						resumeMu.Unlock()
+						// Persist the stage-A checkpoint under our ownership.
+						_ = resumeTQ.SetTaskCheckpoint(ctx, pgFromUUIDStr(env.TaskID), []byte("A"), pgFromUUIDStr(env.WorkerID))
+						if first {
+							close(resumeBlocked) // signal "stage A done, now crash"
+							<-ctx.Done()
+							return nil, ctx.Err()
+						}
+					}
+					resumeMu.Lock()
+					resumeStageB++
+					resumeMu.Unlock()
+					return []byte("B"), nil
+				},
+			}
+		})
+	})
+}
+
+func TestTaskqueue_PipelineResumeFromCheckpoint(t *testing.T) {
+	setupResumeRegistry()
+
+	pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
+	clearAllTasks(t, pool)
+	tq := NewPostgresDB(pool)
+	resumeTQ = tq
+	resumeMu.Lock()
+	resumeStageA, resumeStageB = 0, 0
+	resumeMu.Unlock()
+	userID, lessonID := getOrCreateTestUserAndLesson(t, pool)
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	logger := slog.Default()
+	scanner := NewScannerRaw(tq, logger).WithInterval(100 * time.Millisecond).WithStaleAfter(100 * time.Millisecond)
+	worker1 := NewWorkerRaw(tq, logger, scanner.NotifCh()).WithAllowedTypes([]string{"test_resume_task"})
+	worker1.heartbeat = 50 * time.Millisecond
+	worker1.pollIdle = 50 * time.Millisecond
+	go scanner.Run(ctx1)
+	go worker1.Run(ctx1)
+
+	taskIDRaw, _ := uuid.NewV7()
+	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
+	if _, err := tq.CreateTask(ctx1, taskID, lessonID, pgtype.UUID{}, userID, "test_resume_task", []byte("input")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Worker 1 runs stage A, checkpoints, then blocks (simulated crash).
+	select {
+	case <-resumeBlocked:
+	case <-time.After(taskActiveTimeout()):
+		t.Fatal("timeout waiting for worker 1 to run stage A")
+	}
+
+	// The stage-A checkpoint must be durably persisted to output_payload.
+	if task, err := tq.GetTask(ctx1, taskID); err != nil {
+		t.Fatal(err)
+	} else if string(task.OutputPayload) != "A" {
+		t.Fatalf("expected checkpoint output_payload 'A' after stage A, got %q", string(task.OutputPayload))
+	}
+
+	// Crash worker 1, backdate heartbeat so the scanner reaps the task.
+	cancel1()
+	if err := db.WithConnectionExec(pool, context.Background(), func(_ *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(context.Background(),
+			`UPDATE tasks SET heartbeat = $2 WHERE id = $1`, taskID, time.Now().UTC().Add(-10*time.Second))
+		return err
+	}); err != nil {
+		t.Fatalf("backdate heartbeat: %v", err)
+	}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	scanner2 := NewScannerRaw(tq, logger).WithInterval(50 * time.Millisecond).WithStaleAfter(100 * time.Millisecond)
+	worker2 := NewWorkerRaw(tq, logger, scanner2.NotifCh()).WithAllowedTypes([]string{"test_resume_task"})
+	worker2.heartbeat = 50 * time.Millisecond
+	worker2.pollIdle = 50 * time.Millisecond
+	go scanner2.Run(ctx2)
+	go worker2.Run(ctx2)
+
+	start := time.Now()
+	for time.Since(start) < 5*time.Second {
+		task, err := tq.GetTask(ctx2, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.Status == string(StatusSucceeded) {
+			if string(task.OutputPayload) != "B" {
+				t.Errorf("expected final output 'B', got %q", string(task.OutputPayload))
+			}
+			resumeMu.Lock()
+			a, b := resumeStageA, resumeStageB
+			resumeMu.Unlock()
+			// The crux: stage A ran exactly ONCE despite the crash + resume —
+			// the reclaimed run skipped it via the checkpoint. Stage B ran once.
+			if a != 1 {
+				t.Errorf("stage A must run exactly once (resume skips completed stages), ran %d times", a)
+			}
+			if b != 1 {
+				t.Errorf("stage B should run once, ran %d times", b)
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("task was not resumed and completed in time")
+}
+
 func TestTaskqueue_WorkerCrashAndRecovery(t *testing.T) {
 	setupRecoveryRegistry()
 
@@ -887,7 +1027,12 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	worker1.heartbeat = 1 * time.Hour
 	worker1.pollIdle = 50 * time.Millisecond
 
-	go worker1.Run(ctx1)
+	// Run worker1 under its OWN context so we can stop its poll loop (so it cannot
+	// re-claim the requeued task) without cancelling the test's DB operations, which
+	// use ctx1.
+	worker1Ctx, stopWorker1 := context.WithCancel(context.Background())
+	defer stopWorker1()
+	go worker1.Run(worker1Ctx)
 
 	taskIDRaw, _ := uuid.NewV7()
 	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
@@ -907,6 +1052,16 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	case <-time.After(taskActiveTimeout()):
 		t.Fatal("timeout waiting for worker 1 to claim task")
 	}
+
+	// Capture worker1's id, then STOP worker1 so it cannot re-claim the task once we
+	// requeue it. A live worker polls continuously and runs executors in goroutines
+	// (no per-worker concurrency cap), so leaving worker1 running would let it race
+	// worker2 for the reaped task — and, since the controlled executor is a shared
+	// global, worker1 could end up running exec2 and owning the row. That re-claim is
+	// the original flake. worker1's stale late write is reproduced directly below.
+	worker1IDpg := pgtype.UUID{Bytes: uuidBytes(worker1.WorkerID()), Valid: true}
+	stopWorker1()
+	time.Sleep(2 * worker1.pollIdle) // let worker1's loop observe cancellation and exit
 
 	// Age ONLY this task's heartbeat (via the scoped SetTaskHeartbeat query) so it
 	// — not a concurrent package's fresh processing task — is the one reaped. A
@@ -958,16 +1113,17 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 		t.Fatal("timeout waiting for worker 2 to claim task")
 	}
 
-	close(exec1.release)
-	select {
-	case <-exec1.done:
-	case <-time.After(taskActiveTimeout()):
-		t.Fatal("timeout waiting for worker 1 executor to finish")
+	// Worker2 now owns the task. Reproduce worker1's ORPHANED late completion landing
+	// after reassignment: it must be a no-op because worker1 no longer owns the row
+	// (MarkSucceeded is WHERE id=? AND worker_id=me), so the status must stay processing
+	// under worker2 and the output must NOT become worker1's "out1".
+	if err = tq.MarkSucceeded(ctx2, taskID, worker1IDpg, []byte("out1")); err != nil {
+		t.Fatalf("simulated stale MarkSucceeded errored: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	task, err = tq.GetTask(ctx1, taskID)
+	task, err = tq.GetTask(ctx2, taskID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -46,6 +46,19 @@ func invokeAISvc(i do.Injector) (*ai.AISvc, error) {
 	return do.Invoke[*ai.AISvc](i)
 }
 
+// effectiveProgressStep decides what a sub-step progress callback writes to the
+// task's progress_step. Standalone (manual flow) it reports its own fine-grained
+// enum (detailed). Inside a composite pipeline, stageLabel is set to the coarse
+// stage (e.g. "CHUNKING") and that is reported instead — so a FE that renders the
+// coarse 3-stage strip isn't confused by sub-steps reused across stages (e.g.
+// ANALYZING is emitted during BOTH transcribe and chunk).
+func effectiveProgressStep(detailed, stageLabel string) string {
+	if stageLabel != "" {
+		return stageLabel
+	}
+	return detailed
+}
+
 // ─── Concrete implementations ──────────────────────────────────────────────
 
 type transcriptSvcImpl struct {
@@ -61,11 +74,11 @@ func (s *transcriptSvcImpl) Run(ctx context.Context, lessonID pgtype.UUID, env *
 	taskIDpg := pgtype.UUID{Bytes: [16]byte(taskUUID), Valid: true}
 
 	prog := func(step richterv1.AnalysisProgressStep, msg string) error {
-		_ = s.tqDB.UpdateTaskProgress(ctx, taskIDpg, step.String(), 0, 0, msg)
+		_ = s.tqDB.UpdateTaskProgress(ctx, taskIDpg, effectiveProgressStep(step.String(), env.StageLabel), 0, 0, msg)
 		return nil
 	}
 
-	var videoKey string
+	var videoKey, audioLang string
 	err = db.WithConnectionExec(s.svc.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
 		lesson, err := q.GetLessonByID(ctx, lessonID)
 		if err != nil {
@@ -74,6 +87,7 @@ func (s *transcriptSvcImpl) Run(ctx context.Context, lessonID pgtype.UUID, env *
 		if lesson.VideoStorageKey.Valid {
 			videoKey = lesson.VideoStorageKey.String
 		}
+		audioLang = lesson.AudioLanguage
 		return nil
 	})
 	if err != nil {
@@ -83,7 +97,7 @@ func (s *transcriptSvcImpl) Run(ctx context.Context, lessonID pgtype.UUID, env *
 		return fmt.Errorf("lesson has no video uploaded")
 	}
 
-	return s.svc.RunExtract(ctx, lessonID, videoKey, prog)
+	return s.svc.RunExtract(ctx, lessonID, videoKey, audioLang, prog)
 }
 
 func (s *transcriptSvcImpl) RunChunk(ctx context.Context, lessonID pgtype.UUID, env *taskqueue.Env) error {
@@ -94,7 +108,7 @@ func (s *transcriptSvcImpl) RunChunk(ctx context.Context, lessonID pgtype.UUID, 
 	taskIDpg := pgtype.UUID{Bytes: [16]byte(taskUUID), Valid: true}
 
 	prog := func(step richterv1.AnalysisProgressStep, msg string) error {
-		_ = s.tqDB.UpdateTaskProgress(ctx, taskIDpg, step.String(), 0, 0, msg)
+		_ = s.tqDB.UpdateTaskProgress(ctx, taskIDpg, effectiveProgressStep(step.String(), env.StageLabel), 0, 0, msg)
 		return nil
 	}
 	return s.svc.RunChunk(ctx, lessonID, prog)
@@ -113,7 +127,7 @@ func (s *generationSvcImpl) Run(ctx context.Context, lessonID pgtype.UUID, req *
 	taskIDpg := pgtype.UUID{Bytes: [16]byte(taskUUID), Valid: true}
 
 	send := func(step richterv1.GenerateInteractionsStep, msg string, chunkIndex, totalChunks int32) error {
-		_ = s.tqDB.UpdateTaskProgress(ctx, taskIDpg, step.String(), chunkIndex, totalChunks, msg)
+		_ = s.tqDB.UpdateTaskProgress(ctx, taskIDpg, effectiveProgressStep(step.String(), env.StageLabel), chunkIndex, totalChunks, msg)
 		return nil
 	}
 	return s.svc.Run(ctx, lessonID, req, send)

@@ -3,9 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/url"
-	"strconv"
 
 	"example.com/richter/cfg"
 	"example.com/richter/internal"
@@ -37,13 +34,7 @@ func NewPostgresSvc(i do.Injector) (p *PostgresSvc, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("PostgreCfg cannot be invoked: %w", err)
 	}
-	url := &url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(postgreCfg.User, postgreCfg.Password),
-		Host:   net.JoinHostPort(postgreCfg.Host, strconv.FormatUint(uint64(postgreCfg.Port), 10)),
-		Path:   postgreCfg.Database,
-	}
-	config, err := pgxpool.ParseConfig(url.String())
+	config, err := pgxpool.ParseConfig(postgreCfg.DSN())
 	if err != nil {
 		return nil, fmt.Errorf("parse config error: %w", err)
 	}

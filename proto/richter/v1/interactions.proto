@@ -374,7 +374,8 @@ message CourseStudentSummary {
   string user_id = 1;
   string display_name = 2;
   string email = 3;
-  // Number of distinct lessons this student has submitted an attempt for.
+  // Progress: number of distinct lessons this student has submitted an attempt
+  // for, regardless of score (matches the student-facing course progress).
   int32 lessons_completed = 4;
   // Total number of lessons in the course.
   int32 lessons_total = 5;
@@ -385,6 +386,22 @@ message CourseStudentSummary {
   // Timestamp of the most recent attempt submission.
   google.protobuf.Timestamp last_active = 8;
   double response_rate = 9;
+  // 10 was lessons_passed (mastery) — removed with the completion-thresholds feature.
+  reserved 10;
+  // Average fraction of lesson videos watched across attempts (0..1).
+  double avg_video_watch_fraction = 11;
+  // ── Raw totals (for the "Tổng" mode of the results table; the fields above
+  //    are averages/fractions for the "Trung bình" mode) ──
+  // Sum of total_score (points earned) across all submitted attempts.
+  double total_score = 12;
+  // Sum of max_score (points available) across all submitted attempts.
+  double total_max_score = 13;
+  // Total interactions answered across all attempted lessons.
+  int32 total_responses = 14;
+  // Total interactions available across all attempted lessons.
+  int32 total_interactions = 15;
+  // Total time-on-task (ms) summed across all responses.
+  double total_time_ms = 16;
 }
 
 message ChunkScoreCell {
@@ -403,9 +420,29 @@ message LessonHeatmapRequest {
   string lesson_id = 1 [(buf.validate.field).string.uuid = true];
 }
 
+// One student's score on a single chunk (heatmap drill-down).
+message ChunkStudentScore {
+  string user_id = 1;
+  string display_name = 2;
+  string email = 3;
+  // score_frac is this student's score/max on the chunk's questions (0..1).
+  double score_frac = 4;
+  // answered = how many of the chunk's questions the student answered.
+  int32 answered = 5;
+}
+
+// All students' scores for one chunk — the click-to-expand list under a heatmap cell.
+message ChunkStudentBreakdown {
+  string chunk_id = 1;
+  repeated ChunkStudentScore students = 2;
+}
+
 message LessonHeatmapResponse {
   repeated ChunkScoreCell cells = 1;
   double gap_threshold = 2;
+  // Per-chunk student breakdowns so the UI can list who is in each segment when
+  // a cell is clicked, without a second round-trip.
+  repeated ChunkStudentBreakdown breakdowns = 3;
 }
 
 message AtRiskLessonPoint {
@@ -445,10 +482,17 @@ message McqOptionStat {
   bool is_correct = 4;
 }
 
-message McqInteractionStats {
+// QuestionStat is the per-question analysis row for ANY kind. `options` is only
+// populated for single-choice MCQ (the answer-distribution bars); for the other
+// kinds (multiple choice, fill, reading, listening) it is empty and `accuracy`
+// carries the correct fraction so every answered question is shown.
+message QuestionStat {
   string interaction_id = 1;
-  string prompt = 2;
-  repeated McqOptionStat options = 3;
+  string kind = 2;
+  string prompt = 3;
+  int32 response_count = 4;
+  double accuracy = 5;
+  repeated McqOptionStat options = 6;
 }
 
 message GetLessonQuestionAnalyticsRequest {
@@ -456,9 +500,12 @@ message GetLessonQuestionAnalyticsRequest {
 }
 
 message GetLessonQuestionAnalyticsResponse {
+  reserved 2;                  // was mcq_stats (McqInteractionStats) — superseded by question_stats
+  reserved "mcq_stats";
   repeated KindAccuracy kind_accuracy = 1;
-  repeated McqInteractionStats mcq_stats = 2;
   double avg_response_length_words = 3;
+  // Per-question analysis covering ALL kinds (not just single-choice MCQ).
+  repeated QuestionStat question_stats = 4;
 }
 
 message ListCourseAttemptsSummaryRequest {

@@ -118,6 +118,42 @@ func TestMockEngineResponsesAreSchemaValid(t *testing.T) {
 	}
 }
 
+// TestNewSelectsEngineByConfig locks the contract the AI service depends on: the
+// engine implementation (mock vs real Gemini) is chosen SOLELY by the config's
+// gemini.engine field. "mock" (case-insensitive) → in-process mock; ANYTHING
+// else — the default "gemini", an empty string, or an unknown value — → the real
+// Gemini engine. This is what guarantees local/production always talk to the real
+// API while ONLY the test config (engine="mock") opts into the mock, so a mock
+// can never silently "dính vào" a non-test deployment.
+func TestNewSelectsEngineByConfig(t *testing.T) {
+	cases := []struct {
+		name   string
+		engine string
+		want   string
+	}{
+		{"explicit_mock", "mock", "mock"},
+		{"mock_uppercase", "MOCK", "mock"},
+		{"mock_mixedcase", "Mock", "mock"},
+		{"explicit_gemini", "gemini", "gemini"},
+		{"default_config_value", cfg.NewGeminiCfg().Engine, "gemini"}, // default is "gemini"
+		{"empty_is_real", "", "gemini"},
+		{"unknown_is_real", "openai", "gemini"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := genengine.New(&cfg.GeminiCfg{Engine: tc.engine})
+			if eng.Name() != tc.want {
+				t.Errorf("New(engine=%q).Name() = %q, want %q", tc.engine, eng.Name(), tc.want)
+			}
+		})
+	}
+	// The production DEFAULT config (zero value → NewGeminiCfg) must select the
+	// real engine — never the mock by accident.
+	if got := genengine.New(&cfg.GeminiCfg{Engine: cfg.NewGeminiCfg().Engine}).Name(); got != "gemini" {
+		t.Errorf("default config selects %q engine, want gemini (real API is the default)", got)
+	}
+}
+
 // TestRealGeminiIntegration exercises the REAL Gemini API once, to catch
 // upstream breakage (auth, model rename, response shape) that the mock cannot.
 // It is skipped unless RICHTER_GEMINI_API_KEY is set, so it never breaks a

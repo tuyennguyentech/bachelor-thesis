@@ -91,3 +91,28 @@ func TestQuizGenInputProtoRoundtrip(t *testing.T) {
 		t.Errorf("CountPerChunk = %d, want 5", out.CountPerChunk)
 	}
 }
+
+// TestShouldForceGen guards the resume anti-duplication rule: force-regenerate
+// must only apply when the chunk stage actually (re)ran this run, otherwise a
+// resume that skipped chunking would DUPLICATE interactions.
+func TestShouldForceGen(t *testing.T) {
+	cases := []struct {
+		name  string
+		force bool
+		done  richterv1.PipelineStage
+		want  bool
+	}{
+		{"fresh run forces (chunk stage ran)", true, richterv1.PipelineStage_PIPELINE_STAGE_UNSPECIFIED, true},
+		{"resume after transcribe forces (chunk will run)", true, richterv1.PipelineStage_PIPELINE_STAGE_TRANSCRIBED, true},
+		{"resume past chunk must NOT force (avoid dup)", true, richterv1.PipelineStage_PIPELINE_STAGE_CHUNKED, false},
+		{"resume past generate must NOT force", true, richterv1.PipelineStage_PIPELINE_STAGE_GENERATED, false},
+		{"force off never forces", false, richterv1.PipelineStage_PIPELINE_STAGE_UNSPECIFIED, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldForceGen(tc.force, tc.done); got != tc.want {
+				t.Errorf("shouldForceGen(%v, %v) = %v, want %v", tc.force, tc.done, got, tc.want)
+			}
+		})
+	}
+}

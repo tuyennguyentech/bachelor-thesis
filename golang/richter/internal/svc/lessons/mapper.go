@@ -30,9 +30,8 @@ func LessonToProto(l gen.Lesson) *richterv1.Lesson {
 		DurationSeconds:  duration,
 		FeedbackMode:     interactions.FeedbackModeToProto(l.FeedbackMode),
 		Language:         l.Language,
+		AudioLanguage:    l.AudioLanguage,
 		MaxAttempts:      l.MaxAttempts,
-		MinWatchFraction: float64(l.MinWatchFraction),
-		MinScoreFraction: float64(l.MinScoreFraction),
 		CreatedAt:        svc.TimestampToProto(l.CreatedAt),
 		UpdatedAt:        svc.TimestampToProto(l.UpdatedAt),
 	}

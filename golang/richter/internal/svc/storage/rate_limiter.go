@@ -37,8 +37,9 @@ func NewUploadRateLimiter(c cfg.StorageCfg) UploadRateLimiter {
 		window = time.Minute
 	}
 	return &inMemoryUploadRateLimiter{
-		max:    c.StudentUploadsPerWindow,
-		window: window,
+		max:     c.StudentUploadsPerWindow,
+		window:  window,
+		buckets: map[string]*uploadCounter{},
 	}
 }
 

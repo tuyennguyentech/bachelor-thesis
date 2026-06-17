@@ -49,6 +49,27 @@ func TestNewUploadRateLimiter_PositiveIsInMemory(t *testing.T) {
 	}
 }
 
+// TestNewUploadRateLimiter_FactoryAllowDoesNotPanic exercises the FULL factory
+// → Allow path. The other factory tests only assert the concrete type and never
+// call Allow, and the Allow tests build the struct literal directly with an
+// initialised buckets map — so a factory that forgot to initialise `buckets`
+// (the production default StudentUploadsPerWindow>0 path) would panic with
+// "assignment to entry in nil map" on the very first real student upload, yet
+// every unit test stayed green. This guards that exact regression.
+func TestNewUploadRateLimiter_FactoryAllowDoesNotPanic(t *testing.T) {
+	lim := NewUploadRateLimiter(cfg.StorageCfg{StudentUploadsPerWindow: 2, StudentUploadWindow: time.Minute})
+	key := "lessons/L/student-recordings/x.webm"
+	if !lim.Allow("u", key) {
+		t.Fatal("first factory-built Allow must succeed")
+	}
+	if !lim.Allow("u", key) {
+		t.Fatal("second factory-built Allow (within limit) must succeed")
+	}
+	if lim.Allow("u", key) {
+		t.Fatal("third factory-built Allow must be rejected (limit=2)")
+	}
+}
+
 func TestInMemoryUploadRateLimiter(t *testing.T) {
 	const max = 3
 	r := &inMemoryUploadRateLimiter{

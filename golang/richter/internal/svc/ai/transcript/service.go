@@ -6,10 +6,8 @@ package transcript
 
 import (
 	"context"
-	"time"
 
 	richterv1 "example.com/buf/gen/richter/v1"
-	"example.com/richter/cfg"
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/kv"
@@ -26,7 +24,7 @@ type ProgressFn func(step richterv1.AnalysisProgressStep, msg string) error
 // transcriptionService.runSTTAnalyze here. Keeping it as a function
 // type (rather than an interface on the concrete type) lets this package
 // stay decoupled from the ai package's internals.
-type STTRunner func(ctx context.Context, videoKey string, progress ProgressFn) (string, []segment.Segment, error)
+type STTRunner func(ctx context.Context, videoKey string, audioLang string, progress ProgressFn) (string, []segment.Segment, error)
 
 // LessonLock is the handle returned by TryAcquireLessonLock. Callers must
 // pass it to ReleaseLessonLock when done. Stored as `any` so this package
@@ -46,15 +44,10 @@ type Deps struct {
 	Postgres *db.PostgresSvc
 	KV       *kv.KVSvc
 	Log      *log.LogSvc
-	AiCfg    *cfg.AiCfg
 
 	Transcription STTRunner
 	Chunk         ChunkRunner
 	Locks         LessonLocker
-
-	// Context helper: returns ctx unchanged + no-op cancel when d<=0,
-	// otherwise context.WithTimeout(ctx, d). Keeps callers concise.
-	AiCtx func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc)
 
 	// List-page size helpers (configurable via [ai] section).
 	ChunksLimit    func() int32

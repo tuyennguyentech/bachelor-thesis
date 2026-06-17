@@ -47,6 +47,13 @@
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "kate@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "liam@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "mia@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "noah@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "carol@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "grace@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "iris@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "jack@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "peter@dyadia.local", "role": "student" },
+  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "quinn@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "alice@dyadia.local", "role": "teacher" },
 
   { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu", "user_email": "frank@dyadia.local", "role": "teacher" },
@@ -58,7 +65,7 @@
   { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu", "user_email": "ngan@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu", "user_email": "bob@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu", "user_email": "noah@dyadia.local", "role": "student" },
-  { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu", "user_email": "alice@dyadia.local", "role": "teacher" },
+  { "org_slug": "hust-cs", "course_title": "Cơ sở dữ liệu", "user_email": "carol@dyadia.local", "role": "teacher" },
 
   { "org_slug": "hust-cs", "course_title": "Mạng máy tính", "user_email": "khanh@dyadia.local", "role": "teacher" },
   { "org_slug": "hust-cs", "course_title": "Mạng máy tính", "user_email": "alice@dyadia.local", "role": "teacher" },
@@ -72,7 +79,7 @@
   { "org_slug": "hust-cs", "course_title": "Hệ điều hành", "user_email": "bob@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Hệ điều hành", "user_email": "dave@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Hệ điều hành", "user_email": "eve@dyadia.local", "role": "student" },
-  { "org_slug": "hust-cs", "course_title": "Hệ điều hành", "user_email": "alice@dyadia.local", "role": "teacher" },
+  { "org_slug": "hust-cs", "course_title": "Hệ điều hành", "user_email": "khanh@dyadia.local", "role": "teacher" },
 
   { "org_slug": "hust-cs", "course_title": "Kiến trúc máy tính", "user_email": "alice@dyadia.local", "role": "teacher" },
   { "org_slug": "hust-cs", "course_title": "Kiến trúc máy tính", "user_email": "grace@dyadia.local", "role": "student" },

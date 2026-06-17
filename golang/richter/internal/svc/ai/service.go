@@ -22,7 +22,6 @@ import (
 	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/richter/internal/taskqueue"
 	"example.com/richter/log"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/samber/do/v2"
@@ -98,11 +97,7 @@ type AISvc struct {
 
 // FDB namespace constants.
 const (
-	kvNsLesson = "lesson"
-	kvNsChunk  = "chunk"
-	kvNsWatch  = "watch"
-
-	kvNsWatchCov = "watch_cov"
+	kvNsWatch = "watch"
 )
 
 var _ richterv1connect.AIServiceHandler = (*AISvc)(nil)
@@ -178,7 +173,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		apiCfg:  apiCfg,
 		taskCfg: taskCfg,
 		ttsCfg:  ttsCfg, ttsClient: newSpeachesTTSClient(ttsCfg, aiCfg.TTSMaxConcurrent, aiCfg.TTSRequestTimeout),
-		chunking:      newChunkingService(geminiCfg, aiCfg, genEngine, l),
+		chunking:      newChunkingService(aiCfg, genEngine, l),
 		transcription: transcription,
 		grading:       newGradingService(geminiCfg, transcription),
 		tqDB:          tqDB,
@@ -186,7 +181,6 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 	svc.generation = generation.New(generation.Deps{
 		Postgres:             pg,
 		Log:                  l,
-		GeminiCfg:            geminiCfg,
 		AiCfg:                aiCfg,
 		Engine:               genEngine,
 		FetchChunkTranscript: func(chunkID string) string { return segment.FetchChunkTranscript(kvSvc, chunkID) },
@@ -207,8 +201,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 		Postgres: pg,
 		KV:       kvSvc,
 		Log:      l,
-		AiCfg:    aiCfg,
-		Transcription: func(ctx context.Context, videoKey string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
+		Transcription: func(ctx context.Context, videoKey string, audioLang string, progress transcript.ProgressFn) (string, []transcriptSegment, error) {
 			// STTRunner expects transcript.ProgressFn;
 			// runSTTAnalyze uses the local progressFn alias
 			// (which is task.ProgressFn). Bridge with a wrapper
@@ -216,7 +209,7 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 			adapted := func(step richterv1.AnalysisProgressStep, msg string) error {
 				return progress(step, msg)
 			}
-			return transcription.runSTTAnalyze(ctx, videoKey, adapted)
+			return transcription.runSTTAnalyze(ctx, videoKey, audioLang, adapted)
 		},
 		Chunk: func(ctx context.Context, t string, segs []byte) ([]transcript.ChunkProposal, error) {
 			raws, err := svc.chunking.runGeminiChunk(ctx, t, segs)
@@ -234,7 +227,6 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 			return out, nil
 		},
 		Locks:               analysisLocks,
-		AiCtx:               svc.aiCtx,
 		ChunksLimit:         svc.chunksLimit,
 		LessonOpsLimit:      svc.lessonOpsLimit,
 		RequireTeacherRole:  svc.requireTeacherRole,
@@ -272,12 +264,6 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 var _ interface {
 	Handler() (string, http.Handler)
 } = (*AISvc)(nil)
-
-// unused import silencer for pgtype in service.go (no field on AISvc uses it directly here)
-var _ = pgtype.UUID{}
-
-// richterv1 is used in handler signatures; suppress unused if not referenced.
-var _ = (*richterv1.LessonTask)(nil)
 
 // Transcript returns the transcript sub-service. Exposed for the
 // aitasks/svc shims so they can invoke the existing pipeline

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -226,6 +227,14 @@ func (s *InteractionsSvc) CreateManualInteraction(
 				chunkID = parsed
 			}
 		}
+		// No explicit chunk → attribute by timestamp so the interaction shows up
+		// in the per-chunk heatmap. A NULL chunk_id makes answered questions
+		// invisible there (they belong to no segment).
+		if !chunkID.Valid {
+			if resolved, ok := resolveChunkForSeconds(ctx, q, lessonID, float64(req.GetStartSeconds())); ok {
+				chunkID = resolved
+			}
+		}
 		return q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
 			LessonID:     lessonID,
 			ChunkID:      chunkID,
@@ -243,6 +252,46 @@ func (s *InteractionsSvc) CreateManualInteraction(
 		return nil, svc.ConnectDBError(err)
 	}
 	return &richterv1.CreateManualInteractionResponse{Interaction: InteractionToProto(created, false)}, nil
+}
+
+// resolveChunkForSeconds returns the transcript chunk a timestamp belongs to so
+// an interaction is always attributed to a segment (and thus appears in the
+// per-chunk heatmap). It prefers the chunk whose [start, end) range contains the
+// timestamp; if the time falls in a gap or past the last chunk it returns the
+// most recent chunk that has started; if it precedes the first chunk it returns
+// the first. ok is false only when the lesson has no chunks yet.
+func resolveChunkForSeconds(ctx context.Context, q *gen.Queries, lessonID pgtype.UUID, seconds float64) (pgtype.UUID, bool) {
+	chunks, err := q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{
+		LessonID: lessonID, Limit: 1000, Offset: 0,
+	})
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	return chunkForSeconds(chunks, seconds)
+}
+
+// chunkForSeconds is the pure attribution decision (no DB) over a chunk slice, so
+// it is unit-testable. It sorts defensively — the "last chunk that has started"
+// fallback assumes ascending start time, and ListLessonTranscriptChunks orders by
+// order_index (normally monotonic in start_seconds) — then prefers the chunk whose
+// [start, end) range contains the timestamp; on a gap / past-last it returns the
+// most recent chunk that has started; before the first chunk it returns the first.
+// ok is false only when there are no chunks. NOTE: sorts the slice in place.
+func chunkForSeconds(chunks []gen.LessonTranscriptChunk, seconds float64) (pgtype.UUID, bool) {
+	if len(chunks) == 0 {
+		return pgtype.UUID{}, false
+	}
+	sort.Slice(chunks, func(i, j int) bool { return chunks[i].StartSeconds < chunks[j].StartSeconds })
+	best := chunks[0].ID // default: first chunk (timestamp before everything)
+	for _, c := range chunks {
+		if seconds >= c.StartSeconds && seconds < c.EndSeconds {
+			return c.ID, true // exact range match
+		}
+		if seconds >= c.StartSeconds {
+			best = c.ID // last chunk that has started by this timestamp
+		}
+	}
+	return best, true
 }
 
 // ── UpdateInteraction ─────────────────────────────────────────────────────────

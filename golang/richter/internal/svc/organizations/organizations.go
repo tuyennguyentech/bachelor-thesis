@@ -108,7 +108,9 @@ func (o *OrganizationsSvc) GetOrganizationById(
 		o.log.ErrorContext(ctx, "organizations service failed", svc.LogAttrs("GetOrganizationById.ParseUUID", err)...)
 		return nil, err
 	}
-	if _, err := o.authz.RequireOrgMember(ctx, id); err != nil {
+	// Any-status membership: an INVITED user must be able to read the org's name
+	// (to see which org invited them) before they accept and become active.
+	if _, err := o.authz.RequireOrgMembershipAnyStatus(ctx, id); err != nil {
 		return nil, err
 	}
 
@@ -143,7 +145,10 @@ func (o *OrganizationsSvc) GetOrganizationBySlug(
 		o.log.ErrorContext(ctx, "organizations service failed", svc.LogAttrs("GetOrganizationBySlug", err)...)
 		return nil, err
 	}
-	if _, err := o.authz.RequireOrgMember(ctx, org.ID); err != nil {
+	// Any-status membership (mirrors GetOrganizationById): an INVITED user must be
+	// able to read the org by slug too, so navigating directly to the org URL
+	// resolves it (the layout then routes them to accept) instead of a 404.
+	if _, err := o.authz.RequireOrgMembershipAnyStatus(ctx, org.ID); err != nil {
 		return nil, err
 	}
 	return &richterv1.GetOrganizationBySlugResponse{Organization: OrganizationToProto(org)}, nil

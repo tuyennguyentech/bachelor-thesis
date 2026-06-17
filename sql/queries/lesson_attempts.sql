@@ -37,6 +37,18 @@ JOIN lesson_interactions li ON li.id = lar.interaction_id
 WHERE lar.attempt_id = $1
 ORDER BY li.order_index;
 
+-- name: ListLessonResponseKinds :many
+-- Flat (response_json, interaction_kind) for every response across ALL attempts in
+-- a lesson. Lets analytics measure free-text word counts in O(pages) instead of an
+-- N+1 per-attempt ListAttemptResponses fetch.
+SELECT lar.response, li.kind AS interaction_kind
+FROM lesson_attempt_responses lar
+JOIN lesson_interactions li ON li.id = lar.interaction_id
+JOIN lesson_attempts la ON la.id = lar.attempt_id
+WHERE la.lesson_id = $1
+ORDER BY lar.attempt_id, li.order_index
+LIMIT $2 OFFSET $3;
+
 -- name: ListLessonAttempts :many
 SELECT
   la.id,

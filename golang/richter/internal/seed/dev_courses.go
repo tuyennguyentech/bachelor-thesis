@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc/ai/segment"
@@ -260,6 +261,16 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 		return fmt.Errorf("delete old chunks/interactions: %w", err)
 	}
 
+	// Defensive: both the order_index assignment below and the
+	// attribute-by-start_seconds loop further down assume chunks are in
+	// ascending temporal order (the "last chunk that has started" fallback).
+	// Sort to match the runtime resolver (resolveChunkForSeconds, which sorts)
+	// so an out-of-order seed JSON can never mis-attribute a question to the
+	// wrong chunk and corrupt the per-chunk heatmap.
+	sort.SliceStable(a.Chunks, func(i, j int) bool {
+		return a.Chunks[i].StartSeconds < a.Chunks[j].StartSeconds
+	})
+
 	// Insert chunks and build a map: start_seconds → chunk.id
 	chunkMap := make(map[float64]pgtype.UUID)
 	for i, cs := range a.Chunks {
@@ -288,14 +299,26 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 		if err != nil {
 			return fmt.Errorf("marshal config for interaction %d: %w", i, err)
 		}
-		// Find matching chunk by start_seconds range
+		// Attribute the question to a chunk by start_seconds. Prefer the chunk
+		// whose [start, end) range contains it; otherwise fall back to the most
+		// recent chunk that has started (gap / past-last) or the first chunk
+		// (before everything). Never leave it NULL — a NULL chunk_id hides the
+		// question from the per-chunk heatmap even though students answer it.
 		chunkID := pgtype.UUID{}
+		matched := false
 		for _, cs := range a.Chunks {
 			cid := chunkMap[cs.StartSeconds]
 			if qspec.StartSeconds >= cs.StartSeconds && qspec.StartSeconds < cs.EndSeconds {
 				chunkID = cid
+				matched = true
 				break
 			}
+			if qspec.StartSeconds >= cs.StartSeconds {
+				chunkID = cid // last chunk that has started by this timestamp
+			}
+		}
+		if !matched && !chunkID.Valid && len(a.Chunks) > 0 {
+			chunkID = chunkMap[a.Chunks[0].StartSeconds] // before the first chunk
 		}
 		if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
 			return q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{

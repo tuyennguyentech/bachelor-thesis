@@ -3,8 +3,6 @@ package ai
 import (
 	"strings"
 	"testing"
-
-	"github.com/google/generative-ai-go/genai"
 )
 
 func TestBuildTextOnlyGradingPrompt(t *testing.T) {
@@ -25,38 +23,4 @@ func TestBuildTextOnlyGradingPrompt(t *testing.T) {
 			t.Errorf("expected prompt to contain Tiếng Anh (English), got %s", prompt)
 		}
 	})
-}
-
-func TestTextGradingSchema(t *testing.T) {
-	t.Parallel()
-	// Verify that the schema type is TypeObject and includes required properties
-	// This mirrors TestAudioGradingResponseSchema to avoid runtime crashes during marshalling
-	schema := &genai.Schema{
-		Type:     genai.TypeObject,
-		Required: []string{"score", "feedback"},
-		Properties: map[string]*genai.Schema{
-			"score": {
-				Type: genai.TypeNumber,
-			},
-			"feedback": {
-				Type: genai.TypeString,
-			},
-		},
-	}
-
-	if schema.Type != genai.TypeObject {
-		t.Errorf("expected TypeObject, got %v", schema.Type)
-	}
-
-	if len(schema.Required) != 2 || schema.Required[0] != "score" || schema.Required[1] != "feedback" {
-		t.Errorf("expected required fields: score, feedback. got %v", schema.Required)
-	}
-
-	if schema.Properties["score"] == nil || schema.Properties["score"].Type != genai.TypeNumber {
-		t.Errorf("score property should be TypeNumber")
-	}
-
-	if schema.Properties["feedback"] == nil || schema.Properties["feedback"].Type != genai.TypeString {
-		t.Errorf("feedback property should be TypeString")
-	}
 }

@@ -31,6 +31,10 @@ message OrganizationMember {
   string user_email = 7;
   string user_first_name = 8;
   string user_last_name = 9;
+  // Embedded org info (populated by ListUserMemberships via JOIN — avoids a
+  // separate getOrganizationById per membership when listing a user's orgs).
+  string organization_name = 10;
+  string organization_slug = 11;
 }
 
 message AddOrganizationMemberRequest {
@@ -118,6 +122,20 @@ message RemoveOrganizationMemberRequest {
 
 message RemoveOrganizationMemberResponse {}
 
+// RespondToOrganizationInvitation lets the AUTHENTICATED user accept or decline
+// their OWN pending invitation (status INVITED) to an organization. There is no
+// user_id field: the caller can only respond to their own invitation. Accepting
+// flips the membership to ACTIVE; declining removes the membership row.
+message RespondToOrganizationInvitationRequest {
+  string organization_id = 1 [(buf.validate.field).string.uuid = true];
+  bool accept = 2;
+}
+
+message RespondToOrganizationInvitationResponse {
+  // Present (status ACTIVE) when accepted; empty when declined.
+  OrganizationMember member = 1;
+}
+
 service OrganizationMemberService {
   rpc AddOrganizationMember(AddOrganizationMemberRequest) returns (AddOrganizationMemberResponse) {}
   rpc GetOrganizationMember(GetOrganizationMemberRequest) returns (GetOrganizationMemberResponse) {}
@@ -126,4 +144,5 @@ service OrganizationMemberService {
   rpc UpdateOrganizationMemberRole(UpdateOrganizationMemberRoleRequest) returns (UpdateOrganizationMemberRoleResponse) {}
   rpc UpdateOrganizationMemberStatus(UpdateOrganizationMemberStatusRequest) returns (UpdateOrganizationMemberStatusResponse) {}
   rpc RemoveOrganizationMember(RemoveOrganizationMemberRequest) returns (RemoveOrganizationMemberResponse) {}
+  rpc RespondToOrganizationInvitation(RespondToOrganizationInvitationRequest) returns (RespondToOrganizationInvitationResponse) {}
 }

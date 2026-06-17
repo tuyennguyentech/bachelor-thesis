@@ -315,6 +315,13 @@
             "duration_secs": 1820,
             "analysis": {
               "transcript": "Trong bài này chúng ta tìm hiểu ba thành phần cốt lõi của nền tảng Java: JVM, JDK và JRE.\n\nJVM (Java Virtual Machine) là máy ảo thực thi bytecode Java. JVM tạo nên tính 'Write Once, Run Anywhere' của Java — bytecode (.class file) có thể chạy trên bất kỳ hệ điều hành nào có JVM. JVM gồm các thành phần: Class Loader, Runtime Data Areas (Heap, Stack, Method Area), và Execution Engine.\n\nJIT (Just-In-Time) Compiler là phần quan trọng của Execution Engine. Nó biên dịch bytecode thường xuyên được dùng thành mã máy native, giúp Java đạt hiệu năng gần với C/C++.\n\nJRE (Java Runtime Environment) = JVM + các thư viện chuẩn (rt.jar). Đây là môi trường tối thiểu để chạy ứng dụng Java.\n\nJDK (Java Development Kit) = JRE + công cụ phát triển (javac compiler, debugger, javadoc...). Developer cần cài JDK để viết và biên dịch Java.\n\nVòng đời: Source code (.java) → javac compiler → Bytecode (.class) → JVM → Execution. JVM cũng có GC (Garbage Collector) tự động giải phóng bộ nhớ.",
+              "chunks": [
+                {"start_seconds": 0, "end_seconds": 360, "summary": "Tổng quan JVM, JDK, JRE và vai trò"},
+                {"start_seconds": 360, "end_seconds": 700, "summary": "Phân biệt JRE và JDK"},
+                {"start_seconds": 700, "end_seconds": 1050, "summary": "JIT Compiler và Execution Engine"},
+                {"start_seconds": 1050, "end_seconds": 1350, "summary": "Biên dịch .java thành bytecode .class"},
+                {"start_seconds": 1350, "end_seconds": 1820, "summary": "Write Once Run Anywhere — ưu điểm bytecode"}
+              ],
               "questions": [
                 {
                   "question_text": "JVM là gì?",
@@ -381,7 +388,78 @@
           },
           {
             "title": "Bài 2: Kiểu dữ liệu và biểu thức",
-            "description": "Primitive types, autoboxing, String pool và các toán tử."
+            "description": "Primitive types, autoboxing, String pool và các toán tử.",
+            "duration_secs": 1500,
+            "analysis": {
+              "transcript": "Java có hai loại kiểu dữ liệu: kiểu nguyên thủy (primitive) và kiểu tham chiếu (reference).\n\nJava có đúng 8 kiểu nguyên thủy: byte, short, int, long, float, double, char và boolean. Chúng lưu trực tiếp giá trị trên stack và không phải là object.\n\nKiểu tham chiếu trỏ tới object trên heap. String là một kiểu tham chiếu, KHÔNG phải primitive — đây là nhầm lẫn phổ biến. Mỗi primitive có một lớp bao (wrapper class) tương ứng: int ↔ Integer, double ↔ Double, char ↔ Character...\n\nAutoboxing là việc Java tự động chuyển đổi giữa primitive và wrapper, ví dụ 'Integer x = 5;' tự động bọc int 5 thành Integer. Chiều ngược lại gọi là unboxing.\n\nString pool là vùng nhớ đặc biệt trong heap, nơi JVM tái sử dụng các String literal giống nhau để tiết kiệm bộ nhớ. 'String a = \"hi\"; String b = \"hi\";' thì a và b cùng trỏ tới một đối tượng trong pool.\n\nVề biểu thức: phép chia hai số nguyên cho kết quả nguyên — 7 / 2 = 3 (phần thập phân bị cắt bỏ). Toán tử % (modulo) lấy phần dư: 7 % 2 = 1. Cần chú ý ép kiểu (casting) khi trộn các kiểu số khác nhau.",
+              "chunks": [
+                {"start_seconds": 0, "end_seconds": 250, "summary": "Tổng quan kiểu dữ liệu nguyên thủy"},
+                {"start_seconds": 250, "end_seconds": 500, "summary": "Kiểu tham chiếu và String"},
+                {"start_seconds": 500, "end_seconds": 750, "summary": "Autoboxing và Wrapper class"},
+                {"start_seconds": 750, "end_seconds": 1000, "summary": "String pool và bộ nhớ"},
+                {"start_seconds": 1000, "end_seconds": 1250, "summary": "Toán tử số học và ép kiểu"},
+                {"start_seconds": 1250, "end_seconds": 1500, "summary": "Toán tử lấy dư và biểu thức"}
+              ],
+              "questions": [
+                {
+                  "question_text": "Java có bao nhiêu kiểu dữ liệu nguyên thủy (primitive)?",
+                  "options": ["6", "8", "10", "4"],
+                  "correct_answer": 1,
+                  "explanation": "Java có đúng 8 kiểu nguyên thủy: byte, short, int, long, float, double, char, boolean.",
+                  "start_seconds": 120
+                },
+                {
+                  "question_text": "Kiểu nào sau đây KHÔNG phải là primitive type?",
+                  "options": ["String", "int", "double", "boolean"],
+                  "correct_answer": 0,
+                  "explanation": "String là kiểu tham chiếu (reference), không phải primitive — đây là nhầm lẫn rất phổ biến.",
+                  "start_seconds": 360
+                },
+                {
+                  "question_text": "Autoboxing trong Java là gì?",
+                  "options": [
+                    "Chuyển String thành số",
+                    "Tự động chuyển đổi giữa primitive và wrapper (int ↔ Integer)",
+                    "Cấp phát bộ nhớ trên heap",
+                    "Ép kiểu tường minh giữa các số"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Autoboxing tự động bọc một primitive thành wrapper tương ứng (và unboxing là chiều ngược lại).",
+                  "start_seconds": 600
+                },
+                {
+                  "question_text": "String pool giúp ích gì?",
+                  "options": [
+                    "Tăng tốc độ truy cập mạng",
+                    "Tái sử dụng các String literal giống nhau để tiết kiệm bộ nhớ",
+                    "Tự động mã hóa chuỗi",
+                    "Sắp xếp chuỗi theo thứ tự"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "String pool lưu lại các literal giống nhau và tái sử dụng cùng một đối tượng, tiết kiệm bộ nhớ.",
+                  "start_seconds": 840
+                },
+                {
+                  "question_text": "Kết quả của biểu thức 7 / 2 với hai số int trong Java là?",
+                  "options": ["3.5", "3", "4", "2"],
+                  "correct_answer": 1,
+                  "explanation": "Phép chia hai số nguyên cho kết quả nguyên: phần thập phân bị cắt bỏ nên 7 / 2 = 3.",
+                  "start_seconds": 1080
+                },
+                {
+                  "question_text": "Toán tử % trong Java dùng để làm gì?",
+                  "options": [
+                    "Tính phần trăm",
+                    "Lấy phần dư của phép chia",
+                    "Làm tròn số",
+                    "Nối hai chuỗi"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Toán tử % (modulo) trả về phần dư của phép chia, ví dụ 7 % 2 = 1.",
+                  "start_seconds": 1320
+                }
+              ]
+            }
           },
           {
             "title": "Bài 3: Control flow và vòng lặp",

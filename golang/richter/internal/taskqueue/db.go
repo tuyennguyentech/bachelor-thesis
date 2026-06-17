@@ -68,6 +68,11 @@ type DB interface {
 	// UpdateTaskProgress updates the task's progress fields.
 	UpdateTaskProgress(ctx context.Context, id pgtype.UUID, progressStep string, progressCurrent, progressTotal int32, message string) error
 
+	// SetTaskCheckpoint persists a mid-run partial output_payload (a resumable
+	// stage checkpoint) without leaving 'processing'. Ownership-guarded by
+	// workerID so a stolen task's late write is a no-op.
+	SetTaskCheckpoint(ctx context.Context, id pgtype.UUID, output []byte, workerID pgtype.UUID) error
+
 	// CountActiveTasksByUser counts active tasks for the user.
 	CountActiveTasksByUser(ctx context.Context, userID pgtype.UUID) (int64, error)
 

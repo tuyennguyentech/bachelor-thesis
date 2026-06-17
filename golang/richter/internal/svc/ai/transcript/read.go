@@ -8,7 +8,6 @@ import (
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
 	"example.com/sql/gen"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -82,12 +81,6 @@ func (s *Service) UpdateConfig(
 		return nil, svc.ConnectDBError(err)
 	}
 	return &richterv1.UpdateChunkConfigResponse{Chunk: chunkToProto(updated)}, nil
-}
-
-// tupleForLessonSegments is a tiny helper so callers don't have to import
-// the foundationdb tuple package just to read/write lesson segments.
-func tupleForLessonSegments(lessonIDStr string) tuple.Tuple {
-	return tuple.Tuple{lessonIDStr, "segments"}
 }
 
 // chunkToProto converts a sqlc-generated LessonTranscriptChunk to the

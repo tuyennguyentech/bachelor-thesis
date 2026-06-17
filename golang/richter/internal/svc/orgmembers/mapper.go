@@ -20,6 +20,22 @@ func OrganizationMemberToProto(m gen.OrganizationMember) *richterv1.Organization
 	}
 }
 
+// OrganizationMembershipRowToProto maps a ListUserMemberships row — which JOINs
+// the organization to embed its name + slug, so a user's org list needs no
+// per-org getOrganizationById round-trip.
+func OrganizationMembershipRowToProto(m gen.ListUserMembershipsRow) *richterv1.OrganizationMember {
+	return &richterv1.OrganizationMember{
+		OrganizationId:   m.OrganizationID.String(),
+		UserId:           m.UserID.String(),
+		Role:             OrganizationRoleToProto(m.Role),
+		Status:           MemberStatusToProto(m.Status),
+		CreatedAt:        svc.TimestampToProto(m.CreatedAt),
+		UpdatedAt:        svc.TimestampToProto(m.UpdatedAt),
+		OrganizationName: m.OrganizationName,
+		OrganizationSlug: m.OrganizationSlug,
+	}
+}
+
 func OrganizationMemberRowToProto(m gen.ListOrganizationMembersRow) *richterv1.OrganizationMember {
 	return &richterv1.OrganizationMember{
 		OrganizationId: m.OrganizationID.String(),

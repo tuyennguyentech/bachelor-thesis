@@ -14,14 +14,13 @@ import (
 )
 
 type chunkingService struct {
-	geminiCfg *cfg.GeminiCfg
-	aiCfg     *cfg.AiCfg
-	engine    genengine.Engine
-	log       *log.LogSvc
+	aiCfg  *cfg.AiCfg
+	engine genengine.Engine
+	log    *log.LogSvc
 }
 
-func newChunkingService(geminiCfg *cfg.GeminiCfg, aiCfg *cfg.AiCfg, engine genengine.Engine, logSvc *log.LogSvc) *chunkingService {
-	return &chunkingService{geminiCfg: geminiCfg, aiCfg: aiCfg, engine: engine, log: logSvc}
+func newChunkingService(aiCfg *cfg.AiCfg, engine genengine.Engine, logSvc *log.LogSvc) *chunkingService {
+	return &chunkingService{aiCfg: aiCfg, engine: engine, log: logSvc}
 }
 
 // transcriptChunkRaw is the boundary-only Gemini response for a chunk.
@@ -74,15 +73,36 @@ Trả về JSON:
 }`)
 
 	s.log.InfoContext(ctx, "[GENAI] ChunkTranscript: generating", "engine", s.engine.Name())
-	raw, err := s.engine.Generate(ctx, genengine.Request{
-		Prompt:          sb.String(),
-		Temperature:     0.2,
-		MaxOutputTokens: 32768,
-		JSONOutput:      true,
-		Purpose:         genengine.PurposeChunk,
-	})
-	if err != nil {
-		return nil, friendlyGeminiError(err)
+
+	// Retry transient Gemini failures (429 quota, 5xx, overloaded) with linear
+	// backoff — the SAME policy item generation already uses. Running several
+	// lesson pipelines at once can momentarily exhaust the free-tier per-minute
+	// quota; without this a single transient 429 here kills the whole pipeline at
+	// the chunk stage (observed as "Không thể phân đoạn").
+	attempts := max(s.aiCfg.GeminiMaxAttempts, 1)
+	var raw string
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		raw, err = s.engine.Generate(ctx, genengine.Request{
+			Prompt:          sb.String(),
+			Temperature:     0.2,
+			MaxOutputTokens: 32768,
+			JSONOutput:      true,
+			Purpose:         genengine.PurposeChunk,
+		})
+		if err == nil {
+			break
+		}
+		if !isTransientGeminiError(err) || attempt == attempts {
+			return nil, friendlyGeminiError(err)
+		}
+		s.log.WarnContext(ctx, "[GENAI] ChunkTranscript: transient error, retrying",
+			"attempt", attempt, "max", attempts, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * s.aiCfg.GeminiRetryBackoff):
+		}
 	}
 
 	var result struct {

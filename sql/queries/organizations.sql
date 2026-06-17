@@ -49,13 +49,3 @@ RETURNING *;
 -- name: DeleteOrganization :execrows
 DELETE FROM organizations
 WHERE id = $1;
-
--- name: BulkCreateOrganizations :copyfrom
-INSERT INTO organizations (
-  created_by,
-  name,
-  slug,
-  status
-) VALUES (
-  $1, $2, $3, $4
-);

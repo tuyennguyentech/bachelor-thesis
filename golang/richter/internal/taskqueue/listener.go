@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/url"
-	"strconv"
 	"time"
 
 	"example.com/richter/cfg"
@@ -136,11 +133,5 @@ func NewListenerFromDI(i do.Injector) (*Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("taskqueue.NewListener: LogSvc: %w", err)
 	}
-	dsn := (&url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(pg.User, pg.Password),
-		Host:   net.JoinHostPort(pg.Host, strconv.FormatUint(uint64(pg.Port), 10)),
-		Path:   pg.Database,
-	}).String()
-	return NewListener(dsn, scanner.notifCh, &logSvc.Logger), nil
+	return NewListener(pg.DSN(), scanner.notifCh, &logSvc.Logger), nil
 }

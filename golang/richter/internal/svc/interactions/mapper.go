@@ -5,7 +5,6 @@ import (
 
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/sql/gen"
-	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -169,10 +168,3 @@ func ShouldStripAnswers(feedbackMode string, isTeacher bool, hasSubmitted bool) 
 	}
 }
 
-// TimestamptzToProto converts a pgtype.Timestamptz to *timestamppb.Timestamp.
-func TimestamptzToProto(t pgtype.Timestamptz) *timestamppb.Timestamp {
-	if !t.Valid {
-		return nil
-	}
-	return timestamppb.New(t.Time)
-}

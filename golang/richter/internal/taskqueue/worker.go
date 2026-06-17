@@ -208,11 +208,12 @@ func (w *Worker) runTask(ctx context.Context, task Task) {
 
 	executor := factory()
 	env := &Env{
-		TaskID:   task.ID.String(),
-		TaskType: task.TaskType,
-		WorkerID: w.id,
-		Logger:   w.log,
-		Input:    task.InputPayload,
+		TaskID:      task.ID.String(),
+		TaskType:    task.TaskType,
+		WorkerID:    w.id,
+		Logger:      w.log,
+		Input:       task.InputPayload,
+		PriorOutput: task.OutputPayload,
 	}
 
 	output, err := executor.Execute(ctx, env)

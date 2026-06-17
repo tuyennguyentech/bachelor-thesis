@@ -6,11 +6,8 @@ import (
 	"strings"
 
 	richterv1 "example.com/buf/gen/richter/v1"
-	"example.com/richter/internal/db"
 	"example.com/sql/gen"
 	"github.com/google/generative-ai-go/genai"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // ── Step 3: UpdateTranscriptSegment ──────────────────────────────────────────
@@ -89,139 +86,6 @@ func (s *AISvc) AdjustChunkBoundary(
 	}, nil
 }
 
-// ── Generation config helpers ─────────────────────────────────────────────────
-
-const defaultGenerationCount = 2
-
-// kindCount pairs a kind with how many interactions to generate for it in a single chunk.
-type kindCount struct {
-	kind  richterv1.InteractionKind
-	count int32
-}
-
-// generationPlan describes how to generate interactions for one chunk.
-// Exactly one of useAIChoose or len(evenCounts)>0 is set.
-type generationPlan struct {
-	useAIChoose bool
-	aiKinds     []richterv1.InteractionKind // AI_CHOOSE: allowed kinds
-	aiCount     int32                       // AI_CHOOSE: total items to request
-	evenCounts  []kindCount                 // EVEN_DISTRIBUTION: per-kind counts
-}
-
-func interactionGenerationBatchSize(kind richterv1.InteractionKind) int32 {
-	// Listening and reading items each carry a long passage + several nested
-	// MCQ; a batch of 2 reading items can push Gemini past its 16K-token
-	// limit even at 65536 max output. Single-item batches are safe.
-	switch kind {
-	case richterv1.InteractionKind_INTERACTION_KIND_LISTENING,
-		richterv1.InteractionKind_INTERACTION_KIND_READING:
-		return 1
-	default:
-		return 4
-	}
-}
-
-// resolveGenerationPlan merges chunk config → lesson default → server default → request overrides
-// and returns the effective generation plan.
-func resolveGenerationPlan(
-	chunk gen.LessonTranscriptChunk,
-	lesson gen.Lesson,
-	reqKinds []richterv1.InteractionKind,
-	reqCount int32,
-	reqStrategy richterv1.GenerationStrategy,
-) generationPlan {
-	var cfgKinds []richterv1.InteractionKind
-	cfgCount := int32(chunk.QuestionCountConfig)
-	cfgStrategy := richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED
-
-	if d := interactionConfigFromJSON(lesson.DefaultInteractionConfig); d != nil {
-		if len(d.Kinds) > 0 {
-			cfgKinds = d.Kinds
-		}
-		if d.Count > 0 {
-			cfgCount = d.Count
-		}
-		if d.Strategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED {
-			cfgStrategy = d.Strategy
-		}
-	}
-	if c := interactionConfigFromJSON(chunk.InteractionConfig); c != nil {
-		if len(c.Kinds) > 0 {
-			cfgKinds = c.Kinds
-		}
-		if c.Count > 0 {
-			cfgCount = c.Count
-		}
-		if c.Strategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED {
-			cfgStrategy = c.Strategy
-		}
-	}
-
-	// Request-level overrides take highest priority.
-	if len(reqKinds) > 0 {
-		cfgKinds = reqKinds
-	}
-	if reqCount > 0 {
-		cfgCount = reqCount
-	}
-	if reqStrategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED {
-		cfgStrategy = reqStrategy
-	}
-
-	// Server defaults.
-	if len(cfgKinds) == 0 {
-		cfgKinds = []richterv1.InteractionKind{richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE}
-	}
-	if cfgCount <= 0 {
-		cfgCount = defaultGenerationCount
-	}
-
-	// UNSPECIFIED → AI_CHOOSE (default).
-	if cfgStrategy != richterv1.GenerationStrategy_GENERATION_STRATEGY_EVEN_DISTRIBUTION {
-		return generationPlan{useAIChoose: true, aiKinds: cfgKinds, aiCount: cfgCount}
-	}
-
-	// EVEN_DISTRIBUTION: round-robin across cfgKinds.
-	kindMap := make(map[richterv1.InteractionKind]int32, len(cfgKinds))
-	for i := int32(0); i < cfgCount; i++ {
-		k := cfgKinds[i%int32(len(cfgKinds))]
-		kindMap[k]++
-	}
-	seen := make(map[richterv1.InteractionKind]bool)
-	result := make([]kindCount, 0, len(kindMap))
-	for _, k := range cfgKinds {
-		if !seen[k] {
-			seen[k] = true
-			result = append(result, kindCount{k, kindMap[k]})
-		}
-	}
-	return generationPlan{evenCounts: result}
-}
-
-// ── Step 7: GenerateInteractionsStream ───────────────────────────────────────
-//
-// GenerateInteractionsStream was removed in this revision. The generation
-// step is now triggered via StartLessonTask with kind =
-// LESSON_TASK_KIND_GENERATE_INTERACTIONS. The underlying pipeline
-// (runGenerateInteractions below) is still used by the task worker — see
-// task_runner.go.
-
-// generateInteractionsProgressFn is the new typed callback used by the
-// task worker. We no longer wrap it in a *GenerateInteractionsProgressEvent
-// (the proto type was removed) — we emit each field directly.
-type generateInteractionsProgressFn func(step richterv1.GenerateInteractionsStep, msg string, chunkIndex, totalChunks int32) error
-
-func (s *AISvc) runGenerateInteractions(
-	ctx context.Context,
-	lessonID pgtype.UUID,
-	req *richterv1.GenerateInteractionsRequest,
-	send generateInteractionsProgressFn,
-) error {
-	return s.generation.Run(ctx, lessonID, req, func(step richterv1.GenerateInteractionsStep, msg string, chunkIndex, totalChunks int32) error {
-		return send(step, msg, chunkIndex, totalChunks)
-	})
-}
-
 // ── Gemini helpers ────────────────────────────────────────────────────────────
 
 // extractStatusCode extracts an HTTP status code string from a Gemini error message.
@@ -254,6 +118,27 @@ func friendlyGeminiError(err error) error {
 		return fmt.Errorf("Vượt hạn mức Gemini API (%s). Vui lòng thử lại sau vài phút.", extractStatusCode(msg))
 	}
 	return err
+}
+
+// isTransientGeminiError reports whether a Gemini error is the kind that clears
+// on a retry — rate-limit/quota (429), server overload (5xx), or an empty/
+// truncated response under load. Mirrors the generation package's check so the
+// chunk stage retries transient failures instead of failing the whole pipeline.
+func isTransientGeminiError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, marker := range []string{
+		"429", "quota", "rate limit", "ratelimit", "RESOURCE_EXHAUSTED",
+		"503", "overloaded", "500", "502", "504", "UNAVAILABLE",
+		"empty gemini response", "no candidates", "no content parts", "stopped unexpectedly",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func geminiResponseText(resp *genai.GenerateContentResponse) (string, error) {
@@ -298,15 +183,6 @@ func geminiResponseText(resp *genai.GenerateContentResponse) (string, error) {
 	return raw, nil
 }
 
-// generatedItem is the common output of any Gemini generation run.
-type generatedItem struct {
-	prompt      string
-	explanation string
-	startSecs   float32
-	configJSON  []byte
-	kindStr     string
-}
-
 func normalizeGeneratedInteractionStartSeconds(ints []gen.LessonInteraction, chunks []gen.LessonTranscriptChunk) {
 	if len(ints) == 0 || len(chunks) == 0 {
 		return
@@ -327,35 +203,3 @@ func normalizeGeneratedInteractionStartSeconds(ints []gen.LessonInteraction, chu
 	}
 }
 
-func (s *AISvc) insertInteractionsInTx(ctx context.Context, q *gen.Queries, lessonID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
-	saved := make([]gen.LessonInteraction, 0, len(items))
-	nextIdx, err := q.GetLessonInteractionNextOrderIndex(ctx, lessonID)
-	if err != nil {
-		return saved, fmt.Errorf("compute order_index: %w", err)
-	}
-	for i, item := range items {
-		li, err := q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
-			LessonID:     lessonID,
-			ChunkID:      chunkID,
-			Kind:         item.kindStr,
-			StartSeconds: item.startSecs,
-			OrderIndex:   nextIdx + int32(i),
-			Prompt:       item.prompt,
-			Explanation:  item.explanation,
-			Config:       item.configJSON,
-			MaxScore:     1.0,
-			GeneratedBy:  "ai",
-		})
-		if err != nil {
-			return saved, err
-		}
-		saved = append(saved, li)
-	}
-	return saved, nil
-}
-
-func (s *AISvc) saveInteractionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
-	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonInteraction, error) {
-		return s.insertInteractionsInTx(ctx, q, lessonID, chunkID, items)
-	})
-}

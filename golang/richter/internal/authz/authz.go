@@ -152,6 +152,37 @@ func (a *AuthzSvc) RequireOrgMember(ctx context.Context, orgID pgtype.UUID) (*jw
 	)
 }
 
+// RequireOrgMembershipAnyStatus returns claims if the authenticated user has a
+// membership row in the org of ANY status (active, invited, or suspended) — used
+// for reading the org's public details so an INVITED user can see which org they
+// were invited to before accepting. SYS_ADMIN bypasses the check.
+func (a *AuthzSvc) RequireOrgMembershipAnyStatus(ctx context.Context, orgID pgtype.UUID) (*jwtv1.JWTClaims, error) {
+	claims, err := a.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if claims.GetRole() == richterv1.UserRole_USER_ROLE_ADMIN {
+		return claims, nil
+	}
+	userID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+	_, err = db.WithConnection(a.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+		return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: orgID,
+			UserID:         userID,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("not a member of this organization"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	return claims, nil
+}
+
 // RequireOrgRole returns claims if the authenticated user has any of the given org-level roles.
 // SYS_ADMIN bypasses the org membership check.
 func (a *AuthzSvc) RequireOrgRole(ctx context.Context, orgID pgtype.UUID, roles ...gen.OrganizationRole) (*jwtv1.JWTClaims, error) {

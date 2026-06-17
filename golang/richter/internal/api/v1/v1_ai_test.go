@@ -854,6 +854,19 @@ func TestAIStatusMapping(t *testing.T) {
 			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_ERROR,
 			name:        "Error",
 		},
+		{
+			// Quick Create uses a single composite pipeline_run task (no separate
+			// transcribe/chunk/quiz_gen rows). A succeeded run must derive to DONE,
+			// not PENDING — else the FE wipes the generated chunks on reload.
+			insertTask:  func(t *testing.T, lid string) { insertTestTask(t, lid, "pipeline_run", "succeeded") },
+			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE,
+			name:        "PipelineRunSucceeded",
+		},
+		{
+			insertTask:  func(t *testing.T, lid string) { insertTestTask(t, lid, "pipeline_run", "processing") },
+			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_PROCESSING,
+			name:        "PipelineRunProcessing",
+		},
 	}
 
 	for _, tc := range cases {
@@ -1270,6 +1283,85 @@ func TestAIGenerateInteractionsResumable(t *testing.T) {
 			t.Errorf("task should have completed; got status %v", task.Status)
 		}
 	})
+}
+
+// TestAIGenerateInteractionsIdempotent covers the over-generation fix: a
+// force-regenerate that re-runs item generation for a chunk must REPLACE that
+// chunk's interactions, not APPEND — otherwise re-runs/resumes accumulate
+// duplicates (the lesson with one chunk holding 3× its questions). Runs against
+// the mock engine (richter.test.toml), which returns a deterministic item set.
+func TestAIGenerateInteractionsIdempotent(t *testing.T) {
+	t.Parallel()
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusChunksReady)
+	// Non-empty transcript so generation actually calls the engine for this chunk.
+	chunk := insertTestChunk(t, e.lessonID, 0, "Đây là nội dung transcript mẫu cho kiểm thử idempotent.")
+
+	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get db: %v", err)
+	}
+	countForChunk := func() int64 {
+		t.Helper()
+		n, err := db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (int64, error) {
+			return q.CountLessonInteractionsByChunk(ctx, chunk.ID)
+		})
+		if err != nil {
+			t.Fatalf("count interactions: %v", err)
+		}
+		return n
+	}
+
+	forceGen := func(t *testing.T) *richterv1.LessonTask {
+		t.Helper()
+		startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		startResp, err := e.aiTeacher.StartLessonTask(startCtx, &richterv1.StartLessonTaskRequest{
+			LessonId:             e.lessonID,
+			Kind:                 richterv1.LessonTaskKind_LESSON_TASK_KIND_GENERATE_INTERACTIONS,
+			GenerateInteractions: &richterv1.GenerateInteractionsRequest{LessonId: e.lessonID, ForceRegenerate: true},
+		})
+		cancel()
+		if err != nil {
+			t.Fatalf("StartLessonTask: %v", err)
+		}
+		taskID := startResp.Task.Id
+		waitCtx, waitCancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer waitCancel()
+		for {
+			getResp, err := e.aiTeacher.GetLessonTask(waitCtx, &richterv1.GetLessonTaskRequest{TaskId: taskID})
+			if err != nil {
+				t.Fatalf("GetLessonTask: %v", err)
+			}
+			s := getResp.Task.Status
+			if s == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_SUCCEEDED ||
+				s == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_FAILED ||
+				s == richterv1.LessonTaskStatus_LESSON_TASK_STATUS_CANCELED {
+				return getResp.Task
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	t1 := forceGen(t)
+	if t1.Status != richterv1.LessonTaskStatus_LESSON_TASK_STATUS_SUCCEEDED {
+		t.Fatalf("first generation: want SUCCEEDED, got %v (err=%q)", t1.Status, t1.ErrorMsg)
+	}
+	first := countForChunk()
+	if first == 0 {
+		t.Fatal("expected interactions after first generation")
+	}
+
+	t2 := forceGen(t)
+	if t2.Status != richterv1.LessonTaskStatus_LESSON_TASK_STATUS_SUCCEEDED {
+		t.Fatalf("second generation: want SUCCEEDED, got %v (err=%q)", t2.Status, t2.ErrorMsg)
+	}
+	second := countForChunk()
+
+	if second != first {
+		t.Errorf("force-regenerate must REPLACE, not append: first run produced %d interactions, second run left %d (duplicated)", first, second)
+	}
 }
 
 // ── TestAIFDBContent ──────────────────────────────────────────────────────────
@@ -2763,10 +2855,11 @@ func TestLearnerMetrics(t *testing.T) {
 		}
 		for _, s := range lessonListRes.Attempts {
 			if s.UserId == e.studentID {
-				// Full responder: response_rate=1.0, watch=0, score=1.0 →
-				// engagement = round(100*(0.4*0 + 0.3*1 + 0.3*1)) = round(60) = 60
-				if s.EngagementScore < 55 || s.EngagementScore > 65 {
-					t.Errorf("student full-answer engagement: want ~60, got %v", s.EngagementScore)
+				// Engagement is now the 50/50 blend of watch + score (response_rate
+				// was dropped). Full responder: watch=0, score=1.0 →
+				// engagement = round(100*(0.5*0 + 0.5*1)) = round(50) = 50.
+				if s.EngagementScore < 45 || s.EngagementScore > 55 {
+					t.Errorf("student full-answer engagement: want ~50, got %v", s.EngagementScore)
 				}
 			}
 		}
@@ -2946,6 +3039,143 @@ func TestLearnerMetrics(t *testing.T) {
 					t.Errorf("empty-audio reading response score: want 0, got %v", r.Score)
 				}
 			}
+		}
+	})
+}
+
+// TestAIResetLessonContent covers the "Xoá toàn bộ nội dung" action that returns
+// a lesson to its blank pre-quick-create state: it must wipe the video pointer,
+// the analysis row, the chunks (+FDB transcripts), and the interactions, be
+// idempotent on an already-blank lesson, and be manager-only.
+func TestAIResetLessonContent(t *testing.T) {
+	t.Parallel()
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get db: %v", err)
+	}
+	kvSvc, err := do.Invoke[*kv.KVSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get kv: %v", err)
+	}
+	var lid pgtype.UUID
+	if err := lid.Scan(e.lessonID); err != nil {
+		t.Fatalf("parse lessonID: %v", err)
+	}
+
+	// seedContent populates the lesson with the full "after Tạo nhanh" state:
+	// a video pointer, an analysis row, two chunks with FDB transcripts, and
+	// interactions on each. Returns the chunk ids for FDB assertions.
+	seedContent := func(t *testing.T) []string {
+		t.Helper()
+		// Set the video pointer directly in PG (the UpdateLessonVideo RPC
+		// stat-checks the object in storage; we want a dangling key to also
+		// exercise the reset's best-effort RemoveObject path).
+		if err := db.WithConnectionExec(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			_, err := q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
+				ID:              lid,
+				VideoStorageKey: pgtype.Text{String: "lessons/" + e.lessonID + "/video.mp4", Valid: true},
+				DurationSeconds: pgtype.Int4{Int32: 120, Valid: true},
+			})
+			return err
+		}); err != nil {
+			t.Fatalf("seed video: %v", err)
+		}
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusChunksReady)
+		c0 := insertTestChunk(t, e.lessonID, 0, "first chunk transcript")
+		c1 := insertTestChunk(t, e.lessonID, 1, "second chunk transcript")
+		insertTestInteractionsForChunk(t, e.lessonID, c0.ID.String(), 2)
+		insertTestInteractionsForChunk(t, e.lessonID, c1.ID.String(), 2)
+		return []string{c0.ID.String(), c1.ID.String()}
+	}
+
+	countInteractions := func(t *testing.T) int {
+		t.Helper()
+		its, err := db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+			return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{LessonID: lid, Limit: 500, Offset: 0})
+		})
+		if err != nil {
+			t.Fatalf("list interactions: %v", err)
+		}
+		return len(its)
+	}
+
+	// ── Authz: students / non-members / anon cannot reset (role check is first,
+	// so no content is needed). ────────────────────────────────────────────────
+	t.Run("Authz", func(t *testing.T) {
+		req := &richterv1.ResetLessonContentRequest{LessonId: e.lessonID}
+		assertCode(t, func() error { _, err := e.aiAnon.ResetLessonContent(ctx, req); return err }(), connect.CodeUnauthenticated)
+		assertCode(t, func() error { _, err := e.aiStudent.ResetLessonContent(ctx, req); return err }(), connect.CodePermissionDenied)
+		assertCode(t, func() error { _, err := e.aiNonMember.ResetLessonContent(ctx, req); return err }(), connect.CodePermissionDenied)
+	})
+
+	// ── The teacher wipe clears everything. ─────────────────────────────────────
+	t.Run("Teacher/WipesEverything", func(t *testing.T) {
+		chunkIDs := seedContent(t)
+
+		// Precondition: content exists.
+		listRes, err := e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{LessonId: e.lessonID, Limit: 50})
+		if err != nil {
+			t.Fatalf("list before: %v", err)
+		}
+		if len(listRes.Chunks) != 2 {
+			t.Fatalf("want 2 chunks before reset, got %d", len(listRes.Chunks))
+		}
+		if n := countInteractions(t); n != 4 {
+			t.Fatalf("want 4 interactions before reset, got %d", n)
+		}
+
+		if _, err := e.aiTeacher.ResetLessonContent(ctx, &richterv1.ResetLessonContentRequest{LessonId: e.lessonID}); err != nil {
+			t.Fatalf("ResetLessonContent: %v", err)
+		}
+
+		// Chunks gone.
+		listRes, err = e.aiTeacher.ListLessonTranscriptChunks(ctx, &richterv1.ListLessonTranscriptChunksRequest{LessonId: e.lessonID, Limit: 50})
+		if err != nil {
+			t.Fatalf("list after: %v", err)
+		}
+		if len(listRes.Chunks) != 0 {
+			t.Errorf("want 0 chunks after reset, got %d", len(listRes.Chunks))
+		}
+
+		// Interactions gone.
+		if n := countInteractions(t); n != 0 {
+			t.Errorf("want 0 interactions after reset, got %d", n)
+		}
+
+		// Video pointer cleared.
+		lesson, err := db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+			return q.GetLessonByID(ctx, lid)
+		})
+		if err != nil {
+			t.Fatalf("get lesson: %v", err)
+		}
+		if lesson.VideoStorageKey.Valid {
+			t.Errorf("video_storage_key should be cleared, got %q", lesson.VideoStorageKey.String)
+		}
+
+		// Analysis row deleted entirely (reads as never-analyzed, not DONE/FAILED).
+		if _, err := db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonAnalysis, error) {
+			return q.GetLessonAnalysis(ctx, lid)
+		}); err == nil {
+			t.Error("expected lesson_analyses row to be deleted")
+		}
+
+		// FDB chunk transcripts gone.
+		for _, id := range chunkIDs {
+			b, _ := kvSvc.Get("chunk", tuple.Tuple{id, "transcript"})
+			if len(b) != 0 {
+				t.Errorf("chunk %s transcript still present in FDB after reset", id)
+			}
+		}
+	})
+
+	// ── Idempotent: resetting an already-blank lesson is a no-op, not an error. ─
+	t.Run("Idempotent", func(t *testing.T) {
+		if _, err := e.aiTeacher.ResetLessonContent(ctx, &richterv1.ResetLessonContentRequest{LessonId: e.lessonID}); err != nil {
+			t.Fatalf("second reset on blank lesson should succeed: %v", err)
 		}
 	})
 }

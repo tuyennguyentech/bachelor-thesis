@@ -43,7 +43,10 @@ func (s *gradingService) GradeAudio(ctx context.Context, audioMP3 []byte, langua
 	// spoken answer transcribes in ~1.5s on GPU / ~10s on CPU; 90s is a generous
 	// ceiling that fails fast on a hung/malformed upload.
 	sttCtx, sttCancel := s.transcription.aiCtx(ctx, s.transcription.aiCfg.AudioGradeSTTTimeout)
-	transcript, _, werr := s.transcription.sttTranscribe(sttCtx, audioTmpPath)
+	// Grading a student's recorded answer: auto-detect the spoken language ("") —
+	// it's the learner's voice, not the lesson's source video, so the per-lesson
+	// audio-language hint doesn't apply here.
+	transcript, _, werr := s.transcription.sttTranscribe(sttCtx, audioTmpPath, "")
 	sttCancel()
 	if werr != nil {
 		return nil, fmt.Errorf("gemini audio grade: whisper transcription: %w", werr)
@@ -157,33 +160,6 @@ func buildTextGradingPrompt(language, passageMarkdown, question, expectedAnswer,
 	return sb.String()
 }
 
-// detectAudioMIME returns the appropriate MIME type for audio bytes based on magic bytes.
-// Falls back to "audio/webm" which is the default format from browser MediaRecorder.
-func detectAudioMIME(b []byte) string {
-	if len(b) >= 4 {
-		// EBML header → WebM/MKV container
-		if b[0] == 0x1a && b[1] == 0x45 && b[2] == 0xdf && b[3] == 0xa3 {
-			return "audio/webm"
-		}
-		// OGG
-		if b[0] == 'O' && b[1] == 'g' && b[2] == 'g' && b[3] == 'S' {
-			return "audio/ogg"
-		}
-		// WAV
-		if b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F' {
-			return "audio/wav"
-		}
-		// ID3 tag (MP3 with metadata)
-		if b[0] == 'I' && b[1] == 'D' && b[2] == '3' {
-			return "audio/mpeg"
-		}
-		// MP3 sync frame
-		if b[0] == 0xff && (b[1]&0xe0) == 0xe0 {
-			return "audio/mpeg"
-		}
-	}
-	return "audio/webm"
-}
 
 func clamp01(v float32) float32 {
 	if v < 0 {

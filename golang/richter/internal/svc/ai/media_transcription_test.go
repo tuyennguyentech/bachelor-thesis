@@ -85,7 +85,7 @@ func TestSTTSem_BlocksExcessConcurrentCalls(t *testing.T) {
 			for i := 0; i < tc.parallelism; i++ {
 				go func() {
 					defer wg.Done()
-					_, _, err := svc.sttTranscribe(context.Background(), audioPath)
+					_, _, err := svc.sttTranscribe(context.Background(), audioPath, "")
 					if err != nil {
 						t.Errorf("sttTranscribe: %v", err)
 					}
@@ -136,7 +136,7 @@ func TestSTTSem_CtxCancelUnblocks(t *testing.T) {
 	// Saturate the slot.
 	saturationDone := make(chan struct{})
 	go func() {
-		_, _, _ = svc.sttTranscribe(context.Background(), audioPath)
+		_, _, _ = svc.sttTranscribe(context.Background(), audioPath, "")
 		close(saturationDone)
 	}()
 	// Give the first request a moment to enter the semaphore.
@@ -152,7 +152,7 @@ func TestSTTSem_CtxCancelUnblocks(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
-	_, _, err := svc.sttTranscribe(ctx, audioPath)
+	_, _, err := svc.sttTranscribe(ctx, audioPath, "")
 	waitElapsed := time.Since(waitStart)
 	if err == nil {
 		t.Fatal("expected error from cancelled-ctx STT, got nil")
@@ -165,6 +165,85 @@ func TestSTTSem_CtxCancelUnblocks(t *testing.T) {
 	}
 	// Wait for the first request to finish so we don't leak the goroutine.
 	<-saturationDone
+}
+
+// TestSTTLanguageHint verifies the SPOKEN-language hint sent to Whisper as the
+// "language" multipart field. PRECEDENCE: the per-lesson audio language (passed
+// to sttTranscribe) wins; otherwise the deployment default (sttCfg.Language);
+// empty/whitespace on both => the field is omitted (Whisper auto-detect). This
+// is the audio language — independent of the lesson's output/exercise language —
+// and is what keeps a Vietnamese clip from being read as English AND an English
+// clip from being forced to Vietnamese.
+func TestSTTLanguageHint(t *testing.T) {
+	cases := []struct {
+		name      string
+		perLesson string // audioLang argument (per-lesson)
+		cfgLang   string // sttCfg.Language (deployment default)
+		wantSent  string // "" => the field must be ABSENT (auto-detect)
+	}{
+		{"per_lesson_vi", "vi", "", "vi"},
+		{"per_lesson_overrides_cfg", "en", "vi", "en"}, // EN video on a vi-default deployment
+		{"cfg_fallback_when_no_per_lesson", "", "vi", "vi"},
+		{"both_empty_autodetect", "", "", ""},
+		{"whitespace_autodetect", "  ", "  ", ""},
+		{"per_lesson_trimmed", "  en ", "", "en"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var gotLang string
+			var hadField bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseMultipartForm(1 << 20); err == nil && r.MultipartForm != nil {
+					if vals, ok := r.MultipartForm.Value["language"]; ok {
+						mu.Lock()
+						hadField = true
+						if len(vals) > 0 {
+							gotLang = vals[0]
+						}
+						mu.Unlock()
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"text":     "xin chào",
+					"segments": []map[string]any{{"start": 0.0, "end": 1.0, "text": "xin chào"}},
+				})
+			}))
+			defer srv.Close()
+
+			ai := cfg.NewAiCfg()
+			ai.STTClientTimeout = 5 * time.Second
+			ai.STTResponseHeaderTimeout = 5 * time.Second
+			ai.STTRequestTimeout = 5 * time.Second
+			stt := cfg.NewSTTCfg()
+			stt.Endpoint = strings.TrimPrefix(srv.URL, "http://")
+			stt.Language = tc.cfgLang
+			svc := newTranscriptionService(nil, nil, &stt, &ai)
+
+			audioPath := filepath.Join(t.TempDir(), "audio.wav")
+			if err := os.WriteFile(audioPath, []byte("audio"), 0o600); err != nil {
+				t.Fatalf("write temp audio: %v", err)
+			}
+			if _, _, err := svc.sttTranscribe(context.Background(), audioPath, tc.perLesson); err != nil {
+				t.Fatalf("sttTranscribe: %v", err)
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			if tc.wantSent == "" {
+				if hadField {
+					t.Errorf("language field present (%q), want ABSENT (auto-detect) for perLesson=%q cfg=%q", gotLang, tc.perLesson, tc.cfgLang)
+				}
+			} else {
+				if !hadField {
+					t.Errorf("language field absent, want %q (perLesson=%q cfg=%q)", tc.wantSent, tc.perLesson, tc.cfgLang)
+				} else if gotLang != tc.wantSent {
+					t.Errorf("language = %q, want %q", gotLang, tc.wantSent)
+				}
+			}
+		})
+	}
 }
 
 // TestSTTSem_NilUnlimited verifies that an unconfigured (cap<=0)

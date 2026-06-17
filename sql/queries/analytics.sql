@@ -6,26 +6,18 @@
 -- all attempted lessons.  A student who answered every question scores 1.0;
 -- a student who skipped all interactions scores 0.0.
 --
--- lessons_attempted = distinct lessons with any attempt (was previously called
--- "lessons_completed" which was semantically incorrect).
--- lessons_completed  = distinct lessons where the student's score >= 50 % of max.
+-- lessons_completed = distinct lessons with any attempt (course progress, the
+-- same definition the student-facing ListMyCourseProgress uses).
 SELECT
   u.id                                        AS user_id,
   u.first_name,
   u.middle_name,
   u.last_name,
   u.email,
-  -- lessons_completed: lessons meeting the per-lesson score + watch thresholds.
-  -- The columns store the real thresholds directly (default 0.6/0.8 lives in the
-  -- column DEFAULT, migration 00034), so 0 means "0% — no requirement".
-  -- The thresholds are 'real' (float32); a student at an EXACT boundary (e.g. 80%)
-  -- would otherwise fail '>=' because float32(0.8) promotes to 0.80000001 > 0.8.
-  -- A 0.001 (0.1%) tolerance absorbs that rounding without loosening intent.
-  COUNT(DISTINCT CASE
-    WHEN la.max_score > 0
-     AND la.total_score >= la.max_score * (l.min_score_fraction - 0.001)
-     AND COALESCE(la.video_watch_fraction,0) >= l.min_watch_fraction - 0.001
-    THEN la.lesson_id END)::int               AS lessons_completed,
+  -- lessons_completed: progress = distinct lessons with any submitted attempt,
+  -- regardless of score (the single progress metric — mastery/completion
+  -- thresholds were removed as an unused feature).
+  COUNT(DISTINCT la.lesson_id)::int           AS lessons_completed,
   (
     SELECT COUNT(*)::int
     FROM lessons l2
@@ -47,6 +39,12 @@ SELECT
     / NULLIF(SUM(li_agg.total_interactions), 0),
     0
   )::float8                                   AS response_rate,
+  -- Raw totals for the "Tổng" results mode.
+  COALESCE(SUM(la.total_score), 0)::float8    AS total_score,
+  COALESCE(SUM(la.max_score), 0)::float8      AS total_max_score,
+  COALESCE(SUM(lar_agg.response_count), 0)::int AS total_responses,
+  COALESCE(SUM(li_agg.total_interactions), 0)::int AS total_interactions,
+  COALESCE(SUM(lar_agg.total_time_ms), 0)::float8 AS total_time_ms,
   MAX(la.submitted_at)                        AS last_active
 FROM lesson_attempts la
 JOIN lessons l ON l.id = la.lesson_id
@@ -55,7 +53,8 @@ JOIN users u ON u.id = la.user_id
 LEFT JOIN LATERAL (
   SELECT
     COUNT(*)::float8                          AS response_count,
-    AVG(lar.time_to_answer_ms)::float8        AS avg_time_to_answer_ms
+    AVG(lar.time_to_answer_ms)::float8        AS avg_time_to_answer_ms,
+    COALESCE(SUM(lar.time_to_answer_ms), 0)::float8 AS total_time_ms
   FROM lesson_attempt_responses lar
   WHERE lar.attempt_id = la.id
 ) lar_agg ON true
@@ -149,3 +148,31 @@ JOIN lesson_attempts la ON la.id = lar.attempt_id
 JOIN lesson_interactions li ON li.id = lar.interaction_id
 WHERE la.lesson_id = $1 AND li.kind = 'mcq' AND lar.response ? 'selected'
 GROUP BY lar.interaction_id, option_index ORDER BY lar.interaction_id, option_index;
+
+-- name: LessonQuestionStats :many
+-- Per-question correctness across ALL kinds (single/multiple choice, fill, reading,
+-- listening). Drives the per-question analysis so EVERY answered question shows up,
+-- not just single-choice MCQ. accuracy is the score-weighted correct fraction.
+SELECT lar.interaction_id AS interaction_id,
+  COUNT(*)::int AS response_count,
+  COALESCE(SUM(lar.score) / NULLIF(SUM(lar.max_score),0),0)::float8 AS accuracy
+FROM lesson_attempt_responses lar
+JOIN lesson_attempts la ON la.id = lar.attempt_id
+WHERE la.lesson_id = $1
+GROUP BY lar.interaction_id;
+
+-- name: LessonChunkStudentScores :many
+-- Per-(chunk, student) score for the heatmap drill-down: clicking a segment lists
+-- exactly who answered that segment's questions and how they scored on it.
+SELECT c.id AS chunk_id, c.order_index AS chunk_index,
+  la.user_id, u.first_name, u.middle_name, u.last_name, u.email,
+  COALESCE(SUM(lar.score)::float8 / NULLIF(SUM(lar.max_score),0),0)::float8 AS score_frac,
+  COUNT(lar.interaction_id)::int AS answered
+FROM lesson_transcript_chunks c
+JOIN lesson_interactions li ON li.chunk_id = c.id
+JOIN lesson_attempt_responses lar ON lar.interaction_id = li.id
+JOIN lesson_attempts la ON la.id = lar.attempt_id
+JOIN users u ON u.id = la.user_id
+WHERE c.lesson_id = $1
+GROUP BY c.id, c.order_index, la.user_id, u.id
+ORDER BY c.order_index ASC, score_frac ASC;

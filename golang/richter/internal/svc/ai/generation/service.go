@@ -34,7 +34,6 @@ type EmbedAudioFunc func(
 type Deps struct {
 	Postgres             *db.PostgresSvc
 	Log                  *log.LogSvc
-	GeminiCfg            *cfg.GeminiCfg
 	AiCfg                *cfg.AiCfg
 	Engine               genengine.Engine
 	FetchChunkTranscript FetchChunkTranscriptFunc
@@ -46,7 +45,6 @@ type Deps struct {
 type Service struct {
 	pg                   *db.PostgresSvc
 	log                  *log.LogSvc
-	geminiCfg            *cfg.GeminiCfg
 	aiCfg                *cfg.AiCfg
 	engine               genengine.Engine
 	fetchChunkTranscript FetchChunkTranscriptFunc
@@ -59,7 +57,6 @@ func New(deps Deps) *Service {
 	return &Service{
 		pg:                   deps.Postgres,
 		log:                  deps.Log,
-		geminiCfg:            deps.GeminiCfg,
 		aiCfg:                deps.AiCfg,
 		engine:               deps.Engine,
 		fetchChunkTranscript: deps.FetchChunkTranscript,

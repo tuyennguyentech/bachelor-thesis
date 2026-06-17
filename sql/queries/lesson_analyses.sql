@@ -12,6 +12,11 @@ SELECT * FROM lesson_analyses WHERE lesson_id = $1;
 -- name: UpdateLessonAnalysisStatus :exec
 UPDATE lesson_analyses SET status = $2, error_msg = $3 WHERE lesson_id = $1;
 
+-- name: DeleteLessonAnalysis :exec
+-- Removes the analysis row entirely (used by the full "reset lesson" action so
+-- the lesson reads as never-analyzed, not DONE/FAILED).
+DELETE FROM lesson_analyses WHERE lesson_id = $1;
+
 -- name: ListStuckLessonAnalyses :many
 -- Returns lessons whose analysis row is still in 'processing' longer
 -- than the cutoff. Used by the startup sweeper to reconcile DB rows

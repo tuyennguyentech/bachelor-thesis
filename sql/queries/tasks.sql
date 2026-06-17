@@ -38,7 +38,11 @@ LIMIT $1 OFFSET $2;
 SELECT DISTINCT ON (lesson_id, task_type) *
 FROM tasks
 WHERE lesson_id = ANY($1::uuid[])
-ORDER BY lesson_id, task_type, created_at DESC;
+-- id (UUIDv7 PK) is a stable tiebreaker so the "latest" row is well-defined even
+-- when two same-type re-runs share a created_at (the txn start time) — otherwise
+-- DISTINCT ON returns an arbitrary, plan-dependent row and the derived analysis
+-- status can flip between reloads.
+ORDER BY lesson_id, task_type, created_at DESC, id DESC;
 
 -- name: DeleteTasksForLesson :exec
 -- Test helper: removes all tasks for a lesson. Tests use this
@@ -246,6 +250,16 @@ SET progress_step = $2,
     message = $5,
     updated_at = now()
 WHERE id = $1;
+
+-- name: SetTaskCheckpoint :exec
+-- Worker primitive: persist a mid-run checkpoint (partial output_payload)
+-- WITHOUT leaving 'processing', so a crash + reclaim can resume from the last
+-- completed stage instead of restarting the whole pipeline. The ownership
+-- clause mirrors MarkSucceeded so a stolen task's late checkpoint is a no-op.
+UPDATE tasks
+SET output_payload = $2,
+    updated_at = now()
+WHERE id = $1 AND worker_id = $3 AND status = 'processing';
 
 -- name: CountTaskStatusBuckets :one
 -- System-wide task counts grouped into the three buckets the admin monitor

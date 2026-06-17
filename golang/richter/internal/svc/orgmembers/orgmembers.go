@@ -115,8 +115,17 @@ func (o *OrgMembersSvc) GetOrganizationMember(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := o.authz.RequireOrgMember(ctx, orgID); err != nil {
+	// A user may always read their OWN membership, regardless of status — an
+	// INVITED (not-yet-active) member must be able to see their pending
+	// invitation. Reading someone else's membership requires an active membership.
+	claims, err := o.authz.RequireAuthenticated(ctx)
+	if err != nil {
 		return nil, err
+	}
+	if claims.GetSub() != req.GetUserId() {
+		if _, err := o.authz.RequireOrgMember(ctx, orgID); err != nil {
+			return nil, err
+		}
 	}
 	userID, err := svc.ParseUUID(req.GetUserId())
 	if err != nil {
@@ -181,7 +190,7 @@ func (o *OrgMembersSvc) ListUserMemberships(
 		return nil, err
 	}
 
-	members, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.OrganizationMember, error) {
+	members, err := db.WithConnection(o.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.ListUserMembershipsRow, error) {
 		return q.ListUserMemberships(ctx, gen.ListUserMembershipsParams{
 			UserID: userID,
 			Limit:  req.GetLimit(),
@@ -196,7 +205,7 @@ func (o *OrgMembersSvc) ListUserMemberships(
 
 	out := make([]*richterv1.OrganizationMember, 0, len(members))
 	for _, m := range members {
-		out = append(out, OrganizationMemberToProto(m))
+		out = append(out, OrganizationMembershipRowToProto(m))
 	}
 	return &richterv1.ListUserMembershipsResponse{Members: out}, nil
 }
@@ -434,4 +443,71 @@ func (o *OrgMembersSvc) RemoveOrganizationMember(
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("member not found: org=%s user=%s", orgID.String(), userID.String()))
 	}
 	return &richterv1.RemoveOrganizationMemberResponse{}, nil
+}
+
+// RespondToOrganizationInvitation lets the authenticated caller accept or decline
+// their OWN pending invitation. Accept flips status INVITED → ACTIVE; decline
+// deletes the membership row. The caller can only act on their own invitation
+// (the target user is the token subject — no user_id in the request).
+func (o *OrgMembersSvc) RespondToOrganizationInvitation(
+	ctx context.Context,
+	req *richterv1.RespondToOrganizationInvitationRequest,
+) (*richterv1.RespondToOrganizationInvitationResponse, error) {
+	orgID, err := svc.ParseUUID(req.GetOrganizationId())
+	if err != nil {
+		return nil, err
+	}
+	claims, err := o.authz.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	callerID, err := svc.ParseUUID(claims.GetSub())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("invalid token subject"))
+	}
+
+	// Read the caller's own membership, verify it's a pending invitation, then
+	// accept (→ ACTIVE) or decline (delete) — all in one tx to avoid TOCTOU.
+	member, err := db.WithCommitTx(o.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (gen.OrganizationMember, error) {
+		current, err := q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: orgID,
+			UserID:         callerID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return gen.OrganizationMember{}, connect.NewError(connect.CodeNotFound, errors.New("no invitation for this organization"))
+			}
+			return gen.OrganizationMember{}, connect.NewError(connect.CodeInternal, fmt.Errorf("get member: %w", err))
+		}
+		if current.Status != gen.MemberStatusInvited {
+			return gen.OrganizationMember{}, connect.NewError(connect.CodeFailedPrecondition, errors.New("no pending invitation to respond to"))
+		}
+		if !req.GetAccept() {
+			if _, err := q.RemoveOrganizationMember(ctx, gen.RemoveOrganizationMemberParams{
+				OrganizationID: orgID,
+				UserID:         callerID,
+			}); err != nil {
+				return gen.OrganizationMember{}, connect.NewError(connect.CodeInternal, fmt.Errorf("decline invitation: %w", err))
+			}
+			return gen.OrganizationMember{}, nil
+		}
+		return q.UpdateOrganizationMemberStatus(ctx, gen.UpdateOrganizationMemberStatusParams{
+			OrganizationID: orgID,
+			UserID:         callerID,
+			Status:         gen.MemberStatusActive,
+		})
+	})
+	if err != nil {
+		if connect.CodeOf(err) != connect.CodeUnknown {
+			return nil, err
+		}
+		err = svc.ConnectDBError(err)
+		o.log.ErrorContext(ctx, "org_members service failed", svc.LogAttrs("RespondToOrganizationInvitation", err)...)
+		return nil, err
+	}
+	resp := &richterv1.RespondToOrganizationInvitationResponse{}
+	if req.GetAccept() {
+		resp.Member = OrganizationMemberToProto(member)
+	}
+	return resp, nil
 }

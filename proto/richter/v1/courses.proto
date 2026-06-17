@@ -177,9 +177,14 @@ message Lesson {
   // Language of the lesson content: "vi" or "en". Used by TTS and AI grading.
   string language = 11;
   int32 max_attempts = 12;
-  // Teacher-set completion thresholds; 0 means "use default" (0.8 / 0.6).
-  double min_watch_fraction = 13;
-  double min_score_fraction = 14;
+  // 13, 14 were min_watch_fraction / min_score_fraction (lesson completion
+  // thresholds) — removed; completion conditions are no longer a feature.
+  reserved 13, 14;
+  // Spoken/audio language of the source video ("vi", "en", or "" = auto-detect).
+  // Sent to the STT engine as the transcription-language hint so the transcript
+  // follows the actual AUDIO — distinct from `language` (the OUTPUT/exercise
+  // language). Empty lets Whisper auto-detect.
+  string audio_language = 15;
 }
 
 message CreateLessonRequest {
@@ -230,8 +235,10 @@ message UpdateLessonRequest {
   // Language of the lesson content: "vi" or "en".
   string language = 5 [(buf.validate.field).string = {in: ["vi", "en", ""]}];
   optional int32 max_attempts = 6 [(buf.validate.field).int32.gte = 0];
-  optional double min_watch_fraction = 7 [(buf.validate.field).double = {gte: 0, lte: 1}];
-  optional double min_score_fraction = 8 [(buf.validate.field).double = {gte: 0, lte: 1}];
+  // 7, 8 were min_watch_fraction / min_score_fraction — removed.
+  reserved 7, 8;
+  // Spoken/audio language of the source video ("vi", "en", or "" = auto-detect).
+  string audio_language = 9 [(buf.validate.field).string = {in: ["vi", "en", ""]}];
 }
 
 message UpdateLessonResponse {

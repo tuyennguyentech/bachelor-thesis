@@ -2,6 +2,9 @@ package cfg
 
 import (
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/samber/do/v2"
@@ -28,6 +31,18 @@ type PostgresCfg struct {
 	User           string        `mapstructure:"user"`
 	Password       string        `mapstructure:"password"`
 	ConnectTimeout time.Duration `mapstructure:"connect_timeout"`
+}
+
+// DSN builds the postgres:// connection string from the config. Both the
+// pgxpool (db package) and the LISTEN/NOTIFY listener (taskqueue package)
+// need an identical DSN, so this is the single source of truth for it.
+func (c PostgresCfg) DSN() string {
+	return (&url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.User, c.Password),
+		Host:   net.JoinHostPort(c.Host, strconv.FormatUint(uint64(c.Port), 10)),
+		Path:   c.Database,
+	}).String()
 }
 
 func NewPostgreCfgSvc(i do.Injector) (p *PostgresCfg, err error) {

@@ -16,7 +16,6 @@ import (
 const (
 	NsLesson = "lesson"
 	NsChunk  = "chunk"
-	NsWatch  = "watch"
 )
 
 // LoadTranscript reads the full transcript text for a lesson from FDB.
@@ -97,13 +96,6 @@ func DeleteChunkTranscript(kvSvc *kv.KVSvc, chunkIDStr string) error {
 func DeleteLessonTranscripts(kvSvc *kv.KVSvc, lessonIDStr string) {
 	_ = kvSvc.Delete(NsLesson, tuple.Tuple{lessonIDStr, "transcript"})
 	_ = kvSvc.Delete(NsLesson, tuple.Tuple{lessonIDStr, "segments"})
-}
-
-// ChunkToProtoKey returns the FDB key tuple for a chunk's transcript.
-// Exposed so callers that need to build the key without writing (e.g.
-// to delete stale entries) don't have to duplicate the tuple layout.
-func ChunkToProtoKey(chunkIDStr string) tuple.Tuple {
-	return tuple.Tuple{chunkIDStr, "transcript"}
 }
 
 // ── internal helpers ────────────────────────────────────────────────────────

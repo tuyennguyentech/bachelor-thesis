@@ -27,6 +27,12 @@ last_name = "Admin"
 [stt]
 endpoint = "speaches:8000"
 model = "Systran/faster-whisper-small"
+# Spoken-language hint for the source AUDIO (ISO-639-1, e.g. "vi", "en"). This is
+# the language SPOKEN in the video — NOT the lesson's output language (which lives
+# on each lesson and controls the generated questions/exercises). Empty = Whisper
+# auto-detect; pin it to the audio language to avoid mis-detection (e.g. a
+# Vietnamese clip transcribed as English). Override per env via RICHTER_STT_LANGUAGE.
+language = ""
 
 # Text-to-speech via Speaches' OpenAI-compatible /v1/audio/speech. Each language
 # maps to a Piper model + voice. The vi/en models are pre-pulled at compose up by
@@ -99,11 +105,16 @@ stt_progress_interval      = "20s"
 # prevent the default speaches deployment from being overwhelmed
 # under parallel transcribe (most common cause of "timeout awaiting
 # response headers" failures). 0 = unlimited.
-stt_max_concurrent         = 1
-# Semaphore chặn TTS đồng thời ở richter (TTS phục vụ bởi Speaches qua
-# /v1/audio/speech). 0 = unlimited. Default; override bằng
-# RICHTER_AI_TTS_MAX_CONCURRENT trong .env.
-tts_max_concurrent             = 0
+#
+# CỐ Ý comment 2 dòng *_max_concurrent dưới đây: giá trị thực BẮT BUỘC đến từ biến
+# môi trường (RICHTER_AI_STT_MAX_CONCURRENT / RICHTER_AI_TTS_MAX_CONCURRENT trong
+# .env), vì cap app-side ở richter phải khớp 1:1 với số worker của speaches
+# (WHISPER__NUM_WORKERS) mà compose nội suy từ CÙNG file .env. Env LUÔN override
+# giá trị trong toml (viper AutomaticEnv), nên đặt số cứng ở đây chỉ gây hiểu nhầm /
+# sai lệch với giá trị đang chạy thật (ví dụ file ghi 1 nhưng thực tế là 4). Khi
+# KHÔNG có env, viper fallback về default khai báo trong cfg/ai.go (STT=1, TTS=0).
+# stt_max_concurrent       = 1
+# tts_max_concurrent       = 0
 # ── ĐỘ ĐỒNG THỜI AI LOCAL — cấu hình TẬP TRUNG ở .env, KHÔNG chỉnh số ở file này ──
 # 2 dòng *_max_concurrent trên CHỈ là default. Mỗi service AI local có 1 CẶP:
 # cap ở richter (app-side semaphore) + số workers ở service. Đặt trong .env, để cặp bằng nhau:
