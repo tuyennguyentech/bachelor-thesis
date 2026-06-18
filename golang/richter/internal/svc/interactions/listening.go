@@ -28,6 +28,28 @@ func init() {
 // "frequently missing", since a dropped item under AI_CHOOSE was not re-requested.
 const minListeningWords = 30
 
+// instructionalMarkers are meta/instruction phrases that must never appear in a
+// listening passage (the text spoken by TTS). Their presence means Gemini leaked
+// the prompt or the questions into audio_source_text instead of writing lecture
+// content — which makes the audio say things like "answer the following questions".
+var instructionalMarkers = []string{
+	"trả lời các câu hỏi", "trả lời câu hỏi sau", "các câu hỏi sau đây",
+	"hãy nghe", "nghe đoạn", "nghe bài giảng sau",
+	"answer the following", "following question", "listen to the",
+}
+
+// looksInstructional reports whether s reads like task instructions rather than
+// spoken lecture content.
+func looksInstructional(s string) bool {
+	lower := strings.ToLower(s)
+	for _, m := range instructionalMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
 type listeningConfigJSON struct {
 	AudioObjectKey string `json:"audio_object_key"`
 	// AudioSourceText is the text used for TTS synthesis (set during AI generation).
@@ -304,12 +326,18 @@ func (h *listeningHandler) GeminiSchema() string {
 func (h *listeningHandler) GeminiPromptHint() string {
 	return `Tạo bài nghe hiểu (listening comprehension) đòi hỏi người học xử lý và suy luận thông tin — không phải nghe lại một câu rồi chọn đáp án hiển nhiên.
 
-audio_source_text (đoạn nghe):
+QUAN TRỌNG NHẤT — audio_source_text là VĂN BẢN SẼ ĐƯỢC ĐỌC THÀNH TIẾNG (text-to-speech) cho học viên nghe. Vì vậy nó CHỈ được chứa NỘI DUNG bài giảng để nghe, viết như một người đang GIẢNG/KỂ. TUYỆT ĐỐI KHÔNG được chứa:
+- Lời dẫn hay hướng dẫn làm bài (vd: "Hãy nghe đoạn sau", "Trả lời các câu hỏi sau đây", "Nghe đoạn giảng về…").
+- Bản thân các câu hỏi hoặc đáp án.
+- Bất kỳ chữ "câu hỏi", "đáp án", "phương án" nào.
+Những thứ đó thuộc về trường "prompt" và "questions", KHÔNG thuộc audio_source_text. Nếu audio_source_text đọc lên nghe như một lời dẫn/đề bài thì là SAI.
+
+audio_source_text (đoạn nghe — nội dung để nghe):
 - BẮT BUỘC dài 60–100 từ (tối thiểu 30 từ). Đoạn quá ngắn sẽ bị loại.
-- PHẢI dựa trên và diễn giải lại nội dung của ĐOẠN TRANSCRIPT được cung cấp ở trên — TUYỆT ĐỐI KHÔNG bịa nội dung chung chung, không liên quan đến bài giảng.
-- Trình bày một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang), tự đủ ngữ cảnh.
+- PHẢI bám sát và diễn giải lại NỘI DUNG CỤ THỂ của ĐOẠN TRANSCRIPT được cung cấp ở trên (cùng chủ đề, cùng số liệu/khái niệm) — TUYỆT ĐỐI KHÔNG bịa nội dung chung chung, không dùng lời giới thiệu khoá học sáo rỗng, không nói lan man ngoài đoạn.
+- Là một đoạn GIẢNG GIẢI tự nhiên, mạch lạc, một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang), tự đủ ngữ cảnh — như trích một đoạn người thầy đang nói.
 - Đoạn phải chứa đủ thông tin để trả lời tất cả câu hỏi phía dưới — không phụ thuộc vào kiến thức bên ngoài.
-- Viết bằng văn phong tự nhiên, mạch lạc (không phải danh sách bullet).
+- Viết bằng văn phong nói tự nhiên, mạch lạc (không phải danh sách bullet, không tiêu đề).
 
 Câu hỏi (2–4 câu, phân loại theo mức độ tư duy):
 - ÍT NHẤT 1 câu hỏi YÊU CẦU SUY LUẬN hoặc TỔNG HỢP: "Mục đích chính của … là gì?", "Tại sao tác giả nói …?", "Điều gì sẽ xảy ra nếu …?"
@@ -335,6 +363,13 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 	// 40 is a safe floor that still rejects the degenerate cases.
 	if n := len(strings.Fields(item.AudioSourceText)); n < minListeningWords {
 		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text too short (%d words, need >= %d)", n, minListeningWords)
+	}
+	// Reject passages that leaked task instructions / the questions themselves into
+	// the spoken content — the #1 cause of "the listening audio just says 'answer
+	// the following questions'". Those belong to the prompt/questions, never to the
+	// TTS-spoken passage; rejecting makes the retry loop re-request a clean one.
+	if looksInstructional(item.AudioSourceText) {
+		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text reads like task instructions, not lecture content")
 	}
 	if len(item.Questions) == 0 {
 		return "", "", 0, nil, fmt.Errorf("listening: questions empty")

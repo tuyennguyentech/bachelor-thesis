@@ -247,4 +247,26 @@ func TestListeningParseGeminiItem_LengthFloor(t *testing.T) {
 			t.Errorf("unexpected parse result: prompt=%q start=%v cfgLen=%d", prompt, startSecs, len(configJSON))
 		}
 	})
+
+	// A long-enough passage that nevertheless reads like task instructions (Gemini
+	// leaked the prompt/questions into the spoken content) must be rejected so the
+	// retry loop re-requests real lecture content — the "audio just says 'answer
+	// the following questions'" bug.
+	t.Run("rejects instructional/meta text in audio_source_text", func(t *testing.T) {
+		leaked := "Trong bài học này, hãy nghe đoạn giảng về thuật toán sắp xếp một cách cẩn thận và sau đó trả lời các câu hỏi sau đây để kiểm tra mức độ hiểu bài của bạn về nội dung vừa trình bày."
+		raw := json.RawMessage(`{
+			"prompt": "Nghe và trả lời.",
+			"start_seconds": 3.0,
+			"audio_source_text": "` + leaked + `",
+			"questions": [
+				{"question": "Câu hỏi một?", "options": ["A","B","C","D"], "correct_answer": 0},
+				{"question": "Câu hỏi hai?", "options": ["A","B","C","D"], "correct_answer": 1}
+			]
+		}`)
+		if _, _, _, _, err := h.ParseGeminiItem(raw); err == nil {
+			t.Fatal("expected rejection of instructional audio_source_text")
+		} else if !strings.Contains(err.Error(), "instructions") {
+			t.Errorf("expected 'instructions' error, got: %v", err)
+		}
+	})
 }
