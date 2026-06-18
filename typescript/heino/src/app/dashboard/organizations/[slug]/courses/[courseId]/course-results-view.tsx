@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/pagination";
-import { AlertTriangleIcon, BarChart2Icon, ListIcon, ScatterChartIcon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, BarChart2Icon, CheckCircle2Icon, ListIcon, ScatterChartIcon, XIcon } from "lucide-react";
 import { engagementBadge } from "@/lib/engagement-utils";
 import { cn } from "@/lib/utils";
 import { ScoreBar, scoreTextClass } from "@/components/score-viz";
@@ -437,9 +437,10 @@ export function CourseResultsView({
               ["list", "Danh sách kết quả", ListIcon],
               ["distribution", "Phân bố điểm", BarChart2Icon],
               ["scatter", "Tương tác × Điểm", ScatterChartIcon],
-              ...(atRisk.length > 0
-                ? ([["at-risk", "Cần chú ý", AlertTriangleIcon]] as [SubTab, string, typeof ListIcon][])
-                : []),
+              // Always present so it never silently "disappears" when a course
+              // happens to have no flagged students; an empty state covers the
+              // zero case (see the at-risk section below).
+              ["at-risk", "Cần chú ý", AlertTriangleIcon],
             ] as [SubTab, string, typeof ListIcon][]
           ).map(([t, label, Icon]) => {
             const isAtRisk = t === "at-risk";
@@ -465,7 +466,7 @@ export function CourseResultsView({
               >
                 <Icon className="size-4" />
                 {label}
-                {isAtRisk && (
+                {isAtRisk && atRisk.length > 0 && (
                   <span className="ml-0.5 rounded-full bg-red-600 px-1.5 text-[11px] font-semibold tabular-nums text-white">
                     {atRisk.length}
                   </span>
@@ -476,9 +477,12 @@ export function CourseResultsView({
         </div>
       )}
 
-      {/* Tab: Cần chú ý — ranked, metric-rich student cards (worst first) */}
-      {!loadError && atRisk.length > 0 && subTab === "at-risk" && (
+      {/* Tab: Cần chú ý — ranked cards (worst first), with an empty state so the
+          tab is never a dead end when no student is flagged. */}
+      {!loadError && subTab === "at-risk" && (
         <div className="flex flex-col gap-3" data-testid="at-risk-section">
+          {atRisk.length > 0 ? (
+            <>
           <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50/60 px-3 py-2 dark:border-red-900/50 dark:bg-red-950/20">
             <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
             <p className="text-xs text-red-700/90 dark:text-red-400/90">
@@ -495,6 +499,19 @@ export function CourseResultsView({
               <AtRiskStudentCard key={s.userId} s={s} row={row} />
             ))}
           </div>
+            </>
+          ) : (
+            <div
+              className="flex flex-col items-center gap-2 rounded-md border border-dashed bg-muted/10 px-4 py-10 text-center"
+              data-testid="at-risk-empty"
+            >
+              <CheckCircle2Icon className="size-8 text-emerald-500" />
+              <p className="text-sm font-medium">Không có học viên nào cần chú ý</p>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                Hiện chưa có học viên nào dưới ngưỡng cảnh báo (tương tác thấp hoặc điểm thấp). Học viên sẽ xuất hiện ở đây ngay khi có dấu hiệu cần hỗ trợ.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

@@ -344,6 +344,23 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
         ? "chunk"
         : "transcribe";
 
+  // While the pipeline runs, the displayed step MUST follow the live pipeline
+  // stage — NOT props.activeStep. props.activeStep is seeded by
+  // getInitialWorkflowStep, which jumps straight to "exercises" whenever the
+  // lesson already has chunks/interactions. So re-running Quick Create on a
+  // lesson that already had exercises would render the STALE old exercises under
+  // a "Bài tập: Chờ phiên âm" stepper — a dangerous mismatch (the body shows
+  // content the pipeline is about to delete-and-regenerate). Driving the body off
+  // the stage hides that stale content until the generate stage is actually
+  // reached. Outside a pipeline run we honour the user's chosen step.
+  const displayStep: WorkflowContentStepKey = pipelineStage
+    ? pipelineStage === "transcribe"
+      ? "transcript"
+      : pipelineStage === "chunk"
+        ? "chunks"
+        : "exercises"
+    : props.activeStep;
+
   const uploadStatus: WorkflowStatus = !props.videoStorageKey ? "active" : "done";
   const transcriptStatus: WorkflowStatus =
     pipelineStage ? (pipelineStage === "transcribe" ? "running" : "done") :
@@ -452,7 +469,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   );
 
   const stepMeta = buildStepMeta({
-    activeStep: props.activeStep,
+    activeStep: displayStep,
     videoStorageKey: props.videoStorageKey,
     hasSegments: props.hasSegments,
     hasChunks: props.hasChunks,
@@ -481,7 +498,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
       )}
       <VideoProcessingStepper
         steps={workflowSteps}
-        currentStep={props.activeStep}
+        currentStep={displayStep}
         onSelect={handleStepperSelect}
       />
       {/* Advanced AI config (difficulty / question kinds / focus prompt) belongs
@@ -492,7 +509,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
           question kinds for the lesson-level generate (see use-lesson-analysis-
           state); TabExercises only overrides difficulty/focusPrompt via a dialog,
           so this panel does not duplicate that. */}
-      {props.videoStorageKey && props.activeStep === "exercises" && (
+      {props.videoStorageKey && !pipelineStage && displayStep === "exercises" && (
         <AIConfigPanel
           difficulty={props.globalDifficulty}
           onDifficultyChange={props.setGlobalDifficulty}
@@ -516,7 +533,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
       )}
       <LessonTaskPanel
         tasks={props.lessonTasks}
-        activeStep={taskStepToPanelStep(props.activeStep)}
+        activeStep={taskStepToPanelStep(displayStep)}
         hidePipelineTask
         onRefresh={() => void props.onRefreshTasks()}
         onCancel={(taskId) => void props.onCancelTask(taskId)}
@@ -551,7 +568,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
         title={stepMeta.title}
         description={stepMeta.description}
       >
-        {props.activeStep === "upload" && (
+        {displayStep === "upload" && (
           <div className="flex flex-col gap-3">
             <div>
               <p className="text-xs font-semibold text-foreground">Nguồn video</p>
@@ -573,7 +590,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
           </div>
         )}
 
-        {props.activeStep === "transcript" && (
+        {displayStep === "transcript" && (
           <div className="flex flex-col gap-3 animate-in fade-in duration-200">
             {!props.videoStorageKey ? (
               <TranscriptLockedState />
@@ -621,7 +638,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
           </div>
         )}
 
-        {props.activeStep === "chunks" && (
+        {displayStep === "chunks" && (
           <div className="flex flex-col gap-3 animate-in fade-in duration-200">
             {!props.hasTranscriptContent ? (
               <ChunkLockedState />
@@ -674,7 +691,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
           </div>
         )}
 
-        {props.activeStep === "exercises" && (
+        {displayStep === "exercises" && (
           <TabExercises
             lessonId={props.lessonId}
             chunks={props.chunks}
