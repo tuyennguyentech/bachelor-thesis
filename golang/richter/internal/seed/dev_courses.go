@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc/ai/segment"
@@ -220,6 +221,61 @@ func (s *SeederSvc) seedDevLessonVideoKeys(ctx context.Context, courses []devCou
 	return nil
 }
 
+// deriveSeedSegments splits a plain transcript into sentence-level pieces and
+// distributes them across [0, totalDuration] proportional to length, so seeded
+// lessons have an interactive, video-synced transcript. Returns nil when there
+// is no usable duration (no chunks) so callers fall back to plain text.
+func deriveSeedSegments(transcript string, totalDuration float64) []segment.Segment {
+	if totalDuration <= 0 {
+		return nil
+	}
+	pieces := splitSentences(transcript)
+	if len(pieces) == 0 {
+		return nil
+	}
+	totalChars := 0
+	for _, p := range pieces {
+		totalChars += len([]rune(p))
+	}
+	if totalChars == 0 {
+		return nil
+	}
+	segs := make([]segment.Segment, 0, len(pieces))
+	cumChars := 0
+	for _, p := range pieces {
+		start := totalDuration * float64(cumChars) / float64(totalChars)
+		cumChars += len([]rune(p))
+		end := totalDuration * float64(cumChars) / float64(totalChars)
+		segs = append(segs, segment.Segment{
+			StartSeconds: float32(start),
+			EndSeconds:   float32(end),
+			Text:         p,
+		})
+	}
+	return segs
+}
+
+// splitSentences breaks text into trimmed, non-empty sentence-ish pieces on
+// sentence-final punctuation and newlines.
+func splitSentences(text string) []string {
+	var out []string
+	var b strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(b.String()); s != "" {
+			out = append(out, s)
+		}
+		b.Reset()
+	}
+	for _, r := range text {
+		b.WriteRune(r)
+		if r == '.' || r == '!' || r == '?' || r == '\n' {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
 func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID, createdBy pgtype.UUID, a *devAnalysisSpec) error {
 	// Write transcript to FDB before marking analysis as done; if FDB fails we
 	// don't want a "done" status with no transcript in the DB. Always go
@@ -227,6 +283,23 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 	if a.Transcript != "" {
 		if err := segment.SaveTranscript(s.kv, lessonID.String(), a.Transcript); err != nil {
 			return fmt.Errorf("seed: FDB transcript write failed: %w", err)
+		}
+		// Derive approximate timed segments so seeded lessons get an interactive,
+		// video-synced transcript: the transcript-step editor and the in-video
+		// karaoke follow-along both need segments, but the seed JSON only carries
+		// plain transcript text. Real (Whisper) lessons get exact word timings;
+		// this distributes sentences across the lesson timeline by length as a
+		// best-effort stand-in for demo data.
+		var totalDur float64
+		for _, c := range a.Chunks {
+			if c.EndSeconds > totalDur {
+				totalDur = c.EndSeconds
+			}
+		}
+		if segs := deriveSeedSegments(a.Transcript, totalDur); len(segs) > 0 {
+			if err := segment.SaveSegments(s.kv, lessonID.String(), segs); err != nil {
+				return fmt.Errorf("seed: FDB segments write failed: %w", err)
+			}
 		}
 	}
 	taskID, err := uuid.NewV7()
