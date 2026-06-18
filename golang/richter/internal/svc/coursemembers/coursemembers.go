@@ -416,6 +416,37 @@ func (s *CourseMembersSvc) ReviewJoinRequest(
 		return nil, err
 	}
 
+	// Re-verify org membership at APPROVAL time (not just at request time): the
+	// requester may have left or been suspended from the org between requesting
+	// and approval, so approving would otherwise (re)create a course_members row
+	// for a non-org-member — the same BUG-E invariant AddCourseMember enforces.
+	if req.GetApprove() {
+		course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
+			return q.GetCourseByID(ctx, courseID)
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, connect.NewError(connect.CodeNotFound, errors.New("course not found"))
+			}
+			return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		}
+		orgMember, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+			return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+				OrganizationID: course.OrganizationID,
+				UserID:         userID,
+			})
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("requester is no longer a member of the organization"))
+			}
+			return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		}
+		if orgMember.Status != gen.MemberStatusActive {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("requester's organization membership is not active"))
+		}
+	}
+
 	var status gen.JoinRequestStatus
 	if req.GetApprove() {
 		status = gen.JoinRequestStatusApproved

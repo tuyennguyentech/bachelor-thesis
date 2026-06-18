@@ -118,39 +118,57 @@ Trả về JSON object: {"items": [...]}`,
 		return items, nil
 	}
 
-	// Retry transient failures / degraded empty results with linear backoff, so
-	// real multi-user bursts past Gemini's per-minute quota recover instead of
-	// failing the task. A non-empty chunk that yields 0 items is a degraded
-	// response and is retried; an empty transcript legitimately yields 0.
+	// Retry transient failures, degraded-empty results, AND UNDER-DELIVERY with
+	// linear backoff. Under-delivery matters for kinds that fail validation/TTS
+	// more often (listening especially): a batch that should yield N items but
+	// returns fewer (because some were dropped) used to be accepted as-is — the
+	// chief cause of "listening exercises frequently missing" when an explicit
+	// per-kind count was requested. We now retry until the target count is met,
+	// keeping the BEST (largest) attempt so a later thinner attempt never loses
+	// items. An empty transcript legitimately yields 0.
 	attempts := max(s.aiCfg.GeminiMaxAttempts, 1)
 	transcriptEmpty := strings.TrimSpace(transcript) == ""
+	target := int(chunk.QuestionCountConfig)
 	s.log.InfoContext(ctx, "[GEMINI] GenerateItems: calling GenerateContent", "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex)
-	var items []generatedItem
+	var best []generatedItem
+	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		var err error
-		items, err = genOnce()
-		if err == nil && (len(items) > 0 || transcriptEmpty) {
-			return items, nil
-		}
-		retryable := isTransientGeminiError(err) || (err == nil && len(items) == 0)
-		if !retryable || attempt == attempts {
-			if err != nil {
-				return nil, err
+		items, err := genOnce()
+		if err == nil {
+			if len(items) > len(best) {
+				best = items
 			}
-			// Exhausted: Gemini kept returning 0 items for a non-empty chunk — a
-			// throttled/degraded response. Surface as a quota-style error so
-			// callers treat it as "provider temporarily unavailable".
+			// Done once we meet the target (or there's no target / empty transcript).
+			if transcriptEmpty || target <= 0 || len(best) >= target {
+				return best, nil
+			}
+		}
+		lastErr = err
+		// Retry on transient errors and on any non-error short delivery.
+		retryable := isTransientGeminiError(err) || err == nil
+		if !retryable || attempt == attempts {
+			if len(best) > 0 {
+				// Exhausted attempts but have a partial set — return it rather than
+				// failing the whole chunk (some questions beat none).
+				return best, nil
+			}
+			if lastErr != nil {
+				return nil, lastErr
+			}
 			return nil, fmt.Errorf("Gemini API trả về 0 câu hỏi sau %d lần thử (có thể do vượt quota / quá tải). Vui lòng thử lại sau.", attempts)
 		}
-		s.log.WarnContext(ctx, "[GEMINI] GenerateItems: transient/empty result, retrying",
-			"attempt", attempt, "max", attempts, "items", len(items), "err", err)
+		s.log.WarnContext(ctx, "[GEMINI] GenerateItems: under-target/transient result, retrying",
+			"attempt", attempt, "max", attempts, "items", len(best), "target", target, "err", err)
 		select {
 		case <-ctx.Done():
+			if len(best) > 0 {
+				return best, nil
+			}
 			return nil, ctx.Err()
 		case <-time.After(time.Duration(attempt) * s.aiCfg.GeminiRetryBackoff):
 		}
 	}
-	return items, nil
+	return best, nil
 }
 
 func (s *Service) GenerateItemsAIChoose(

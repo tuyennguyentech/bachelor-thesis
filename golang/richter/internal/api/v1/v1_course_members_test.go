@@ -1026,6 +1026,56 @@ func TestListCoursesCanAccess(t *testing.T) {
 	})
 }
 
+// TestReviewJoinRequestRequiresActiveOrgMembership closes the BUG-E approve-time
+// window: a user who requested to join while an org member, then left/was removed
+// from the org before approval, must NOT be enrolled on approval — otherwise we'd
+// (re)create a course_members row for a non-org-member.
+func TestReviewJoinRequestRequiresActiveOrgMembership(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	orgID := createCMTestOrg(t, c, ownerID)
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	// Student (a valid org member) requests to join.
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+	studentCM := richterv1connect.NewCourseMemberServiceClient(httpClientWithToken(studentToken), url)
+	if _, err := studentCM.CreateJoinRequest(ctx, &richterv1.CreateJoinRequestRequest{CourseId: courseID}); err != nil {
+		t.Fatalf("CreateJoinRequest: %v", err)
+	}
+
+	// Student leaves the org before the manager reviews the request.
+	if _, err := c.orgMembers.RemoveOrganizationMember(ctx, &richterv1.RemoveOrganizationMemberRequest{
+		OrganizationId: orgID,
+		UserId:         studentID,
+	}); err != nil {
+		t.Fatalf("remove org member: %v", err)
+	}
+
+	// Approving must now be rejected.
+	_, err := c.courseMembers.ReviewJoinRequest(ctx, &richterv1.ReviewJoinRequestRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Approve:  true,
+	})
+	assertCode(t, err, connect.CodeFailedPrecondition)
+
+	// And no course membership was created.
+	res, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{CourseId: courseID, Limit: 50, Offset: 0})
+	if err != nil {
+		t.Fatalf("list course members: %v", err)
+	}
+	for _, m := range res.Members {
+		if m.UserId == studentID {
+			t.Error("approval created a course membership for a non-org-member")
+		}
+	}
+}
+
 func TestCourseJoinRequests(t *testing.T) {
 	t.Parallel()
 	c, url := setupCourseMembersTestClients(t)
