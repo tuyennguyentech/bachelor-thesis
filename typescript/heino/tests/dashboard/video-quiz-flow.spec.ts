@@ -420,7 +420,6 @@ test.describe("AI analysis streaming progress", () => {
         .first()
         .isVisible();
       const resultVisible = await page
-        .getByTestId("workflow-next-action")
         .getByRole("button", { name: "Phân đoạn bài học" })
         .first()
         .isVisible();
@@ -429,7 +428,6 @@ test.describe("AI analysis streaming progress", () => {
 
     await expect.poll(async () => {
       const resultVisible = await page
-        .getByTestId("workflow-next-action")
         .getByRole("button", { name: "Phân đoạn bài học" })
         .first()
         .isVisible();
@@ -794,15 +792,17 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     const extractHero = page.locator('[data-testid="extract-progress"]');
     await expect(extractHero).toBeVisible({ timeout: 5_000 });
     await expect(
-      page.getByTestId("workflow-next-action").getByRole("button", { name: "Phân đoạn bài học" }).or(page.locator('[data-testid="extract-error"]')),
+      page.getByRole("button", { name: "Phân đoạn bài học" }).or(page.locator('[data-testid="extract-error"]')),
     ).toBeVisible({ timeout: 360_000 });
     await expect(page.locator('[data-testid="extract-error"]')).not.toBeVisible();
     await expect(page.getByTestId("workflow-step-body")).toContainText("Phân đoạn bài học");
     await expect(page.getByText("Tác vụ phân đoạn")).not.toBeVisible();
 
-    // Step 2: Chunk transcript
+    // Step 2: Chunk transcript. After extract the workflow advances to the chunks
+    // step, where the single chunk CTA lives in ChunkReadyState (the duplicate
+    // WorkflowNextAction CTA was removed); match by accessible name either way.
     await page.getByTestId("workflow-step-chunks").click();
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Phân đoạn bài học" }).click();
+    await page.getByRole("button", { name: "Phân đoạn bài học" }).first().click();
     // The running chunk state is shown in the bottom hero card.
     const chunkHero = page.locator('[data-testid="chunk-progress"]');
     await expect(chunkHero).toBeVisible({ timeout: 10_000 });
