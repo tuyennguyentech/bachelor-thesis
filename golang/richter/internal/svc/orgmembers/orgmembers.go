@@ -426,6 +426,15 @@ func (o *OrgMembersSvc) RemoveOrganizationMember(
 				return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("cannot remove the last owner of an organization"))
 			}
 		}
+		// Cascade: drop the user's course memberships in this org in the SAME tx,
+		// so losing org membership also revokes course access (no orphan
+		// course_members row pointing at a user no longer in the org).
+		if _, err := q.RemoveCourseMembershipsForUserInOrg(ctx, gen.RemoveCourseMembershipsForUserInOrgParams{
+			OrganizationID: orgID,
+			UserID:         userID,
+		}); err != nil {
+			return 0, connect.NewError(connect.CodeInternal, fmt.Errorf("cascade course memberships: %w", err))
+		}
 		return q.RemoveOrganizationMember(ctx, gen.RemoveOrganizationMemberParams{
 			OrganizationID: orgID,
 			UserID:         userID,

@@ -16,6 +16,18 @@ func init() {
 	registerHandler(&listeningHandler{})
 }
 
+// minListeningWords is the minimum word count for a generated listening passage.
+// The prompt requests 60–100 words; passages below this floor are rejected so
+// the generation retry loop re-requests a fuller one (a too-short passage TTS's
+// into meaningless audio with seemingly-unrelated questions).
+//
+// Kept low enough (a real 2–3 sentence passage is ~30+ words; a degenerate
+// 1-sentence blurb is ~10–15) that it still rejects degenerate audio but no
+// longer drops otherwise-valid passages that land just under the aspirational
+// 60-word target — over-rejection here was the main cause of listening items
+// "frequently missing", since a dropped item under AI_CHOOSE was not re-requested.
+const minListeningWords = 30
+
 type listeningConfigJSON struct {
 	AudioObjectKey string `json:"audio_object_key"`
 	// AudioSourceText is the text used for TTS synthesis (set during AI generation).
@@ -272,7 +284,7 @@ func (h *listeningHandler) GeminiSchema() string {
     "prompt":            {"type": "string"},
     "explanation":       {"type": "string"},
     "start_seconds":     {"type": "number"},
-    "audio_source_text": {"type": "string", "minLength": 10},
+    "audio_source_text": {"type": "string", "minLength": 150},
     "questions": {
       "type": "array", "minItems": 1, "maxItems": 4,
       "items": {
@@ -293,7 +305,9 @@ func (h *listeningHandler) GeminiPromptHint() string {
 	return `Tạo bài nghe hiểu (listening comprehension) đòi hỏi người học xử lý và suy luận thông tin — không phải nghe lại một câu rồi chọn đáp án hiển nhiên.
 
 audio_source_text (đoạn nghe):
-- Viết đoạn giảng TỰ ĐỦ NGỮ CẢNH, khoảng 60–100 từ, trình bày một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang) từ nội dung transcript.
+- BẮT BUỘC dài 60–100 từ (tối thiểu 30 từ). Đoạn quá ngắn sẽ bị loại.
+- PHẢI dựa trên và diễn giải lại nội dung của ĐOẠN TRANSCRIPT được cung cấp ở trên — TUYỆT ĐỐI KHÔNG bịa nội dung chung chung, không liên quan đến bài giảng.
+- Trình bày một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang), tự đủ ngữ cảnh.
 - Đoạn phải chứa đủ thông tin để trả lời tất cả câu hỏi phía dưới — không phụ thuộc vào kiến thức bên ngoài.
 - Viết bằng văn phong tự nhiên, mạch lạc (không phải danh sách bullet).
 
@@ -313,6 +327,14 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 	}
 	if strings.TrimSpace(item.AudioSourceText) == "" {
 		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text empty")
+	}
+	// Reject too-short passages: Gemini sometimes returns a ~1-sentence blurb
+	// that TTS turns into "very short meaningless audio" with questions that
+	// feel unrelated. Returning an error makes the generation retry loop
+	// (items.go) re-request a fuller passage. The prompt asks for 60–100 words;
+	// 40 is a safe floor that still rejects the degenerate cases.
+	if n := len(strings.Fields(item.AudioSourceText)); n < minListeningWords {
+		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text too short (%d words, need >= %d)", n, minListeningWords)
 	}
 	if len(item.Questions) == 0 {
 		return "", "", 0, nil, fmt.Errorf("listening: questions empty")

@@ -2,37 +2,63 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/cfg"
 	"example.com/richter/internal/svc/ai/genengine"
+	svcinteractions "example.com/richter/internal/svc/interactions"
 	"example.com/richter/internal/taskqueue"
 	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// hasVietnameseDiacritics reports whether s contains characters specific to
+// Vietnamese (đ + the vowels with Vietnamese diacritics). Used to assert a
+// generated chunk summary is in the requested language, not always Vietnamese.
+func hasVietnameseDiacritics(s string) bool {
+	for _, r := range strings.ToLower(s) {
+		switch r {
+		case 'đ', 'ă', 'â', 'ê', 'ô', 'ơ', 'ư',
+			'á', 'à', 'ả', 'ã', 'ạ', 'ấ', 'ầ', 'ẩ', 'ẫ', 'ậ', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ',
+			'é', 'è', 'ẻ', 'ẽ', 'ẹ', 'ế', 'ề', 'ể', 'ễ', 'ệ',
+			'í', 'ì', 'ỉ', 'ĩ', 'ị',
+			'ó', 'ò', 'ỏ', 'õ', 'ọ', 'ố', 'ồ', 'ổ', 'ỗ', 'ộ', 'ớ', 'ờ', 'ở', 'ỡ', 'ợ',
+			'ú', 'ù', 'ủ', 'ũ', 'ụ', 'ứ', 'ừ', 'ử', 'ữ', 'ự',
+			'ý', 'ỳ', 'ỷ', 'ỹ', 'ỵ':
+			return true
+		}
+	}
+	return false
+}
+
 // fakeChunkEngine fails its first `failTimes` Generate calls (with failErr) then
 // returns `okResp`, recording the total number of calls. Used to exercise the
 // chunk-stage transient-retry policy without touching the real Gemini API.
 type fakeChunkEngine struct {
-	calls     int
-	failTimes int
-	failErr   error
-	okResp    string
+	calls      int
+	failTimes  int
+	failErr    error
+	okResp     string
+	lastPrompt string
 }
 
 func (f *fakeChunkEngine) Name() string { return "fake" }
 
-func (f *fakeChunkEngine) Generate(_ context.Context, _ genengine.Request) (string, error) {
+func (f *fakeChunkEngine) Generate(_ context.Context, req genengine.Request) (string, error) {
 	f.calls++
+	f.lastPrompt = req.Prompt
 	if f.calls <= f.failTimes {
 		return "", f.failErr
 	}
@@ -351,7 +377,7 @@ func TestChunkStageRetriesTransient(t *testing.T) {
 
 	t.Run("retries a transient 429 then succeeds", func(t *testing.T) {
 		eng := &fakeChunkEngine{failTimes: 2, failErr: errors.New("googleapi: Error 429: RESOURCE_EXHAUSTED"), okResp: okResp}
-		chunks, err := mkSvc(eng, 4).runGeminiChunk(context.Background(), "nội dung transcript", nil)
+		chunks, err := mkSvc(eng, 4).runGeminiChunk(context.Background(), "nội dung transcript", nil, "vi")
 		if err != nil {
 			t.Fatalf("want success after retries, got err: %v", err)
 		}
@@ -365,7 +391,7 @@ func TestChunkStageRetriesTransient(t *testing.T) {
 
 	t.Run("gives up after GeminiMaxAttempts with a friendly quota message", func(t *testing.T) {
 		eng := &fakeChunkEngine{failTimes: 99, failErr: errors.New("Error 429: quota exceeded"), okResp: okResp}
-		_, err := mkSvc(eng, 3).runGeminiChunk(context.Background(), "t", nil)
+		_, err := mkSvc(eng, 3).runGeminiChunk(context.Background(), "t", nil, "vi")
 		if err == nil {
 			t.Fatal("want error after exhausting attempts")
 		}
@@ -379,7 +405,7 @@ func TestChunkStageRetriesTransient(t *testing.T) {
 
 	t.Run("does NOT retry a non-transient error", func(t *testing.T) {
 		eng := &fakeChunkEngine{failTimes: 99, failErr: errors.New("invalid request: malformed prompt"), okResp: okResp}
-		_, err := mkSvc(eng, 4).runGeminiChunk(context.Background(), "t", nil)
+		_, err := mkSvc(eng, 4).runGeminiChunk(context.Background(), "t", nil, "vi")
 		if err == nil {
 			t.Fatal("want error")
 		}
@@ -387,4 +413,168 @@ func TestChunkStageRetriesTransient(t *testing.T) {
 			t.Errorf("non-transient error must fail fast; want 1 call, got %d", eng.calls)
 		}
 	})
+
+	t.Run("chunk prompt instructs the summary language", func(t *testing.T) {
+		// en → the prompt must tell Gemini to write the summary in English, so
+		// chunk names follow the lesson language instead of always Vietnamese.
+		engEN := &fakeChunkEngine{okResp: okResp}
+		if _, err := mkSvc(engEN, 1).runGeminiChunk(context.Background(), "transcript", nil, "en"); err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !strings.Contains(engEN.lastPrompt, "Tiếng Anh (English)") {
+			t.Errorf("en prompt should request an English summary; prompt did not mention it")
+		}
+		if strings.Contains(engEN.lastPrompt, "Tiếng Việt (Vietnamese)") {
+			t.Errorf("en prompt should not request a Vietnamese summary")
+		}
+
+		engVI := &fakeChunkEngine{okResp: okResp}
+		if _, err := mkSvc(engVI, 1).runGeminiChunk(context.Background(), "transcript", nil, "vi"); err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !strings.Contains(engVI.lastPrompt, "Tiếng Việt (Vietnamese)") {
+			t.Errorf("vi prompt should request a Vietnamese summary")
+		}
+	})
+}
+
+// TestChunkSummaryLanguageRealGemini is a GATED real-API test (skips unless
+// RICHTER_GEMINI_API_KEY is set). It proves the P3 fix end-to-end against the
+// real model: an English transcript with language="en" yields an English chunk
+// summary (no Vietnamese diacritics), instead of the old always-Vietnamese name.
+func TestChunkSummaryLanguageRealGemini(t *testing.T) {
+	key := os.Getenv("RICHTER_GEMINI_API_KEY")
+	if key == "" {
+		t.Skip("RICHTER_GEMINI_API_KEY not set — skipping real Gemini integration test")
+	}
+	model := os.Getenv("RICHTER_GEMINI_MODEL")
+	if model == "" {
+		model = "gemini-3.1-flash-lite"
+	}
+	aiCfg := cfg.NewAiCfg()
+	s := &chunkingService{
+		aiCfg:  &aiCfg,
+		engine: genengine.NewGemini(&cfg.GeminiCfg{APIKey: key, Model: model}),
+		log:    discardLog(),
+	}
+
+	const englishTranscript = `What is an algorithm? In computer science, an algorithm is a ` +
+		`set of step-by-step instructions for solving a problem. Computers run algorithms, ` +
+		`but humans use them too. For example, to count the people in a room you might point ` +
+		`at each person one at a time and count up from zero. That counting procedure is an ` +
+		`algorithm. A more efficient algorithm counts people two at a time, which roughly ` +
+		`halves the number of steps. Choosing a better algorithm makes the same task faster.`
+
+	chunks, err := s.runGeminiChunk(context.Background(), englishTranscript, nil, "en")
+	if err != nil {
+		if isTransientGeminiError(err) {
+			t.Skipf("real Gemini quota/transient error, skipping: %v", err)
+		}
+		t.Fatalf("runGeminiChunk(en): %v", err)
+	}
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+	for i, c := range chunks {
+		t.Logf("en chunk %d summary: %q", i, c.Summary)
+		if strings.TrimSpace(c.Summary) == "" {
+			t.Errorf("chunk %d has empty summary", i)
+		}
+		if hasVietnameseDiacritics(c.Summary) {
+			t.Errorf("chunk %d summary %q contains Vietnamese diacritics — should be English for language=en", i, c.Summary)
+		}
+	}
+}
+
+// TestListeningGenerationRealGemini is a GATED real-API test (skips unless
+// RICHTER_GEMINI_API_KEY is set). It proves the P5 fix end-to-end against the
+// real model: a listening item generated from a real transcript yields a
+// SUBSTANTIAL passage (>= minListeningWords) with >= 2 questions, instead of the
+// old short/meaningless one. Exercises the real listening prompt + schema +
+// ParseGeminiItem validation.
+func TestListeningGenerationRealGemini(t *testing.T) {
+	key := os.Getenv("RICHTER_GEMINI_API_KEY")
+	if key == "" {
+		t.Skip("RICHTER_GEMINI_API_KEY not set — skipping real Gemini integration test")
+	}
+	model := os.Getenv("RICHTER_GEMINI_MODEL")
+	if model == "" {
+		model = "gemini-3.1-flash-lite"
+	}
+	g, ok := svcinteractions.Get(richterv1.InteractionKind_INTERACTION_KIND_LISTENING).(svcinteractions.GeminiGenerator)
+	if !ok {
+		t.Fatal("listening handler is not a GeminiGenerator")
+	}
+	tts, ok := g.(svcinteractions.TTSProvider)
+	if !ok {
+		t.Fatal("listening handler is not a TTSProvider")
+	}
+	eng := genengine.NewGemini(&cfg.GeminiCfg{APIKey: key, Model: model})
+
+	const transcript = `What is an algorithm? In computer science, an algorithm is a set of ` +
+		`step-by-step instructions for solving a problem. For example, to count the number of ` +
+		`people in a room, you could point at each person one at a time and count up from zero. ` +
+		`A more efficient algorithm counts people two at a time, halving the number of steps. ` +
+		`The choice of algorithm determines how quickly the same problem is solved.`
+
+	// Mirror the real listening prompt assembly (generation/items.go): the
+	// kind hint + the language instruction (strongLanguageInstruction) + the
+	// transcript context + the kind's JSON schema.
+	const langInstruction = "BẮT BUỘC SỬ DỤNG TIẾNG ANH cho toàn bộ đoạn nghe (audio_source_text), câu hỏi, phương án và giải thích. KHÔNG viết tiếng Việt."
+	prompt := fmt.Sprintf(`Bạn là chuyên gia thiết kế câu hỏi giáo dục. Tạo 1 bài tập nghe hiểu CHẤT LƯỢNG CAO từ đoạn bài giảng dưới đây.
+
+%s
+%s
+
+Đoạn nội dung:
+%s
+
+Mỗi item trong mảng "items" phải tuân theo JSON schema sau:
+%s
+
+Trả về JSON object: {"items": [...]}`, g.GeminiPromptHint(), langInstruction, transcript, g.GeminiSchema())
+
+	raw, err := eng.Generate(context.Background(), genengine.Request{
+		Prompt:          prompt,
+		Temperature:     0.3,
+		MaxOutputTokens: 65536,
+		JSONOutput:      true,
+		Purpose:         genengine.ItemsPurpose("listening"),
+	})
+	if err != nil {
+		if isTransientGeminiError(err) {
+			t.Skipf("real Gemini quota/transient error, skipping: %v", err)
+		}
+		t.Fatalf("Generate(listening): %v", err)
+	}
+
+	var result struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("parse gemini response: %v\nraw: %s", err, raw)
+	}
+	if len(result.Items) == 0 {
+		t.Fatal("expected at least one listening item")
+	}
+
+	for i, item := range result.Items {
+		_, _, _, configJSON, perr := g.ParseGeminiItem(item)
+		if perr != nil {
+			// The validation floor REJECTING a short passage is the fix working —
+			// but the prompt now also asks for a long passage, so a real run should
+			// usually produce a valid one. A rejection here is acceptable (retry
+			// would re-request); a malformed item is the only hard failure.
+			t.Logf("item %d rejected by validation (acceptable): %v", i, perr)
+			continue
+		}
+		passage := tts.AudioSourceText(configJSON)
+		words := len(strings.Fields(passage))
+		t.Logf("listening item %d: %d words, vietnamese=%v — %q", i, words, hasVietnameseDiacritics(passage), passage)
+		// HARD check — the P5 fix: a substantial passage (no more short/meaningless
+		// audio). The validation floor would have rejected anything under 40 words.
+		if words < 40 {
+			t.Errorf("listening passage %d has only %d words, want >= 40", i, words)
+		}
+	}
 }

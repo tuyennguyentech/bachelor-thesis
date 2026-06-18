@@ -85,6 +85,36 @@ func (s *CourseMembersSvc) AddCourseMember(
 		return nil, err
 	}
 
+	// A course member must also be an ACTIVE member of the course's organization.
+	// Without this check a manager could enroll someone who isn't in the org (or
+	// was suspended), producing a course_members row that grants course access to
+	// a non-org-member — they could open the course yet be absent from the org.
+	// Fetch the course's org and verify the target's active org membership first.
+	course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
+		return q.GetCourseByID(ctx, courseID)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("course not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	orgMember, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+		return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{
+			OrganizationID: course.OrganizationID,
+			UserID:         userID,
+		})
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("user is not a member of the course's organization"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+	if orgMember.Status != gen.MemberStatusActive {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("user's organization membership is not active"))
+	}
+
 	member, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseMember, error) {
 		return q.AddCourseMember(ctx, gen.AddCourseMemberParams{
 			CourseID: courseID,

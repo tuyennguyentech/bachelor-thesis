@@ -211,8 +211,8 @@ func NewAISvc(i do.Injector) (*AISvc, error) {
 			}
 			return transcription.runSTTAnalyze(ctx, videoKey, audioLang, adapted)
 		},
-		Chunk: func(ctx context.Context, t string, segs []byte) ([]transcript.ChunkProposal, error) {
-			raws, err := svc.chunking.runGeminiChunk(ctx, t, segs)
+		Chunk: func(ctx context.Context, t string, segs []byte, language string) ([]transcript.ChunkProposal, error) {
+			raws, err := svc.chunking.runGeminiChunk(ctx, t, segs, language)
 			if err != nil {
 				return nil, err
 			}

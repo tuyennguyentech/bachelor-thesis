@@ -324,6 +324,156 @@ func TestCourseMemberLifecycle(t *testing.T) {
 	})
 }
 
+// TestCourseMemberRequiresOrgMembership pins the data-integrity invariant
+// (BUG-E): a course member must be an ACTIVE member of the course's
+// organization. Enrolling someone who isn't an org member is rejected, so we
+// never produce a course_members row for a user the org doesn't grant access to
+// (which would let them appear enrolled yet be blocked by RequireOrgMember when
+// opening the course).
+func TestCourseMemberRequiresOrgMembership(t *testing.T) {
+	t.Parallel()
+	c, _ := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	_, _, outsiderID := createActiveUser(t, c.users) // valid user, never joins the org
+	orgID := createCMTestOrg(t, c, ownerID)
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+
+	// Outsider is not an org member → enrolment must be rejected.
+	_, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   outsiderID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	})
+	assertCode(t, err, connect.CodeFailedPrecondition)
+
+	// Once they join the org, the same enrolment succeeds.
+	addOrgMember(t, c, orgID, outsiderID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   outsiderID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enrolment after org join should succeed, got %v", err)
+	}
+}
+
+// TestListCoursesShowsAccessibleDraftToEnrolledStudent pins BUG-D: a draft
+// course a non-manager can access (they're an enrolled course member) must still
+// appear in the org course list. Otherwise they could open the draft directly
+// (GetCourseById allows course members) yet never find it in their list. A
+// non-enrolled org member must still NOT see the draft.
+func TestListCoursesShowsAccessibleDraftToEnrolledStudent(t *testing.T) {
+	t.Parallel()
+	c, url := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	studentEmail, studentPass, studentID := createActiveUser(t, c.users)
+	orgID := createCMTestOrg(t, c, ownerID)
+	courseID := createCMTestCourse(t, c, orgID, ownerID) // CreateCourse defaults to draft
+
+	addOrgMember(t, c, orgID, studentID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   studentID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("enrol student: %v", err)
+	}
+
+	// As the student (non-manager → excludeDrafts=true, exactly like the frontend).
+	studentToken := getUserToken(t, url, studentEmail, studentPass)
+	studentCourses := richterv1connect.NewCourseServiceClient(httpClientWithToken(studentToken), url)
+	excludeDrafts := true
+	res, err := studentCourses.ListCourses(ctx, &richterv1.ListCoursesRequest{
+		OrganizationId: orgID,
+		Limit:          50,
+		ExcludeDrafts:  &excludeDrafts,
+	})
+	if err != nil {
+		t.Fatalf("student ListCourses: %v", err)
+	}
+	var found *richterv1.Course
+	for _, course := range res.GetCourses() {
+		if course.GetId() == courseID {
+			found = course
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("accessible draft course missing from enrolled student's ListCourses (BUG-D)")
+	}
+	if !found.GetCanAccess() {
+		t.Error("expected can_access=true for the enrolled student's draft course")
+	}
+
+	// Control: an org member who is NOT enrolled must NOT see the draft.
+	outsiderEmail, outsiderPass, outsiderID := createActiveUser(t, c.users)
+	addOrgMember(t, c, orgID, outsiderID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+	outsiderToken := getUserToken(t, url, outsiderEmail, outsiderPass)
+	outsiderCourses := richterv1connect.NewCourseServiceClient(httpClientWithToken(outsiderToken), url)
+	res2, err := outsiderCourses.ListCourses(ctx, &richterv1.ListCoursesRequest{
+		OrganizationId: orgID,
+		Limit:          50,
+		ExcludeDrafts:  &excludeDrafts,
+	})
+	if err != nil {
+		t.Fatalf("outsider ListCourses: %v", err)
+	}
+	for _, course := range res2.GetCourses() {
+		if course.GetId() == courseID {
+			t.Error("non-enrolled org member should NOT see the draft course")
+		}
+	}
+}
+
+// TestRemoveOrgMemberCascadesCourseMemberships pins the cascade half of BUG-E:
+// removing a user from an organization also drops their course memberships in
+// that org, so they can't retain course access after losing org membership.
+func TestRemoveOrgMemberCascadesCourseMemberships(t *testing.T) {
+	t.Parallel()
+	c, _ := setupCourseMembersTestClients(t)
+	ctx := t.Context()
+
+	_, _, ownerID := createActiveUser(t, c.users)
+	_, _, memberID := createActiveUser(t, c.users)
+	orgID := createCMTestOrg(t, c, ownerID)
+	courseID := createCMTestCourse(t, c, orgID, ownerID)
+	addOrgMember(t, c, orgID, memberID, richterv1.OrganizationRole_ORGANIZATION_ROLE_STUDENT)
+
+	if _, err := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
+		CourseId: courseID,
+		UserId:   memberID,
+		Role:     richterv1.CourseRole_COURSE_ROLE_STUDENT,
+	}); err != nil {
+		t.Fatalf("add course member: %v", err)
+	}
+
+	// Remove from the org — the course membership must cascade away in the same tx.
+	if _, err := c.orgMembers.RemoveOrganizationMember(ctx, &richterv1.RemoveOrganizationMemberRequest{
+		OrganizationId: orgID,
+		UserId:         memberID,
+	}); err != nil {
+		t.Fatalf("remove org member: %v", err)
+	}
+
+	res, err := c.courseMembers.ListCourseMembers(ctx, &richterv1.ListCourseMembersRequest{
+		CourseId: courseID,
+		Limit:    50,
+		Offset:   0,
+	})
+	if err != nil {
+		t.Fatalf("list course members: %v", err)
+	}
+	for _, m := range res.Members {
+		if m.UserId == memberID {
+			t.Error("course membership survived org removal — cascade did not fire")
+		}
+	}
+}
+
 // ── access gate tests ─────────────────────────────────────────────────────────
 
 // TestCourseMemberAccessGate verifies that:
@@ -550,11 +700,13 @@ func TestCourseMemberAuthz(t *testing.T) {
 
 	t.Run("AddCourseMember_NonExistentCourse_Rejected", func(t *testing.T) {
 		// A manager adding a member to a non-existent course is rejected. The
-		// course foreign key cannot be satisfied, surfaced as FailedPrecondition.
+		// org-membership precheck fetches the course first and reports NotFound
+		// (clearer than the old FK-violation FailedPrecondition; matches how
+		// CreateJoinRequest handles a missing course).
 		_, e := c.courseMembers.AddCourseMember(ctx, &richterv1.AddCourseMemberRequest{
 			CourseId: gofakeit.UUID(), UserId: targetID, Role: richterv1.CourseRole_COURSE_ROLE_STUDENT,
 		})
-		assertCode(t, e, connect.CodeFailedPrecondition)
+		assertCode(t, e, connect.CodeNotFound)
 	})
 
 	// ── RemoveCourseMember authz ───────────────────────────────────────────────

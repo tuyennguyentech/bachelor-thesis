@@ -40,10 +40,33 @@ func (s *chunkingService) aiCtx(ctx context.Context, d time.Duration) (context.C
 	return context.WithTimeout(ctx, d)
 }
 
-// runGeminiChunk calls Gemini with the transcript text (no video) to determine chunk boundaries.
-func (s *chunkingService) runGeminiChunk(ctx context.Context, transcript string, segmentsJSON []byte) ([]transcriptChunkRaw, error) {
+// chunkLanguageName maps a lesson language code to a human name for the chunk
+// prompt. Mirrors generation.friendlyLanguageName (kept local to avoid an
+// import just for one switch). Empty/unknown falls back to Vietnamese.
+func chunkLanguageName(langCode string) string {
+	switch strings.ToLower(strings.TrimSpace(langCode)) {
+	case "vi":
+		return "Tiếng Việt (Vietnamese)"
+	case "en":
+		return "Tiếng Anh (English)"
+	default:
+		if strings.TrimSpace(langCode) != "" {
+			return langCode
+		}
+		return "Tiếng Việt (Vietnamese)"
+	}
+}
+
+// runGeminiChunk calls Gemini with the transcript text (no video) to determine
+// chunk boundaries. `language` is the lesson's output language ("vi"/"en"); the
+// chunk SUMMARY must be written in it (previously the prompt hardcoded a
+// Vietnamese summary, so chunk names were always Vietnamese regardless of an
+// English video/lesson).
+func (s *chunkingService) runGeminiChunk(ctx context.Context, transcript string, segmentsJSON []byte, language string) ([]transcriptChunkRaw, error) {
 	ctx, cancel := s.aiCtx(ctx, s.aiCfg.ChunkingTimeout)
 	defer cancel()
+
+	langName := chunkLanguageName(language)
 
 	var sb strings.Builder
 	sb.WriteString(`Bạn là trợ lý giáo dục. Dựa trên nội dung phiên âm bài giảng và các mốc thời gian dưới đây, hãy phân chia bài giảng thành các đoạn lớn theo chủ đề/nội dung gắn kết (thường 3-7 đoạn).
@@ -57,20 +80,21 @@ Nội dung phiên âm:
 		sb.Write(segmentsJSON)
 	}
 
-	sb.WriteString(`
+	fmt.Fprintf(&sb, `
 
 Chỉ trả về ranh giới thời gian và tóm tắt — KHÔNG cần trả lại nội dung transcript (sẽ được lắp ráp từ mốc thời gian ở phía server).
+QUAN TRỌNG: Trường "summary" PHẢI được viết bằng %s (theo ngôn ngữ của bài học), KHÔNG dịch sang ngôn ngữ khác.
 
 Trả về JSON:
 {
   "chunks": [
     {
-      "summary": "Tóm tắt ngắn gọn (2-5 từ)",
+      "summary": "Tóm tắt ngắn gọn (2-5 từ) bằng %s",
       "start_seconds": 0.0,
       "end_seconds": 120.0
     }
   ]
-}`)
+}`, langName, langName)
 
 	s.log.InfoContext(ctx, "[GENAI] ChunkTranscript: generating", "engine", s.engine.Name())
 

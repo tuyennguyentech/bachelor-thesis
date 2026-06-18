@@ -55,6 +55,26 @@ func TestFillBlankGradeStatic(t *testing.T) {
 			t.Errorf("expected 0.0, got %v", score)
 		}
 	})
+
+	// Regression: a CASE-SENSITIVE accepted answer authored with stray
+	// surrounding whitespace must still match the (trimmed) user input — the
+	// case-sensitive branch used to compare against the untrimmed `want`.
+	t.Run("case sensitive accepted answer with trailing space still matches", func(t *testing.T) {
+		csCfg := fillBlankConfigJSON{
+			Template: "{{0}}",
+			Blanks:   []blankJSON{{Accepted: []string{"Paris "}, CaseSensitive: true}},
+		}
+		csJSON, _ := json.Marshal(csCfg)
+		resp := fillBlankResponseJSON{Answers: []string{"Paris"}}
+		respJSON, _ := json.Marshal(resp)
+		score, _, _, err := h.Grade(csJSON, respJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if score != 1.0 {
+			t.Errorf("expected 1.0 (trimmed case-sensitive match), got %v", score)
+		}
+	})
 }
 
 func TestFillBlankGradeWithAIContext(t *testing.T) {

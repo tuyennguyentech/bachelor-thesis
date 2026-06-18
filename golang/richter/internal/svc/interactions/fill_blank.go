@@ -55,7 +55,9 @@ func (h *fillBlankHandler) Grade(configJSON, responseJSON []byte) (score, maxSco
 		got := resp.Answers[i]
 		for _, want := range blank.Accepted {
 			if blank.CaseSensitive {
-				if got == want {
+				// Trim both for parity with the case-insensitive branch — only
+				// CASE should distinguish them, not surrounding whitespace.
+				if strings.TrimSpace(got) == strings.TrimSpace(want) {
 					score++
 					break
 				}
@@ -98,7 +100,10 @@ func (h *fillBlankHandler) GradeWithContext(ctx context.Context, deps GradingDep
 		matched := false
 		for _, want := range blank.Accepted {
 			if blank.CaseSensitive {
-				if got == want {
+				// TrimSpace(want) for parity with the case-insensitive branch:
+				// `got` is already trimmed (above), so an accepted answer authored
+				// with stray surrounding whitespace must still match.
+				if got == strings.TrimSpace(want) {
 					matched = true
 					break
 				}

@@ -12,6 +12,7 @@ import (
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ChunkProposal mirrors the JSON shape Gemini returns for one chunk.
@@ -23,9 +24,10 @@ type ChunkProposal struct {
 }
 
 // ChunkRunner is the Gemini chunking pipeline. The ai package wires
-// chunkingService.runGeminiChunk here. Returns a slice of proposed chunks;
-// persistence happens in RunChunk below.
-type ChunkRunner func(ctx context.Context, transcript string, segmentsJSON []byte) ([]ChunkProposal, error)
+// chunkingService.runGeminiChunk here. `language` is the lesson's output
+// language, used so the chunk summaries follow it. Returns a slice of proposed
+// chunks; persistence happens in RunChunk below.
+type ChunkRunner func(ctx context.Context, transcript string, segmentsJSON []byte, language string) ([]ChunkProposal, error)
 
 // RunChunk is the worker entry point for LESSON_TASK_KIND_CHUNK_TRANSCRIPT.
 // It validates the prerequisite transcript exists, asks Gemini for chunk
@@ -45,11 +47,21 @@ func (s *Service) RunChunk(
 	segmentsBytes := segment.LoadSegmentsPromptJSON(s.KV, lessonIDStr)
 	allSegs := segment.LoadSegments(s.KV, lessonIDStr)
 
+	// Lesson output language drives the chunk-summary language. Best-effort: a
+	// load failure just falls back to the empty string (→ Vietnamese default),
+	// it must not block chunking.
+	var language string
+	if lesson, err := db.WithConnection(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
+	}); err == nil {
+		language = lesson.Language
+	}
+
 	if err := progress(richterv1.AnalysisProgressStep_ANALYSIS_PROGRESS_STEP_ANALYZING, "Đang phân tích nội dung để xác định đoạn..."); err != nil {
 		return err
 	}
 
-	chunks, chunkErr := s.Chunk(ctx, transcriptText, segmentsBytes)
+	chunks, chunkErr := s.Chunk(ctx, transcriptText, segmentsBytes, language)
 	if chunkErr == nil && len(chunks) == 0 {
 		chunkErr = fmt.Errorf("Gemini returned 0 chunks — transcript may be too short or model response was empty")
 	}

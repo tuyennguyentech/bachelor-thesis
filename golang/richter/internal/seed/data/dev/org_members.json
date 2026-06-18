@@ -37,6 +37,7 @@
   { "org_slug": "hust-cs", "user_email": "ngan@dyadia.local",  "role": "student", "status": "active"    },
   { "org_slug": "hust-cs", "user_email": "olivia@dyadia.local","role": "student", "status": "invited"   },
   { "org_slug": "hust-cs", "user_email": "tina@dyadia.local",  "role": "student", "status": "invited"   },
+  { "org_slug": "hust-cs", "user_email": "quinn@dyadia.local", "role": "student", "status": "active"    },
   { "org_slug": "hust-cs", "user_email": "peter@dyadia.local", "role": "student", "status": "suspended" },
 
   { "org_slug": "open-learn", "user_email": "dave@dyadia.local",   "role": "admin",   "status": "active"  },

@@ -20,7 +20,7 @@ import (
 )
 
 var Package = do.Package(
-	do.Lazy(NewS1Svc),
+	do.Lazy(NewV1Svc),
 )
 
 func init() {
@@ -31,7 +31,7 @@ type V1Svc struct {
 	Mux *http.ServeMux
 }
 
-func NewS1Svc(i do.Injector) (v1 *V1Svc, err error) {
+func NewV1Svc(i do.Injector) (v1 *V1Svc, err error) {
 	authSvc, err := do.Invoke[*auth.AuthSvc](i)
 	if err != nil {
 		return

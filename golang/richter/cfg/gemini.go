@@ -14,12 +14,20 @@ type GeminiCfg struct {
 	// engine that returns canned, schema-valid responses (no network, no quota)
 	// for the test suite. Set engine = "mock" in richter.test.toml.
 	Engine string `mapstructure:"engine"`
+	// MaxConcurrent caps in-flight Gemini generate calls across the WHOLE
+	// process (every pipeline, every chunk). Free-tier Gemini has a low
+	// per-minute quota; without a cap, several quick-create pipelines fire many
+	// concurrent calls, collectively blow the quota, and each one 429s into a
+	// retry-storm that stalls generation for tens of minutes. Mirrors
+	// STTMaxConcurrent. 0 = unlimited. Default 2 keeps free-tier usage smooth.
+	MaxConcurrent int `mapstructure:"max_concurrent"`
 }
 
 func NewGeminiCfg() GeminiCfg {
 	return GeminiCfg{
-		Model:  "gemini-3.1-flash-lite",
-		Engine: "gemini",
+		Model:         "gemini-3.1-flash-lite",
+		Engine:        "gemini",
+		MaxConcurrent: 2,
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"example.com/richter/cfg"
 	"github.com/google/generative-ai-go/genai"
@@ -65,21 +66,77 @@ func New(geminiCfg *cfg.GeminiCfg) Engine {
 
 // NewGemini returns the real Gemini-backed engine. Exposed so an integration
 // test can exercise the real API regardless of the configured engine.
-func NewGemini(geminiCfg *cfg.GeminiCfg) Engine { return &geminiEngine{cfg: geminiCfg} }
+func NewGemini(geminiCfg *cfg.GeminiCfg) Engine {
+	e := &geminiEngine{cfg: geminiCfg}
+	if geminiCfg.MaxConcurrent > 0 {
+		// Buffered channel as a counting semaphore: each in-flight Generate
+		// takes a slot and releases on return, blocking excess callers. Caps
+		// total concurrent Gemini calls across all pipelines so a burst of
+		// quick-create pipelines can't collectively exhaust the per-minute
+		// quota and retry-storm. Mirrors the STT semaphore.
+		e.sem = make(chan struct{}, geminiCfg.MaxConcurrent)
+	}
+	return e
+}
 
-type geminiEngine struct{ cfg *cfg.GeminiCfg }
+type geminiEngine struct {
+	cfg *cfg.GeminiCfg
+	sem chan struct{}
+
+	// The genai client is safe for concurrent use and meant to be long-lived;
+	// reuse one instead of dialing a fresh client (and TLS handshake) on every
+	// call — which mattered under the retry-storm that motivated the cap above.
+	clientOnce sync.Once
+	client     *genai.Client
+	clientErr  error
+}
 
 func (e *geminiEngine) Name() string { return "gemini" }
+
+// getClient lazily builds and caches the shared genai client. Lazy (not in the
+// constructor) so DI wiring never fails when the API key is absent in a config
+// that won't actually call Gemini.
+func (e *geminiEngine) getClient(ctx context.Context) (*genai.Client, error) {
+	e.clientOnce.Do(func() {
+		// Use a background context for the long-lived client, not the per-call
+		// ctx (which is cancelled when the call returns).
+		e.client, e.clientErr = genai.NewClient(context.WithoutCancel(ctx), option.WithAPIKey(e.cfg.APIKey))
+	})
+	return e.client, e.clientErr
+}
+
+// acquireSlot blocks until a concurrency slot is free (or ctx is done) and
+// returns a release func. When no cap is configured it's a no-op. Extracted from
+// Generate so the cap is unit-testable without a real Gemini call.
+func (e *geminiEngine) acquireSlot(ctx context.Context) (func(), error) {
+	if e.sem == nil {
+		return func() {}, nil
+	}
+	select {
+	case e.sem <- struct{}{}:
+		return func() { <-e.sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func (e *geminiEngine) Generate(ctx context.Context, req Request) (string, error) {
 	if e.cfg.APIKey == "" {
 		return "", fmt.Errorf("Gemini API key not configured (set RICHTER_GEMINI_API_KEY or gemini.api_key in config)")
 	}
-	client, err := genai.NewClient(ctx, option.WithAPIKey(e.cfg.APIKey))
+
+	// Acquire a concurrency slot (if a cap is configured), honouring ctx so a
+	// cancelled/timed-out call doesn't block forever waiting for a slot.
+	release, err := e.acquireSlot(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	client, err := e.getClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("create gemini client: %w", err)
 	}
-	defer client.Close()
 
 	model := client.GenerativeModel(e.cfg.Model)
 	model.SetTemperature(req.Temperature)

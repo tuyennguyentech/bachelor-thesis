@@ -200,3 +200,51 @@ func TestListeningGradeDictationWithAIContext(t *testing.T) {
 		}
 	})
 }
+
+// TestListeningParseGeminiItem_LengthFloor covers the fix for short/meaningless
+// listening audio: a passage below minListeningWords must be rejected (so the
+// generation retry loop re-requests a fuller one), while a substantial passage
+// with >= 2 questions parses cleanly.
+func TestListeningParseGeminiItem_LengthFloor(t *testing.T) {
+	t.Parallel()
+	h := &listeningHandler{}
+
+	longPassage := strings.Repeat("nội dung bài giảng mẫu ", 20) // ~80 words
+
+	t.Run("rejects too-short audio_source_text", func(t *testing.T) {
+		raw := json.RawMessage(`{
+			"prompt": "Nghe và trả lời.",
+			"start_seconds": 1.0,
+			"audio_source_text": "Đoạn nghe rất ngắn vô nghĩa.",
+			"questions": [
+				{"question": "Câu hỏi một?", "options": ["A","B","C","D"], "correct_answer": 0},
+				{"question": "Câu hỏi hai?", "options": ["A","B","C","D"], "correct_answer": 1}
+			]
+		}`)
+		if _, _, _, _, err := h.ParseGeminiItem(raw); err == nil {
+			t.Fatal("expected error for too-short audio_source_text")
+		} else if !strings.Contains(err.Error(), "too short") {
+			t.Errorf("expected 'too short' error, got: %v", err)
+		}
+	})
+
+	t.Run("accepts a substantial passage with >=2 questions", func(t *testing.T) {
+		raw := json.RawMessage(`{
+			"prompt": "Nghe đoạn giảng và trả lời.",
+			"explanation": "Giải thích.",
+			"start_seconds": 2.0,
+			"audio_source_text": "` + strings.TrimSpace(longPassage) + `",
+			"questions": [
+				{"question": "Ý chính của đoạn là gì?", "options": ["A","B","C","D"], "correct_answer": 0},
+				{"question": "Chi tiết nào được nêu?", "options": ["A","B","C","D"], "correct_answer": 2}
+			]
+		}`)
+		prompt, _, startSecs, configJSON, err := h.ParseGeminiItem(raw)
+		if err != nil {
+			t.Fatalf("expected valid item, got error: %v", err)
+		}
+		if prompt == "" || startSecs != 2.0 || len(configJSON) == 0 {
+			t.Errorf("unexpected parse result: prompt=%q start=%v cfgLen=%d", prompt, startSecs, len(configJSON))
+		}
+	})
+}

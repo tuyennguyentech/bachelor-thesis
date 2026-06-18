@@ -190,26 +190,6 @@ func (s *Service) GenerateItemsAIChoose(
 	ctx, cancel := aiCtx(ctx, s.aiCfg.InteractionGenTimeout)
 	defer cancel()
 
-	s.log.InfoContext(ctx, "[GENAI] GenerateItemsAIChoose: generating",
-		"engine", s.engine.Name(), "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
-	raw, err := s.engine.Generate(ctx, genengine.Request{
-		Prompt:          prompt,
-		Temperature:     0.3,
-		MaxOutputTokens: 65536,
-		JSONOutput:      true,
-		Purpose:         genengine.PurposeItemsAIChoose,
-	})
-	if err != nil {
-		return nil, friendlyGeminiError(err)
-	}
-
-	var result struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("parse gemini response: %w", err)
-	}
-
 	handlerByKind := make(map[string]svcinteractions.GeminiGenerator, len(specs))
 	kindAllowed := make(map[string]bool, len(specs))
 	for _, sp := range specs {
@@ -217,45 +197,99 @@ func (s *Service) GenerateItemsAIChoose(
 		kindAllowed[sp.kindStr] = true
 	}
 
-	items := make([]generatedItem, 0, len(result.Items))
-	for i, rawItem := range result.Items {
-		if totalCount > 0 && len(items) >= int(totalCount) {
-			break
+	// One generation attempt: ask the engine, parse, build validated items
+	// (synthesising TTS audio where the kind requires it).
+	genOnce := func() ([]generatedItem, error) {
+		raw, err := s.engine.Generate(ctx, genengine.Request{
+			Prompt:          prompt,
+			Temperature:     0.3,
+			MaxOutputTokens: 65536,
+			JSONOutput:      true,
+			Purpose:         genengine.PurposeItemsAIChoose,
+		})
+		if err != nil {
+			return nil, friendlyGeminiError(err)
 		}
-		var kindHolder struct {
-			Kind string `json:"kind"`
+		var result struct {
+			Items []json.RawMessage `json:"items"`
 		}
-		if err := json.Unmarshal(rawItem, &kindHolder); err != nil || kindHolder.Kind == "" {
-			s.log.WarnContext(ctx, "ai-choose: item missing kind field, skipping", "index", i)
-			continue
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			return nil, fmt.Errorf("parse gemini response: %w", err)
 		}
-		if !kindAllowed[kindHolder.Kind] {
-			s.log.WarnContext(ctx, "ai-choose: item has disallowed kind, skipping", "index", i, "kind", kindHolder.Kind)
-			continue
-		}
-		handler := handlerByKind[kindHolder.Kind]
-		prompt, explanation, _, configJSON, parseErr := handler.ParseGeminiItem(rawItem)
-		if parseErr != nil {
-			s.log.WarnContext(ctx, "ai-choose: skipping item that failed validation", "index", i, "kind", kindHolder.Kind, "err", parseErr)
-			continue
-		}
-		startSecs := generatedInteractionCheckpointSeconds(chunk)
-		if ttsProv, ok := handler.(svcinteractions.TTSProvider); ok {
-			if text := ttsProv.AudioSourceText(configJSON); text != "" {
-				configJSON, parseErr = s.embedAudio(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
-				if parseErr != nil {
-					s.log.WarnContext(ctx, "ai-choose: TTS synthesis failed, skipping item", "index", i, "kind", kindHolder.Kind, "err", parseErr)
-					continue
+		items := make([]generatedItem, 0, len(result.Items))
+		for i, rawItem := range result.Items {
+			if totalCount > 0 && len(items) >= int(totalCount) {
+				break
+			}
+			var kindHolder struct {
+				Kind string `json:"kind"`
+			}
+			if err := json.Unmarshal(rawItem, &kindHolder); err != nil || kindHolder.Kind == "" {
+				s.log.WarnContext(ctx, "ai-choose: item missing kind field, skipping", "index", i)
+				continue
+			}
+			if !kindAllowed[kindHolder.Kind] {
+				s.log.WarnContext(ctx, "ai-choose: item has disallowed kind, skipping", "index", i, "kind", kindHolder.Kind)
+				continue
+			}
+			handler := handlerByKind[kindHolder.Kind]
+			prompt, explanation, _, configJSON, parseErr := handler.ParseGeminiItem(rawItem)
+			if parseErr != nil {
+				s.log.WarnContext(ctx, "ai-choose: skipping item that failed validation", "index", i, "kind", kindHolder.Kind, "err", parseErr)
+				continue
+			}
+			startSecs := generatedInteractionCheckpointSeconds(chunk)
+			if ttsProv, ok := handler.(svcinteractions.TTSProvider); ok {
+				if text := ttsProv.AudioSourceText(configJSON); text != "" {
+					configJSON, parseErr = s.embedAudio(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
+					if parseErr != nil {
+						s.log.WarnContext(ctx, "ai-choose: TTS synthesis failed, skipping item", "index", i, "kind", kindHolder.Kind, "err", parseErr)
+						continue
+					}
 				}
 			}
+			items = append(items, generatedItem{
+				prompt:      prompt,
+				explanation: explanation,
+				startSecs:   startSecs,
+				configJSON:  configJSON,
+				kindStr:     kindHolder.Kind,
+			})
 		}
-		items = append(items, generatedItem{
-			prompt:      prompt,
-			explanation: explanation,
-			startSecs:   startSecs,
-			configJSON:  configJSON,
-			kindStr:     kindHolder.Kind,
-		})
+		return items, nil
+	}
+
+	// Retry transient failures / degraded-empty results, exactly like the
+	// single-kind GenerateItems path. Without this, a single AI_CHOOSE call whose
+	// only listening item failed validation or whose response was throttled
+	// dropped the kind with no recovery — the chief cause of "listening exercises
+	// frequently missing". A non-empty chunk that yields 0 items is retried; an
+	// empty transcript legitimately yields 0.
+	attempts := max(s.aiCfg.GeminiMaxAttempts, 1)
+	transcriptEmpty := strings.TrimSpace(transcript) == ""
+	s.log.InfoContext(ctx, "[GENAI] GenerateItemsAIChoose: generating",
+		"engine", s.engine.Name(), "chunk_id", chunk.ID.String(), "chunk_index", chunk.OrderIndex, "kinds", len(specs), "count", totalCount)
+	var items []generatedItem
+	for attempt := 1; attempt <= attempts; attempt++ {
+		var err error
+		items, err = genOnce()
+		if err == nil && (len(items) > 0 || transcriptEmpty) {
+			return items, nil
+		}
+		retryable := isTransientGeminiError(err) || (err == nil && len(items) == 0)
+		if !retryable || attempt == attempts {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("Gemini API trả về 0 câu hỏi sau %d lần thử (có thể do vượt quota / quá tải). Vui lòng thử lại sau.", attempts)
+		}
+		s.log.WarnContext(ctx, "[GENAI] GenerateItemsAIChoose: transient/empty result, retrying",
+			"attempt", attempt, "max", attempts, "items", len(items), "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * s.aiCfg.GeminiRetryBackoff):
+		}
 	}
 	return items, nil
 }
