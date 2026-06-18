@@ -81,6 +81,25 @@ func newTranscriptionService(s3client *minio.Client, s3cfg *cfg.S3Cfg, sttCfg *c
 
 // maxVideoBytes returns the effective video size cap from config.
 // A zero/negative config value falls back to the 2 GB default.
+// friendlyTranscriptionError maps a non-200 Whisper/Speaches response into a
+// user-readable Vietnamese message. The raw API body (e.g. a 404 "model not
+// installed locally" JSON) must NEVER reach the end user via the task error_msg;
+// the message stays specific enough to diagnose the cause from the backend log
+// (which the taskqueue worker now records on every failure).
+func friendlyTranscriptionError(status int, body []byte) error {
+	b := strings.ToLower(string(body))
+	switch {
+	case status == http.StatusNotFound && (strings.Contains(b, "not installed") || strings.Contains(b, "model")):
+		return errors.New("máy chủ phiên âm chưa cài đặt mô hình nhận dạng giọng nói (Whisper). Hệ thống cần tải mô hình trước khi phiên âm — vui lòng thử lại sau ít phút khi quá trình khởi tạo hoàn tất")
+	case status == http.StatusTooManyRequests:
+		return errors.New("máy chủ phiên âm đang quá tải. Vui lòng thử lại sau giây lát")
+	case status >= 500:
+		return fmt.Errorf("máy chủ phiên âm gặp sự cố nội bộ (mã %d). Vui lòng thử lại sau", status)
+	default:
+		return fmt.Errorf("không thể phiên âm video (máy chủ phiên âm trả về mã %d). Vui lòng thử lại sau", status)
+	}
+}
+
 func (s *transcriptionService) maxVideoBytes() int64 {
 	if s.aiCfg.MaxVideoBytes > 0 {
 		return s.aiCfg.MaxVideoBytes
@@ -377,7 +396,7 @@ func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath stri
 		return "", nil, fmt.Errorf("whisper response exceeds %d bytes", maxSTTResponseBytes)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("whisper API %d: %s", resp.StatusCode, string(respBytes))
+		return "", nil, friendlyTranscriptionError(resp.StatusCode, respBytes)
 	}
 
 	var result struct {

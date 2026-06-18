@@ -225,6 +225,12 @@ func (w *Worker) runTask(ctx context.Context, task Task) {
 	}
 	workerID := pgtype.UUID{Bytes: uuidBytes(w.id), Valid: true}
 	if err != nil {
+		// Log the executor failure itself — previously only a MarkFailed write
+		// error was logged, so a failing task (e.g. Whisper model not installed)
+		// was stored in error_msg and surfaced to the user but left ZERO backend
+		// log lines, making it un-diagnosable from the server side.
+		w.log.ErrorContext(ctx, "taskqueue.Worker: task failed",
+			"task_id", task.ID.String(), "task_type", task.TaskType, "err", err)
 		if markErr := w.db.MarkFailed(ctx, task.ID, workerID, err.Error()); markErr != nil {
 			w.log.WarnContext(ctx, "taskqueue.Worker: MarkFailed",
 				"task_id", task.ID.String(), "err", markErr)

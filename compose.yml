@@ -109,8 +109,12 @@ services:
     volumes:
       - ./scripts/init/speaches:/init:ro,Z
     environment:
-      # Single source for the TTS models: RICHTER_TTS_* in .env (same vars richter reads).
+      # Single source for the models: RICHTER_STT_MODEL / RICHTER_TTS_* in .env
+      # (same vars richter reads). The STT model MUST be pulled here — Speaches'
+      # PRELOAD_MODELS only loads an already-downloaded model, so after a volume
+      # wipe transcription 404s until this sidecar fetches it.
       SPEACHES_URL: ${RICHTER_TTS_ENDPOINT:-http://speaches:8000}
+      STT_MODEL: ${RICHTER_STT_MODEL:-Systran/faster-whisper-small}
       TTS_VI_MODEL: ${RICHTER_TTS_VI_MODEL:-speaches-ai/piper-vi_VN-vais1000-medium}
       TTS_EN_MODEL: ${RICHTER_TTS_EN_MODEL:-speaches-ai/piper-en_US-lessac-medium}
     entrypoint: ["sh", "/init/preload-tts.sh"]
