@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, useTransition } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -217,10 +217,19 @@ export function StudentLessonView({
     ? lessonInteractions.find((it) => it.id === activeId) ?? null
     : null;
 
-  // Pending checkpoints (not yet passed) ordered by startSeconds
-  const pendingCheckpoints = lessonInteractions
-    .filter((it) => it.startSeconds > 0 && !passedIds.has(it.id))
-    .sort((a, b) => a.startSeconds - b.startSeconds);
+  // Pending checkpoints (not yet passed) ordered by startSeconds.
+  // MEMOISED: this used to be a fresh array every render, which gave
+  // handleTimeUpdate (and the player effects keyed on its identity) a new
+  // identity on every render. Combined with the seek guard's state updates that
+  // produced a synchronous re-render→re-subscribe storm during fast scrubbing
+  // that froze the page. Memoising stabilises identity so the cascade stops.
+  const pendingCheckpoints = useMemo(
+    () =>
+      lessonInteractions
+        .filter((it) => it.startSeconds > 0 && !passedIds.has(it.id))
+        .sort((a, b) => a.startSeconds - b.startSeconds),
+    [lessonInteractions, passedIds],
+  );
 
   const handleTimeUpdate = useCallback(
     (t: number) => {
@@ -350,17 +359,36 @@ export function StudentLessonView({
   // Once every checkpoint is answered there is no gate and seeking is unrestricted.
   // Teachers in preview seek without restriction.
   const nextGate = pendingCheckpoints[0];
+  // Re-entry guard: writing video.currentTime inside a seeking/seeked handler
+  // fires ANOTHER seeking/seeked event, which re-enters guardSeek. Under fast
+  // repeated scrubbing those self-induced events interleave with real ones into
+  // a synchronous storm that saturates the main thread (the freeze). The flag
+  // makes the handler ignore the seek event its own correction caused.
+  const clampingRef = useRef(false);
   useEffect(() => {
     if (isPreview || !nextGate) return;
     const video = videoRef.current;
     if (!video) return;
     const guardSeek = () => {
+      if (clampingRef.current) return; // ignore the event our own clamp caused
+      // Ignore the resume-seek the player performs on mount (loadedmetadata →
+      // initialPosition) plus the poster-fragment seek. Those fire seeking/seeked
+      // before the student has played anything; clamping on them yanks the video
+      // around on entry. Real forward-skips clear isInitialLoadRef (first play /
+      // a >1s timeupdate move) before reaching the guard.
+      if (isInitialLoadRef.current) return;
       if (video.currentTime > nextGate.startSeconds + FORWARD_SEEK_SLACK_S) {
+        clampingRef.current = true;
         video.currentTime = nextGate.startSeconds;
         prevTimeRef.current = nextGate.startSeconds;
         // Trying to scrub past an unanswered checkpoint surfaces it (the gate), so
         // the learner must complete it before continuing past this point.
         setActiveId((cur) => cur ?? nextGate.id);
+        // Release the guard after the correction settles (the browser fires the
+        // induced seeking/seeked within the same tick).
+        window.setTimeout(() => {
+          clampingRef.current = false;
+        }, 0);
       }
     };
     video.addEventListener("seeking", guardSeek);
@@ -370,6 +398,35 @@ export function StudentLessonView({
       video.removeEventListener("seeked", guardSeek);
     };
   }, [isPreview, playerKey, nextGate]);
+
+  // Surface a checkpoint that the resumed position has already passed. On return
+  // to a lesson, the saved position can be AT/just before an unanswered gate
+  // (see the save-position clamp in the player); the forward-crossing hit-test
+  // in handleTimeUpdate never fires for a gate we resume on top of, so without
+  // this the question would be silently skipped. Runs once after interactions
+  // load. (P6 fix.)
+  const initialGateCheckedRef = useRef(false);
+  useEffect(() => {
+    if (initialGateCheckedRef.current || isPreview || submitted) return;
+    if (lessonInteractions.length === 0) return;
+    initialGateCheckedRef.current = true;
+    // Only relevant when actually RESUMING (initialPosition meaningfully > 0). At
+    // a fresh start (initialPosition ≈ 0) a checkpoint whose startSeconds sits
+    // within CHECKPOINT_EPSILON of zero would otherwise satisfy `0 >= start -
+    // epsilon` and pop the question immediately on entry — before the student has
+    // watched anything. The normal forward-crossing hit-test in handleTimeUpdate
+    // surfaces such an early checkpoint on first play instead.
+    if (initialPosition <= CHECKPOINT_EPSILON_SECONDS) return;
+    const missed = pendingCheckpoints.find(
+      (c) => initialPosition >= c.startSeconds - CHECKPOINT_EPSILON_SECONDS,
+    );
+    if (missed) {
+      if (!questionShownAtRef.current.has(missed.id)) {
+        questionShownAtRef.current.set(missed.id, Date.now());
+      }
+      setActiveId((cur) => cur ?? missed.id);
+    }
+  }, [isPreview, submitted, lessonInteractions, pendingCheckpoints, initialPosition]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleAnswer(id: string, response: any) {
@@ -680,6 +737,7 @@ export function StudentLessonView({
             onFirstPlay={handleFirstPlay}
             onEnded={handleEnded}
             maxWatchedSeconds={isPreview ? undefined : maxWatchedSeconds}
+            maxSavablePositionSeconds={isPreview ? undefined : nextGate?.startSeconds}
             showTranscript={false}
             allowNativeFullscreen={false}
             isFullscreen={isFullscreen}

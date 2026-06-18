@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { analysisConfig } from "@/lib/client-config";
 import {
   AnalysisProgressStep,
@@ -86,6 +86,11 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
     dispatchStep,
   } = input;
 
+  // Pipeline task ids whose chunks we've already loaded mid-run, so the
+  // CHUNKING→GENERATING reload (below) fires once per pipeline instead of on
+  // every 2.5s poll.
+  const pipelineGenChunksLoadedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     for (const task of lessonTasks) {
       const previousStatus = taskStatusByIdRef.current.get(task.id);
@@ -140,6 +145,14 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
               chunkIndex: Math.max(0, task.progressCurrent - 1),
               totalChunks: task.progressTotal,
             });
+            // Chunking finished — load the now-persisted chunks ONCE so the user
+            // can see the phân-đoạn result while generation is still running
+            // (previously chunks only loaded at pipeline end, so the user stared
+            // at an empty result for the whole — sometimes long — generate stage).
+            if (!pipelineGenChunksLoadedRef.current.has(task.id)) {
+              pipelineGenChunksLoadedRef.current.add(task.id);
+              void reloadChunks();
+            }
           } else if (stage.includes("CHUNKING")) {
             setExtractState({ phase: "done" });
             setChunkState({ phase: "running", currentStep: null });

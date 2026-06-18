@@ -166,10 +166,10 @@ test.describe("Lesson tabs — clickable after a task completes", () => {
 
     // Now the page-level tabs must remain responsive. Clicking "Kết quả & Thống kê"
     // and "Bài giảng" must actually navigate (no stuck router.refresh wedging them).
-    await page.getByRole("link", { name: /Kết quả.*Thống kê/ }).click();
+    await page.getByRole("tab", { name: /Kết quả.*Thống kê/ }).click();
     await expect(page).toHaveURL(/tab=results/, { timeout: 15_000 });
 
-    await page.getByRole("link", { name: /Bài giảng/ }).click();
+    await page.getByRole("tab", { name: /Bài giảng/ }).click();
     await expect(page).toHaveURL(/tab=content/, { timeout: 15_000 });
     await expect(page.getByText("Studio bài giảng")).toBeVisible({ timeout: 15_000 });
   });

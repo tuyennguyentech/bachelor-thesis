@@ -154,9 +154,10 @@ test(
     // After upload, the dialog hands off to the lesson's processing tab — no
     // blocking modal. The durable RUN_PIPELINE task is already running there.
     await expect(page).toHaveURL(/\/lessons\/.*tab=processing/, { timeout: 120_000 });
-    // The read-only auto-progress card proves the pipeline auto-runs server-side
-    // (the user does not click each step).
-    await expect(page.getByTestId("pipeline-auto-progress")).toBeVisible({ timeout: 30_000 });
+    // The slim auto-pipeline banner proves the pipeline auto-runs server-side
+    // (the user does not click each step). The 5-step stepper below it is the
+    // single progress visualization, driven by the live progress_step.
+    await expect(page.getByTestId("pipeline-auto-banner")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Đang xử lý tự động/)).toBeVisible();
   },
 );

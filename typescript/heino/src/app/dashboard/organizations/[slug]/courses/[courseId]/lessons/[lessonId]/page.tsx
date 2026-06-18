@@ -36,20 +36,19 @@ import { extractLocalResponse } from "@/interactions/registry";
 import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recorder";
 import { QuickCreateTrigger } from "@/components/dashboard/quick-create/QuickCreateTrigger";
 import { LessonCourseSidebar, LessonWorkspaceShell } from "./lesson-workspace";
+import { LessonTeacherTabs, SwitchToProcessingButton, type TeacherTab } from "./lesson-teacher-tabs";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const COURSE_NAV_LIMIT = 100;
-
-const VALID_TABS = ["content", "processing", "results"];
 
 /**
  * Normalise the `?tab=` query param. Maps the legacy `"exercises"` tab to
  * `"processing"`, and falls back to `"content"` for any unknown value so an
  * invalid tab never renders a blank body.
  */
-function normalizeTab(raw: string | undefined): string {
+function normalizeTab(raw: string | undefined): TeacherTab {
   if (raw === "exercises") return "processing";
-  if (raw && VALID_TABS.includes(raw)) return raw;
+  if (raw === "processing" || raw === "results") return raw;
   return "content";
 }
 
@@ -57,8 +56,16 @@ function normalizeTab(raw: string | undefined): string {
  * Append `#t=0.1` to a presigned video URL so the browser renders the first
  * frame as a poster instead of a black box. Only applied when the URL has no
  * existing `#` fragment (presigned URLs put their query in the search string).
+ *
+ * IMPORTANT: skip the fragment when we have a resume position
+ * (`initialPosition > 0`). The `#t=0.1` media-fragment makes the browser seek
+ * to 0.1s on metadata load, which RACES the player's resume-seek to
+ * `initialPosition` — the two interleave and the video jumps erratically past
+ * the intended resume point / first chunk. With no resume, the fragment is
+ * harmless (and useful as a poster).
  */
-function withFirstFramePoster(url: string): string {
+function withFirstFramePoster(url: string, initialPosition = 0): string {
+  if (initialPosition > 0) return url;
   return url.includes("#") ? url : `${url}#t=0.1`;
 }
 
@@ -397,57 +404,13 @@ export default async function LessonDetailPage({
                 </div>
               )}
 
-              {/* Teacher/Admin navigation tabs (hidden in preview AND learn mode) */}
-              {canManage && !isPreview && !learnMode && (
-                <div className="flex border-b border-muted">
-                  <Link
-                    href="?tab=content"
-                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
-                      activeTab === "content"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <VideoIcon className="size-3.5" />
-                    Bài giảng
-                  </Link>
-                  <Link
-                    href="?tab=processing"
-                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
-                      activeTab === "processing"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <SparklesIcon className="size-3.5" />
-                    Xử lý video
-                  </Link>
-                  <Link
-                    href="?tab=results"
-                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-[2px] transition-colors flex items-center gap-2 ${
-                      activeTab === "results"
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <BarChart2Icon className="size-3.5" />
-                    Kết quả &amp; Thống kê
-                    {attemptsData && attemptsData.total > 0 && (
-                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary font-semibold">
-                        {attemptsData.total}
-                      </span>
-                    )}
-                  </Link>
-                </div>
-              )}
-
               {/* Main content areas based on user role and selected tab */}
               {!effectiveCanManage || isPreview ? (
                 // STUDENT or PREVIEW VIEW:
                 videoUrl ? (
                   <StudentLessonView
                     key={`${isPreview ? "preview" : "student"}:${lesson.id}:${lesson.videoStorageKey}:${videoVersion}`}
-                    videoUrl={withFirstFramePoster(videoUrl)}
+                    videoUrl={withFirstFramePoster(videoUrl, isPreview ? 0 : initialPosition)}
                     videoStorageKey={lesson.videoStorageKey || undefined}
                     nextLessonHref={nextLessonHref}
                     segments={analysis?.transcriptSegments ?? []}
@@ -471,10 +434,12 @@ export default async function LessonDetailPage({
                   </div>
                 )
               ) : (
-                // TEACHER or ADMIN VIEW — three tabs
-                <>
-                  {/* ── Tab 1: Bài giảng (Video + Transcript) ── */}
-                  <div className={activeTab !== "content" ? "hidden" : "flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200"}>
+                // TEACHER or ADMIN VIEW — three tabs, switched CLIENT-side (no
+                // per-tab server re-render — see LessonTeacherTabs).
+                <LessonTeacherTabs
+                  initialTab={activeTab}
+                  resultsTotal={attemptsData?.total ?? 0}
+                  content={
                     <section className="w-full overflow-hidden rounded-md border bg-card shadow-sm">
                       <div className="flex items-center justify-between gap-3 border-b px-4 py-3 bg-muted/15">
                         <div className="flex min-w-0 items-center gap-2">
@@ -494,7 +459,7 @@ export default async function LessonDetailPage({
                         <div className="p-4 flex flex-col gap-4">
                           <VideoPlayer
                             key={`${lesson.id}:${lesson.videoStorageKey}:${videoVersion}`}
-                            videoUrl={withFirstFramePoster(videoUrl)}
+                            videoUrl={withFirstFramePoster(videoUrl, initialPosition)}
                             segments={analysis?.transcriptSegments ?? []}
                             transcript={analysis?.transcript ?? ""}
                             lessonId={lessonId}
@@ -525,32 +490,22 @@ export default async function LessonDetailPage({
                                 existingLesson={{ id: lesson.id, title: lesson.title }}
                                 label="Tạo nhanh (tự động)"
                               />
-                              {/* On the always-black video placeholder a theme `outline`
-                                  button is dark-on-black in light mode. Force a glassy
-                                  light-on-dark treatment so it stays legible in both themes. */}
-                              <Button
-                                asChild
-                                variant="outline"
-                                size="sm"
-                                className="gap-1.5 border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white"
-                              >
-                                <Link href="?tab=processing">
-                                  <SparklesIcon className="size-3.5" />
-                                  Xử lý thủ công
-                                </Link>
-                              </Button>
+                              {/* Pure client tab-switch (no navigation) — see
+                                  SwitchToProcessingButton. On the always-black video
+                                  placeholder a theme `outline` button is dark-on-black in
+                                  light mode, so force a glassy light-on-dark treatment to
+                                  stay legible in both themes. */}
+                              <SwitchToProcessingButton className="gap-1.5 border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                                <SparklesIcon className="size-3.5" />
+                                Xử lý thủ công
+                              </SwitchToProcessingButton>
                             </div>
                           </div>
                         </div>
                       )}
                     </section>
-                  </div>
-
-                  {/* ── Tab 2: Xử lý video (AI pipeline) ──
-                      ALWAYS mounted (never conditionally removed) so that in-flight
-                      pipeline state (activeStep, polling timers, chunk edits) survives
-                      tab switches. Visibility is controlled by the `hidden` class only. */}
-                  <div className={activeTab !== "processing" ? "hidden" : "flex flex-col gap-6 items-stretch w-full animate-in fade-in duration-200"}>
+                  }
+                  processing={
                     <section className="rounded-md border bg-card p-5 shadow-sm">
                       <div className="mb-4 flex items-start gap-2.5">
                         <div className="rounded-lg bg-primary/10 p-2 text-primary">
@@ -589,46 +544,46 @@ export default async function LessonDetailPage({
                         />
                       </div>
                     </section>
-                  </div>
+                  }
+                  results={
+                    attemptsData ? (
+                      <>
+                        {heatmapData && (
+                          <div className="rounded-md border p-4 flex flex-col gap-3" data-testid="lesson-heatmap-panel">
+                            <div className="flex items-center gap-2">
+                              <BarChart2Icon className="size-4 text-muted-foreground" />
+                              <h2 className="font-medium text-sm">
+                                {heatmapData.cells.some((c) => c.responseCount > 0)
+                                  ? "Bản đồ nhiệt theo phân đoạn"
+                                  : "Bản đồ nhiệt theo câu hỏi"}
+                              </h2>
+                            </div>
+                            <LessonHeatmap
+                              cells={heatmapData.cells}
+                              breakdowns={heatmapData.breakdowns}
+                              questions={questionAnalytics?.questionStats}
+                              error={heatmapData.error}
+                            />
+                          </div>
+                        )}
 
-                  {/* ── Tab 3: Kết quả & Thống kê ── */}
-                  {activeTab === "results" && attemptsData && (
-                    <div className="flex flex-col gap-4 animate-in fade-in duration-200">
-                      {heatmapData && (
-                        <div className="rounded-md border p-4 flex flex-col gap-3" data-testid="lesson-heatmap-panel">
+                        <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
                           <div className="flex items-center gap-2">
                             <BarChart2Icon className="size-4 text-muted-foreground" />
-                            <h2 className="font-medium text-sm">
-                              {heatmapData.cells.some((c) => c.responseCount > 0)
-                                ? "Bản đồ nhiệt theo phân đoạn"
-                                : "Bản đồ nhiệt theo câu hỏi"}
-                            </h2>
+                            <h2 className="font-medium text-sm">Bảng kết quả học viên</h2>
                           </div>
-                          <LessonHeatmap
-                            cells={heatmapData.cells}
-                            breakdowns={heatmapData.breakdowns}
+                          <LessonAttempts
+                            attempts={attemptsData.attempts}
+                            total={attemptsData.total}
+                            maxAttempts={lesson.maxAttempts}
+                            perKind={questionAnalytics?.kindAccuracy}
                             questions={questionAnalytics?.questionStats}
-                            error={heatmapData.error}
                           />
                         </div>
-                      )}
-
-                      <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
-                        <div className="flex items-center gap-2">
-                          <BarChart2Icon className="size-4 text-muted-foreground" />
-                          <h2 className="font-medium text-sm">Bảng kết quả học viên</h2>
-                        </div>
-                        <LessonAttempts
-                          attempts={attemptsData.attempts}
-                          total={attemptsData.total}
-                          maxAttempts={lesson.maxAttempts}
-                          perKind={questionAnalytics?.kindAccuracy}
-                          questions={questionAnalytics?.questionStats}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </>
+                      </>
+                    ) : null
+                  }
+                />
               )}
             </div>
           </LessonWorkspaceShell>

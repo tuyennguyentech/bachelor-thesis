@@ -118,6 +118,7 @@ function shouldKeepTask(task: LessonTask, dismissedIds: Set<string>, now: number
 export function LessonTaskPanel({
   tasks,
   activeStep,
+  hidePipelineTask = false,
   onRefresh,
   onCancel,
 }: {
@@ -128,6 +129,13 @@ export function LessonTaskPanel({
    * rendered twice (top panel + bottom step card).
    */
   activeStep: PanelStep;
+  /**
+   * Hide the one-shot RUN_PIPELINE task. Its progress is already shown by the
+   * auto-pipeline banner + stepper, so listing it here too is a redundant
+   * loader. taskKindToStep() returns null for RUN_PIPELINE so the activeStep
+   * dedup below never catches it — this flag does.
+   */
+  hidePipelineTask?: boolean;
   onRefresh: () => void;
   onCancel: (taskId: string) => void;
 }) {
@@ -167,9 +175,12 @@ export function LessonTaskPanel({
   // pure duplication. Everything else (other-step running tasks and
   // recent terminal results for any step) is still useful as a
   // background/recency signal.
-  const displayTasks = visibleTasks.filter(
-    (task) => taskKindToStep(task.kind) !== activeStep || !isLessonTaskActive(task),
-  );
+  const displayTasks = visibleTasks.filter((task) => {
+    if (hidePipelineTask && task.kind === LessonTaskKind.RUN_PIPELINE && isLessonTaskActive(task)) {
+      return false;
+    }
+    return taskKindToStep(task.kind) !== activeStep || !isLessonTaskActive(task);
+  });
   if (displayTasks.length === 0) return null;
 
   return (

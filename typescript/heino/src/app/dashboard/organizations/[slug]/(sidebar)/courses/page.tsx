@@ -142,10 +142,14 @@ export default async function DashboardCoursesPage({
   );
   const detailsMap = new Map(courseDetails.map((d) => [d.courseId, d]));
 
-  // Plain members must not see authoring drafts; managers see everything.
+  // Plain members must not see authoring drafts they have no part in — but a
+  // draft they can access (enrolled course member, owner) must stay visible, or
+  // they could open it directly yet never find it in this list. Managers see
+  // everything. (The server query already applies the same rule; this is a
+  // belt-and-suspenders filter for the non-manager fetch.)
   const visibleCourses = canManage
     ? courses
-    : courses.filter((c) => c.status !== CourseStatus.DRAFT);
+    : courses.filter((c) => c.status !== CourseStatus.DRAFT || c.canAccess);
   // Sectioning is by ACTUAL membership (course_members row), NOT bypass access:
   // org owners/admins are not auto-enrolled in every course. A course the viewer
   // belongs to → "Khóa học của bạn" (Vào học + Vào quản lý). Otherwise →

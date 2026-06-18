@@ -231,6 +231,134 @@ test.describe.serial("Student Checkpoint Bugs", () => {
       }
     });
   });
+
+  // P6 — a checkpoint the resumed position has already passed must re-surface on
+  // load, not be silently skipped. Repro: seek past a gate, navigate away, come
+  // back → the saved position is past the gate so the forward-crossing hit-test
+  // never fires. The fix surfaces the earliest un-passed gate at/under the
+  // resume position on mount. We simulate "seek past + navigate away" by
+  // persisting a watch position beyond the gate via UpdateWatchProgress.
+  test.describe("P6 — pending checkpoint survives navigation", () => {
+    test("a gate the resumed position passed is re-surfaced on load", async ({
+      teacherPage,
+      isolatedLesson,
+    }) => {
+      await setFeedbackMode(teacherPage, isolatedLesson.lessonId, "FEEDBACK_MODE_AFTER_EACH");
+      const createdIds: string[] = [];
+      try {
+        const gateId = await addInteraction(teacherPage, isolatedLesson.lessonId, {
+          prompt: "Câu hỏi cổng P6.",
+          explanation: "",
+          startSeconds: 10,
+          mcq: {
+            options: [{ text: "Đáp án A" }, { text: "Đáp án B" }],
+            correctAnswer: 0,
+            correctAnswers: [],
+            question: "",
+          },
+        });
+        createdIds.push(gateId);
+
+        // Persist a resume position PAST the 10s gate (as if the student seeked
+        // past it then navigated to another lesson).
+        await rpc(teacherPage, "richter.v1.AIService", "UpdateWatchProgress", {
+          lessonId: isolatedLesson.lessonId,
+          positionSeconds: 40,
+          watchedFromSeconds: 0,
+          watchedToSeconds: 0,
+        });
+
+        // Return to the lesson as a real (gated) learner.
+        await teacherPage.goto(`${isolatedLesson.url}?mode=learn`, { waitUntil: "domcontentloaded" });
+
+        // The skipped gate must re-surface on mount instead of being lost.
+        await expect(teacherPage.getByTestId("quiz-checkpoint")).toBeVisible({ timeout: 15_000 });
+        await expect(teacherPage.getByText("Câu hỏi cổng P6.")).toBeVisible();
+      } finally {
+        // Reset the persisted position so the shared lesson is clean for reruns.
+        await rpc(teacherPage, "richter.v1.AIService", "UpdateWatchProgress", {
+          lessonId: isolatedLesson.lessonId,
+          positionSeconds: 0,
+          watchedFromSeconds: 0,
+          watchedToSeconds: 0,
+        }).catch(() => {});
+        await deleteInteractions(teacherPage, createdIds);
+      }
+    });
+  });
+
+  // P4 — rapid scrubbing past an unanswered gate must not freeze the page. The
+  // old seek guard re-entered itself (writing currentTime inside a seek handler)
+  // and rebuilt pendingCheckpoints every render, producing a synchronous storm
+  // that locked the main thread. After the fix the page stays interactive.
+  test.describe("P4 — rapid seeking stays responsive", () => {
+    test("hammering seeks past a gate does not freeze the page", async ({
+      teacherPage,
+      isolatedLesson,
+    }) => {
+      await setFeedbackMode(teacherPage, isolatedLesson.lessonId, "FEEDBACK_MODE_AFTER_EACH");
+      const createdIds: string[] = [];
+      try {
+        const gateId = await addInteraction(teacherPage, isolatedLesson.lessonId, {
+          prompt: "Câu hỏi cổng P4.",
+          explanation: "",
+          startSeconds: 8,
+          mcq: {
+            options: [{ text: "A" }, { text: "B" }],
+            correctAnswer: 0,
+            correctAnswers: [],
+            question: "",
+          },
+        });
+        createdIds.push(gateId);
+
+        await teacherPage.goto(`${isolatedLesson.url}?mode=learn`, { waitUntil: "domcontentloaded" });
+        await expect(teacherPage.locator('[data-testid="video-player"]')).toBeAttached({ timeout: 15_000 });
+        // Wait until the video can actually seek so currentTime writes register.
+        await teacherPage.waitForFunction(() => {
+          const v = document.querySelector("video");
+          return !!v && v.readyState >= 1;
+        }, { timeout: 15_000 }).catch(() => {});
+
+        // Fast scrubbing far past the gate, many times in a tight burst — this is
+        // what used to re-enter the seek guard into a synchronous storm. If the
+        // main thread wedges (the old freeze), THIS evaluate never resolves and
+        // the test fails on timeout. Completing it is the core freeze check.
+        const burst = teacherPage.evaluate(async () => {
+          const v = document.querySelector("video");
+          if (!v) return false;
+          for (let i = 0; i < 60; i++) {
+            v.currentTime = 8 + (i % 12) * 40; // jump around well past the 8s gate
+            v.dispatchEvent(new Event("seeking"));
+            v.dispatchEvent(new Event("seeked"));
+            await new Promise((r) => setTimeout(r, 3));
+          }
+          return true;
+        });
+        // Hard ceiling: a frozen thread would blow past this.
+        const completed = await Promise.race([
+          burst,
+          new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 15_000)),
+        ]);
+        expect(completed).toBe(true);
+
+        // And the page is still INTERACTIVE afterwards: a stable control click
+        // works (a frozen page would never resolve this).
+        const exit = teacherPage.getByRole("link", { name: /Quay lại Studio/i }).first();
+        await expect(exit).toBeVisible({ timeout: 8_000 });
+        await exit.click({ timeout: 5_000 });
+        await expect(teacherPage).not.toHaveURL(/mode=learn/, { timeout: 8_000 });
+      } finally {
+        await rpc(teacherPage, "richter.v1.AIService", "UpdateWatchProgress", {
+          lessonId: isolatedLesson.lessonId,
+          positionSeconds: 0,
+          watchedFromSeconds: 0,
+          watchedToSeconds: 0,
+        }).catch(() => {});
+        await deleteInteractions(teacherPage, createdIds);
+      }
+    });
+  });
 });
 
 // Bug B — Reading PreviewGrade transient errors

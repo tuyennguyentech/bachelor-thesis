@@ -26,18 +26,18 @@ test.describe("Lesson tabs — manager view", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
     // All three tabs rendered as <Link> anchors in the tab strip
-    await expect(page.getByRole("link", { name: /Bài giảng/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Xử lý video/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Kết quả.*Thống kê/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Bài giảng/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Xử lý video/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Kết quả.*Thống kê/ })).toBeVisible();
   });
 
   test("all 3 tab links are visible for teacher (teacherPage)", async ({ teacherPage: page }) => {
     await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    await expect(page.getByRole("link", { name: /Bài giảng/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Xử lý video/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Kết quả.*Thống kê/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Bài giảng/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Xử lý video/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Kết quả.*Thống kê/ })).toBeVisible();
   });
 });
 
@@ -99,6 +99,26 @@ test.describe("Lesson tab — Xử lý video (processing)", () => {
     await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByTestId("workflow-step-transcript")).toBeVisible();
+  });
+
+  // BUG-C: the "Cấu hình AI nâng cao" panel configures exercise generation, so it
+  // must appear ONLY on the Bài tập (exercises) step — not on Phiên âm/Phân đoạn,
+  // where it used to render whenever a video existed.
+  test("AI config panel shows only on the exercises step, not transcribe/chunks", async ({ teacherPage: page }) => {
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
+    await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("video-workflow-stepper")).toBeVisible();
+
+    const aiConfig = page.getByText("Cấu hình AI nâng cao", { exact: false });
+
+    await page.getByTestId("workflow-step-transcript").click();
+    await expect(aiConfig).toHaveCount(0);
+
+    await page.getByTestId("workflow-step-chunks").click();
+    await expect(aiConfig).toHaveCount(0);
+
+    await page.getByTestId("workflow-step-exercises").click();
+    await expect(aiConfig).toBeVisible({ timeout: 10_000 });
   });
 
   test("switching from content to processing and back does not crash", async ({ teacherPage: page }) => {
@@ -169,11 +189,16 @@ test.describe("Lesson tab — Bài giảng, no-video placeholder", () => {
     // Quick-create (auto) entry point for this existing video-less lesson.
     await expect(page.getByTestId("quick-create-lesson-trigger")).toBeVisible();
 
-    // Manual processing link still available, pointing at ?tab=processing.
-    const manualBtn = page.getByRole("link", { name: /Xử lý thủ công/i });
+    // "Xử lý thủ công" switches to the processing tab CLIENT-side (no navigation):
+    // it used to be a <Link href="?tab=processing"> whose RSC navigation failed to
+    // update the now-client-side tab state, so the tab stayed on Bài giảng until a
+    // hard refresh (BUG-F). It is now a button that toggles the tab in-place.
+    const manualBtn = page.getByTestId("manual-processing-cta");
     await expect(manualBtn).toBeVisible();
-    const href = await manualBtn.getAttribute("href");
-    expect(href).toContain("tab=processing");
+    await manualBtn.click();
+    // Processing tab becomes active in-place — its panel heading appears.
+    await expect(page.getByRole("heading", { name: /Tạo nội dung từ video/i })).toBeVisible();
+    await expect(page.getByTestId("lesson-tab-processing")).toHaveAttribute("aria-selected", "true");
   });
 });
 
@@ -185,8 +210,8 @@ test.describe("Lesson tabs — student view (no tab strip)", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
     // Manager tabs are conditionally rendered only for canManage && !isPreview
-    await expect(page.getByRole("link", { name: /Xử lý video/ })).not.toBeVisible();
-    await expect(page.getByRole("link", { name: /Kết quả.*Thống kê/ })).not.toBeVisible();
+    await expect(page.getByRole("tab", { name: /Xử lý video/ })).not.toBeVisible();
+    await expect(page.getByRole("tab", { name: /Kết quả.*Thống kê/ })).not.toBeVisible();
   });
 
   test("student sees the video player area (not the Studio card)", async ({ studentPage: page }) => {

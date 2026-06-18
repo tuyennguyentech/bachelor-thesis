@@ -15,10 +15,10 @@ import { Pagination } from "@/components/pagination";
 import { AlertTriangleIcon, BarChart2Icon, ListIcon, ScatterChartIcon, XIcon } from "lucide-react";
 import { engagementBadge } from "@/lib/engagement-utils";
 import { cn } from "@/lib/utils";
-import { scoreBarClass } from "@/components/score-viz";
+import { ScoreBar, scoreTextClass } from "@/components/score-viz";
 import { ScoreDistributionChart, EngagementScatterChart } from "./course-results-charts";
 import { InfoHint } from "@/components/ui/info-hint";
-import { HoverTip } from "@/components/ui/hover-tip";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export interface ResultRow {
   userId: string;
@@ -71,6 +71,120 @@ function StatChip({ label, value, hint }: { label: string; value: string; hint?:
         {hint && <InfoHint text={hint} />}
       </span>
       <span className="text-lg font-semibold tabular-nums leading-none">{value}</span>
+    </div>
+  );
+}
+
+function initialsOf(label: string): string {
+  return (label.trim() || "?")
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+/** A small labelled metric for the at-risk card header row. */
+function MiniMetric({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-0.5 rounded-md bg-muted/40 px-2 py-1.5">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className={cn("text-sm font-semibold tabular-nums leading-none", className)}>{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Redesigned at-risk student card: avatar + name/email, an at-a-glance metric
+ * row (score / engagement / progress / activity, joined from the full results
+ * row), the reasons they're flagged, and their weak lessons as labelled
+ * engagement bars (replacing the old cryptic colored squares). Ranked worst-first
+ * by the caller. `row` may be undefined when the student isn't on the current
+ * results page — the card degrades gracefully to the at-risk-only data.
+ */
+function AtRiskStudentCard({ s, row }: { s: AtRiskRow; row?: ResultRow }) {
+  const reasons: string[] = [];
+  if (row) {
+    if (row.engagementScore < 40) reasons.push("tương tác thấp");
+    if (row.hasAttempt && row.avgScorePct < 50) reasons.push("điểm dưới 50%");
+    if (!row.hasAttempt) reasons.push("chưa làm bài");
+  }
+  if (s.lowStreak.length >= 2) reasons.push(`${s.lowStreak.length} bài liên tiếp yếu`);
+
+  const progressPct =
+    row && row.lessonsTotal > 0 ? Math.round((row.lessonsCompleted / row.lessonsTotal) * 100) : null;
+
+  return (
+    <div
+      data-testid="at-risk-card"
+      className="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
+    >
+      {/* Header: avatar + identity + overall engagement badge */}
+      <div className="flex items-start gap-3">
+        <Avatar size="default" className="shrink-0">
+          <AvatarFallback className="bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300">
+            {initialsOf(s.label)}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-semibold" title={s.label}>
+              {s.label}
+            </span>
+            {row && engagementBadge(row.engagementScore)}
+          </div>
+          {row?.email && row.email !== s.label && (
+            <p className="truncate text-xs text-muted-foreground" title={row.email}>
+              {row.email}
+            </p>
+          )}
+          {reasons.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {reasons.map((r, i) => (
+                <span
+                  key={i}
+                  className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                >
+                  {r}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* At-a-glance metrics (when the full row is available) */}
+      {row && (
+        <div className="grid grid-cols-3 gap-1.5">
+          <MiniMetric
+            label="Điểm TB"
+            value={row.hasAttempt ? `${row.avgScorePct}%` : "—"}
+            className={row.hasAttempt ? scoreTextClass(row.avgScorePct / 100) : undefined}
+          />
+          <MiniMetric label="Tiến độ" value={progressPct !== null ? `${progressPct}%` : "—"} />
+          <MiniMetric label="Hoạt động" value={row.lastActive ?? "Chưa có"} />
+        </div>
+      )}
+
+      {/* Weak lessons as labelled engagement bars (was cryptic squares) */}
+      {s.lowStreak.length > 0 && (
+        <div className="border-t pt-2.5">
+          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Bài học tương tác thấp
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {s.lowStreak.map((p, i) => (
+              <ScoreBar
+                key={i}
+                label={p.label || "Bài học"}
+                frac={p.score / 100}
+                right={`${Math.round(p.score)}/100`}
+                labelClass="w-32 truncate"
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -210,6 +324,20 @@ export function CourseResultsView({
 
   // Drill-down: which histogram band / scatter group is currently expanded.
   const rowsById = new Map(rows.map((r) => [r.userId, r]));
+  // At-risk students joined to their full metrics row + ranked worst-first
+  // (lowest engagement → lowest score → longest weak streak) so the teacher sees
+  // the most urgent cases at the top.
+  const rankedAtRisk = atRisk
+    .map((s) => ({ s, row: rowsById.get(s.userId) }))
+    .sort((a, b) => {
+      const ea = a.row?.engagementScore ?? 0;
+      const eb = b.row?.engagementScore ?? 0;
+      if (ea !== eb) return ea - eb;
+      const sa = a.row?.hasAttempt ? a.row.avgScorePct : 0;
+      const sb = b.row?.hasAttempt ? b.row.avgScorePct : 0;
+      if (sa !== sb) return sa - sb;
+      return b.s.lowStreak.length - a.s.lowStreak.length;
+    });
   const bandRows = bandSel !== null ? histBins[bandSel]?.members ?? [] : [];
   const scatterRows =
     scatterSel !== null
@@ -348,70 +476,23 @@ export function CourseResultsView({
         </div>
       )}
 
-      {/* Tab: Cần chú ý — students needing attention, as a responsive card grid */}
+      {/* Tab: Cần chú ý — ranked, metric-rich student cards (worst first) */}
       {!loadError && atRisk.length > 0 && subTab === "at-risk" && (
         <div className="flex flex-col gap-3" data-testid="at-risk-section">
           <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50/60 px-3 py-2 dark:border-red-900/50 dark:bg-red-950/20">
             <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
             <p className="text-xs text-red-700/90 dark:text-red-400/90">
-              <span className="font-medium">{atRisk.length} học viên cần chú ý.</span>{" "}
-              Tiêu chí: điểm tương tác dưới 40 hoặc điểm dưới 50%, hoặc có từ 2 bài
-              liên tiếp tương tác thấp. Mỗi ô là một bài học tương tác thấp (đỏ = rất
-              thấp, vàng = thấp) — di chuột để xem chi tiết.
+              <span className="font-medium">{atRisk.length} học viên cần chú ý</span>
+              {" — xếp theo mức độ ưu tiên (nặng nhất trước)."}
+              <InfoHint
+                className="ml-1 text-red-700/70 dark:text-red-400/70"
+                text="Tiêu chí: điểm tương tác dưới 40, hoặc điểm dưới 50%, hoặc có từ 2 bài liên tiếp tương tác thấp. Mỗi thanh là một bài học có tương tác thấp (màu theo mức độ)."
+              />
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {atRisk.map((s) => (
-              <div
-                key={s.userId}
-                data-testid="at-risk-card"
-                className="flex flex-col gap-2.5 rounded-lg border bg-card p-3 shadow-sm transition-shadow hover:shadow-md"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-semibold" title={s.label}>
-                    {s.label}
-                  </span>
-                  {s.lowStreak.length > 0 ? (
-                    <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-950/40 dark:text-red-400">
-                      {s.lowStreak.length} bài liên tiếp
-                    </span>
-                  ) : (
-                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-                      điểm dưới ngưỡng
-                    </span>
-                  )}
-                </div>
-                {s.lowStreak.length > 0 ? (
-                  <div className="flex flex-col gap-1.5">
-                    {s.lowStreak.map((p, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <HoverTip
-                          label={
-                            <span>
-                              <span className="font-medium">{p.label || "Bài học"}</span>
-                              {" · tương tác "}
-                              <span className="tabular-nums">{Math.round(p.score)}/100</span>
-                            </span>
-                          }
-                        >
-                          <div
-                            data-testid="at-risk-square"
-                            className={cn("size-3 shrink-0 cursor-help rounded-sm", scoreBarClass(p.score / 100))}
-                          />
-                        </HoverTip>
-                        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={p.label}>
-                          {p.label || "Bài học"}
-                        </span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                          {Math.round(p.score)}/100
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Điểm trung bình dưới ngưỡng đạt.</p>
-                )}
-              </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {rankedAtRisk.map(({ s, row }) => (
+              <AtRiskStudentCard key={s.userId} s={s} row={row} />
             ))}
           </div>
         </div>

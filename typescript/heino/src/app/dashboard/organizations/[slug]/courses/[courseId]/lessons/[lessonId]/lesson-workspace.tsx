@@ -228,6 +228,12 @@ export function LessonCourseSidebar({
                     <Link
                       key={lesson.id}
                       href={`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lesson.id}${learnSuffix}`}
+                      // prefetch={false}: each lesson target is the heavy ~13-RPC
+                      // lesson page. With up to 100 lessons in the sidebar, default
+                      // prefetch fires a storm of heavy server renders against
+                      // richter, slowing the actual navigation (and any in-flight
+                      // router.refresh) — a key contributor to the tab/page freeze.
+                      prefetch={false}
                       className="flex items-center rounded-lg border border-transparent px-3 py-2.5 text-sm transition-all hover:bg-muted/50 hover:border-border/40 group"
                     >
                       {content}

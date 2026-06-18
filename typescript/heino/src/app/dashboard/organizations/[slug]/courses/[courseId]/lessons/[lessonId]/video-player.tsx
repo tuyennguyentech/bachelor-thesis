@@ -41,6 +41,12 @@ interface Props {
    *  scrubber greys out the locked forward region beyond it. Omit for free seeking
    *  (e.g. teacher preview). */
   maxWatchedSeconds?: number;
+  /** Upper bound (seconds) for the PERSISTED resume position. Set to the next
+   *  unanswered checkpoint so we never save a position past a gate the student
+   *  hasn't cleared — otherwise on return the video resumes beyond the gate and
+   *  the question is silently skipped. Omit for free saving (e.g. all answered /
+   *  teacher preview). */
+  maxSavablePositionSeconds?: number;
 }
 
 declare global {
@@ -80,9 +86,17 @@ export function VideoPlayer({
   onFullscreenToggle,
   interactions = [],
   maxWatchedSeconds,
+  maxSavablePositionSeconds,
 }: Props) {
   const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
+  // Ref-mirror so saveProgress (a stable useCallback) reads the latest cap
+  // without being recreated each time the next-gate moves (which would
+  // re-subscribe all the player listeners that depend on it).
+  const maxSavablePosRef = useRef(maxSavablePositionSeconds);
+  useEffect(() => {
+    maxSavablePosRef.current = maxSavablePositionSeconds;
+  }, [maxSavablePositionSeconds]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
   const lastSavedPos = useRef<number>(-1);
@@ -235,6 +249,11 @@ export function VideoPlayer({
   const saveProgress = useCallback(
     (pos: number) => {
       if (!lessonId) return;
+      // Never persist a resume position past the next unanswered gate — otherwise
+      // the student returns to a spot beyond the checkpoint and the question is
+      // skipped. Clamp to the gate so resume lands on it and it re-surfaces.
+      const cap = maxSavablePosRef.current;
+      if (cap != null && Number.isFinite(cap) && pos > cap) pos = cap;
       if (Math.abs(pos - lastSavedPos.current) < 1) return;
       lastSavedPos.current = pos;
       // Report the continuous-play interval [from, to] since the last interval

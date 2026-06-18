@@ -274,6 +274,11 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
   // the primary affordance in those cases.
   const shouldHide =
     (activeStep === "upload" && !videoStorageKey) ||
+    // On the chunks step with transcript ready but no chunks yet, the step body's
+    // ChunkReadyState already renders the primary "Phân đoạn bài học" button —
+    // this panel's identical CTA was a duplicate. Keep the panel once chunks
+    // exist (it then becomes the forward "Tạo bài tập" prompt, not a duplicate).
+    (activeStep === "chunks" && hasTranscriptContent && !hasChunks) ||
     (activeStep === "exercises" && hasChunks && genState.phase !== "error" && !isGenerating && !questionsGenerated) ||
     (runningActionStep !== null && activeStep === runningActionStep);
 

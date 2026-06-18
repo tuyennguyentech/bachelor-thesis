@@ -371,21 +371,23 @@ test.describe("Analytics drill-downs (teacher view)", () => {
 
 // ── Bug fixes: at-risk tooltip + per-lesson audio language selector ──────────
 test.describe("Analytics/processing bug fixes (teacher view)", () => {
-  test("at-risk square reveals the lesson name in a real (non-native) tooltip", async ({ userPage: page }) => {
+  test("at-risk card shows the weak lesson name + score directly (redesigned)", async ({ userPage: page }) => {
     await goToDsaCourseResults(page);
     const tab = page.getByTestId("results-subtab-at-risk");
     if ((await tab.count()) === 0) {
-      test.skip(true, "no at-risk students in the seed — tooltip path not exercised");
+      test.skip(true, "no at-risk students in the seed — at-risk tab not exercised");
     }
     await tab.click();
-    const square = page.getByTestId("at-risk-square").first();
-    if ((await square.count()) === 0) {
-      test.skip(true, "at-risk student has no low-streak squares");
+    const card = page.getByTestId("at-risk-card").first();
+    await expect(card).toBeVisible({ timeout: 5000 });
+    // Redesign: weak lessons are labelled engagement bars — the lesson name and
+    // the score "/100" are visible inline (no hover/tooltip needed). The section
+    // header "Bài học tương tác thấp" appears whenever a card has a weak streak.
+    const weak = page.getByText("Bài học tương tác thấp").first();
+    if ((await weak.count()) > 0) {
+      await expect(weak).toBeVisible();
+      await expect(page.getByText(/\/100/).first()).toBeVisible();
     }
-    await square.hover();
-    const tip = page.getByRole("tooltip").first();
-    await expect(tip).toBeVisible({ timeout: 5000 });
-    await expect(tip).toContainText("tương tác");
   });
 
   test("lesson processing tab exposes a separate audio-language selector", async ({ teacherPage: page }) => {

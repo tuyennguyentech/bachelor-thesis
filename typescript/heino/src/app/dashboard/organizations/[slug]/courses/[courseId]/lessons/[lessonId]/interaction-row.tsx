@@ -352,7 +352,7 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
 
   const editDialog = (
     <Dialog open={editing} onOpenChange={(o) => !o && !saving && setEditing(false)}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Chỉnh sửa bài tập</DialogTitle>
         </DialogHeader>

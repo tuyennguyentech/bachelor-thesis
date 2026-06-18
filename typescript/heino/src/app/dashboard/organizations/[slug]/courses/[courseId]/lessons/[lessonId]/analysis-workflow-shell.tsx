@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, ChevronDownIcon, ChevronUpIcon, SlidersHorizontalIcon, AlertCircleIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, ChevronDownIcon, ChevronUpIcon, SlidersHorizontalIcon, AlertCircleIcon, Loader2Icon } from "lucide-react";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import {
   VideoProcessingStepper,
@@ -26,7 +26,6 @@ import {
   TranscriptReadyState,
 } from "./analysis-progress-card";
 import { WorkflowNextAction } from "./analysis-actions";
-import { PipelineAutoProgressCard } from "./pipeline-auto-progress";
 import type { GenRunState } from "./use-lesson-analysis-state";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import type { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
@@ -326,14 +325,35 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   // but NOT while a re-transcription is in flight (those exercises are about to be
   // regenerated).
   const isComplete = props.questionsGenerated && !transcribing;
+
+  // Quick Create runs everything under a single RUN_PIPELINE task whose
+  // progress_step is the authoritative current stage. When it's active, the
+  // 5-step stepper is derived DIRECTLY from that stage — not from the artifact
+  // flags below (hasChunks/questionsGenerated), which only hydrate at pipeline
+  // start/end and otherwise lag the real backend stage, making the stepper
+  // desync from the live progress (the bug in Image #3). This makes the stepper
+  // the single, accurate progress source, replacing the separate 3-circle card.
+  const pipelineTask = props.lessonTasks.find(
+    (t) => t.kind === LessonTaskKind.RUN_PIPELINE && isLessonTaskActive(t),
+  );
+  const pipelineStage: "transcribe" | "chunk" | "generate" | null = !pipelineTask
+    ? null
+    : pipelineTask.progressStep.includes("GENERATING")
+      ? "generate"
+      : pipelineTask.progressStep.includes("CHUNKING")
+        ? "chunk"
+        : "transcribe";
+
   const uploadStatus: WorkflowStatus = !props.videoStorageKey ? "active" : "done";
   const transcriptStatus: WorkflowStatus =
+    pipelineStage ? (pipelineStage === "transcribe" ? "running" : "done") :
     !props.videoStorageKey ? "locked" :
     props.extractState.phase === "error" ? "error" :
     transcribing ? "running" :
     props.hasSegments || props.hasTranscriptContent || props.hasChunks || isComplete ? "done" :
     props.activeStep === "transcript" ? "active" : "ready";
   const chunkStatus: WorkflowStatus =
+    pipelineStage ? (pipelineStage === "transcribe" ? "locked" : pipelineStage === "chunk" ? "running" : "done") :
     transcribing ? "locked" :
     !props.hasTranscriptContent && !isComplete ? "locked" :
     props.chunkState.phase === "error" ? "error" :
@@ -341,6 +361,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     props.hasChunks || isComplete ? "done" :
     props.activeStep === "chunks" ? "active" : "ready";
   const exerciseStatus: WorkflowStatus =
+    pipelineStage ? (pipelineStage === "generate" ? "running" : "locked") :
     transcribing ? "locked" :
     !props.hasChunks && !isComplete ? "locked" :
     props.genState.phase === "error" ? "error" :
@@ -348,6 +369,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     props.questionsGenerated ? "done" :
     props.activeStep === "exercises" ? "active" : "ready";
   const previewStatus: WorkflowStatus =
+    pipelineStage ? "locked" :
     !transcribing && (props.questionsGenerated || props.interactions.length > 0) ? "ready" : "locked";
 
   const segmentsCount = props.segments.length;
@@ -428,11 +450,6 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   const activeGenTask = props.lessonTasks.find(
     (t) => t.kind === LessonTaskKind.GENERATE_INTERACTIONS && isLessonTaskActive(t),
   );
-  // Quick Create starts a single durable RUN_PIPELINE task that runs every stage
-  // server-side. Surface its live progress (read-only) so the user just watches.
-  const activePipelineTask = props.lessonTasks.find(
-    (t) => t.kind === LessonTaskKind.RUN_PIPELINE && isLessonTaskActive(t),
-  );
 
   const stepMeta = buildStepMeta({
     activeStep: props.activeStep,
@@ -442,15 +459,40 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     questionsGenerated: props.questionsGenerated,
   });
 
+  // Single explanatory line for the auto-pipeline, sourced from the SAME stage
+  // as the stepper. Replaces the old redundant 3-circle PipelineAutoProgressCard
+  // (which duplicated the stepper's stages) — the stepper below is the progress.
+  const pipelineStageLabel =
+    pipelineStage === "transcribe" ? "Đang phiên âm video…" :
+    pipelineStage === "chunk" ? "Đang phân đoạn nội dung…" :
+    pipelineStage === "generate" ? "Đang tạo bài tập…" : "";
+
   return (
     <div className="flex flex-col gap-3">
-      {activePipelineTask && <PipelineAutoProgressCard task={activePipelineTask} />}
+      {pipelineStage && (
+        <div
+          className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
+          data-testid="pipeline-auto-banner"
+        >
+          <Loader2Icon className="size-4 shrink-0 animate-spin text-primary" />
+          <span className="font-medium text-foreground">Đang xử lý tự động</span>
+          <span className="text-muted-foreground">— {pipelineStageLabel} Bạn không cần thao tác gì.</span>
+        </div>
+      )}
       <VideoProcessingStepper
         steps={workflowSteps}
         currentStep={props.activeStep}
         onSelect={handleStepperSelect}
       />
-      {props.videoStorageKey && (
+      {/* Advanced AI config (difficulty / question kinds / focus prompt) belongs
+          to the GENERATE step only — it configures exercise generation, not
+          transcription or chunking. Showing it on every step (it used to render
+          whenever a video existed) cluttered the Phiên âm / Phân đoạn steps with
+          irrelevant controls. `globalKinds` here is still the sole source of
+          question kinds for the lesson-level generate (see use-lesson-analysis-
+          state); TabExercises only overrides difficulty/focusPrompt via a dialog,
+          so this panel does not duplicate that. */}
+      {props.videoStorageKey && props.activeStep === "exercises" && (
         <AIConfigPanel
           difficulty={props.globalDifficulty}
           onDifficultyChange={props.setGlobalDifficulty}
@@ -475,29 +517,35 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
       <LessonTaskPanel
         tasks={props.lessonTasks}
         activeStep={taskStepToPanelStep(props.activeStep)}
+        hidePipelineTask
         onRefresh={() => void props.onRefreshTasks()}
         onCancel={(taskId) => void props.onCancelTask(taskId)}
       />
-      <WorkflowNextAction
-        videoStorageKey={props.videoStorageKey}
-        hasTranscriptContent={props.hasTranscriptContent}
-        hasChunks={props.hasChunks}
-        questionsGenerated={props.questionsGenerated}
-        chunksCount={chunksCount}
-        extractPhase={props.extractState.phase}
-        chunkPhase={props.chunkState.phase}
-        genState={props.genState}
-        isExtracting={props.isExtracting}
-        isSyncing={props.isSyncing}
-        isChunking={props.isChunking}
-        isChunkSyncing={props.isChunkSyncing}
-        isGenerating={props.isGenerating}
-        activeStep={props.activeStep}
-        onStartExtract={props.onStartExtract}
-        onStartChunk={props.onStartChunk}
-        onOpenExercises={props.onOpenExercises}
-        onGotoStep={props.onGotoStep}
-      />
+      {/* During the auto-pipeline the slim banner + stepper already convey the
+          live stage; the "next action" card would be a 3rd redundant loader, so
+          suppress it until the user is back to the manual step-by-step flow. */}
+      {!pipelineStage && (
+        <WorkflowNextAction
+          videoStorageKey={props.videoStorageKey}
+          hasTranscriptContent={props.hasTranscriptContent}
+          hasChunks={props.hasChunks}
+          questionsGenerated={props.questionsGenerated}
+          chunksCount={chunksCount}
+          extractPhase={props.extractState.phase}
+          chunkPhase={props.chunkState.phase}
+          genState={props.genState}
+          isExtracting={props.isExtracting}
+          isSyncing={props.isSyncing}
+          isChunking={props.isChunking}
+          isChunkSyncing={props.isChunkSyncing}
+          isGenerating={props.isGenerating}
+          activeStep={props.activeStep}
+          onStartExtract={props.onStartExtract}
+          onStartChunk={props.onStartChunk}
+          onOpenExercises={props.onOpenExercises}
+          onGotoStep={props.onGotoStep}
+        />
+      )}
       <WorkflowStepPanel
         stepNumber={stepMeta.stepNumber}
         title={stepMeta.title}
