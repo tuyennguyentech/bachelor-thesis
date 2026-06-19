@@ -11,7 +11,7 @@ import {
   LessonTaskStatus,
 } from "buf/gen/richter/v1/ai_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
-import { FeedbackMode, InteractionKind } from "buf/gen/richter/v1/interactions_pb";
+import { FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { toast } from "sonner";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import { analysisConfig } from "@/lib/client-config";
@@ -137,14 +137,6 @@ export interface UseLessonAnalysisState {
   connectionError: string | null;
   refreshTasks: () => Promise<void>;
   cancelTask: (taskId: string) => Promise<LessonTask | undefined>;
-
-  // Global AI Config state
-  globalDifficulty: string;
-  setGlobalDifficulty: React.Dispatch<React.SetStateAction<string>>;
-  globalFocusPrompt: string;
-  setGlobalFocusPrompt: React.Dispatch<React.SetStateAction<string>>;
-  globalKinds: InteractionKind[];
-  setGlobalKinds: React.Dispatch<React.SetStateAction<InteractionKind[]>>;
 }
 
 export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseLessonAnalysisState {
@@ -241,17 +233,6 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     orderIndex,
     title,
   });
-
-  // ── Global AI Config state ────────────────────────────────────────────────
-  const [globalDifficulty, setGlobalDifficulty] = useState<string>("medium");
-  const [globalFocusPrompt, setGlobalFocusPrompt] = useState<string>("");
-  const [globalKinds, setGlobalKinds] = useState<InteractionKind[]>([
-    InteractionKind.SINGLE_CHOICE,
-    InteractionKind.MULTIPLE_CHOICE,
-    InteractionKind.FILL_BLANK,
-    InteractionKind.READING,
-    InteractionKind.LISTENING,
-  ]);
 
   // ── Misc UI state ─────────────────────────────────────────────────────────
   const [confirmReExtract, setConfirmReExtract] = useState(false);
@@ -434,13 +415,18 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
       setGenState({ phase: "running", message: "Đang bắt đầu...", chunkIndex: 0, totalChunks: 0 });
       setGenWarnings([]);
       const shouldForce = force ?? interactionsState.length > 0;
+      // Kinds/strategy/count come from the lesson's saved defaultInteractionConfig
+      // (set by the "Tạo bài tập" dialog's KindQuantityGrid) — we deliberately do
+      // NOT send interactionKinds here. Sending a global kinds list used to OVERRIDE
+      // the dialog's config in the backend (resolveGenerationPlan), so picking e.g.
+      // listening still produced a single MCQ. difficulty/focusPrompt come straight
+      // from the generate dialog.
       void startTask(LessonTaskKind.GENERATE_INTERACTIONS, {
         lessonId,
         chunkId: chunkId ?? "",
         forceRegenerate: shouldForce,
-        difficulty: difficulty || globalDifficulty,
-        focusPrompt: focusPrompt || globalFocusPrompt,
-        interactionKinds: globalKinds,
+        difficulty: difficulty || "",
+        focusPrompt: focusPrompt || "",
       })
         .then((task) => {
           if (task) {
@@ -454,7 +440,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
           toast.error(msg);
         });
     },
-    [interactionsState.length, lessonId, startTask, globalDifficulty, globalFocusPrompt, globalKinds],
+    [interactionsState.length, lessonId, startTask],
   );
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -517,8 +503,5 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     handleMoveSegment: chunkMutations.handleMoveSegment,
     lessonTasks, activeTasks, refreshTasks, cancelTask,
     connectionError: taskPollError ? toUserMessage(taskPollError) : null,
-    globalDifficulty, setGlobalDifficulty,
-    globalFocusPrompt, setGlobalFocusPrompt,
-    globalKinds, setGlobalKinds,
   };
 }

@@ -163,12 +163,6 @@ export function AnalyzeButton({
         onMoveSegment={(a, b, c, d) => void s.handleMoveSegment(a, b, c, d)}
         onSegmentUpdated={(i, t) => s.setSegments((prev) => prev.map((seg, j) => j === i ? { ...seg, text: t } : seg))}
         onSegmentSaved={() => {}}
-        globalDifficulty={s.globalDifficulty}
-        setGlobalDifficulty={s.setGlobalDifficulty}
-        globalFocusPrompt={s.globalFocusPrompt}
-        setGlobalFocusPrompt={s.setGlobalFocusPrompt}
-        globalKinds={s.globalKinds}
-        setGlobalKinds={s.setGlobalKinds}
         exerciseOpenRequest={s.exerciseOpenRequest}
         genWarnings={s.genWarnings}
         aiClient={aiClient}

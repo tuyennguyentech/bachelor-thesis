@@ -101,24 +101,20 @@ test.describe("Lesson tab — Xử lý video (processing)", () => {
     await expect(page.getByTestId("workflow-step-transcript")).toBeVisible();
   });
 
-  // BUG-C: the "Cấu hình AI nâng cao" panel configures exercise generation, so it
-  // must appear ONLY on the Bài tập (exercises) step — not on Phiên âm/Phân đoạn,
-  // where it used to render whenever a video existed.
-  test("AI config panel shows only on the exercises step, not transcribe/chunks", async ({ teacherPage: page }) => {
+  // The standalone "Cấu hình AI nâng cao" panel on the processing page was
+  // removed (it had no effect — generation reads the dialog's saved config, not
+  // this panel). It must NOT appear on any step.
+  test("the removed AI config panel does not appear on the processing steps", async ({ teacherPage: page }) => {
     const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
     await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("video-workflow-stepper")).toBeVisible();
 
     const aiConfig = page.getByText("Cấu hình AI nâng cao", { exact: false });
 
-    await page.getByTestId("workflow-step-transcript").click();
-    await expect(aiConfig).toHaveCount(0);
-
-    await page.getByTestId("workflow-step-chunks").click();
-    await expect(aiConfig).toHaveCount(0);
-
-    await page.getByTestId("workflow-step-exercises").click();
-    await expect(aiConfig).toBeVisible({ timeout: 10_000 });
+    for (const step of ["transcript", "chunks", "exercises"] as const) {
+      await page.getByTestId(`workflow-step-${step}`).click();
+      await expect(aiConfig).toHaveCount(0);
+    }
   });
 
   test("switching from content to processing and back does not crash", async ({ teacherPage: page }) => {

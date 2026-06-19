@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, ChevronDownIcon, ChevronUpIcon, SlidersHorizontalIcon, AlertCircleIcon, Loader2Icon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, AlertCircleIcon, Loader2Icon } from "lucide-react";
 import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import {
   VideoProcessingStepper,
@@ -172,139 +172,10 @@ export interface AnalysisWorkflowShellProps {
   onSegmentUpdated: (index: number, text: string) => void;
   onSegmentSaved: () => void;
 
-  globalDifficulty: string;
-  setGlobalDifficulty: React.Dispatch<React.SetStateAction<string>>;
-  globalFocusPrompt: string;
-  setGlobalFocusPrompt: React.Dispatch<React.SetStateAction<string>>;
-  globalKinds: import("buf/gen/richter/v1/interactions_pb").InteractionKind[];
-  setGlobalKinds: React.Dispatch<React.SetStateAction<import("buf/gen/richter/v1/interactions_pb").InteractionKind[]>>;
-
   exerciseOpenRequest: number;
   genWarnings: string[];
 
   aiClient: AIClient;
-}
-
-function AIConfigPanel({
-  difficulty,
-  onDifficultyChange,
-  focusPrompt,
-  onFocusPromptChange,
-  selectedKinds,
-  onSelectedKindsChange,
-}: {
-  difficulty: string;
-  onDifficultyChange: (val: string) => void;
-  focusPrompt: string;
-  onFocusPromptChange: (val: string) => void;
-  selectedKinds: InteractionKind[];
-  onSelectedKindsChange: (val: InteractionKind[]) => void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const difficultyOptions = [
-    { value: "easy", label: "Dễ", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" },
-    { value: "medium", label: "Vừa", cls: "bg-blue-500/10 text-blue-600 dark:text-blue-300" },
-    { value: "hard", label: "Khó", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-300" },
-  ];
-
-  const kindOptions = [
-    { kind: InteractionKind.SINGLE_CHOICE, label: "Trắc nghiệm MCQ" },
-    { kind: InteractionKind.MULTIPLE_CHOICE, label: "Trắc nghiệm Multi" },
-    { kind: InteractionKind.FILL_BLANK, label: "Điền vào chỗ trống" },
-    { kind: InteractionKind.LISTENING, label: "Luyện nghe & Chính tả" },
-    { kind: InteractionKind.READING, label: "Luyện đọc hiểu" },
-  ];
-
-  const handleKindToggle = (kind: InteractionKind) => {
-    if (selectedKinds.includes(kind)) {
-      if (selectedKinds.length > 1) {
-        onSelectedKindsChange(selectedKinds.filter((k) => k !== kind));
-      }
-    } else {
-      onSelectedKindsChange([...selectedKinds, kind]);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-border/60 bg-card/30 backdrop-blur-md overflow-hidden shadow-sm transition-all duration-300">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors text-left"
-      >
-        <div className="flex items-center gap-2">
-          <SlidersHorizontalIcon className="size-4 text-primary animate-pulse" />
-          <span className="text-sm font-semibold text-foreground">Cấu hình AI nâng cao (Tùy chọn)</span>
-        </div>
-        {isOpen ? <ChevronUpIcon className="size-4 text-muted-foreground" /> : <ChevronDownIcon className="size-4 text-muted-foreground" />}
-      </button>
-
-      {isOpen && (
-        <div className="border-t border-border/50 p-4 flex flex-col gap-4 bg-background/5 animate-in slide-in-from-top-1 duration-200">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Mức độ khó</label>
-            <div className="flex gap-2">
-              {difficultyOptions.map((opt) => {
-                const active = difficulty === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => onDifficultyChange(opt.value)}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-                      active
-                        ? `${opt.cls} border-primary/50 shadow-sm ring-1 ring-primary/20`
-                        : "border-border bg-transparent text-muted-foreground hover:bg-muted/40"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Loại câu hỏi / bài tập</label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
-              {kindOptions.map((opt) => {
-                const active = selectedKinds.includes(opt.kind);
-                return (
-                  <button
-                    key={opt.kind}
-                    type="button"
-                    onClick={() => handleKindToggle(opt.kind)}
-                    className={`flex items-center justify-center text-center p-2.5 rounded-lg border text-xs font-medium transition-all ${
-                      active
-                        ? "border-primary/50 bg-primary/10 text-primary shadow-sm"
-                        : "border-border bg-transparent text-muted-foreground hover:bg-muted/40"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="workflow-focus-prompt" className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              Trọng tâm nội dung (Focus Prompt)
-            </label>
-            <textarea
-              id="workflow-focus-prompt"
-              rows={3}
-              value={focusPrompt}
-              onChange={(e) => onFocusPromptChange(e.target.value)}
-              placeholder="Nhập yêu cầu định hướng cho AI (ví dụ: tập trung từ vựng IELTS chủ đề môi trường, câu hỏi phân tích...)"
-              className="w-full text-xs rounded-lg border border-input bg-background/50 px-3 py-2 placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-none"
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
@@ -501,24 +372,6 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
         currentStep={displayStep}
         onSelect={handleStepperSelect}
       />
-      {/* Advanced AI config (difficulty / question kinds / focus prompt) belongs
-          to the GENERATE step only — it configures exercise generation, not
-          transcription or chunking. Showing it on every step (it used to render
-          whenever a video existed) cluttered the Phiên âm / Phân đoạn steps with
-          irrelevant controls. `globalKinds` here is still the sole source of
-          question kinds for the lesson-level generate (see use-lesson-analysis-
-          state); TabExercises only overrides difficulty/focusPrompt via a dialog,
-          so this panel does not duplicate that. */}
-      {props.videoStorageKey && !pipelineStage && displayStep === "exercises" && (
-        <AIConfigPanel
-          difficulty={props.globalDifficulty}
-          onDifficultyChange={props.setGlobalDifficulty}
-          focusPrompt={props.globalFocusPrompt}
-          onFocusPromptChange={props.setGlobalFocusPrompt}
-          selectedKinds={props.globalKinds}
-          onSelectedKindsChange={props.setGlobalKinds}
-        />
-      )}
       {props.connectionError && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           <AlertCircleIcon className="size-4 shrink-0" />

@@ -93,6 +93,36 @@ func TestResolveGenerationPlan_EvenDistribution(t *testing.T) {
 	}
 }
 
+// TestResolveGenerationPlan_DialogConfigSurvivesEmptyRequest is the regression
+// for "chọn bài nghe nhưng gen ra 1 MCQ": the "Tạo bài tập" dialog saves the
+// chosen kinds to the lesson's DefaultInteractionConfig, then the generate
+// request must NOT carry a kinds list. Previously the FE sent a global kinds
+// list that OVERRODE the saved config here, so EVEN distribution of count=1 fell
+// to the first global kind (SINGLE_CHOICE/MCQ) instead of the chosen listening.
+func TestResolveGenerationPlan_DialogConfigSurvivesEmptyRequest(t *testing.T) {
+	t.Parallel()
+	lesson := emptyLesson()
+	lesson.DefaultInteractionConfig = configJSON(1, []string{"listening"}, "even")
+
+	plan := resolveGenerationPlan(
+		emptyChunk(), lesson,
+		nil, 0, // fixed FE behaviour: no request-level kinds override
+		richterv1.GenerationStrategy_GENERATION_STRATEGY_UNSPECIFIED,
+	)
+	if plan.useAIChoose {
+		t.Fatal("expected EVEN_DISTRIBUTION from the saved dialog config, got AI_CHOOSE")
+	}
+	if len(plan.evenCounts) != 1 {
+		t.Fatalf("expected exactly 1 kind (listening), got %d: %v", len(plan.evenCounts), plan.evenCounts)
+	}
+	if plan.evenCounts[0].kind != richterv1.InteractionKind_INTERACTION_KIND_LISTENING {
+		t.Errorf("expected LISTENING, got %v", plan.evenCounts[0].kind)
+	}
+	if plan.evenCounts[0].count != 1 {
+		t.Errorf("expected count 1 listening item, got %d", plan.evenCounts[0].count)
+	}
+}
+
 func TestResolveGenerationPlan_ChunkConfigOverridesLesson(t *testing.T) {
 	t.Parallel()
 	// Lesson default: EVEN, 2 MCQ.
