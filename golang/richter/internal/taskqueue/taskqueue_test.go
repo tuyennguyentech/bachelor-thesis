@@ -182,24 +182,11 @@ func TestPostgresDB_TaskLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	if task.Status != string(StatusPending) {
-		t.Errorf("expected task status to be pending, got %s", task.Status)
+	if task.Status != string(StatusInqueued) {
+		t.Errorf("expected task status to be inqueued, got %s", task.Status)
 	}
 
-	// 2. Enqueue this specific task. EnqueuePendingBatch transitions the
-	// globally-oldest N pending rows, which is racy under concurrent producers
-	// (our task may fall outside the batch); EnqueueTask scopes to our own id.
-	enqueued, err := db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-		return q.EnqueueTask(ctx, taskID)
-	})
-	if err != nil {
-		t.Fatalf("EnqueueTask: %v", err)
-	}
-	if string(enqueued.Status) != string(StatusInqueued) {
-		t.Errorf("expected status to be inqueued, got %s", enqueued.Status)
-	}
-
-	// 3. ClaimNextInqueuedTask
+	// 2. ClaimNextInqueuedTask — CreateTask already births the row inqueued.
 	workerIDRaw, _ := uuid.NewV7()
 	workerID := pgtype.UUID{Bytes: [16]byte(workerIDRaw), Valid: true}
 	claimed, err := tq.ClaimNextInqueuedTask(ctx, workerID, []string{"test_task"})
@@ -794,19 +781,9 @@ func TestPostgresDB_OptimisticConcurrency(t *testing.T) {
 	taskIDRaw, _ := uuid.NewV7()
 	taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
 
-	// 1. Tạo task (pending)
+	// 1. Tạo task (born inqueued)
 	_, err := tq.CreateTask(ctx, taskID, lessonID, pgtype.UUID{}, userID, "test_task", nil)
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Enqueue ONLY this test's task via the scoped EnqueueTask query.
-	// EnqueuePendingBatch promotes the globally-oldest pending rows, which under
-	// parallel test load may be another producer's task — leaving ours pending
-	// (so the type-scoped claim below finds nothing) and altering theirs.
-	if _, err = db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-		return q.EnqueueTask(ctx, taskID)
-	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -911,13 +888,6 @@ func TestTaskqueue_WorkerStaleWakeUpSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Enqueue this specific task (scoped — avoids racing concurrent producers' pending tasks).
-	if _, err = db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-		return q.EnqueueTask(ctx, taskID)
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	select {
 	case <-exec.started:
 	case <-time.After(taskActiveTimeout()):
@@ -1040,13 +1010,6 @@ func TestTaskqueue_WorkerStaleWakeUpFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Enqueue this specific task (scoped — avoids racing concurrent producers' pending tasks).
-	if _, err = db.WithConnection(pool, ctx1, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-		return q.EnqueueTask(ctx1, taskID)
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	select {
 	case <-exec1.started:
 	case <-time.After(taskActiveTimeout()):
@@ -1237,17 +1200,7 @@ func TestTaskqueue_TasksRunInParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2. Enqueue both (scoped to these two ids — EnqueuePendingBatch's global
-	// oldest-N batch could promote concurrent producers' tasks instead).
-	for _, id := range []pgtype.UUID{task1ID, task2ID} {
-		if _, err = db.WithConnection(pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-			return q.EnqueueTask(ctx, id)
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// 3. Start worker
+	// 2. Start worker (both tasks are already inqueued from CreateTask)
 	logger := slog.Default()
 	worker := NewWorkerRaw(tq, logger, make(chan string, 1)).WithAllowedTypes([]string{"parallel_test_task"})
 	worker.heartbeat = 1 * time.Hour
@@ -1286,7 +1239,3 @@ func TestTaskqueue_TasksRunInParallel(t *testing.T) {
 		t.Errorf("expected task 2 to be succeeded, got %s", t2.Status)
 	}
 }
-
-
-
-

@@ -127,6 +127,7 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 		{"dev.lesson_video_keys", func(ctx context.Context) error { return s.seedDevLessonVideoKeys(ctx, data.Courses) }},
 		{"dev.attempts", func(ctx context.Context) error { return s.seedDevAttempts(ctx, data.Attempts) }},
 		{"dev.videos", func(ctx context.Context) error { return s.seedDevVideos(ctx, data.Videos) }},
+		{"dev.assert_consistency", func(ctx context.Context) error { return s.assertSeedConsistency(ctx) }},
 	}
 	for _, st := range steps {
 		s.log.InfoContext(ctx, "seed: running seeder", "name", st.name)

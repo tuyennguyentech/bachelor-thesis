@@ -29,8 +29,10 @@ type Listener struct {
 	interval time.Duration // reconnect backoff cap
 }
 
-// NewListener returns a listener that writes received task IDs to
-// notifCh. Callers select on notifCh alongside their own ticker.
+// NewListener returns a listener that writes a wake signal to notifCh on each
+// 'task_created' NOTIFY. notifCh is the Worker's wake channel: tasks are inserted
+// already 'inqueued' (StartLessonTask enqueues in the same tx), and the NOTIFY is
+// delivered at COMMIT, so by the time the worker wakes the row is claimable.
 func NewListener(dsn string, notifCh chan<- string, log *slog.Logger) *Listener {
 	return &Listener{
 		dsn:      dsn,
@@ -107,9 +109,8 @@ func (l *Listener) runOnce(ctx context.Context) error {
 			if n == nil {
 				continue
 			}
-			// Best-effort: forward the task id. If the scanner's
-			// queue is full, drop and rely on the periodic
-			// cycle to catch up.
+			// Wake the worker. Best-effort: if its channel is full, drop and rely
+			// on the worker's poll / the scanner's periodic cycle to catch up.
 			select {
 			case l.notifCh <- n.Payload:
 			default:

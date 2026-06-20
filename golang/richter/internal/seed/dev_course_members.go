@@ -2,10 +2,12 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"example.com/richter/internal/db"
 	"example.com/sql/gen"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -47,6 +49,27 @@ func (s *SeederSvc) seedDevCourseMembers(ctx context.Context, members []devCours
 		})
 		if err != nil {
 			return fmt.Errorf("lookup user %s: %w", m.UserEmail, err)
+		}
+
+		// Invariant guard: a course member MUST be an active org member. The
+		// production AddCourseMember RPC enforces this; the raw SQL below bypasses
+		// it, so guard here — skip (don't insert) any non-active member so the seed
+		// never creates a state production would reject.
+		om, omErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+			return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{OrganizationID: org.ID, UserID: user.ID})
+		})
+		if omErr != nil {
+			if errors.Is(omErr, pgx.ErrNoRows) {
+				s.log.WarnContext(ctx, "seed: course member skipped — not an org member",
+					"course", m.CourseTitle, "user", m.UserEmail, "org", m.OrgSlug)
+				continue
+			}
+			return fmt.Errorf("check org membership for %s in %s: %w", m.UserEmail, m.OrgSlug, omErr)
+		}
+		if om.Status != gen.MemberStatusActive {
+			s.log.WarnContext(ctx, "seed: course member skipped — org membership not active",
+				"course", m.CourseTitle, "user", m.UserEmail, "org", m.OrgSlug, "status", om.Status)
+			continue
 		}
 
 		_, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseMember, error) {

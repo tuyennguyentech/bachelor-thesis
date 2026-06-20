@@ -292,7 +292,9 @@ func insertTestTask(t *testing.T, lessonID, kind, status string) gen.Task {
 	taskID := uuid.New()
 	taskIDpg := pgtype.UUID{Bytes: taskID, Valid: true}
 	row, err := db.WithConnection(pool, context.Background(), func(q *gen.Queries, _ *pgxpool.Conn) (gen.Task, error) {
-		return q.InsertTask(context.Background(), gen.InsertTaskParams{
+		// InsertSeededTask takes an explicit status (InsertTask now always births
+		// 'inqueued'); test setup needs to plant tasks in arbitrary states.
+		return q.InsertSeededTask(context.Background(), gen.InsertSeededTaskParams{
 			ID:           taskIDpg,
 			LessonID:     lid,
 			ChunkID:      pgtype.UUID{},
@@ -2104,7 +2106,7 @@ func TestGetLessonAnalysis_FDBVisibility(t *testing.T) {
 	e := setupAIEnv(t)
 	ctx := context.Background()
 	clearTestTasks(t, e.lessonID)
-	insertTestTask(t, e.lessonID, "transcribe", "pending")
+	insertTestTask(t, e.lessonID, "transcribe", "inqueued")
 
 	kvSvc, err := do.Invoke[*kv.KVSvc](internal.Injector)
 	if err != nil {
@@ -2722,8 +2724,11 @@ func TestStartPipelineRunTask_Dedup(t *testing.T) {
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
-	// Insert a fake pipeline_run task in pending state so the dedup check fires.
-	insertTestTask(t, e.lessonID, "pipeline_run", "pending")
+	// Insert a fake pipeline_run task already 'processing' (in-flight) so the dedup
+	// check fires. It must NOT be 'inqueued' — the test server runs a worker that
+	// would claim a queued task at once and fail it ("no video"). A processing task
+	// with a NULL heartbeat is left alone by both the worker and the stale-reaper.
+	insertTestTask(t, e.lessonID, "pipeline_run", "processing")
 
 	req := &richterv1.StartLessonTaskRequest{
 		LessonId: e.lessonID,
@@ -2752,15 +2757,18 @@ func TestStartPipelineRunTask_Dedup(t *testing.T) {
 	}
 }
 
-// TestStartPipelineRunTask_Cancel verifies that a pending pipeline_run task
+// TestStartPipelineRunTask_Cancel verifies that an in-flight pipeline_run task
 // can be cancelled and transitions to CANCELED status.
 func TestStartPipelineRunTask_Cancel(t *testing.T) {
 	t.Parallel()
 	e := setupAIEnv(t)
 	ctx := context.Background()
 
-	// Insert a pipeline_run task in pending state so we have something to cancel.
-	row := insertTestTask(t, e.lessonID, "pipeline_run", "pending")
+	// Insert a pipeline_run task already 'processing' (in-flight) so we have an
+	// active task to cancel. Not 'inqueued': the test server's worker would claim
+	// and fail it ("no video") before the cancel lands. A processing task with a
+	// NULL heartbeat is untouched by the worker and the stale-reaper.
+	row := insertTestTask(t, e.lessonID, "pipeline_run", "processing")
 	taskID := row.ID.String()
 
 	res, err := e.aiTeacher.CancelLessonTask(ctx, &richterv1.CancelLessonTaskRequest{TaskId: taskID})

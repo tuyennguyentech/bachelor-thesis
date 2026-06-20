@@ -171,7 +171,7 @@ func (s *AISvc) seedAnalyzedLesson(
 	for _, taskType := range []string{"transcribe", "chunk"} {
 		taskID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-			_, err := q.InsertTask(ctx, gen.InsertTaskParams{
+			_, err := q.InsertSeededTask(ctx, gen.InsertSeededTaskParams{
 				ID:           taskID,
 				LessonID:     lessonID,
 				ChunkID:      pgtype.UUID{},

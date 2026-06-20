@@ -529,6 +529,9 @@ message MyCourseProgress {
   int32 lessons_total = 4;
   // Average score fraction across all submitted attempts (0..1).
   double avg_score = 5;
+  // Slug of the course's owning organization, so the client can deep-link to
+  // the course at /dashboard/organizations/{org_slug}/courses/{course_id}.
+  string org_slug = 6;
 }
 
 message ListMyCourseProgressRequest {

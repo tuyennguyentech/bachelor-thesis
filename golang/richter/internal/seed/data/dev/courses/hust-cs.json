@@ -17,11 +17,31 @@
             "analysis": {
               "transcript": "Trong bài học hôm nay, chúng ta sẽ tìm hiểu về ba ký hiệu quan trọng để đánh giá độ phức tạp thuật toán: Big-O, Omega và Theta.\n\nBig-O notation (ký hiệu O) dùng để mô tả giới hạn trên của thời gian chạy thuật toán. Nó cho chúng ta biết trong trường hợp xấu nhất, thuật toán sẽ chạy như thế nào. Ví dụ, thuật toán tìm kiếm tuyến tính có độ phức tạp O(n) vì trong trường hợp xấu nhất ta phải duyệt qua n phần tử.\n\nOmega notation (ký hiệu Ω) là giới hạn dưới — mô tả trường hợp tốt nhất của thuật toán. Ví dụ, tìm kiếm tuyến tính có Ω(1) vì phần tử cần tìm có thể nằm ngay ở đầu mảng.\n\nTheta notation (ký hiệu Θ) biểu diễn cả giới hạn trên lẫn giới hạn dưới, tức là độ phức tạp chính xác. Khi Big-O và Omega bằng nhau, ta dùng Theta. Ví dụ, vòng lặp đơn giản duyệt qua n phần tử luôn có Θ(n).\n\nKhi phân tích, ta bỏ qua hằng số và các số hạng bậc thấp. Ví dụ, 3n² + 5n + 10 được viết là O(n²). Các độ phức tạp phổ biến từ tốt đến xấu: O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ) < O(n!).",
               "chunks": [
-                {"start_seconds": 0, "end_seconds": 416, "summary": "Giới thiệu về Big-O, Omega, Theta"},
-                {"start_seconds": 416, "end_seconds": 624, "summary": "Cách viết gọn biểu thức Big-O"},
-                {"start_seconds": 624, "end_seconds": 831, "summary": "Ký hiệu Theta (cận chặt)"},
-                {"start_seconds": 831, "end_seconds": 1039, "summary": "So sánh độ phức tạp các thuật toán"},
-                {"start_seconds": 1039, "end_seconds": 1247, "summary": "Ví dụ: Binary Search O(log n)"}
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 416,
+                  "summary": "Giới thiệu về Big-O, Omega, Theta"
+                },
+                {
+                  "start_seconds": 416,
+                  "end_seconds": 624,
+                  "summary": "Cách viết gọn biểu thức Big-O"
+                },
+                {
+                  "start_seconds": 624,
+                  "end_seconds": 831,
+                  "summary": "Ký hiệu Theta (cận chặt)"
+                },
+                {
+                  "start_seconds": 831,
+                  "end_seconds": 1039,
+                  "summary": "So sánh độ phức tạp các thuật toán"
+                },
+                {
+                  "start_seconds": 1039,
+                  "end_seconds": 1247,
+                  "summary": "Ví dụ: Binary Search O(log n)"
+                }
               ],
               "questions": [
                 {
@@ -90,7 +110,26 @@
           {
             "title": "Bài 2: Phân tích đệ quy với Master Theorem",
             "description": "Áp dụng Master Theorem để giải quyết quan hệ truy hồi.",
+            "video_key": "seed/hust-cs/dsa/ch2-master-theorem.mp4",
+            "duration_secs": 600,
             "analysis": {
+              "chunks": [
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 200,
+                  "summary": "Dạng tổng quát T(n)=aT(n/b)+f(n) và ba tham số a, b, f(n)"
+                },
+                {
+                  "start_seconds": 200,
+                  "end_seconds": 400,
+                  "summary": "Trường hợp 1 và Trường hợp 2 của Master Theorem"
+                },
+                {
+                  "start_seconds": 400,
+                  "end_seconds": 600,
+                  "summary": "Trường hợp 3 và ví dụ Merge Sort"
+                }
+              ],
               "transcript": "Master Theorem là công cụ mạnh mẽ để phân tích độ phức tạp của các thuật toán đệ quy dạng chia để trị.\n\nDạng tổng quát của quan hệ truy hồi là: T(n) = aT(n/b) + f(n), trong đó a là số bài toán con, b là hệ số chia nhỏ kích thước, và f(n) là chi phí chia/hợp nhất.\n\nMaster Theorem có 3 trường hợp:\n\nTrường hợp 1: Nếu f(n) = O(n^(log_b(a) - ε)) với ε > 0, thì T(n) = Θ(n^log_b(a)). Tức là chi phí ở các tầng dưới chiếm ưu thế.\n\nTrường hợp 2: Nếu f(n) = Θ(n^log_b(a)), thì T(n) = Θ(n^log_b(a) * log n). Hai phần cân bằng nhau.\n\nTrường hợp 3: Nếu f(n) = Ω(n^(log_b(a) + ε)) và af(n/b) ≤ cf(n) với c < 1, thì T(n) = Θ(f(n)). Chi phí ở gốc chiếm ưu thế.\n\nVí dụ: Merge Sort có T(n) = 2T(n/2) + O(n). Ở đây a=2, b=2, f(n)=n. Ta có log_2(2)=1, f(n)=n=n^1, nên thuộc trường hợp 2: T(n) = Θ(n log n).",
               "questions": [
                 {
@@ -171,6 +210,33 @@
             "video_key": "seed/hust-cs/dsa/ch2-array-linked-list.mp4",
             "duration_secs": 1530,
             "analysis": {
+              "chunks": [
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 306,
+                  "summary": "Mảng: lưu trữ liên tiếp, truy cập ngẫu nhiên O(1)"
+                },
+                {
+                  "start_seconds": 306,
+                  "end_seconds": 612,
+                  "summary": "Mảng động (Dynamic Array) và amortized O(1)"
+                },
+                {
+                  "start_seconds": 612,
+                  "end_seconds": 918,
+                  "summary": "Linked List: node rải rác, chèn/xóa đầu O(1)"
+                },
+                {
+                  "start_seconds": 918,
+                  "end_seconds": 1224,
+                  "summary": "Doubly Linked List và duyệt hai chiều"
+                },
+                {
+                  "start_seconds": 1224,
+                  "end_seconds": 1530,
+                  "summary": "Khi nào dùng mảng vs linked list"
+                }
+              ],
               "transcript": "Trong bài này, chúng ta sẽ so sánh hai cấu trúc dữ liệu cơ bản nhất: Mảng (Array) và Danh sách liên kết (Linked List).\n\nMảng lưu trữ các phần tử liên tiếp trong bộ nhớ. Ưu điểm: truy cập ngẫu nhiên O(1) bằng chỉ số, cache-friendly. Nhược điểm: kích thước cố định (với mảng tĩnh), chèn/xóa ở giữa tốn O(n).\n\nMảng động (Dynamic Array) như ArrayList trong Java hay vector trong C++ tự động tăng kích thước khi đầy. Chi phí amortized cho append là O(1).\n\nLinked List lưu các node rải rác trong bộ nhớ, mỗi node chứa dữ liệu và con trỏ đến node tiếp theo. Ưu điểm: chèn/xóa ở đầu O(1), không cần biết trước kích thước. Nhược điểm: truy cập ngẫu nhiên O(n), tốn thêm bộ nhớ cho con trỏ, không cache-friendly.\n\nDoubly Linked List có thêm con trỏ đến node trước, cho phép duyệt hai chiều và xóa O(1) khi biết node.\n\nKhi nào dùng mảng: cần truy cập ngẫu nhiên, dữ liệu ít thay đổi. Khi nào dùng linked list: thường xuyên chèn/xóa ở đầu/giữa.",
               "questions": [
                 {
@@ -238,7 +304,79 @@
           },
           {
             "title": "Bài 2: Stack và ứng dụng",
-            "description": "Stack với mảng và DSLK, bài toán cân bằng ngoặc, tính biểu thức hậu tố."
+            "description": "Stack với mảng và DSLK, bài toán cân bằng ngoặc, tính biểu thức hậu tố.",
+            "video_key": "seed/hust-cs/dsa/ch2-stack.mp4",
+            "duration_secs": 980,
+            "analysis": {
+              "transcript": "Stack là cấu trúc dữ liệu tuân theo nguyên tắc LIFO, nghĩa là phần tử vào sau cùng sẽ được lấy ra đầu tiên. Hãy hình dung một chồng đĩa: ta chỉ thêm hoặc lấy đĩa ở trên cùng.\n\nStack cung cấp ba thao tác cơ bản. Push thêm một phần tử lên đỉnh, pop lấy và loại bỏ phần tử ở đỉnh, còn peek chỉ xem phần tử ở đỉnh mà không loại bỏ. Cả ba thao tác đều có độ phức tạp hằng số, tức là rất nhanh. Ta có thể cài đặt stack bằng mảng động hoặc bằng danh sách liên kết.\n\nStack có nhiều ứng dụng quan trọng. Trình biên dịch dùng stack để kiểm tra cân bằng dấu ngoặc. Máy tính dùng call stack để quản lý các lời gọi hàm và quay lui khi hàm kết thúc. Chức năng undo trong trình soạn thảo cũng dựa trên stack: mỗi thao tác được đẩy vào stack, khi hoàn tác ta pop thao tác gần nhất ra.",
+              "chunks": [
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 320,
+                  "summary": "Khái niệm Stack và nguyên tắc LIFO"
+                },
+                {
+                  "start_seconds": 320,
+                  "end_seconds": 650,
+                  "summary": "Thao tác push, pop, peek và cách cài đặt"
+                },
+                {
+                  "start_seconds": 650,
+                  "end_seconds": 980,
+                  "summary": "Ứng dụng: cân bằng ngoặc, call stack, undo"
+                }
+              ],
+              "questions": [
+                {
+                  "question_text": "Stack tuân theo nguyên tắc nào?",
+                  "options": [
+                    "FIFO — vào trước ra trước",
+                    "LIFO — vào sau ra trước",
+                    "Truy cập ngẫu nhiên theo chỉ số",
+                    "Sắp xếp theo độ ưu tiên"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Stack là LIFO: phần tử thêm vào sau cùng được lấy ra đầu tiên.",
+                  "start_seconds": 120
+                },
+                {
+                  "question_text": "Thao tác peek trên stack làm gì?",
+                  "options": [
+                    "Thêm phần tử lên đỉnh",
+                    "Xóa phần tử ở đáy",
+                    "Xem phần tử ở đỉnh nhưng không loại bỏ",
+                    "Đảo ngược toàn bộ stack"
+                  ],
+                  "correct_answer": 2,
+                  "explanation": "Peek trả về phần tử ở đỉnh mà không thay đổi stack.",
+                  "start_seconds": 420
+                },
+                {
+                  "question_text": "Độ phức tạp của push và pop trên stack là gì?",
+                  "options": [
+                    "O(1) hằng số",
+                    "O(log n)",
+                    "O(n)",
+                    "O(n log n)"
+                  ],
+                  "correct_answer": 0,
+                  "explanation": "Push và pop chỉ tác động ở đỉnh nên có độ phức tạp hằng số O(1).",
+                  "start_seconds": 520
+                },
+                {
+                  "question_text": "Ứng dụng nào sau đây dựa trên stack?",
+                  "options": [
+                    "Lập lịch tiến trình theo vòng tròn",
+                    "Kiểm tra cân bằng dấu ngoặc trong biểu thức",
+                    "Tìm đường đi ngắn nhất bằng Dijkstra",
+                    "Sắp xếp danh sách theo độ ưu tiên"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Kiểm tra cân bằng ngoặc dùng stack để đẩy ngoặc mở và đối chiếu khi gặp ngoặc đóng.",
+                  "start_seconds": 780
+                }
+              ]
+            }
           },
           {
             "title": "Bài 3: Queue và Deque",
@@ -255,7 +393,96 @@
         "lessons": [
           {
             "title": "Bài 1: Binary Tree và BST",
-            "description": "Duyệt cây (inorder/preorder/postorder), tìm kiếm, chèn, xóa trên BST."
+            "description": "Duyệt cây (inorder/preorder/postorder), tìm kiếm, chèn, xóa trên BST.",
+            "video_key": "seed/hust-cs/dsa/ch3-binary-tree-bst.mp4",
+            "duration_secs": 1120,
+            "analysis": {
+              "transcript": "Cây nhị phân là cấu trúc trong đó mỗi nút có tối đa hai con, gọi là con trái và con phải. Cây tìm kiếm nhị phân, viết tắt là BST, là một cây nhị phân có thêm ràng buộc về thứ tự.\n\nTính chất BST quy định: với mỗi nút, mọi giá trị trong cây con trái đều nhỏ hơn giá trị của nút, và mọi giá trị trong cây con phải đều lớn hơn. Nhờ tính chất này, khi duyệt cây theo thứ tự giữa, tức inorder, ta nhận được dãy giá trị đã được sắp xếp tăng dần.\n\nThao tác tìm kiếm và chèn trên BST đi từ gốc xuống, mỗi bước loại bỏ một nửa cây, nên có độ phức tạp tỉ lệ với chiều cao của cây. Nếu cây cân bằng, chiều cao xấp xỉ log n và thao tác rất nhanh. Nhưng nếu dữ liệu được chèn theo thứ tự tăng dần, cây bị suy biến thành một danh sách, chiều cao bằng n và độ phức tạp xấu nhất trở thành tuyến tính.",
+              "chunks": [
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 300,
+                  "summary": "Cây nhị phân và khái niệm BST"
+                },
+                {
+                  "start_seconds": 300,
+                  "end_seconds": 620,
+                  "summary": "Tính chất BST và duyệt inorder"
+                },
+                {
+                  "start_seconds": 620,
+                  "end_seconds": 900,
+                  "summary": "Tìm kiếm và chèn theo chiều cao cây"
+                },
+                {
+                  "start_seconds": 900,
+                  "end_seconds": 1120,
+                  "summary": "Cây suy biến và độ phức tạp xấu nhất"
+                }
+              ],
+              "questions": [
+                {
+                  "question_text": "Trong một cây nhị phân, mỗi nút có tối đa bao nhiêu con?",
+                  "options": [
+                    "Một",
+                    "Hai",
+                    "Ba",
+                    "Không giới hạn"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Cây nhị phân: mỗi nút có tối đa hai con (trái và phải).",
+                  "start_seconds": 150
+                },
+                {
+                  "question_text": "Tính chất của cây tìm kiếm nhị phân (BST) là gì?",
+                  "options": [
+                    "Con trái lớn hơn nút, con phải nhỏ hơn",
+                    "Mọi giá trị con trái nhỏ hơn nút, con phải lớn hơn",
+                    "Mọi lá nằm cùng một mức",
+                    "Mỗi nút có đúng hai con"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "BST: cây con trái chứa giá trị nhỏ hơn, cây con phải chứa giá trị lớn hơn nút.",
+                  "start_seconds": 360
+                },
+                {
+                  "question_text": "Duyệt BST theo thứ tự inorder cho kết quả gì?",
+                  "options": [
+                    "Dãy giá trị sắp xếp tăng dần",
+                    "Dãy giá trị sắp xếp giảm dần",
+                    "Thứ tự ngẫu nhiên",
+                    "Duyệt theo từng mức"
+                  ],
+                  "correct_answer": 0,
+                  "explanation": "Inorder của BST trả về các giá trị theo thứ tự tăng dần.",
+                  "start_seconds": 500
+                },
+                {
+                  "question_text": "Độ phức tạp tìm kiếm trên BST phụ thuộc vào điều gì?",
+                  "options": [
+                    "Số nút lá",
+                    "Chiều cao của cây",
+                    "Số con của gốc",
+                    "Giá trị lớn nhất trong cây"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Tìm kiếm đi từ gốc xuống nên chi phí tỉ lệ với chiều cao cây.",
+                  "start_seconds": 720
+                },
+                {
+                  "question_text": "Khi nào BST có độ phức tạp xấu nhất O(n)?",
+                  "options": [
+                    "Khi cây cân bằng hoàn hảo",
+                    "Khi dữ liệu chèn theo thứ tự đã sắp xếp khiến cây suy biến",
+                    "Khi cây có đúng một nút",
+                    "Khi mọi nút đều có hai con"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Chèn theo thứ tự tăng dần biến BST thành danh sách, chiều cao n nên tìm kiếm O(n).",
+                  "start_seconds": 980
+                }
+              ]
+            }
           },
           {
             "title": "Bài 2: AVL Tree và Red-Black Tree",
@@ -263,7 +490,79 @@
           },
           {
             "title": "Bài 3: Heap và Priority Queue",
-            "description": "Min-heap, max-heap, heapify, heap sort và ứng dụng."
+            "description": "Min-heap, max-heap, heapify, heap sort và ứng dụng.",
+            "video_key": "seed/hust-cs/dsa/ch3-heap-priority-queue.mp4",
+            "duration_secs": 1050,
+            "analysis": {
+              "transcript": "Heap là một cây nhị phân gần hoàn chỉnh, được lấp đầy từ trái sang phải ở mỗi mức. Có hai loại heap: min-heap, trong đó nút cha luôn nhỏ hơn hoặc bằng các con, và max-heap, trong đó nút cha luôn lớn hơn hoặc bằng các con.\n\nNhờ tính chất này, phần tử nhỏ nhất của min-heap hoặc lớn nhất của max-heap luôn nằm ở gốc và lấy ra với chi phí hằng số. Thao tác chèn và lấy phần tử gốc cần khôi phục tính chất heap bằng cách đẩy phần tử lên hoặc xuống, mỗi thao tác có độ phức tạp logarit theo số phần tử.\n\nHeap thường được cài đặt bằng mảng, trong đó con của nút ở vị trí i nằm ở 2i cộng 1 và 2i cộng 2. Ứng dụng quan trọng nhất của heap là hàng đợi ưu tiên, nơi ta luôn lấy ra phần tử có độ ưu tiên cao nhất. Heap cũng là nền tảng của thuật toán sắp xếp heap sort.",
+              "chunks": [
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 360,
+                  "summary": "Heap và phân biệt min-heap, max-heap"
+                },
+                {
+                  "start_seconds": 360,
+                  "end_seconds": 720,
+                  "summary": "Chèn, lấy gốc và độ phức tạp logarit"
+                },
+                {
+                  "start_seconds": 720,
+                  "end_seconds": 1050,
+                  "summary": "Cài đặt bằng mảng và hàng đợi ưu tiên"
+                }
+              ],
+              "questions": [
+                {
+                  "question_text": "Trong min-heap, phần tử nào nằm ở gốc?",
+                  "options": [
+                    "Phần tử lớn nhất",
+                    "Phần tử nhỏ nhất",
+                    "Phần tử ở giữa",
+                    "Phần tử thêm vào sau cùng"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Min-heap: nút cha nhỏ hơn các con, nên gốc là phần tử nhỏ nhất.",
+                  "start_seconds": 180
+                },
+                {
+                  "question_text": "Độ phức tạp của thao tác chèn vào heap là gì?",
+                  "options": [
+                    "O(1)",
+                    "O(log n)",
+                    "O(n)",
+                    "O(n log n)"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Chèn cần đẩy phần tử lên dọc theo chiều cao cây, tức O(log n).",
+                  "start_seconds": 480
+                },
+                {
+                  "question_text": "Heap thường được cài đặt bằng cấu trúc nào?",
+                  "options": [
+                    "Mảng",
+                    "Bảng băm",
+                    "Danh sách liên kết đôi",
+                    "Đồ thị"
+                  ],
+                  "correct_answer": 0,
+                  "explanation": "Heap là cây gần hoàn chỉnh nên ánh xạ gọn vào mảng theo chỉ số.",
+                  "start_seconds": 760
+                },
+                {
+                  "question_text": "Ứng dụng tiêu biểu nhất của heap là gì?",
+                  "options": [
+                    "Kiểm tra cân bằng ngoặc",
+                    "Hàng đợi ưu tiên",
+                    "Tìm kiếm nhị phân",
+                    "Băm chuỗi"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Heap cho phép lấy phần tử ưu tiên cao nhất hiệu quả, nền tảng của priority queue.",
+                  "start_seconds": 880
+                }
+              ]
+            }
           },
           {
             "title": "Bài 4: BFS và DFS trên đồ thị",
@@ -280,7 +579,96 @@
         "lessons": [
           {
             "title": "Bài 1: Chia để trị",
-            "description": "Merge sort, Quick sort, binary search — thiết kế và phân tích."
+            "description": "Merge sort, Quick sort, binary search — thiết kế và phân tích.",
+            "video_key": "seed/hust-cs/dsa/ch4-divide-conquer.mp4",
+            "duration_secs": 1180,
+            "analysis": {
+              "transcript": "Chia để trị là một chiến lược thiết kế thuật toán gồm ba bước: chia bài toán thành các bài toán con nhỏ hơn, trị từng bài toán con một cách đệ quy, rồi kết hợp các kết quả lại.\n\nMerge sort là ví dụ kinh điển. Nó chia mảng làm đôi, sắp xếp đệ quy mỗi nửa, rồi trộn hai nửa đã sắp xếp lại với nhau. Vì luôn chia đôi và bước trộn tốn thời gian tuyến tính, merge sort có độ phức tạp n nhân log n trong mọi trường hợp. Quick sort cũng chia để trị nhưng dựa trên một phần tử chốt; trung bình nó cũng đạt n log n nhưng xấu nhất có thể là bậc hai.\n\nTìm kiếm nhị phân là một dạng chia để trị trên dữ liệu đã sắp xếp: mỗi bước so sánh với phần tử giữa và loại bỏ một nửa không gian tìm kiếm, cho độ phức tạp logarit. Nói chung, chi phí của thuật toán chia để trị được mô tả bằng một quan hệ truy hồi và có thể giải bằng Master Theorem.",
+              "chunks": [
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 300,
+                  "summary": "Ba bước của chiến lược chia để trị"
+                },
+                {
+                  "start_seconds": 300,
+                  "end_seconds": 640,
+                  "summary": "Merge sort và độ phức tạp n log n"
+                },
+                {
+                  "start_seconds": 640,
+                  "end_seconds": 920,
+                  "summary": "Quick sort và phần tử chốt"
+                },
+                {
+                  "start_seconds": 920,
+                  "end_seconds": 1180,
+                  "summary": "Tìm kiếm nhị phân và quan hệ truy hồi"
+                }
+              ],
+              "questions": [
+                {
+                  "question_text": "Chiến lược chia để trị gồm những bước nào?",
+                  "options": [
+                    "Chỉ chia và trị",
+                    "Chia, trị (đệ quy) và kết hợp kết quả",
+                    "Sắp xếp rồi tìm kiếm",
+                    "Lặp và tích lũy"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Chia để trị: chia bài toán, giải đệ quy các bài con, rồi kết hợp.",
+                  "start_seconds": 150
+                },
+                {
+                  "question_text": "Độ phức tạp của merge sort trong mọi trường hợp là gì?",
+                  "options": [
+                    "O(n)",
+                    "O(n log n)",
+                    "O(n²)",
+                    "O(log n)"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Merge sort luôn chia đôi và trộn tuyến tính nên ổn định ở O(n log n).",
+                  "start_seconds": 420
+                },
+                {
+                  "question_text": "Quick sort có thể đạt độ phức tạp xấu nhất nào?",
+                  "options": [
+                    "O(n)",
+                    "O(log n)",
+                    "O(n²)",
+                    "O(1)"
+                  ],
+                  "correct_answer": 2,
+                  "explanation": "Khi chọn chốt kém (mảng đã sắp xếp), quick sort suy biến về O(n²).",
+                  "start_seconds": 720
+                },
+                {
+                  "question_text": "Tìm kiếm nhị phân yêu cầu dữ liệu phải như thế nào?",
+                  "options": [
+                    "Đã được sắp xếp",
+                    "Có số phần tử chẵn",
+                    "Lưu trong danh sách liên kết",
+                    "Không trùng lặp"
+                  ],
+                  "correct_answer": 0,
+                  "explanation": "Mỗi bước loại nửa không gian dựa trên so sánh, chỉ đúng khi dữ liệu đã sắp xếp.",
+                  "start_seconds": 980
+                },
+                {
+                  "question_text": "Độ phức tạp của tìm kiếm nhị phân là gì?",
+                  "options": [
+                    "O(n)",
+                    "O(log n)",
+                    "O(n log n)",
+                    "O(n²)"
+                  ],
+                  "correct_answer": 1,
+                  "explanation": "Mỗi bước loại bỏ một nửa, nên số bước tỉ lệ log n.",
+                  "start_seconds": 1050
+                }
+              ]
+            }
           },
           {
             "title": "Bài 2: Quy hoạch động (DP)",
@@ -316,11 +704,31 @@
             "analysis": {
               "transcript": "Trong bài này chúng ta tìm hiểu ba thành phần cốt lõi của nền tảng Java: JVM, JDK và JRE.\n\nJVM (Java Virtual Machine) là máy ảo thực thi bytecode Java. JVM tạo nên tính 'Write Once, Run Anywhere' của Java — bytecode (.class file) có thể chạy trên bất kỳ hệ điều hành nào có JVM. JVM gồm các thành phần: Class Loader, Runtime Data Areas (Heap, Stack, Method Area), và Execution Engine.\n\nJIT (Just-In-Time) Compiler là phần quan trọng của Execution Engine. Nó biên dịch bytecode thường xuyên được dùng thành mã máy native, giúp Java đạt hiệu năng gần với C/C++.\n\nJRE (Java Runtime Environment) = JVM + các thư viện chuẩn (rt.jar). Đây là môi trường tối thiểu để chạy ứng dụng Java.\n\nJDK (Java Development Kit) = JRE + công cụ phát triển (javac compiler, debugger, javadoc...). Developer cần cài JDK để viết và biên dịch Java.\n\nVòng đời: Source code (.java) → javac compiler → Bytecode (.class) → JVM → Execution. JVM cũng có GC (Garbage Collector) tự động giải phóng bộ nhớ.",
               "chunks": [
-                {"start_seconds": 0, "end_seconds": 360, "summary": "Tổng quan JVM, JDK, JRE và vai trò"},
-                {"start_seconds": 360, "end_seconds": 700, "summary": "Phân biệt JRE và JDK"},
-                {"start_seconds": 700, "end_seconds": 1050, "summary": "JIT Compiler và Execution Engine"},
-                {"start_seconds": 1050, "end_seconds": 1350, "summary": "Biên dịch .java thành bytecode .class"},
-                {"start_seconds": 1350, "end_seconds": 1820, "summary": "Write Once Run Anywhere — ưu điểm bytecode"}
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 360,
+                  "summary": "Tổng quan JVM, JDK, JRE và vai trò"
+                },
+                {
+                  "start_seconds": 360,
+                  "end_seconds": 700,
+                  "summary": "Phân biệt JRE và JDK"
+                },
+                {
+                  "start_seconds": 700,
+                  "end_seconds": 1050,
+                  "summary": "JIT Compiler và Execution Engine"
+                },
+                {
+                  "start_seconds": 1050,
+                  "end_seconds": 1350,
+                  "summary": "Biên dịch .java thành bytecode .class"
+                },
+                {
+                  "start_seconds": 1350,
+                  "end_seconds": 1820,
+                  "summary": "Write Once Run Anywhere — ưu điểm bytecode"
+                }
               ],
               "questions": [
                 {
@@ -389,28 +797,63 @@
           {
             "title": "Bài 2: Kiểu dữ liệu và biểu thức",
             "description": "Primitive types, autoboxing, String pool và các toán tử.",
+            "video_key": "seed/hust-cs/java/ch2-data-types.mp4",
             "duration_secs": 1500,
             "analysis": {
               "transcript": "Java có hai loại kiểu dữ liệu: kiểu nguyên thủy (primitive) và kiểu tham chiếu (reference).\n\nJava có đúng 8 kiểu nguyên thủy: byte, short, int, long, float, double, char và boolean. Chúng lưu trực tiếp giá trị trên stack và không phải là object.\n\nKiểu tham chiếu trỏ tới object trên heap. String là một kiểu tham chiếu, KHÔNG phải primitive — đây là nhầm lẫn phổ biến. Mỗi primitive có một lớp bao (wrapper class) tương ứng: int ↔ Integer, double ↔ Double, char ↔ Character...\n\nAutoboxing là việc Java tự động chuyển đổi giữa primitive và wrapper, ví dụ 'Integer x = 5;' tự động bọc int 5 thành Integer. Chiều ngược lại gọi là unboxing.\n\nString pool là vùng nhớ đặc biệt trong heap, nơi JVM tái sử dụng các String literal giống nhau để tiết kiệm bộ nhớ. 'String a = \"hi\"; String b = \"hi\";' thì a và b cùng trỏ tới một đối tượng trong pool.\n\nVề biểu thức: phép chia hai số nguyên cho kết quả nguyên — 7 / 2 = 3 (phần thập phân bị cắt bỏ). Toán tử % (modulo) lấy phần dư: 7 % 2 = 1. Cần chú ý ép kiểu (casting) khi trộn các kiểu số khác nhau.",
               "chunks": [
-                {"start_seconds": 0, "end_seconds": 250, "summary": "Tổng quan kiểu dữ liệu nguyên thủy"},
-                {"start_seconds": 250, "end_seconds": 500, "summary": "Kiểu tham chiếu và String"},
-                {"start_seconds": 500, "end_seconds": 750, "summary": "Autoboxing và Wrapper class"},
-                {"start_seconds": 750, "end_seconds": 1000, "summary": "String pool và bộ nhớ"},
-                {"start_seconds": 1000, "end_seconds": 1250, "summary": "Toán tử số học và ép kiểu"},
-                {"start_seconds": 1250, "end_seconds": 1500, "summary": "Toán tử lấy dư và biểu thức"}
+                {
+                  "start_seconds": 0,
+                  "end_seconds": 250,
+                  "summary": "Tổng quan kiểu dữ liệu nguyên thủy"
+                },
+                {
+                  "start_seconds": 250,
+                  "end_seconds": 500,
+                  "summary": "Kiểu tham chiếu và String"
+                },
+                {
+                  "start_seconds": 500,
+                  "end_seconds": 750,
+                  "summary": "Autoboxing và Wrapper class"
+                },
+                {
+                  "start_seconds": 750,
+                  "end_seconds": 1000,
+                  "summary": "String pool và bộ nhớ"
+                },
+                {
+                  "start_seconds": 1000,
+                  "end_seconds": 1250,
+                  "summary": "Toán tử số học và ép kiểu"
+                },
+                {
+                  "start_seconds": 1250,
+                  "end_seconds": 1500,
+                  "summary": "Toán tử lấy dư và biểu thức"
+                }
               ],
               "questions": [
                 {
                   "question_text": "Java có bao nhiêu kiểu dữ liệu nguyên thủy (primitive)?",
-                  "options": ["6", "8", "10", "4"],
+                  "options": [
+                    "6",
+                    "8",
+                    "10",
+                    "4"
+                  ],
                   "correct_answer": 1,
                   "explanation": "Java có đúng 8 kiểu nguyên thủy: byte, short, int, long, float, double, char, boolean.",
                   "start_seconds": 120
                 },
                 {
                   "question_text": "Kiểu nào sau đây KHÔNG phải là primitive type?",
-                  "options": ["String", "int", "double", "boolean"],
+                  "options": [
+                    "String",
+                    "int",
+                    "double",
+                    "boolean"
+                  ],
                   "correct_answer": 0,
                   "explanation": "String là kiểu tham chiếu (reference), không phải primitive — đây là nhầm lẫn rất phổ biến.",
                   "start_seconds": 360
@@ -441,7 +884,12 @@
                 },
                 {
                   "question_text": "Kết quả của biểu thức 7 / 2 với hai số int trong Java là?",
-                  "options": ["3.5", "3", "4", "2"],
+                  "options": [
+                    "3.5",
+                    "3",
+                    "4",
+                    "2"
+                  ],
                   "correct_answer": 1,
                   "explanation": "Phép chia hai số nguyên cho kết quả nguyên: phần thập phân bị cắt bỏ nên 7 / 2 = 3.",
                   "start_seconds": 1080

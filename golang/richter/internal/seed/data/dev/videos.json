@@ -14,5 +14,37 @@
   {
     "local_path": "seed-assets/videos/big-buck-bunny.mp4",
     "s3_key": "seed/dyadia-demo/intro/ch1-overview.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/big-buck-bunny.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch2-master-theorem.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/elephants-dream.mp4",
+    "s3_key": "seed/hust-cs/java/ch2-data-types.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/big-buck-bunny.mp4",
+    "s3_key": "seed/langlab/phonetics/ch1-ipa.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/elephants-dream.mp4",
+    "s3_key": "seed/startup-hub/lean/ch1-build-measure-learn.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/cs50-whats-an-algorithm.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch2-stack.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/python-intro-beginners.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch3-binary-tree-bst.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/cs50-whats-an-algorithm.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch3-heap-priority-queue.mp4"
+  },
+  {
+    "local_path": "seed-assets/videos/cs50-whats-an-algorithm.mp4",
+    "s3_key": "seed/hust-cs/dsa/ch4-divide-conquer.mp4"
   }
 ]

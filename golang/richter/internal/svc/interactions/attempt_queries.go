@@ -292,11 +292,12 @@ func (s *InteractionsSvc) ListMyCourseProgress(
 	courses := make([]*richterv1.MyCourseProgress, 0, len(rows))
 	for _, r := range rows {
 		courses = append(courses, &richterv1.MyCourseProgress{
-			CourseId:    r.CourseID.String(),
-			Title:       r.Title,
-			LessonsDone: r.LessonsDone,
+			CourseId:     r.CourseID.String(),
+			Title:        r.Title,
+			OrgSlug:      r.OrgSlug,
+			LessonsDone:  r.LessonsDone,
 			LessonsTotal: r.LessonsTotal,
-			AvgScore:    r.AvgScore,
+			AvgScore:     r.AvgScore,
 		})
 	}
 

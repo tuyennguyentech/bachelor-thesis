@@ -12,6 +12,8 @@
           {
             "title": "Bài 1: Hệ thống âm vị tiếng Việt và IPA",
             "description": "Bảng chữ cái ngữ âm quốc tế (IPA), cách phiên âm và hệ thống âm vị tiếng Việt 6 thanh điệu.",
+            "video_key": "seed/langlab/phonetics/ch1-ipa.mp4",
+            "duration_secs": 900,
             "analysis": {
               "transcript": "Ngữ âm học (Phonetics) là ngành nghiên cứu âm thanh ngôn ngữ. Có ba nhánh chính: ngữ âm học cấu âm (articulatory), ngữ âm học âm học (acoustic) và ngữ âm học thính giác (auditory).\n\nBảng ký hiệu ngữ âm quốc tế IPA (International Phonetic Alphabet) gồm các ký hiệu chuẩn hóa để phiên âm mọi ngôn ngữ. Tiếng Việt có 6 thanh điệu: ngang (a), huyền (à), sắc (á), hỏi (ả), ngã (ã), nặng (ạ). Mỗi thanh điệu mang giá trị khu biệt nghĩa.\n\nÂm vị (phoneme) là đơn vị âm thanh nhỏ nhất có thể phân biệt nghĩa. Ví dụ: 'bàn' và 'màn' khác nhau ở âm vị đầu /b/ và /m/.\n\nTiếng Việt có hệ thống thanh điệu phức tạp với 6 mức và 2 loại thanh (bằng và trắc). Điều này tạo ra sự phong phú nhưng cũng là thách thức lớn với người học ngoại ngữ.",
               "chunks": [

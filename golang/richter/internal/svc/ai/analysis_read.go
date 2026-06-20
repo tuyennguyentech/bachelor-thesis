@@ -165,8 +165,6 @@ func (s *AISvc) GetLessonAnalysis(
 		isTeacher = true
 	}
 
-
-
 	hasSubmitted := false
 	if !isTeacher {
 		if claims, _ := s.authz.RequireAuthenticated(ctx); claims != nil {
@@ -253,7 +251,7 @@ func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.
 		if !hasFailedUpstream {
 			out.Status = gen.LessonAnalysisStatusDone
 		}
-	case string(taskqueue.StatusProcessing), string(taskqueue.StatusInqueued), string(taskqueue.StatusPending):
+	case string(taskqueue.StatusProcessing), string(taskqueue.StatusInqueued):
 		if out.Status == gen.LessonAnalysisStatusPending {
 			out.Status = gen.LessonAnalysisStatusProcessing
 		}
@@ -281,8 +279,7 @@ func applyArtifactFloor(now time.Time, status gen.LessonAnalysisStatus, latest [
 	for _, t := range latest {
 		switch t.Status {
 		case string(taskqueue.StatusFailed),
-			string(taskqueue.StatusInqueued),
-			string(taskqueue.StatusPending):
+			string(taskqueue.StatusInqueued):
 			// Failing or queued to (re)run — keep the derived status so the FE
 			// shows the error / in-flight progress, not a stale DONE.
 			return status

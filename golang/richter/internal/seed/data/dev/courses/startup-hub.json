@@ -12,6 +12,8 @@
           {
             "title": "Bài 1: Build-Measure-Learn và vòng phản hồi",
             "description": "Ba bước của vòng lặp tinh gọn, cách rút ngắn chu kỳ và tại sao tốc độ học quan trọng hơn tốc độ xây dựng.",
+            "video_key": "seed/startup-hub/lean/ch1-build-measure-learn.mp4",
+            "duration_secs": 1200,
             "analysis": {
               "transcript": "Lean Startup là phương pháp khởi nghiệp do Eric Ries phát triển, lấy cảm hứng từ Lean Manufacturing (Toyota). Triết lý cốt lõi: loại bỏ lãng phí trong quá trình xây dựng sản phẩm bằng cách học liên tục và nhanh nhất có thể.\n\nVòng lặp Build-Measure-Learn gồm 3 bước:\n1. BUILD: Xây dựng MVP (Minimum Viable Product) — phiên bản tối thiểu nhất có thể kiểm chứng giả thuyết.\n2. MEASURE: Đo lường phản hồi thực tế của khách hàng bằng các chỉ số đúng (actionable metrics, không phải vanity metrics).\n3. LEARN: Rút ra validated learning — quyết định pivot (thay đổi hướng) hay persevere (tiếp tục).\n\nMVP không phải sản phẩm tệ nhất, mà là cách nhanh nhất để kiểm chứng giả thuyết quan trọng nhất. Ví dụ nổi tiếng: Dropbox dùng video demo trước khi xây dựng; Zappos mua giày từ cửa hàng và ship cho khách trước khi có kho.\n\nVanity metrics (số lượt download, page views) dễ tăng nhưng không cho biết sản phẩm có đang tạo giá trị không. Actionable metrics (activation rate, retention, revenue) thực sự phản ánh sức khỏe kinh doanh.",
               "chunks": [

@@ -52,7 +52,13 @@ func looksInstructional(s string) bool {
 
 type listeningConfigJSON struct {
 	AudioObjectKey string `json:"audio_object_key"`
-	// AudioSourceText is the text used for TTS synthesis (set during AI generation).
+	// AudioSourceText is the passage that gets synthesised to audio during AI
+	// generation. INVARIANT: the spoken audio is produced from a TTS-normalized
+	// copy of this text (math/CS notation → words; see ai.normalizeForTTS), but
+	// THIS field keeps the original. So it must NOT be used for grading or shown
+	// as a transcript/caption — it would diverge from what the learner hears.
+	// (Today it isn't: auto-gen is always comprehension mode, which grades the
+	// MCQ questions, and the student view never renders this string.)
 	AudioSourceText        string                `json:"audio_source_text,omitempty"`
 	DurationSeconds        int32                 `json:"duration_seconds,omitempty"`
 	Mode                   string                `json:"mode"`
@@ -338,6 +344,7 @@ audio_source_text (đoạn nghe — nội dung để nghe):
 - Là một đoạn GIẢNG GIẢI tự nhiên, mạch lạc, một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang), tự đủ ngữ cảnh — như trích một đoạn người thầy đang nói.
 - Đoạn phải chứa đủ thông tin để trả lời tất cả câu hỏi phía dưới — không phụ thuộc vào kiến thức bên ngoài.
 - Viết bằng văn phong nói tự nhiên, mạch lạc (không phải danh sách bullet, không tiêu đề).
+- VÌ ĐOẠN SẼ ĐƯỢC ĐỌC THÀNH TIẾNG: mọi công thức, ký hiệu, notation toán/CS PHẢI viết HOÀN TOÀN BẰNG CHỮ, KHÔNG dùng ký hiệu. Ví dụ: "O(n²)" → "ô lớn của n bình phương"; "Θ(n log n)" → "theta của n nhân lốc n"; "T(n) = aT(n/b)" → "T của n bằng a nhân T của n chia b"; "7 % 2" → "7 chia 2 lấy phần dư". TUYỆT ĐỐI không để các ký hiệu như ( ) ² ³ Θ Ω Σ = % ^ _ / × ≤ ≥ trong đoạn nghe — máy đọc không phát âm được, sẽ thành tiếng ồn vô nghĩa.
 
 Câu hỏi (2–4 câu, phân loại theo mức độ tư duy):
 - ÍT NHẤT 1 câu hỏi YÊU CẦU SUY LUẬN hoặc TỔNG HỢP: "Mục đích chính của … là gì?", "Tại sao tác giả nói …?", "Điều gì sẽ xảy ra nếu …?"

@@ -124,7 +124,7 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 
 				if l.Analysis != nil {
 					if err := s.seedLessonAnalysis(ctx, lesson.ID, owner.ID, l.Analysis); err != nil {
-						s.log.ErrorContext(ctx, "seed: failed to seed analysis", "lesson", l.Title, "err", err)
+						return fmt.Errorf("seed analysis for lesson %q: %w", l.Title, err)
 					}
 				}
 			}
@@ -277,121 +277,100 @@ func splitSentences(text string) []string {
 }
 
 func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID, createdBy pgtype.UUID, a *devAnalysisSpec) error {
-	// Write transcript to FDB before marking analysis as done; if FDB fails we
-	// don't want a "done" status with no transcript in the DB. Always go
-	// through the segment helper so the wire format stays protobuf.
-	if a.Transcript != "" {
-		if err := segment.SaveTranscript(s.kv, lessonID.String(), a.Transcript); err != nil {
-			return fmt.Errorf("seed: FDB transcript write failed: %w", err)
+	// The dev seeder produces analyzed lessons by running the REAL transcript
+	// pipeline (transcript.Service.RunExtract + RunChunk) with the AI boundaries
+	// (STT + chunking) backed by golden fixtures built from the curated JSON. This
+	// yields the same FDB(transcript+segments) + Postgres(chunks) + coherence a real
+	// Whisper/Gemini run would — no dual-store divergence, deterministic, no network.
+
+	// A coherent analysis requires a transcript. Curated chunks/questions with no
+	// transcript can never form a consistent lesson, so fail loudly.
+	if a.Transcript == "" {
+		if len(a.Questions) > 0 || len(a.Chunks) > 0 {
+			return fmt.Errorf("lesson %s has chunks/questions but no transcript", lessonID.String())
 		}
-		// Derive approximate timed segments so seeded lessons get an interactive,
-		// video-synced transcript: the transcript-step editor and the in-video
-		// karaoke follow-along both need segments, but the seed JSON only carries
-		// plain transcript text. Real (Whisper) lessons get exact word timings;
-		// this distributes sentences across the lesson timeline by length as a
-		// best-effort stand-in for demo data.
-		var totalDur float64
-		for _, c := range a.Chunks {
-			if c.EndSeconds > totalDur {
-				totalDur = c.EndSeconds
+		return nil // nothing to analyze
+	}
+
+	// Resolve chunk boundaries. Curated chunks win; if the lesson has questions but
+	// no chunks (a real inconsistency in some seed JSON), derive a single chunk over
+	// the whole timeline so every question still attaches to a real chunk.
+	chunks := append([]devChunkSpec(nil), a.Chunks...)
+	totalDur := 0.0
+	for _, c := range chunks {
+		if c.EndSeconds > totalDur {
+			totalDur = c.EndSeconds
+		}
+	}
+	if len(chunks) == 0 {
+		for _, q := range a.Questions {
+			if q.StartSeconds+1 > totalDur {
+				totalDur = q.StartSeconds + 1
 			}
 		}
-		if segs := deriveSeedSegments(a.Transcript, totalDur); len(segs) > 0 {
-			if err := segment.SaveSegments(s.kv, lessonID.String(), segs); err != nil {
-				return fmt.Errorf("seed: FDB segments write failed: %w", err)
-			}
+		if totalDur <= 0 {
+			totalDur = 60
 		}
+		chunks = []devChunkSpec{{StartSeconds: 0, EndSeconds: totalDur, Summary: "Toàn bài"}}
 	}
-	taskID, err := uuid.NewV7()
-	if err != nil {
-		return fmt.Errorf("seed: failed to generate task ID: %w", err)
-	}
-	var tid pgtype.UUID
-	tid.Bytes = [16]byte(taskID)
-	tid.Valid = true
-
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		_, err := q.InsertTask(ctx, gen.InsertTaskParams{
-			ID:           tid,
-			LessonID:     lessonID,
-			TaskType:     "quiz_gen",
-			Status:       gen.TaskStatusSucceeded,
-			InputPayload: nil,
-			CreatedBy:    createdBy,
-		})
-		return err
-	}); err != nil {
-		return fmt.Errorf("insert task: %w", err)
-	}
-
-	// Delete old chunks, old interactions, then insert fresh chunks + interactions
-	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-		if err := q.DeleteLessonTranscriptChunks(ctx, lessonID); err != nil {
-			return err
-		}
-		return q.DeleteLessonInteractionsByLesson(ctx, lessonID)
-	}); err != nil {
-		return fmt.Errorf("delete old chunks/interactions: %w", err)
-	}
-
-	// Defensive: both the order_index assignment below and the
-	// attribute-by-start_seconds loop further down assume chunks are in
-	// ascending temporal order (the "last chunk that has started" fallback).
-	// Sort to match the runtime resolver (resolveChunkForSeconds, which sorts)
-	// so an out-of-order seed JSON can never mis-attribute a question to the
-	// wrong chunk and corrupt the per-chunk heatmap.
-	sort.SliceStable(a.Chunks, func(i, j int) bool {
-		return a.Chunks[i].StartSeconds < a.Chunks[j].StartSeconds
+	// Chunks must be in ascending temporal order: RunChunk assigns order_index in
+	// slice order, and the question-attribution loop assumes ascending starts.
+	sort.SliceStable(chunks, func(i, j int) bool {
+		return chunks[i].StartSeconds < chunks[j].StartSeconds
 	})
 
-	// Insert chunks and build a map: start_seconds → chunk.id
-	chunkMap := make(map[float64]pgtype.UUID)
-	for i, cs := range a.Chunks {
-		chunk, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonTranscriptChunk, error) {
-			return q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
-				LessonID:            lessonID,
-				OrderIndex:          int32(i),
-				StartSeconds:        cs.StartSeconds,
-				EndSeconds:          cs.EndSeconds,
-				Summary:             cs.Summary,
-				QuestionCountConfig: 1,
-				CoherenceScore:      0.0,
-			})
-		})
-		if err != nil {
-			return fmt.Errorf("insert chunk %d: %w", i, err)
-		}
-		chunkMap[cs.StartSeconds] = chunk.ID
+	chunkJSON, err := buildSeedChunkJSON(chunks)
+	if err != nil {
+		return fmt.Errorf("build chunk fixture for lesson %s: %w", lessonID.String(), err)
 	}
 
+	// Run the real transcribe + chunk stages with golden fixtures. RunExtract writes
+	// transcript+segments to FDB and clears stale downstream data; RunChunk inserts
+	// chunks (with real coherence scores) and writes per-chunk FDB transcripts.
+	ts := s.newSeedTranscriptService(a.Transcript, totalDur, chunkJSON)
+	if err := ts.RunExtract(ctx, lessonID, "seed", "vi", noopProgress); err != nil {
+		return fmt.Errorf("RunExtract lesson %s: %w", lessonID.String(), err)
+	}
+	if err := ts.RunChunk(ctx, lessonID, noopProgress); err != nil {
+		return fmt.Errorf("RunChunk lesson %s: %w", lessonID.String(), err)
+	}
+
+	// Load the chunks RunChunk just created so curated questions attach to real
+	// chunk IDs (chunk_id is therefore never NULL).
+	dbChunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: 5000, Offset: 0})
+	})
+	if err != nil {
+		return fmt.Errorf("list chunks lesson %s: %w", lessonID.String(), err)
+	}
+	if len(dbChunks) == 0 {
+		return fmt.Errorf("lesson %s produced no chunks", lessonID.String())
+	}
+	sort.SliceStable(dbChunks, func(i, j int) bool {
+		return dbChunks[i].StartSeconds < dbChunks[j].StartSeconds
+	})
+
+	// Insert curated (authored) questions, attributed to the real chunks. Routing
+	// authored questions through generation.Service would overwrite their
+	// start_seconds and discard the curated content, so they are inserted directly
+	// here — the divergence bug lived in transcribe/chunk, which now run for real.
 	for i, qspec := range a.Questions {
+		chunkID := dbChunks[0].ID
+		for _, c := range dbChunks {
+			if qspec.StartSeconds >= c.StartSeconds && qspec.StartSeconds < c.EndSeconds {
+				chunkID = c.ID
+				break
+			}
+			if qspec.StartSeconds >= c.StartSeconds {
+				chunkID = c.ID // last chunk that has started by this timestamp
+			}
+		}
 		configJSON, err := json.Marshal(struct {
 			Options       []string `json:"options"`
 			CorrectAnswer int32    `json:"correct_answer"`
 		}{Options: qspec.Options, CorrectAnswer: qspec.CorrectAnswer})
 		if err != nil {
 			return fmt.Errorf("marshal config for interaction %d: %w", i, err)
-		}
-		// Attribute the question to a chunk by start_seconds. Prefer the chunk
-		// whose [start, end) range contains it; otherwise fall back to the most
-		// recent chunk that has started (gap / past-last) or the first chunk
-		// (before everything). Never leave it NULL — a NULL chunk_id hides the
-		// question from the per-chunk heatmap even though students answer it.
-		chunkID := pgtype.UUID{}
-		matched := false
-		for _, cs := range a.Chunks {
-			cid := chunkMap[cs.StartSeconds]
-			if qspec.StartSeconds >= cs.StartSeconds && qspec.StartSeconds < cs.EndSeconds {
-				chunkID = cid
-				matched = true
-				break
-			}
-			if qspec.StartSeconds >= cs.StartSeconds {
-				chunkID = cid // last chunk that has started by this timestamp
-			}
-		}
-		if !matched && !chunkID.Valid && len(a.Chunks) > 0 {
-			chunkID = chunkMap[a.Chunks[0].StartSeconds] // before the first chunk
 		}
 		if _, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.LessonInteraction, error) {
 			return q.InsertLessonInteraction(ctx, gen.InsertLessonInteractionParams{
@@ -410,5 +389,30 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 			return fmt.Errorf("create interaction %d: %w", i, err)
 		}
 	}
+
+	// Coherent succeeded task set (transcribe+chunk+quiz_gen) so GetLessonAnalysis
+	// derives DONE and loads the FDB transcript (deriveAnalysisFromTasks +
+	// canLoadTranscript both key off these task rows).
+	for _, taskType := range []string{"transcribe", "chunk", "quiz_gen"} {
+		taskID, err := uuid.NewV7()
+		if err != nil {
+			return fmt.Errorf("generate task ID: %w", err)
+		}
+		tid := pgtype.UUID{Bytes: [16]byte(taskID), Valid: true}
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			_, err := q.InsertSeededTask(ctx, gen.InsertSeededTaskParams{
+				ID:           tid,
+				LessonID:     lessonID,
+				TaskType:     taskType,
+				Status:       gen.TaskStatusSucceeded,
+				InputPayload: nil,
+				CreatedBy:    createdBy,
+			})
+			return err
+		}); err != nil {
+			return fmt.Errorf("insert %s task: %w", taskType, err)
+		}
+	}
+
 	return nil
 }

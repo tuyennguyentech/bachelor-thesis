@@ -41,8 +41,9 @@ type Task struct {
 // (or use a CTEs that perform the read+update atomically) so the
 // state machine stays consistent.
 type DB interface {
-	// CreateTask inserts a new task in 'pending' state. The input
-	// payload is owned by the caller. Returns the created task.
+	// CreateTask inserts a new task already 'inqueued' (the queue is
+	// Postgres-only; tasks are born claimable). The input payload is
+	// owned by the caller. Returns the created task.
 	CreateTask(ctx context.Context, id, lessonID, chunkID, createdBy pgtype.UUID, taskType string, input []byte) (Task, error)
 
 	// GetTask reads a task by id (no lock).
@@ -54,7 +55,7 @@ type DB interface {
 	// ListAllTasks returns all tasks, newest first.
 	ListAllTasks(ctx context.Context, limit, offset int) ([]Task, error)
 
-	// ListActiveTasks returns only pending/inqueued/processing tasks, newest first.
+	// ListActiveTasks returns only inqueued/processing tasks, newest first.
 	ListActiveTasks(ctx context.Context, limit, offset int) ([]Task, error)
 
 	// ListLatestTaskPerLesson returns the most recent task for each
@@ -62,7 +63,7 @@ type DB interface {
 	// state from the task pipeline.
 	ListLatestTaskPerLesson(ctx context.Context, lessonIDs []pgtype.UUID) ([]Task, error)
 
-	// GetActiveTask checks if there is already a pending/inqueued/processing task.
+	// GetActiveTask checks if there is already an inqueued/processing task.
 	GetActiveTask(ctx context.Context, lessonID, chunkID pgtype.UUID, taskType string) (Task, error)
 
 	// UpdateTaskProgress updates the task's progress fields.
@@ -76,13 +77,7 @@ type DB interface {
 	// CountActiveTasksByUser counts active tasks for the user.
 	CountActiveTasksByUser(ctx context.Context, userID pgtype.UUID) (int64, error)
 
-	// --- Scanner primitives ---
-
-	// EnqueuePendingBatch transitions a batch of pending tasks to
-	// inqueued, returning the rows. Uses FOR UPDATE SKIP LOCKED so
-	// multiple scanners don't fight. queue_seq is assigned at the
-	// tail end so the worker picks up tasks in FIFO order.
-	EnqueuePendingBatch(ctx context.Context, batchSize int) ([]Task, error)
+	// --- Scanner primitives (recovery only) ---
 
 	// ReapStaleProcessingBatch transitions processing tasks whose
 	// heartbeat is older than staleAfter to inqueued, clearing

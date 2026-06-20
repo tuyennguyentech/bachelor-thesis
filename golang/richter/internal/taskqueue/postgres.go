@@ -70,7 +70,6 @@ func FromGen(t gen.Task) Task {
 // callers don't have to import the sqlc package. The strings match
 // the migration enum labels exactly.
 const (
-	StatusPending    = gen.TaskStatusPending
 	StatusInqueued   = gen.TaskStatusInqueued
 	StatusProcessing = gen.TaskStatusProcessing
 	StatusSucceeded  = gen.TaskStatusSucceeded
@@ -85,7 +84,6 @@ func (p *PostgresDB) CreateTask(ctx context.Context, id, lessonID, chunkID, crea
 			LessonID:     lessonID,
 			ChunkID:      chunkID,
 			TaskType:     taskType,
-			Status:       gen.TaskStatusPending,
 			InputPayload: input,
 			CreatedBy:    createdBy,
 		})
@@ -164,20 +162,6 @@ func (p *PostgresDB) ListLatestTaskPerLesson(ctx context.Context, lessonIDs []pg
 	}
 	rows, err := db.WithConnection(p.pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Task, error) {
 		return q.ListLatestTaskPerLesson(ctx, lessonIDs)
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Task, len(rows))
-	for i, r := range rows {
-		out[i] = FromGen(r)
-	}
-	return out, nil
-}
-
-func (p *PostgresDB) EnqueuePendingBatch(ctx context.Context, batchSize int) ([]Task, error) {
-	rows, err := db.WithConnection(p.pool, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.Task, error) {
-		return q.EnqueuePendingBatch(ctx, int32(batchSize))
 	})
 	if err != nil {
 		return nil, err

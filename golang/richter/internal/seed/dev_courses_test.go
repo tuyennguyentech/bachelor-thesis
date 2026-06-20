@@ -1,6 +1,9 @@
 package seed
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestDeriveSeedSegments(t *testing.T) {
 	t.Run("no duration yields no segments", func(t *testing.T) {
@@ -47,4 +50,31 @@ func TestDeriveSeedSegments(t *testing.T) {
 			t.Errorf("expected the longer sentence to get more time: short=%v long=%v", d0, d1)
 		}
 	})
+}
+
+// TestBuildSeedChunkJSON checks that curated chunks serialize into the exact
+// Gemini chunk-response schema and round-trip through the seed chunk runner
+// (which mirrors the production parser) back into ChunkProposals.
+func TestBuildSeedChunkJSON(t *testing.T) {
+	chunks := []devChunkSpec{
+		{StartSeconds: 0, EndSeconds: 10, Summary: "A"},
+		{StartSeconds: 10, EndSeconds: 25, Summary: "B"},
+	}
+	js, err := buildSeedChunkJSON(chunks)
+	if err != nil {
+		t.Fatalf("buildSeedChunkJSON: %v", err)
+	}
+	props, err := seedChunkRunner(js)(context.Background(), "", nil, "")
+	if err != nil {
+		t.Fatalf("seedChunkRunner: %v", err)
+	}
+	if len(props) != 2 {
+		t.Fatalf("expected 2 chunk proposals, got %d", len(props))
+	}
+	if props[0].Summary != "A" || props[0].StartSeconds != 0 || props[0].EndSeconds != 10 {
+		t.Errorf("chunk 0 mismatch: %+v", props[0])
+	}
+	if props[1].Summary != "B" || props[1].StartSeconds != 10 || props[1].EndSeconds != 25 {
+		t.Errorf("chunk 1 mismatch: %+v", props[1])
+	}
 }

@@ -158,7 +158,12 @@ func (s *AISvc) synthesiseAndEmbed(
 		return nil, fmt.Errorf("TTS: lessonID required for lesson-scoped audio key")
 	}
 
-	wav, err := s.synthesiseWithRetry(ctx, text, language)
+	// Rewrite math/CS notation into speakable words before synthesis. A phoneme
+	// TTS (Piper) fed raw "O(n²)", "Θ(n log n)", Greek letters, superscripts, etc.
+	// emits garbled "ô tri" audio — the #1 cause of unintelligible listening
+	// exercises on technical courses. The stored audio_source_text keeps the
+	// original (questions are graded on comprehension, not the spoken string).
+	wav, err := s.synthesiseWithRetry(ctx, normalizeForTTS(text, language), language)
 	if err != nil {
 		return nil, err
 	}

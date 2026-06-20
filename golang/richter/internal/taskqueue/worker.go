@@ -34,17 +34,17 @@ import (
 // timeout) and re-claimed by another worker. The ownership check
 // on terminal writes is what prevents it from corrupting state.
 type Worker struct {
-	id         string             // UUID v7, generated once at construction
-	db         DB
-	log        *slog.Logger
-	active     sync.Map           // taskID -> *managedTask
-	taskGoroutines sync.WaitGroup // counts in-flight task goroutines
-	heartbeat  time.Duration      // interval between heartbeat ticks
-	pollIdle   time.Duration      // interval between claim attempts when queue empty
-	heartbeatFreshFor time.Duration // heartbeat older than this => worker lost ownership
-	workers    int                // concurrency: number of worker loops, 0 = runtime.NumCPU()
-	notifCh    <-chan string       // pg_notify wake signal from Listener via Scanner
-	allowedTypes []string          // task_types this worker may claim; must be non-empty
+	id                string // UUID v7, generated once at construction
+	db                DB
+	log               *slog.Logger
+	active            sync.Map       // taskID -> *managedTask
+	taskGoroutines    sync.WaitGroup // counts in-flight task goroutines
+	heartbeat         time.Duration  // interval between heartbeat ticks
+	pollIdle          time.Duration  // interval between claim attempts when queue empty
+	heartbeatFreshFor time.Duration  // heartbeat older than this => worker lost ownership
+	workers           int            // concurrency: number of worker loops, 0 = runtime.NumCPU()
+	notifCh           <-chan string  // pg_notify wake signal from Listener via Scanner
+	allowedTypes      []string       // task_types this worker may claim; must be non-empty
 }
 
 // NewWorkerRaw generates a UUID v7 worker_id and returns a Worker
@@ -58,13 +58,13 @@ func NewWorkerRaw(db DB, log *slog.Logger, notifCh <-chan string) *Worker {
 		panic("taskqueue: NewV7 failed: " + err.Error())
 	}
 	return &Worker{
-		id:                 id.String(),
-		db:                 db,
-		log:                log,
-		heartbeat:          10 * time.Second,
-		pollIdle:           2 * time.Second,
-		heartbeatFreshFor:  30 * time.Second,
-		notifCh:            notifCh,
+		id:                id.String(),
+		db:                db,
+		log:               log,
+		heartbeat:         10 * time.Second,
+		pollIdle:          2 * time.Second,
+		heartbeatFreshFor: 30 * time.Second,
+		notifCh:           notifCh,
 	}
 }
 
@@ -207,6 +207,12 @@ func (w *Worker) runTask(ctx context.Context, task Task) {
 	}
 
 	executor := factory()
+	// Make the inqueued -> processing transition visible: previously the only
+	// task-lifecycle INFO line was the Scanner's "pending -> inqueued", so a task
+	// being picked up and run by a worker left no trace.
+	w.log.InfoContext(ctx, "taskqueue.Worker: claimed task (inqueued -> processing)",
+		"task_id", task.ID.String(), "task_type", task.TaskType, "worker_id", w.id)
+	start := time.Now()
 	env := &Env{
 		TaskID:      task.ID.String(),
 		TaskType:    task.TaskType,
@@ -240,7 +246,10 @@ func (w *Worker) runTask(ctx context.Context, task Task) {
 	if markErr := w.db.MarkSucceeded(ctx, task.ID, workerID, output); markErr != nil {
 		w.log.WarnContext(ctx, "taskqueue.Worker: MarkSucceeded",
 			"task_id", task.ID.String(), "err", markErr)
+		return
 	}
+	w.log.InfoContext(ctx, "taskqueue.Worker: task succeeded (processing -> succeeded)",
+		"task_id", task.ID.String(), "task_type", task.TaskType, "duration", time.Since(start))
 }
 
 func (w *Worker) heartbeatLoop(ctx context.Context) {

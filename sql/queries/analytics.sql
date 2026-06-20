@@ -82,6 +82,7 @@ WHERE cm.course_id = $1;
 SELECT
   c.id                                        AS course_id,
   c.title,
+  o.slug                                      AS org_slug,
   COUNT(DISTINCT la.lesson_id)::int           AS lessons_done,
   (
     SELECT COUNT(*)::int
@@ -97,8 +98,9 @@ FROM lesson_attempts la
 JOIN lessons l ON l.id = la.lesson_id
 JOIN course_modules cm ON cm.id = l.module_id
 JOIN courses c ON c.id = cm.course_id
+JOIN organizations o ON o.id = c.organization_id
 WHERE la.user_id = $1
-GROUP BY c.id, c.title
+GROUP BY c.id, c.title, o.slug
 ORDER BY MAX(la.submitted_at) DESC NULLS LAST
 LIMIT $2 OFFSET $3;
 

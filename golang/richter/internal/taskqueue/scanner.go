@@ -11,36 +11,31 @@ import (
 	"github.com/samber/do/v2"
 )
 
-// Scanner runs the three periodic sweeps that keep the task state
-// machine moving. It is the only place where pending -> inqueued
-// and processing -> inqueued transitions happen, so all racing
-// concerns live here.
+// Scanner runs the periodic recovery sweeps that keep the task state
+// machine moving. Tasks are born 'inqueued' by the producer (and the
+// pg_notify wakes a worker immediately), so the scanner NEVER creates
+// queue entries — it is a pure BACKUP path that only rescues rows that
+// got stuck. All racing concerns for the recovery transitions live here.
 //
-// Three sweeps per cycle:
+// Two sweeps per cycle:
 //
-//   1. EnqueuePendingBatch: rows with status='pending' become
-//      'inqueued' and get a queue_seq. The pg_notify trigger on
-//      INSERT means a fresh pending row wakes the worker within
-//      milliseconds, not seconds. The periodic sweep is just
-//      belt-and-suspenders for missed notifications.
+//  1. ReapStaleProcessingBatch: rows with status='processing'
+//     AND heartbeat older than staleAfter are re-enqueued. This
+//     is the recovery path for crashed workers.
 //
-//   2. ReapStaleProcessingBatch: rows with status='processing'
-//      AND heartbeat older than staleAfter are re-enqueued. This
-//      is the recovery path for crashed workers.
-//
-//   3. RequeueOrphanedInqueuedBatch: rows with status='inqueued'
-//      that have been sitting longer than queueStaleAfter are
-//      re-prioritized. Safety net for cases where a downstream
-//      push (e.g. a payload store) failed silently and left the
-//      task stranded in 'inqueued' forever.
+//  2. RequeueOrphanedInqueuedBatch: rows with status='inqueued'
+//     that have been sitting longer than queueStaleAfter (the
+//     pg_notify wake was missed, or the worker was down at insert
+//     time) are re-prioritized to the head so the worker picks them
+//     up. Safety net against a permanently-stranded 'inqueued' row.
 type Scanner struct {
 	db              DB
-	interval        time.Duration  // e.g. 5s
-	staleAfter      time.Duration  // e.g. 30s — heartbeat older than this is dead
-	queueStaleAfter time.Duration  // e.g. 1m — inqueued older than this gets bumped
-	batchSize       int            // rows per sweep, e.g. 50
+	interval        time.Duration // e.g. 5s
+	staleAfter      time.Duration // e.g. 30s — heartbeat older than this is dead
+	queueStaleAfter time.Duration // e.g. 1m — inqueued older than this gets bumped
+	batchSize       int           // rows per sweep, e.g. 50
 	log             *slog.Logger
-	notifCh         chan string    // shared with Listener; non-blocking writes
+	notifCh         chan string // Scanner -> Worker wake; non-blocking writes
 }
 
 // NewScannerRaw returns a scanner with sensible defaults. Callers can
@@ -95,21 +90,6 @@ func (s *Scanner) Run(ctx context.Context) {
 }
 
 func (s *Scanner) tick(ctx context.Context) {
-	enqueued, err := s.db.EnqueuePendingBatch(ctx, s.batchSize)
-	if err != nil {
-		s.log.WarnContext(ctx, "taskqueue.Scanner: enqueue failed", "err", err)
-	} else if len(enqueued) > 0 {
-		s.log.InfoContext(ctx, "taskqueue.Scanner: pending -> inqueued", "count", len(enqueued))
-		// Wake the Worker so it claims the newly inqueued tasks
-		// immediately instead of waiting for the next poll cycle.
-		for range len(enqueued) {
-			select {
-			case s.notifCh <- "":
-			default:
-			}
-		}
-	}
-
 	reaped, err := s.db.ReapStaleProcessingBatch(ctx, s.batchSize, s.staleAfter)
 	if err != nil {
 		s.log.WarnContext(ctx, "taskqueue.Scanner: reap failed", "err", err)

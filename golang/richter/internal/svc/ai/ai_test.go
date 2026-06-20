@@ -578,3 +578,81 @@ Trả về JSON object: {"items": [...]}`, g.GeminiPromptHint(), langInstruction
 		}
 	}
 }
+
+// TestNormalizeForTTS pins the fix for "ô tri" (garbled) listening audio: math /
+// CS notation must be rewritten into speakable words before it reaches Piper.
+// The regression guard is structural — after normalization the spoken string must
+// contain NONE of the symbols a phoneme TTS chokes on.
+func TestNormalizeForTTS(t *testing.T) {
+	// Symbols that produce garbled audio and must never survive normalization.
+	unspeakable := []string{"(", ")", "²", "³", "ⁿ", "Θ", "Ω", "Σ", "π", "λ",
+		"=", "%", "^", "_", "≤", "≥", "≈", "∞", "×", "÷", "√", "[", "]", "{", "}"}
+
+	cases := []struct {
+		name     string
+		in       string
+		lang     string
+		wantWord []string // spoken words that must appear
+		notWord  []string // substrings that must NOT appear (prose false positives)
+	}{
+		{
+			name:     "DSA complexity notation (vi)",
+			in:       "Thuật toán có độ phức tạp O(n²) trong trường hợp xấu nhất và Θ(n log n) khi tốt, với cận dưới Ω(1).",
+			lang:     "vi",
+			wantWord: []string{"O lớn của n bình phương", "theta của n log n", "omega của 1"},
+		},
+		{
+			name:     "recurrence + modulo (vi)",
+			in:       "Công thức truy hồi T(n) = aT(n/b) + f(n); và 7 % 2 = 1.",
+			lang:     "vi",
+			wantWord: []string{"bằng", "phần trăm"},
+		},
+		{
+			name:     "english audio",
+			in:       "The cost is O(n²) and at most Θ(n log n); 3 ≤ x ≤ 5.",
+			lang:     "en",
+			wantWord: []string{"Big O of n squared", "theta of n log n", "less than or equal to"},
+		},
+		{
+			name:     "plain prose untouched",
+			in:       "Hôm nay chúng ta học về danh sách liên kết và cây nhị phân.",
+			lang:     "vi",
+			wantWord: []string{"danh sách liên kết", "cây nhị phân"},
+		},
+		{
+			// A lowercase-o word before " (" must NOT be read as Big-O, and a "/"
+			// in a date/URL must NOT become "trên" (the false positives we just fixed).
+			name:    "prose with parens + date is not mangled",
+			in:      "Tất cả vào (xem hình 3) trong buổi ngày 20/6 đều đúng.",
+			lang:    "vi",
+			notWord: []string{"O lớn", "lớn của", "trên"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeForTTS(tc.in, tc.lang)
+			for _, sym := range unspeakable {
+				if strings.Contains(got, sym) {
+					t.Errorf("normalized text still contains unspeakable %q: %q", sym, got)
+				}
+			}
+			for _, w := range tc.wantWord {
+				if !strings.Contains(got, w) {
+					t.Errorf("normalized text missing expected words %q: got %q", w, got)
+				}
+			}
+			for _, w := range tc.notWord {
+				if strings.Contains(got, w) {
+					t.Errorf("normalized text has false-positive %q: got %q", w, got)
+				}
+			}
+		})
+	}
+
+	// Clean prose with no notation must pass through byte-for-byte.
+	clean := "Buổi học hôm nay nói về cấu trúc dữ liệu và các ứng dụng thực tế."
+	if got := normalizeForTTS(clean, "vi"); got != clean {
+		t.Errorf("clean prose was altered:\n want %q\n  got %q", clean, got)
+	}
+}

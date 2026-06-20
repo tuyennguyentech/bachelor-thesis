@@ -52,7 +52,6 @@
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "grace@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "iris@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "jack@dyadia.local", "role": "student" },
-  { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "peter@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "quinn@dyadia.local", "role": "student" },
   { "org_slug": "hust-cs", "course_title": "Lập trình hướng đối tượng với Java", "user_email": "alice@dyadia.local", "role": "teacher" },
 
@@ -130,7 +129,6 @@
   { "org_slug": "open-learn", "course_title": "Data Science với Pandas", "user_email": "grace@dyadia.local", "role": "student" },
   { "org_slug": "open-learn", "course_title": "Data Science với Pandas", "user_email": "iris@dyadia.local", "role": "student" },
 
-  { "org_slug": "open-learn", "course_title": "Linux và Command Line", "user_email": "alice@dyadia.local", "role": "teacher" },
   { "org_slug": "open-learn", "course_title": "Linux và Command Line", "user_email": "peter@dyadia.local", "role": "student" },
   { "org_slug": "open-learn", "course_title": "Linux và Command Line", "user_email": "bob@dyadia.local", "role": "student" },
   { "org_slug": "open-learn", "course_title": "Linux và Command Line", "user_email": "eve@dyadia.local", "role": "student" },

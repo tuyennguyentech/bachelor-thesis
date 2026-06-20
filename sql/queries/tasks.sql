@@ -1,4 +1,22 @@
 -- name: InsertTask :one
+-- Births the task already 'inqueued' — the queue is Postgres-only, so there is no
+-- 'pending' parking state. queue_seq is assigned inline as the next value after the
+-- current inqueued tail (same semantics the old separate EnqueueTask had); the
+-- AFTER INSERT trigger's pg_notify then wakes a worker that can claim it at once.
+INSERT INTO tasks (
+    id, lesson_id, chunk_id, task_type, status, input_payload, created_by, queue_seq
+) VALUES (
+    $1, $2, $3, $4, 'inqueued', $5, $6,
+    (SELECT COALESCE(MAX(queue_seq), 0) + 1 FROM tasks WHERE status = 'inqueued')
+)
+RETURNING *;
+
+-- name: InsertSeededTask :one
+-- Inserts a synthetic task row with an EXPLICIT status — used only by seed/dev
+-- paths to plant a terminal (e.g. 'succeeded') task so preflight checks pass,
+-- WITHOUT enqueuing real work. queue_seq stays at its default 0; a non-'inqueued'
+-- row is never claimed, so the AFTER INSERT pg_notify just wakes a worker that
+-- finds nothing to do. Do NOT use this for real tasks — use InsertTask.
 INSERT INTO tasks (
     id, lesson_id, chunk_id, task_type, status, input_payload, created_by
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -6,7 +24,7 @@ RETURNING *;
 
 -- name: CountActiveTasksByUser :one
 SELECT COUNT(*) FROM tasks
-WHERE created_by = $1 AND status IN ('pending', 'inqueued', 'processing');
+WHERE created_by = $1 AND status IN ('inqueued', 'processing');
 
 -- name: GetTask :one
 SELECT * FROM tasks WHERE id = $1;
@@ -27,7 +45,7 @@ LIMIT $1 OFFSET $2;
 
 -- name: ListActiveTasks :many
 SELECT * FROM tasks
-WHERE status IN ('pending', 'inqueued', 'processing')
+WHERE status IN ('inqueued', 'processing')
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -48,49 +66,6 @@ ORDER BY lesson_id, task_type, created_at DESC, id DESC;
 -- Test helper: removes all tasks for a lesson. Tests use this
 -- to reset state between subtests that share a lesson id.
 DELETE FROM tasks WHERE lesson_id = $1;
-
--- name: EnqueuePendingBatch :many
--- Scanner primitive: atomic pending -> inqueued transition. Uses
--- FOR UPDATE SKIP LOCKED in a CTE to allow multiple scanner
--- goroutines. The window function runs over the locked rows.
--- Returns the rows that were transitioned.
-WITH base AS (
-    SELECT id, created_at
-    FROM tasks
-    WHERE status = 'pending'
-    ORDER BY created_at
-    FOR UPDATE SKIP LOCKED
-    LIMIT $1
-),
-ranked AS (
-    SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn
-    FROM base
-),
-seq AS (
-    SELECT COALESCE(MAX(queue_seq), 0) AS max_seq
-    FROM tasks WHERE status = 'inqueued'
-)
-UPDATE tasks
-SET status = 'inqueued',
-    queue_seq = (SELECT max_seq FROM seq) + ranked.rn,
-    updated_at = now()
-FROM ranked
-WHERE tasks.id = ranked.id
-RETURNING tasks.*;
-
--- name: EnqueueTask :one
--- Ensure ONE specific task is inqueued, assigning the next queue_seq if it was
--- still pending. Unlike EnqueuePendingBatch (which transitions the globally-
--- oldest pending rows), this targets a single id, so callers/tests can enqueue
--- their own task without racing — or transitioning — other producers' pending
--- tasks. Idempotent: a task already inqueued (e.g. the background scanner got
--- there first) is returned unchanged, keeping its existing queue_seq.
-UPDATE tasks
-SET status = 'inqueued',
-    queue_seq = COALESCE(tasks.queue_seq, (SELECT COALESCE(MAX(t2.queue_seq), 0) + 1 FROM tasks t2 WHERE t2.status = 'inqueued')),
-    updated_at = now()
-WHERE tasks.id = $1 AND tasks.status IN ('pending', 'inqueued')
-RETURNING tasks.*;
 
 -- name: ReapStaleProcessingBatch :many
 -- Scanner primitive: processing + heartbeat stale -> inqueued.
@@ -220,7 +195,7 @@ SET status = 'cancelled',
     heartbeat = NULL,
     message = ''
 WHERE id = $1
-  AND status IN ('pending', 'inqueued', 'processing');
+  AND status IN ('inqueued', 'processing');
 
 -- name: ReconnectCandidates :many
 -- Worker primitive: on startup, find tasks still under our worker_id
@@ -239,7 +214,7 @@ WHERE lesson_id = @lesson_id::uuid
     (chunk_id IS NULL AND @chunk_id::uuid IS NULL) OR
     (chunk_id = @chunk_id::uuid)
   )
-  AND status IN ('pending', 'inqueued', 'processing')
+  AND status IN ('inqueued', 'processing')
 LIMIT 1;
 
 -- name: UpdateTaskProgress :exec
@@ -265,7 +240,7 @@ WHERE id = $1 AND worker_id = $3 AND status = 'processing';
 -- System-wide task counts grouped into the three buckets the admin monitor
 -- displays. A single round-trip replaces three separate COUNT(*) queries.
 SELECT
-  count(*) FILTER (WHERE status IN ('pending', 'inqueued', 'processing')) AS active,
+  count(*) FILTER (WHERE status IN ('inqueued', 'processing')) AS active,
   count(*) FILTER (WHERE status = 'succeeded') AS succeeded,
   count(*) FILTER (WHERE status IN ('failed', 'cancelled')) AS failed_or_cancelled
 FROM tasks;

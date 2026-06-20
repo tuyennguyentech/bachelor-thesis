@@ -25,9 +25,10 @@
 //     expensive work, the executor should checkpoint progress to
 //     output_payload after each major step.
 //
-//  4. The scanner does the cross-state-machine bookkeeping
-//     (pending -> inqueued, processing -> inqueued on heartbeat
-//     timeout, inqueued -> head of queue on requeue). It uses
+//  4. Tasks are born 'inqueued' (the producer inserts them already
+//     queued, and pg_notify wakes a worker at once). The scanner does
+//     only recovery bookkeeping — processing -> inqueued on heartbeat
+//     timeout, and inqueued -> head of queue on requeue. It uses
 //     FOR UPDATE SKIP LOCKED so multiple scanner goroutines on the
 //     same or different processes don't fight.
 //

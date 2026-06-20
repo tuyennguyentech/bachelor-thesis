@@ -67,14 +67,14 @@ func lessonTaskInputForKind(k richterv1.LessonTaskKind, req *richterv1.StartLess
 			return nil, "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("generate_interactions.lesson_id must match lesson_id"))
 		}
 		in := &richterv1.QuizGenTaskInput{
-			LessonId:        req.GetLessonId(),
-			ChunkId:         genReq.GetChunkId(),
-			ForceRegenerate: genReq.GetForceRegenerate(),
+			LessonId:         req.GetLessonId(),
+			ChunkId:          genReq.GetChunkId(),
+			ForceRegenerate:  genReq.GetForceRegenerate(),
 			InteractionKinds: genReq.GetInteractionKinds(),
-			CountPerChunk:   genReq.GetCountPerChunk(),
-			Strategy:        genReq.GetStrategy(),
-			Difficulty:      genReq.GetDifficulty(),
-			FocusPrompt:     genReq.GetFocusPrompt(),
+			CountPerChunk:    genReq.GetCountPerChunk(),
+			Strategy:         genReq.GetStrategy(),
+			Difficulty:       genReq.GetDifficulty(),
+			FocusPrompt:      genReq.GetFocusPrompt(),
 		}
 		out, err := proto.Marshal(in)
 		if err != nil {
@@ -212,18 +212,24 @@ func (s *AISvc) StartLessonTask(
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("start lesson task: %w", err))
 		}
+		// InsertTask births the row already 'inqueued' with a queue_seq, so it is
+		// claimable the instant this transaction commits. The pg_notify(task_created)
+		// fired on INSERT is delivered at COMMIT — by then the row is inqueued, so the
+		// worker the Listener wakes claims it at once (no scanner round-trip, no wait).
+		// ('pending' was a FoundationDB-era parking state; the queue is Postgres-only now.)
 		t, err := q.InsertTask(ctx, gen.InsertTaskParams{
 			ID:           taskIDpg,
 			LessonID:     lessonID,
 			ChunkID:      chunkIDpg,
 			TaskType:     taskType,
-			Status:       gen.TaskStatusPending,
 			InputPayload: inputPayload,
 			CreatedBy:    userID,
 		})
 		if err != nil {
 			return nil, svc.ConnectDBError(err)
 		}
+		s.log.InfoContext(ctx, "taskqueue: task created + inqueued",
+			"task_id", taskID.String(), "task_type", taskType, "lesson_id", req.GetLessonId())
 		return &richterv1.StartLessonTaskResponse{Task: lessonTaskToProto(taskqueue.FromGen(t))}, nil
 	})
 	if err != nil {
@@ -272,8 +278,7 @@ func (s *AISvc) ListLessonTasks(
 	out := make([]*richterv1.LessonTask, 0, len(tasks))
 	for _, t := range tasks {
 		if req.GetActiveOnly() {
-			if t.Status != string(taskqueue.StatusPending) &&
-				t.Status != string(taskqueue.StatusInqueued) &&
+			if t.Status != string(taskqueue.StatusInqueued) &&
 				t.Status != string(taskqueue.StatusProcessing) {
 				continue
 			}
@@ -493,8 +498,6 @@ func taskTypeToProtoKind(t string) richterv1.LessonTaskKind {
 
 func taskStatusToProtoStatus(s string) richterv1.LessonTaskStatus {
 	switch s {
-	case string(taskqueue.StatusPending):
-		return richterv1.LessonTaskStatus_LESSON_TASK_STATUS_QUEUED
 	case string(taskqueue.StatusInqueued):
 		return richterv1.LessonTaskStatus_LESSON_TASK_STATUS_QUEUED
 	case string(taskqueue.StatusProcessing):
@@ -511,7 +514,7 @@ func taskStatusToProtoStatus(s string) richterv1.LessonTaskStatus {
 
 func deriveTaskMessage(status string) string {
 	switch status {
-	case string(taskqueue.StatusPending), string(taskqueue.StatusInqueued):
+	case string(taskqueue.StatusInqueued):
 		return "Đang chờ..."
 	case string(taskqueue.StatusProcessing):
 		return "Đang xử lý..."
@@ -525,4 +528,3 @@ func deriveTaskMessage(status string) string {
 		return ""
 	}
 }
-
