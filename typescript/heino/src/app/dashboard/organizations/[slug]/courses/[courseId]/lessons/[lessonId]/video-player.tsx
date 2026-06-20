@@ -7,6 +7,7 @@ import type { TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
 import { AIService } from "buf/gen/richter/v1/ai_pb";
 import type { LessonInteraction } from "buf/gen/richter/v1/interactions_pb";
 import { InteractiveTranscript } from "./interactive-transcript";
+import { useLessonAnalysisLive } from "./lesson-analysis-live-context";
 import { FileTextIcon } from "lucide-react";
 import { VideoPlayerControls } from "./video-player-controls";
 import { useRichterWebClient } from "@/lib/connect-webclient";
@@ -68,8 +69,8 @@ const SAVE_INTERVAL_S = videoPlayerConfig.saveIntervalS;
 
 export function VideoPlayer({
   videoUrl,
-  segments = [],
-  transcript = "",
+  segments: propSegments = [],
+  transcript: propTranscript = "",
   lessonId,
   initialPosition = 0,
   token,
@@ -88,6 +89,13 @@ export function VideoPlayer({
   maxWatchedSeconds,
   maxSavablePositionSeconds,
 }: Props) {
+  // Prefer the live transcript/segments shared by the processing tab's analysis
+  // hook (so a freshly-run transcription shows here without a page reload); fall
+  // back to the one-time server props when rendered outside the provider (e.g. the
+  // student learn view).
+  const live = useLessonAnalysisLive();
+  const segments = live ? live.segments : propSegments;
+  const transcript = live ? live.transcript : propTranscript;
   const router = useRouter();
   const aiClient = useRichterWebClient(AIService, token);
   // Ref-mirror so saveProgress (a stable useCallback) reads the latest cap

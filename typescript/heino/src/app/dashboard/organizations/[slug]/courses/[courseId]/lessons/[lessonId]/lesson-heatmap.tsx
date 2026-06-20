@@ -138,12 +138,14 @@ function HeatmapRow({ cells, gapLabel }: { cells: HeatCell[]; gapLabel: string }
   const [selected, setSelected] = useState<number | null>(null);
   const drillable = cells.some((c) => c.students !== undefined);
   // Cumulative centre (% of row width) of each cell, for tooltip positioning.
+  // Built with a straight-line loop (not `.map` with an outer `let acc`): the
+  // React Compiler forbids reassigning a closed-over variable inside a callback.
+  const centers: number[] = [];
   let acc = 0;
-  const centers = cells.map((c) => {
-    const center = acc + c.widthPct / 2;
+  for (const c of cells) {
+    centers.push(acc + c.widthPct / 2);
     acc += c.widthPct;
-    return center;
-  });
+  }
 
   return (
     <div className="flex flex-col gap-3" data-testid="lesson-heatmap">

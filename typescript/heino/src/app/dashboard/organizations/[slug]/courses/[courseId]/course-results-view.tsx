@@ -258,15 +258,17 @@ export function CourseResultsView({
   page,
   hasNext,
   loadError,
+  initialSub = "list",
 }: {
   rows: ResultRow[];
   atRisk: AtRiskRow[];
   page: number;
   hasNext: boolean;
   loadError: string | null;
+  initialSub?: SubTab;
 }) {
   const [mode, setMode] = useState<Mode>("average");
-  const [subTab, setSubTab] = useState<SubTab>("list");
+  const [subTab, setSubTab] = useState<SubTab>(initialSub);
   // Drill-down selections for the two interactive charts.
   const [bandSel, setBandSel] = useState<number | null>(null);
   const [scatterSel, setScatterSel] = useState<{ key: string; userIds: string[] } | null>(null);

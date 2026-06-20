@@ -13,7 +13,6 @@
 
 import path from "path";
 import { createClient } from "@connectrpc/connect";
-import { AIService, LessonTaskKind, LessonTaskStatus } from "buf/gen/richter/v1/ai_pb";
 import {
   test,
   expect,
@@ -24,7 +23,6 @@ import {
   createAuthedTransport,
   createCourse,
   createCourseModule,
-  rpcBaseUrl,
   SEED_HUST_CS_SLUG,
 } from "../fixtures";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
@@ -178,9 +176,10 @@ test("QuickCreate: video-less lesson shows quick-create + manual buttons", async
     { waitUntil: "domcontentloaded" },
   );
 
-  // Two entry points: quick-create (auto) and manual processing.
+  // Two entry points: quick-create (auto) and manual processing. "Xử lý thủ công"
+  // is now a client-side tab-switch button (was a <Link>), see BUG-F.
   await expect(page.getByTestId("quick-create-lesson-trigger")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("link", { name: /Xử lý thủ công/ })).toBeVisible();
+  await expect(page.getByTestId("manual-processing-cta")).toBeVisible();
 
   // The quick-create button opens the dialog scoped to this existing lesson.
   await page.getByTestId("quick-create-lesson-trigger").click();

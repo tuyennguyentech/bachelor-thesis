@@ -18,9 +18,10 @@ interface CourseResultsProps {
   courseId: string;
   token: string;
   page?: number;
+  initialSub?: "list" | "distribution" | "scatter" | "at-risk";
 }
 
-export async function CourseResults({ courseId, token, page = 1 }: CourseResultsProps) {
+export async function CourseResults({ courseId, token, page = 1, initialSub }: CourseResultsProps) {
   const client = createRichterClient(InteractionService, token);
   const currentPage = Math.max(1, page);
   let students: CourseStudentSummary[] = [];
@@ -64,9 +65,11 @@ export async function CourseResults({ courseId, token, page = 1 }: CourseResults
       engagementScore: s.engagementScore,
       lastActive: s.lastActive ? formatDate(s.lastActive) : null,
       hasAttempt,
-      flagged:
-        atRiskIds.has(s.userId) ||
-        (hasAttempt && (s.avgScore < 0.5 || s.engagementScore < 40)),
+      // The "Cần chú ý" list tag means exactly the same as the "Cần chú ý" tab:
+      // a student flagged at-risk (a run of consecutive low-engagement lessons).
+      // Low average score alone is still visible via the red score column, so it
+      // doesn't need a separate broader flag that would diverge from the tab.
+      flagged: atRiskIds.has(s.userId),
       totalScore: s.totalScore,
       totalMaxScore: s.totalMaxScore,
       totalResponses: s.totalResponses,
@@ -89,6 +92,7 @@ export async function CourseResults({ courseId, token, page = 1 }: CourseResults
       page={currentPage}
       hasNext={hasNext}
       loadError={loadError}
+      initialSub={initialSub}
     />
   );
 }

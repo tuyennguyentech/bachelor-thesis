@@ -27,12 +27,6 @@ async function rpc<T = unknown>(
   return (await res.json()) as T;
 }
 
-function lessonIdFromUrl(url: string) {
-  const match = url.match(/\/lessons\/([^/?#]+)/);
-  if (!match) throw new Error(`Lesson id not found in URL: ${url}`);
-  return match[1];
-}
-
 test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => {
   // Fresh analyzed lesson used by "teacher can manually create every supported interaction kind".
   // Created once in beforeAll so the test doesn't touch the seeded Big-O lesson.

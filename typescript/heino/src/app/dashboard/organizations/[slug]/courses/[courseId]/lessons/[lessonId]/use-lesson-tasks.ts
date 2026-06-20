@@ -100,7 +100,6 @@ function useTaskPolling({
       // Clear stale tasks from a previous enabled period. We intentionally
       // bypass the derived-state pattern because the consumer relies on the
       // hook returning an empty list as soon as the flag flips to false.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState({ tasks: [], lastSuccessAt: null, lastError: null });
       return;
     }

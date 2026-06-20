@@ -52,7 +52,7 @@ test.describe("Silent refresh flow", () => {
 
     // Login lại
     await page.getByLabel("Email").fill(ADMIN_EMAIL);
-    await page.getByLabel("Mật khẩu").fill(ADMIN_PASSWORD);
+    await page.getByLabel("Mật khẩu", { exact: true }).fill(ADMIN_PASSWORD);
     await page.getByRole("button", { name: "Đăng nhập" }).click();
 
     // Quay về đúng trang gốc (không phải /admin/users default)

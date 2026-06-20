@@ -152,6 +152,10 @@ const sharedState: IsolatedFixture = {
 
 // ── Extended test with freshStudentPage fixture ──────────────────────────────
 
+/* eslint-disable react-hooks/rules-of-hooks --
+ * `use` is Playwright's fixture-injection callback, not the React `use` hook.
+ * ESLint's rules-of-hooks rule misidentifies it because of the name collision.
+ */
 const test = base.extend<{ freshStudentPage: Page }>({
   freshStudentPage: async ({ page, baseURL }, use) => {
     // sharedState.freshStudentEmail is set in beforeAll
@@ -159,6 +163,7 @@ const test = base.extend<{ freshStudentPage: Page }>({
     await use(page);
   },
 });
+/* eslint-enable react-hooks/rules-of-hooks */
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 

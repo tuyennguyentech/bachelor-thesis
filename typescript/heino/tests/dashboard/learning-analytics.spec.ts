@@ -48,6 +48,20 @@ async function goToBigOResultsTab(page: Page): Promise<string> {
 }
 
 /**
+ * The lesson results tab is split into sub-tabs (Bảng kết quả / Bản đồ nhiệt /
+ * Phân tích câu hỏi); the table is default. These helpers switch to the heatmap
+ * or question-analysis sub-tab via its segmented-control button (no navigation).
+ */
+async function goToBigOHeatmap(page: Page): Promise<void> {
+  await goToBigOResultsTab(page);
+  await page.getByTestId("lesson-results-subtab-heatmap").click();
+}
+async function goToBigOQuestions(page: Page): Promise<void> {
+  await goToBigOResultsTab(page);
+  await page.getByTestId("lesson-results-subtab-questions").click();
+}
+
+/**
  * Navigate to the DSA course workspace results tab (?tab=results).
  */
 async function goToDsaCourseResults(page: Page): Promise<void> {
@@ -67,7 +81,7 @@ async function goToDsaCourseResults(page: Page): Promise<void> {
 
 test.describe("Lesson analytics — heatmap & question analytics (teacher view)", () => {
   test("teacher sees lesson-heatmap with chunk segments on results tab", async ({ teacherPage: page }) => {
-    await goToBigOResultsTab(page);
+    await goToBigOHeatmap(page);
 
     const heatmap = page.getByTestId("lesson-heatmap");
     await expect(heatmap).toBeVisible();
@@ -81,7 +95,7 @@ test.describe("Lesson analytics — heatmap & question analytics (teacher view)"
   });
 
   test("hovering a heatmap segment reveals its detail tooltip", async ({ teacherPage: page }) => {
-    await goToBigOResultsTab(page);
+    await goToBigOHeatmap(page);
     const heatmap = page.getByTestId("lesson-heatmap");
     await expect(heatmap).toBeVisible();
     // Hover the first segment cell → a rich tooltip with respondent count appears
@@ -96,12 +110,12 @@ test.describe("Lesson analytics — heatmap & question analytics (teacher view)"
     // (admin@dyadia.local) is NOT a hust-cs member and hits the org 403 gate,
     // so org-admin alice is the correct "admin-level manager" coverage here —
     // matching how student-progress.spec.ts uses userPage for manager views.
-    await goToBigOResultsTab(page);
+    await goToBigOHeatmap(page);
     await expect(page.getByTestId("lesson-heatmap")).toBeVisible();
   });
 
   test("teacher sees per-kind accuracy strip and/or question analysis", async ({ teacherPage: page }) => {
-    await goToBigOResultsTab(page);
+    await goToBigOQuestions(page);
 
     // The Big-O lesson has MCQ interactions with seeded responses, so at least
     // one of the analytics panels should render. Assert at least one is visible
@@ -209,7 +223,10 @@ test.describe("Course results analytics (teacher view)", () => {
     await expect(scatter).toBeVisible();
     // Hover the first plotted learner dot — a positioned tooltip appears with the
     // exact điểm % and tương tác value (real React hover, not a native title).
-    await scatter.locator("circle[data-dot]").first().hover();
+    // force: dots are large transparent hit-targets that overlap when learners sit
+    // close together (denser cohorts), so an adjacent dot may cover this one's
+    // centre; the tooltip fires on whichever dot the cursor lands on either way.
+    await scatter.locator("circle[data-dot]").first().hover({ force: true });
     await expect(scatter.getByText(/Điểm:/).first()).toBeVisible({ timeout: 5000 });
     await expect(scatter.getByText(/Tương tác:/).first()).toBeVisible();
   });
@@ -251,20 +268,21 @@ test.describe("Course results analytics (teacher view)", () => {
   test("at-risk lives in its own tab (card grid) or is gracefully absent", async ({ teacherPage: page }) => {
     await goToDsaCourseResults(page);
 
-    // The at-risk panel is now a dedicated sub-tab that only appears when there
-    // ARE at-risk students; the inline always-on box is gone.
+    // The at-risk panel is a dedicated sub-tab that is now ALWAYS present (it no
+    // longer disappears when a course has no flagged students — it shows an empty
+    // state instead, so the teacher can always find it).
     const tab = page.getByTestId("results-subtab-at-risk");
-    if ((await tab.count()) > 0) {
-      await tab.click();
-      const atRisk = page.getByTestId("at-risk-section");
-      await expect(atRisk).toBeVisible();
+    await expect(tab).toBeVisible();
+    await tab.click();
+    const atRisk = page.getByTestId("at-risk-section");
+    await expect(atRisk).toBeVisible();
+    if ((await page.getByTestId("at-risk-card").count()) > 0) {
+      // There ARE at-risk students → header + a card grid.
       await expect(atRisk.getByText(/học viên cần chú ý/)).toBeVisible();
-      // Each at-risk student is a card in the responsive grid.
       await expect(page.getByTestId("at-risk-card").first()).toBeVisible();
     } else {
-      // No at-risk students in this seed — the tab is absent; assert the table
-      // still renders with the watch-rate column so the page is functional.
-      await expect(page.getByRole("columnheader", { name: "% xem" })).toBeVisible();
+      // None in this seed → graceful empty state (no longer a vanished tab).
+      await expect(page.getByTestId("at-risk-empty")).toBeVisible();
     }
   });
 
@@ -310,7 +328,7 @@ test.describe("Pure student does NOT see teacher analytics", () => {
 // ── Reactive drill-downs: click a chart slice → list who is in it ────────────
 test.describe("Analytics drill-downs (teacher view)", () => {
   test("clicking a heatmap segment lists the students who answered it", async ({ teacherPage: page }) => {
-    await goToBigOResultsTab(page);
+    await goToBigOHeatmap(page);
     const heatmap = page.getByTestId("lesson-heatmap");
     await expect(heatmap).toBeVisible();
     // Click a segment cell that has data (shows a "%"), so its breakdown is non-empty.
@@ -373,11 +391,15 @@ test.describe("Analytics drill-downs (teacher view)", () => {
 test.describe("Analytics/processing bug fixes (teacher view)", () => {
   test("at-risk card shows the weak lesson name + score directly (redesigned)", async ({ userPage: page }) => {
     await goToDsaCourseResults(page);
+    // The at-risk sub-tab is always present now; click it and only assert the
+    // card-content redesign when this seed actually has at-risk students (the
+    // empty-state path is covered above; rich-data cards by results-redesign).
     const tab = page.getByTestId("results-subtab-at-risk");
-    if ((await tab.count()) === 0) {
-      test.skip(true, "no at-risk students in the seed — at-risk tab not exercised");
-    }
     await tab.click();
+    if ((await page.getByTestId("at-risk-card").count()) === 0) {
+      await expect(page.getByTestId("at-risk-empty")).toBeVisible();
+      return;
+    }
     const card = page.getByTestId("at-risk-card").first();
     await expect(card).toBeVisible({ timeout: 5000 });
     // Redesign: weak lessons are labelled engagement bars — the lesson name and

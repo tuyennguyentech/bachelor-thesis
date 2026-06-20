@@ -15,7 +15,7 @@ import {
   expect,
   goToSeededLesson,
   SEED_DSA_LESSON_BIG_O,
-  SEED_DSA_LESSON_RECURRENCE,
+  SEED_DSA_LESSON_NO_VIDEO,
 } from "../fixtures";
 
 // ── Tab strip is present for manager roles ─────────────────────────────────
@@ -51,11 +51,8 @@ test.describe("Lesson tab — Bài giảng (content)", () => {
     // The content section header
     await expect(page.getByText("Studio bài giảng")).toBeVisible();
 
-    // The seeded lesson has a video_key → video player area (not an error placeholder)
-    // The tab-1 section should NOT be hidden
-    const contentSection = page.locator('[data-testid="video-workflow-stepper"]');
-    // video-workflow-stepper only lives inside the processing tab — content tab has the Studio card
-    // Use the heading instead:
+    // video-workflow-stepper only lives inside the processing tab — the content
+    // tab shows the Studio card, so assert on its heading instead.
     await expect(page.getByText("Studio bài giảng")).toBeVisible();
   });
 
@@ -172,14 +169,37 @@ test.describe("Lesson tab — Kết quả & Thống kê (results)", () => {
     await expect(attemptsSection.getByText("Học viên").first()).toBeVisible();
     await expect(attemptsSection.getByText("Điểm").first()).toBeVisible();
   });
+
+  test("results splits into 3 sub-tabs: table (default) → heatmap → questions", async ({ userPage: page }) => {
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
+    await page.goto(`${lessonHref}?tab=results`, { waitUntil: "domcontentloaded" });
+
+    // Default sub-tab is the results table.
+    await expect(page.getByTestId("lesson-attempts")).toBeVisible();
+    await expect(page.getByTestId("lesson-heatmap")).toHaveCount(0);
+
+    // Switching to the heatmap sub-tab mounts the heatmap and unmounts the table.
+    await page.getByTestId("lesson-results-subtab-heatmap").click();
+    await expect(page.getByTestId("lesson-heatmap")).toBeVisible();
+    await expect(page.getByTestId("lesson-attempts")).toHaveCount(0);
+
+    // Switching to the question-analysis sub-tab.
+    await page.getByTestId("lesson-results-subtab-questions").click();
+    await expect(page.getByRole("heading", { name: "Phân tích câu hỏi" })).toBeVisible();
+    await expect(page.getByTestId("lesson-heatmap")).toHaveCount(0);
+
+    // Back to the table.
+    await page.getByTestId("lesson-results-subtab-table").click();
+    await expect(page.getByTestId("lesson-attempts")).toBeVisible();
+  });
 });
 
 // ── Tab 1: no-video placeholder shows upload shortcut button ──────────────
 
 test.describe("Lesson tab — Bài giảng, no-video placeholder", () => {
   test("shows quick-create + manual-processing entry points when lesson has no video", async ({ teacherPage: page }) => {
-    // SEED_DSA_LESSON_RECURRENCE has no video_key in seed data → no-video placeholder renders
-    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_RECURRENCE);
+    // SEED_DSA_LESSON_NO_VIDEO is an un-analyzed lesson with no video_key → no-video placeholder renders
+    const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_NO_VIDEO);
     await page.goto(`${lessonHref}?tab=content`, { waitUntil: "domcontentloaded" });
 
     // Quick-create (auto) entry point for this existing video-less lesson.

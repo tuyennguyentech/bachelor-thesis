@@ -39,15 +39,12 @@ import {
   test,
   expect,
   SEED_HUST_CS_SLUG,
-  SEED_DSA_LESSON_BIG_O,
   TEACHER_EMAIL,
   USER_PASSWORD,
-  goToSeededLesson,
   uid,
   createAnalyzedLesson,
 } from "../fixtures";
 
-const COURSES_URL = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses`;
 const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp4");
 
 /**
@@ -94,21 +91,6 @@ function lessonIdFromUrl(rawUrl: string) {
   const parts = url.pathname.split("/").filter(Boolean);
   return parts[parts.length - 1];
 }
-
-async function getSeededLessonWithChunks(
-  page: Page,
-  ai: ReturnType<typeof createAIClient>,
-  lessonTitle: string,
-  minChunks = 1,
-) {
-  await goToSeededLesson(page, lessonTitle);
-  const lessonUrl = page.url();
-  const lessonId = lessonIdFromUrl(lessonUrl);
-  const analysis = await ai.getLessonAnalysis({ lessonId });
-  expect(analysis.chunks.length).toBeGreaterThanOrEqual(minChunks);
-  return { lessonId, lessonUrl, chunks: analysis.chunks };
-}
-
 
 async function startGenerateTask(
   ai: ReturnType<typeof createAIClient>,

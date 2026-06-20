@@ -48,7 +48,6 @@ import {
   addOrgMember,
   createCourse,
   submitJoinRequest,
-  USER_EMAIL,
   USER_PASSWORD,
   SEED_HUST_CS_SLUG,
   OrganizationRole,

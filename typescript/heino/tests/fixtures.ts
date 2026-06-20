@@ -137,7 +137,9 @@ export const SEED_HUST_CS_COURSE_ALICE_NOT_JOINED = "Hệ điều hành";
 // references it, so the temporary self-enrol/cleanup never disturbs another test.
 export const SEED_HUST_CS_COURSE_ALICE_NOT_JOINED_2 = "Cơ sở dữ liệu";
 export const SEED_DSA_LESSON_BIG_O = "Bài 1: Big-O, Omega, Theta notation";
-export const SEED_DSA_LESSON_RECURRENCE = "Bài 2: Phân tích đệ quy với Master Theorem";
+// An un-analyzed DSA lesson with no video_key (Master Theorem now HAS a video,
+// since it carries analysis). Used by the no-video placeholder test.
+export const SEED_DSA_LESSON_NO_VIDEO = "Bài 3: Benchmark thực tế";
 
 async function isOnSeededLesson(page: Page, lessonTitle: string) {
   return page.url().includes("/lessons/") && (await page.getByRole("heading", { name: lessonTitle }).isVisible().catch(() => false));

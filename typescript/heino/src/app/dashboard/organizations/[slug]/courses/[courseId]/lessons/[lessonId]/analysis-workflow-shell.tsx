@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
 import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, AlertCircleIcon, Loader2Icon } from "lucide-react";
-import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import {
   VideoProcessingStepper,
   WorkflowStepPanel,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { AIService } from "buf/gen/richter/v1/ai_pb";
 import { LessonService } from "buf/gen/richter/v1/courses_pb";
 import type { ChunkInteractionConfig, TranscriptChunk, TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
@@ -11,6 +11,7 @@ import { useRichterWebClient } from "@/lib/connect-webclient";
 import { AnalysisWorkflowShell } from "./analysis-workflow-shell";
 import { LessonSettingsBar } from "./analysis-actions";
 import { useLessonAnalysisState } from "./use-lesson-analysis-state";
+import { useLessonAnalysisLive } from "./lesson-analysis-live-context";
 
 interface Props {
   lessonId: string;
@@ -89,6 +90,20 @@ export function AnalyzeButton({
   );
 
   const s = useLessonAnalysisState(state);
+
+  // Publish the live transcript/segments so the content tab's VideoPlayer (a
+  // separate, server-rendered subtree) reflects a freshly-run transcription
+  // without a router.refresh (which would re-trigger the heavy tab reload). The
+  // hook tracks segments only; the plain-text transcript (a fallback for the
+  // no-segments case) is derived from them.
+  const publishLive = useLessonAnalysisLive()?.publish;
+  const liveTranscript = useMemo(
+    () => s.segments.map((seg) => seg.text).join(" "),
+    [s.segments],
+  );
+  useEffect(() => {
+    publishLive?.({ segments: s.segments, transcript: liveTranscript });
+  }, [s.segments, liveTranscript, publishLive]);
 
   return (
     <div className="flex flex-col gap-3">

@@ -58,6 +58,7 @@ export async function CourseClassPulse({
   }
 
   const resultsHref = `/dashboard/organizations/${slug}/courses/${courseId}?tab=results`;
+  const atRiskHref = `${resultsHref}&sub=at-risk`;
 
   if (students.length === 0) {
     return (
@@ -113,7 +114,7 @@ export async function CourseClassPulse({
           <p className="mt-1 text-xl font-bold tabular-nums">{avgProgressPct}%</p>
         </div>
         <Link
-          href={resultsHref}
+          href={atRiskHref}
           className={`rounded-lg border p-3 transition-colors ${
             needAttention > 0
               ? "border-red-200 bg-red-50 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/20"

@@ -50,12 +50,11 @@ test.describe("Student dashboard — bob's actual view (isStudent=false due to a
     await expect(page.getByRole("heading", { name: "Tiến độ học tập của tôi" })).not.toBeVisible();
   });
 
-  test("hust-cs org appears in the Tổ chức sidebar (bob is active member)", async ({ studentPage: page }) => {
-    // The Tổ chức sidebar lists bob's orgs (up to 6). hust-cs name is "HUST Computer Science".
-    // This is more reliable than checking the recent-courses slice (which only shows first 4
-    // courses across all orgs and dyadia-demo's 4 courses may fill that slice before hust-cs).
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  test("hust-cs org appears on the organizations page (bob is active member)", async ({ studentPage: page }) => {
+    // The dashboard home no longer lists orgs/courses (removed as duplicates of the
+    // dedicated /dashboard/organizations and per-org course pages). bob's active
+    // membership now surfaces on the dedicated organizations page.
+    await page.goto("/dashboard/organizations", { waitUntil: "domcontentloaded" });
     await expect(page.getByText("HUST Computer Science")).toBeVisible();
   });
 

@@ -147,7 +147,7 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(chart.getByText(/· \d+%/).first()).toBeVisible();
   });
 
-  test("learner with multiple attempts sees the score-trend sparkline", async ({ studentPage: page }) => {
+  test("learner sees the interactive score-trend chart with a hover tooltip", async ({ studentPage: page }) => {
     const href = await goToCourseWorkspace(page);
     await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
     // bob has ≥2 attempts on the DSA course → the score-trend chart renders.
@@ -156,6 +156,12 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(trend.getByText("Xu hướng điểm qua các bài")).toBeVisible();
     // Match the chart by aria-label (the section also contains an InfoHint "?" SVG).
     await expect(trend.getByRole("img", { name: "Xu hướng điểm" })).toBeVisible();
+    // Redesign regression: hovering a data point shows a tooltip with the lesson
+    // name + exact score (the old sparkline's hover showed nothing). Hover a middle
+    // point (edge dots sit at the axis boundary); force: the SVG dots are small
+    // hit-targets and Firefox hover on them is flaky.
+    await trend.locator("svg circle").nth(1).hover({ force: true });
+    await expect(trend.getByText(/Điểm:/)).toBeVisible();
   });
 
   test("manager sees 'Nội dung theo chương' with content readiness per chapter", async ({ teacherPage: page }) => {
@@ -181,6 +187,20 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(page.getByRole("heading", { name: "Nhịp độ lớp học" })).toBeVisible();
     await expect(page.getByText("Tiến độ TB")).toBeVisible();
     await expect(page.getByText("Đã tham gia")).toBeVisible();
+  });
+
+  test("clicking 'Cần chú ý' in the class pulse opens the AT-RISK results sub-tab", async ({ userPage: page }) => {
+    const href = await goToCourseWorkspace(page);
+    await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
+    // Regression: the "Cần chú ý" metric must deep-link to the at-risk sub-tab of
+    // the results tab (?tab=results&sub=at-risk) — it used to land on the default
+    // "Danh sách kết quả" sub-tab (wrong tab).
+    const link = page.locator('a[href*="sub=at-risk"]').first();
+    await expect(link).toBeVisible();
+    expect(await link.getAttribute("href")).toContain("tab=results");
+    await link.click();
+    await expect(page.getByTestId("at-risk-section")).toBeVisible();
+    await expect(page.getByTestId("results-subtab-at-risk")).toHaveAttribute("aria-selected", "true");
   });
 
   test("overview replaces the lesson outline with a per-chapter chart", async ({ studentPage: page }) => {

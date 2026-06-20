@@ -27,7 +27,6 @@ import type { Page } from "@playwright/test";
 import { createClient, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { AuthService } from "buf/gen/richter/v1/auth_pb";
-import { InteractionService } from "buf/gen/richter/v1/interactions_pb";
 import {
   CourseService,
   CourseModuleService,

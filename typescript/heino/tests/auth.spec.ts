@@ -6,7 +6,7 @@ base.describe("Authentication", () => {
     base("shows form fields", async ({ page }) => {
       await page.goto("/login");
       await expect(page.getByLabel("Email")).toBeVisible();
-      await expect(page.getByLabel("Mật khẩu")).toBeVisible();
+      await expect(page.getByLabel("Mật khẩu", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Đăng nhập" })).toBeVisible();
     });
 
@@ -23,7 +23,7 @@ base.describe("Authentication", () => {
     base("shows validation error for wrong password", async ({ page }) => {
       await page.goto("/login");
       await page.getByLabel("Email").fill(ADMIN_EMAIL);
-      await page.getByLabel("Mật khẩu").fill("wrongpassword");
+      await page.getByLabel("Mật khẩu", { exact: true }).fill("wrongpassword");
       await page.getByRole("button", { name: "Đăng nhập" }).click();
       await expect(page.locator("div[class*='bg-destructive']")).toBeVisible();
     });
@@ -31,7 +31,7 @@ base.describe("Authentication", () => {
     base("logs in successfully and redirects to admin", async ({ page }) => {
       await page.goto("/login");
       await page.getByLabel("Email").fill(ADMIN_EMAIL);
-      await page.getByLabel("Mật khẩu").fill(ADMIN_PASSWORD);
+      await page.getByLabel("Mật khẩu", { exact: true }).fill(ADMIN_PASSWORD);
       await page.getByRole("button", { name: "Đăng nhập" }).click();
       await page.waitForURL(/\/(admin|dashboard)/);
       await expect(page).not.toHaveURL(/\/login/);
@@ -42,7 +42,7 @@ base.describe("Authentication", () => {
       // proxy redirects unauthenticated to /login?next=...
       await expect(page).toHaveURL(/\/login/);
       await page.getByLabel("Email").fill(ADMIN_EMAIL);
-      await page.getByLabel("Mật khẩu").fill(ADMIN_PASSWORD);
+      await page.getByLabel("Mật khẩu", { exact: true }).fill(ADMIN_PASSWORD);
       await page.getByRole("button", { name: "Đăng nhập" }).click();
       await page.waitForURL(/\/admin\/users/);
       await expect(page).toHaveURL(/\/admin\/users/);

@@ -21,8 +21,6 @@ interface Props {
   attempts: StudentAttemptSummary[];
   total: number;
   maxAttempts?: number;
-  perKind?: KindAccuracy[];
-  questions?: QuestionStat[];
 }
 
 /** Vietnamese label + accent colour per DB interaction-kind string. */
@@ -116,7 +114,7 @@ const HARD_QUESTION_THRESHOLD = 0.6;
  * who is struggling and which question is hardest — without scanning every row.
  * Computed from the already-loaded attempts + question stats (no extra request).
  */
-function NeedsAttentionBand({
+export function NeedsAttentionBand({
   attempts,
   questions,
 }: {
@@ -275,28 +273,44 @@ function QuestionAnalysisPanel({ questions }: { questions: QuestionStat[] }) {
   );
 }
 
-export function LessonAttempts({ attempts, total, maxAttempts, perKind, questions }: Props) {
-  if (attempts.length === 0) {
+/**
+ * The "Phân tích câu hỏi" sub-tab: per-kind accuracy + per-question breakdown.
+ * Both inner panels self-hide when empty, so this wrapper supplies the single
+ * empty state for the sub-tab (otherwise it could render blank).
+ */
+export function QuestionAnalysis({
+  perKind,
+  questions,
+}: {
+  perKind?: KindAccuracy[];
+  questions?: QuestionStat[];
+}) {
+  const hasKind = (perKind ?? []).filter((k) => k.responseCount > 0).length >= 2;
+  const hasQuestions = (questions ?? []).length > 0;
+  if (!hasKind && !hasQuestions) {
     return (
-      <div className="flex flex-col gap-4">
-        {perKind && perKind.length > 0 && <KindAccuracyStrip perKind={perKind} />}
-        <p className="text-sm text-muted-foreground">Chưa có học viên nào nộp bài.</p>
-        {questions && questions.length > 0 && (
-          <QuestionAnalysisPanel questions={questions} />
-        )}
+      <div className="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+        Chưa có dữ liệu phân tích câu hỏi. Số liệu xuất hiện khi học viên bắt đầu trả lời.
       </div>
     );
   }
-
   return (
     <div className="flex flex-col gap-4">
-      <NeedsAttentionBand attempts={attempts} questions={questions ?? []} />
-
       {perKind && perKind.length > 0 && <KindAccuracyStrip perKind={perKind} />}
+      {hasQuestions && <QuestionAnalysisPanel questions={questions!} />}
+    </div>
+  );
+}
 
-      <div className="flex flex-col gap-3">
-        <p className="text-xs text-muted-foreground">{total} lượt nộp</p>
-        <div className="overflow-x-auto rounded-md border">
+export function LessonAttempts({ attempts, total, maxAttempts }: Props) {
+  if (attempts.length === 0) {
+    return <p className="text-sm text-muted-foreground">Chưa có học viên nào nộp bài.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">{total} lượt nộp</p>
+      <div className="overflow-x-auto rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -405,11 +419,6 @@ export function LessonAttempts({ attempts, total, maxAttempts, perKind, question
             </TableBody>
           </Table>
         </div>
-      </div>
-
-      {questions && questions.length > 0 && (
-        <QuestionAnalysisPanel questions={questions} />
-      )}
     </div>
   );
 }

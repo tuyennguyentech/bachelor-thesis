@@ -28,8 +28,9 @@ import {
   LogOutIcon,
 } from "lucide-react";
 import { AnalyzeButton } from "./analyze-button";
-import { LessonAttempts } from "./lesson-attempts";
+import { LessonAttempts, NeedsAttentionBand, QuestionAnalysis } from "./lesson-attempts";
 import { LessonHeatmap } from "./lesson-heatmap";
+import { LessonResultsTabs, type ResultsSubTab } from "./lesson-results-tabs";
 import { VideoPlayer } from "./video-player";
 import { StudentLessonView } from "./student-lesson-view";
 import { extractLocalResponse } from "@/interactions/registry";
@@ -37,6 +38,7 @@ import { RecentAccessRecorder } from "@/components/dashboard/recent-access-recor
 import { QuickCreateTrigger } from "@/components/dashboard/quick-create/QuickCreateTrigger";
 import { LessonCourseSidebar, LessonWorkspaceShell } from "./lesson-workspace";
 import { LessonTeacherTabs, SwitchToProcessingButton, type TeacherTab } from "./lesson-teacher-tabs";
+import { LessonAnalysisLiveProvider } from "./lesson-analysis-live-context";
 
 const CAN_MANAGE = [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.TEACHER];
 const COURSE_NAV_LIMIT = 100;
@@ -123,6 +125,8 @@ export default async function LessonDetailPage({
   // not effectiveCanManage (no Studio) and not isPreview (so submit is saved).
   const effectiveCanManage = canManage && !isPreview && !learnMode;
   const activeTab = normalizeTab(typeof sp.tab === "string" ? sp.tab : undefined);
+  const resultsSub: ResultsSubTab =
+    sp.sub === "heatmap" || sp.sub === "questions" ? sp.sub : "table";
 
   const courseClient = createRichterClient(CourseService, token);
   let course;
@@ -435,7 +439,13 @@ export default async function LessonDetailPage({
                 )
               ) : (
                 // TEACHER or ADMIN VIEW — three tabs, switched CLIENT-side (no
-                // per-tab server re-render — see LessonTeacherTabs).
+                // per-tab server re-render — see LessonTeacherTabs). The live
+                // provider bridges the processing tab's freshly-run transcript to
+                // the content tab's VideoPlayer without a router.refresh.
+                <LessonAnalysisLiveProvider
+                  initialSegments={analysis?.transcriptSegments ?? []}
+                  initialTranscript={analysis?.transcript ?? ""}
+                >
                 <LessonTeacherTabs
                   initialTab={activeTab}
                   resultsTotal={attemptsData?.total ?? 0}
@@ -547,43 +557,56 @@ export default async function LessonDetailPage({
                   }
                   results={
                     attemptsData ? (
-                      <>
-                        {heatmapData && (
-                          <div className="rounded-md border p-4 flex flex-col gap-3" data-testid="lesson-heatmap-panel">
+                      <LessonResultsTabs
+                        initialSub={resultsSub}
+                        banner={
+                          attemptsData.attempts.length > 0 ? (
+                            <NeedsAttentionBand
+                              attempts={attemptsData.attempts}
+                              questions={questionAnalytics?.questionStats ?? []}
+                            />
+                          ) : null
+                        }
+                        table={
+                          <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
                             <div className="flex items-center gap-2">
                               <BarChart2Icon className="size-4 text-muted-foreground" />
-                              <h2 className="font-medium text-sm">
-                                {heatmapData.cells.some((c) => c.responseCount > 0)
-                                  ? "Bản đồ nhiệt theo phân đoạn"
-                                  : "Bản đồ nhiệt theo câu hỏi"}
-                              </h2>
+                              <h2 className="font-medium text-sm">Bảng kết quả học viên</h2>
                             </div>
-                            <LessonHeatmap
-                              cells={heatmapData.cells}
-                              breakdowns={heatmapData.breakdowns}
-                              questions={questionAnalytics?.questionStats}
-                              error={heatmapData.error}
+                            <LessonAttempts
+                              attempts={attemptsData.attempts}
+                              total={attemptsData.total}
+                              maxAttempts={lesson.maxAttempts}
                             />
                           </div>
-                        )}
-
-                        <div data-testid="lesson-attempts" className="rounded-md border p-4 flex flex-col gap-3">
-                          <div className="flex items-center gap-2">
-                            <BarChart2Icon className="size-4 text-muted-foreground" />
-                            <h2 className="font-medium text-sm">Bảng kết quả học viên</h2>
-                          </div>
-                          <LessonAttempts
-                            attempts={attemptsData.attempts}
-                            total={attemptsData.total}
-                            maxAttempts={lesson.maxAttempts}
+                        }
+                        heatmap={
+                          heatmapData ? (
+                            <div className="rounded-md border p-4 flex flex-col gap-3" data-testid="lesson-heatmap-panel">
+                              <LessonHeatmap
+                                cells={heatmapData.cells}
+                                breakdowns={heatmapData.breakdowns}
+                                questions={questionAnalytics?.questionStats}
+                                error={heatmapData.error}
+                              />
+                            </div>
+                          ) : (
+                            <div className="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                              Chưa có dữ liệu bản đồ nhiệt.
+                            </div>
+                          )
+                        }
+                        questions={
+                          <QuestionAnalysis
                             perKind={questionAnalytics?.kindAccuracy}
                             questions={questionAnalytics?.questionStats}
                           />
-                        </div>
-                      </>
+                        }
+                      />
                     ) : null
                   }
                 />
+                </LessonAnalysisLiveProvider>
               )}
             </div>
           </LessonWorkspaceShell>

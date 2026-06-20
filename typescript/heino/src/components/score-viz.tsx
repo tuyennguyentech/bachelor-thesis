@@ -70,37 +70,6 @@ export function ScoreBar({
   );
 }
 
-/**
- * A small score-over-sequence trend line (e.g. score per lesson in order). Each
- * point is colored by its score tier; reference lines at 50% and 80%.
- */
-export function ScoreTrend({
-  points,
-  className,
-}: {
-  points: { frac: number; label: string }[];
-  className?: string;
-}) {
-  if (points.length === 0) return null;
-  const W = 300;
-  const H = 80;
-  const n = points.length;
-  const x = (i: number) => (n === 1 ? W / 2 : (i / (n - 1)) * W);
-  const y = (frac: number) => (1 - Math.max(0, Math.min(1, frac))) * H;
-  const line = points.map((p, i) => `${x(i)},${y(p.frac)}`).join(" ");
-  return (
-    <div className={className}>
-      <svg viewBox={`-4 -4 ${W + 8} ${H + 8}`} className="w-full" style={{ aspectRatio: `${W} / ${H}` }} role="img" aria-label="Xu hướng điểm">
-        {/* reference lines at 80% (green) and 50% (amber) */}
-        <line x1={0} y1={y(0.8)} x2={W} y2={y(0.8)} className="stroke-emerald-500/30" strokeWidth={1} strokeDasharray="4 4" />
-        <line x1={0} y1={y(0.5)} x2={W} y2={y(0.5)} className="stroke-amber-500/30" strokeWidth={1} strokeDasharray="4 4" />
-        {n > 1 && <polyline points={line} className="fill-none stroke-primary/60" strokeWidth={2} />}
-        {points.map((p, i) => (
-          <circle key={i} cx={x(i)} cy={y(p.frac)} r={i === n - 1 ? 4 : 3} className={scoreBarClass(p.frac).replace("bg-", "fill-")}>
-            <title>{`${p.label}: ${Math.round(p.frac * 100)}%`}</title>
-          </circle>
-        ))}
-      </svg>
-    </div>
-  );
-}
+// The score-over-sequence trend chart now lives in the student progress card as
+// an interactive client component (labelled axes + hover tooltips):
+// courses/[courseId]/score-trend-chart.tsx.

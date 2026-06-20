@@ -87,6 +87,11 @@ test.describe("Course list — enrolled course (studentPage = bob)", () => {
     const href = await vaoHocLink.getAttribute("href");
     await page.goto(href!, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: SEED_DSA_COURSE_TITLE })).toBeVisible();
+    // Regression guard (BUG-137): a student opening the course detail must NOT hit
+    // the dashboard error boundary. The teacher-only analytics RPCs are gated
+    // behind renderAsManager; if that gating regresses, a student's render throws
+    // PermissionDenied and this page shows "Không thể tải trang" instead.
+    await expect(page.getByText("Không thể tải trang")).toHaveCount(0);
   });
 });
 
