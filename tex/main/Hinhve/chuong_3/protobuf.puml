@@ -1,0 +1,20 @@
+@startuml protobuf
+!pragma layout smetana
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #F5F5F5
+  BorderColor #555555
+}
+
+rectangle "Hợp đồng giao tiếp\nProtocol Buffers (.proto)" as P #E8EEF7
+
+rectangle "Mã Go\n(máy chủ)" as Go
+rectangle "Mã TypeScript\n(giao diện web)" as TS
+
+P --> Go : sinh mã tự động
+P --> TS : sinh mã tự động
+
+note bottom of Go : Kiểu dữ liệu nhất quán hai phía
+@enduml

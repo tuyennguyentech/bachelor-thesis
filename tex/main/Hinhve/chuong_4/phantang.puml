@@ -1,0 +1,27 @@
+@startuml phantang
+!pragma layout smetana
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #F5F5F5
+  BorderColor #555555
+}
+
+rectangle "Máy khách — Trình duyệt web" as C #E8EEF7
+
+package "Máy chủ ứng dụng (richter)" {
+  rectangle "Tầng giao tiếp (API)\nConnect RPC, xác thực, phân quyền" as L1
+  rectangle "Tầng nghiệp vụ\nxử lý logic từng miền chức năng" as L2
+  rectangle "Tầng truy cập dữ liệu\nsqlc (PostgreSQL), FoundationDB" as L3
+}
+
+rectangle "Dịch vụ AI\n(Speaches, Gemini)" as AI
+rectangle "Kho lưu trữ\n(PostgreSQL, FoundationDB, SeaweedFS)" as D
+
+C --> L1 : Connect RPC
+L1 --> L2
+L2 --> L3
+L2 ..> AI : gọi khi phân tích
+L3 --> D
+@enduml

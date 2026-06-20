@@ -1,0 +1,18 @@
+@startuml gemini
+!pragma layout smetana
+left to right direction
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #F5F5F5
+  BorderColor #555555
+}
+
+rectangle "Một đoạn nội dung\n(bản chép lời)" as IN
+rectangle "Mô hình ngôn ngữ lớn\n(Gemini)" as G #E8EEF7
+rectangle "Hoạt động tương tác\ncó cấu trúc\n(câu hỏi, đáp án, phản hồi)" as OUT
+
+IN --> G : đưa vào
+G --> OUT : sinh ra
+@enduml

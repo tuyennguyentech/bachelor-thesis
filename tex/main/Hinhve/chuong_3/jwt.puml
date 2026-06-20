@@ -1,0 +1,23 @@
+@startuml jwt
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+
+actor "Trình duyệt" as B
+participant "Máy chủ" as S
+
+B -> S : Đăng nhập (tài khoản, mật khẩu)
+activate S
+S -> S : Kiểm tra thông tin
+S --> B : Token truy cập + token làm mới
+deactivate S
+
+== Các lần gọi dịch vụ sau ==
+
+B -> S : Gọi API kèm Authorization: Bearer <token>
+activate S
+S -> S : Kiểm tra token hợp lệ
+S --> B : Trả về dữ liệu (HTTP 200)
+deactivate S
+@enduml

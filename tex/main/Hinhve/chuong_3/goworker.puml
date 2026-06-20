@@ -1,0 +1,20 @@
+@startuml goworker
+!pragma layout smetana
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #F5F5F5
+  BorderColor #555555
+}
+
+rectangle "Hàng đợi tác vụ" as Q #E8EEF7
+rectangle "Worker 1\n(goroutine)" as W1
+rectangle "Worker 2\n(goroutine)" as W2
+rectangle "Worker N\n(goroutine)" as W3
+
+Q --> W1
+Q --> W2
+Q --> W3
+note bottom of W2 : Nhiều tác vụ được xử lý song song,\nsố lượng worker điều chỉnh theo máy chủ
+@enduml

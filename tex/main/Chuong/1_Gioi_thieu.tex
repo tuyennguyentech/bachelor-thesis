@@ -1,0 +1,46 @@
+\documentclass[../DoAn.tex]{subfiles}
+\begin{document}
+
+\section{Đặt vấn đề}
+\label{section:1.1}
+Trong những năm gần đây, học tập trực tuyến qua video đã phát triển nhanh chóng và trở thành một hình thức phổ biến trong giáo dục hiện đại nhờ chi phí thấp, khả năng tiếp cận rộng rãi và sự linh hoạt về thời gian. Theo Fortune Business Insights, quy mô thị trường học trực tuyến toàn cầu năm 2025 đạt khoảng 356,7 tỷ USD và được dự báo duy trì tốc độ tăng trưởng kép gần 19\% mỗi năm~\cite{fortune2025elearning}, cho thấy mức độ phổ biến và tiềm năng lớn của hình thức học tập này. Từ các nền tảng khóa học trực tuyến mở đại trà cho đến các kho video bài giảng công cộng, một số lượng lớn người học có thể tiếp cận khối lượng tri thức phong phú chỉ với một thiết bị kết nối Internet. Video vì vậy đã trở thành phương tiện truyền tải nội dung chủ đạo trong nhiều khóa học và chương trình đào tạo, nên hiệu quả của hình thức học tập này ảnh hưởng trực tiếp tới trải nghiệm của đông đảo người học~\cite{brame2016effective}.
+
+Tuy nhiên, học tập qua video mang bản chất một chiều. Người học chủ yếu tiếp nhận thông tin theo cách thụ động nên dễ rơi vào tình trạng xem lướt, giảm tập trung và ngộ nhận rằng đã hiểu bài, trong khi thực tế chưa thể tái hiện hoặc vận dụng kiến thức~\cite{prince2004active,karpicke2008critical}. Hệ quả của tính thụ động này thể hiện rõ qua tỷ lệ hoàn thành rất thấp của các khóa học trực tuyến mở đại trà: nhiều nghiên cứu ghi nhận trung vị tỷ lệ hoàn thành chỉ khoảng 12,6\%, thậm chí khoảng 52\% người đăng ký không bắt đầu khóa học~\cite{celik2024mooc}. Trong khi đó, việc kiểm tra mức độ tiếp thu thường được tách thành các bài trắc nghiệm hoặc bài tập đặt sau video, khiến phản hồi đến với người học bị trì hoãn và không tận dụng được thời điểm kiến thức vừa được trình bày.
+
+Về phía người dạy, việc tăng tính tương tác cho video lại đòi hỏi nhiều công sức. Để chèn các câu hỏi xen kẽ vào video, giảng viên phải xem lại toàn bộ nội dung, xác định những mốc thời gian phù hợp và biên soạn thủ công từng câu hỏi. Công việc này tốn nhiều thời gian và khó duy trì khi số lượng bài giảng tăng lên, đặc biệt với các cơ sở đào tạo đã tích lũy sẵn một kho video lớn.
+
+Như vậy, để đáp ứng nhu cầu học tập chủ động và được phản hồi kịp thời của người học, người dạy phải bỏ ra khối lượng công việc thủ công lớn; chính chi phí này khiến nhu cầu đó thường không được đáp ứng đầy đủ. Nếu được giải quyết, bài toán này sẽ giúp người học tiếp thu hiệu quả hơn, đồng thời giúp giảng viên và các cơ sở đào tạo khai thác lại kho video bài giảng sẵn có với chi phí thấp hơn. Việc giải quyết bài toán này cũng có tiềm năng mở rộng sang nhiều lĩnh vực đào tạo trực tuyến khác, nơi video được sử dụng làm phương tiện học tập chính.
+
+\section{Mục tiêu và phạm vi đề tài}
+\label{section:1.2}
+Hiện đã có nhiều nền tảng hỗ trợ học tập qua video, từ các khóa học trực tuyến mở đại trà và các công cụ tạo video tương tác đến các kho video bài giảng và hệ thống quản lý học tập. Khảo sát chi tiết ở Phần~\ref{section:2.1} cho thấy, trong phạm vi khảo sát, chưa nhóm sản phẩm nào kết hợp được đồng thời ba yếu tố: tự động sinh nội dung tương tác trực tiếp từ video, chấm điểm và phản hồi tự động, và đa dạng loại hình tương tác. Phần lớn gánh nặng tạo nội dung tương tác vẫn thuộc về người dạy, trong khi người học thiếu cơ chế kiểm tra hiểu bài ngay trong quá trình xem.
+
+Trên cơ sở đó, đồ án đặt mục tiêu xây dựng một nền tảng giúp tự động chuyển hóa video bài giảng có sẵn thành bài học có tương tác, qua đó giảm công sức soạn thảo cho người dạy và tăng tính chủ động cho người học. Điểm khác biệt chính của hệ thống là kết hợp đồng thời ba yếu tố còn thiếu nói trên. Phạm vi của đồ án tập trung vào các chức năng chính sau: (i) quản lý tổ chức, khóa học và bài giảng; (ii) tải lên, lưu trữ và phát video bài giảng; (iii) tự động phân tích video và sinh các hoạt động tương tác; (iv) thực hiện bài học có tương tác kèm chấm điểm, phản hồi tự động và theo dõi kết quả học tập; (v) theo dõi trạng thái và xử lý lỗi cho các tác vụ phân tích video và sinh nội dung tương tác; và (vi) quản lý người dùng cùng phân quyền theo vai trò.
+
+Trong phần này, đồ án chỉ trình bày tổng quan về mục tiêu và phạm vi. Các yêu cầu chức năng được phân tích trong Chương~\ref{chapter:Related_works}, phần thiết kế và triển khai hệ thống được trình bày trong Chương~\ref{chapter:Experiment}, còn các giải pháp nổi bật của đồ án được phân tích sâu hơn trong Chương~\ref{chapter:SolutionAndContribution}.
+
+\section{Định hướng giải pháp}
+\label{section:1.3}
+Để giải quyết nhiệm vụ nêu trên, đồ án lựa chọn định hướng ứng dụng trí tuệ nhân tạo, cụ thể là kết hợp công nghệ nhận dạng tiếng nói (mô hình Whisper) để trích xuất lời thoại từ video với các mô hình ngôn ngữ lớn (Gemini) để sinh tự động các hoạt động tương tác, cùng công nghệ tổng hợp tiếng nói để tạo các hoạt động luyện nghe. Định hướng này được lựa chọn vì các mô hình ngôn ngữ lớn hiện nay có khả năng hiểu và tóm tắt nội dung văn bản tốt, phù hợp để tự động đề xuất câu hỏi bám sát nội dung bài giảng và nhờ đó giảm đáng kể công sức soạn thảo thủ công.
+
+Theo định hướng đó, giải pháp của đồ án là Dyadia, một nền tảng web cho phép giảng viên tải lên video bài giảng, sau đó hệ thống tự động phân tích nội dung, sinh các hoạt động tương tác đặt xen kẽ trong video và cho phép giảng viên tinh chỉnh trước khi đưa tới người học. Khi tham gia bài giảng, người học được kiểm tra hiểu bài, chấm điểm và phản hồi tự động ngay trong quá trình xem.
+
+Đóng góp chính của đồ án là đề xuất và hiện thực hóa một quy trình tự động chuyển hóa video bài giảng thụ động thành bài học chủ động với chi phí soạn thảo thấp, cùng một kiến trúc quản lý các tác vụ phân tích video có khả năng theo dõi trạng thái và phục hồi các tác vụ bị gián đoạn. Về kết quả, đồ án đã xây dựng được một hệ thống vận hành đầy đủ luồng nghiệp vụ, từ tải video, phân tích và sinh hoạt động tương tác, tới học tập có chấm điểm, phản hồi tự động và theo dõi kết quả. Các công nghệ và giải pháp cụ thể được phân tích chi tiết trong Chương~\ref{chapter:Methodology} và Chương~\ref{chapter:SolutionAndContribution}.
+
+\section{Bố cục đồ án}
+\label{section:1.4}
+Phần còn lại của báo cáo được tổ chức như sau.
+
+Chương~\ref{chapter:Related_works} khảo sát hiện trạng và phân tích yêu cầu, bao gồm khảo sát nhu cầu người dùng, các hệ thống đã có và các ứng dụng tương tự; trên cơ sở so sánh và đánh giá, chương rút ra các yêu cầu chức năng và phi chức năng mà hệ thống cần đáp ứng.
+
+Chương~\ref{chapter:Methodology} trình bày nền tảng lý thuyết và các công nghệ sử dụng, gồm cơ sở lý thuyết về học tập chủ động cùng các công nghệ cốt lõi như nhận dạng tiếng nói, mô hình ngôn ngữ lớn và các nền tảng phục vụ xây dựng dịch vụ.
+
+Chương~\ref{chapter:Experiment} đi vào phân tích thiết kế, triển khai và đánh giá hệ thống, lần lượt từ kiến trúc tổng thể, thiết kế các thành phần, cơ sở dữ liệu và giao diện cho đến kết quả xây dựng, kiểm thử và triển khai.
+
+Chương~\ref{chapter:SolutionAndContribution} trình bày các giải pháp và đóng góp nổi bật của đồ án. Chương tập trung phân tích quy trình tự động chuyển hóa video bài giảng thành bài học có tương tác bằng trí tuệ nhân tạo, cùng kiến trúc quản lý các tác vụ phân tích chạy dài một cách tin cậy, là hai đóng góp chính đã được giới thiệu khái quát ở Phần~\ref{section:1.3}.
+
+Cuối cùng, Chương~\ref{chapter:conclusion} tổng kết những kết quả đã đạt được, nêu các hạn chế còn tồn tại và đề xuất hướng phát triển trong tương lai.
+
+Tóm lại, chương này đã trình bày bài toán cần giải quyết cùng tính cấp thiết của nó, mục tiêu và phạm vi của hệ thống, định hướng giải pháp và đóng góp chính của đồ án. Trên cơ sở đó, chương tiếp theo tiến hành khảo sát hiện trạng và phân tích yêu cầu một cách chi tiết, làm cơ sở cho việc thiết kế hệ thống ở các chương sau.
+
+\end{document}

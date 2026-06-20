@@ -1,0 +1,39 @@
+@startuml hangdoi2
+!pragma layout smetana
+hide empty description
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+
+state "Chờ xử lý\n(inqueued)" as Inq
+state "Đang xử lý\n(processing)" as Proc
+state "Hoàn tất\n(succeeded)" as Suc
+state "Thất bại\n(failed)" as Fail
+state "Đã hủy\n(cancelled)" as Can
+
+[*] --> Inq : tạo tác vụ + thông báo (pg_notify)
+Inq --> Proc : worker nhận việc\n(NOTIFY + SKIP LOCKED)
+Proc --> Suc : thực thi xong
+Proc --> Fail : thực thi lỗi\n(sau khi đã thử lại)
+Proc -[#red,dashed]-> Inq : quá hạn nhịp tim\n(worker chết, thu hồi)
+Inq --> Can : người dùng hủy
+Proc --> Can
+
+note right of Proc
+  - Lưu điểm kiểm tra theo giai đoạn
+    (Phiên âm -> Phân đoạn -> Sinh nội dung):
+    khi thu hồi và chạy lại, bỏ qua
+    giai đoạn đã hoàn tất.
+  - Lỗi tạm thời khi gọi dịch vụ ngoài
+    được tự động thử lại trước khi báo lỗi.
+end note
+
+note bottom of Fail
+  Trạng thái kết thúc — không tự đưa lại
+  hàng đợi; người dùng chạy lại (tạo tác vụ mới).
+end note
+
+Suc --> [*]
+Fail --> [*]
+Can --> [*]
+@enduml

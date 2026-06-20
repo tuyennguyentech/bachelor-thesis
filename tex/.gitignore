@@ -1,0 +1,53 @@
+# LaTeX build artifacts (regenerable from source — see CLAUDE.md 4-pass build)
+
+# Core auxiliary
+*.aux
+*.log
+*.toc
+*.out
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+
+# Bibliography (bibtex / biblatex)
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+*-blx.bib
+
+# Index / glossary / nomenclature
+*.idx
+*.ind
+*.ilg
+*.glo
+*.gls
+*.glg
+*.acn
+*.acr
+*.alg
+*.nlo
+*.nls
+
+# Beamer / misc
+*.nav
+*.snm
+*.vrb
+*.xdv
+*.dvi
+
+# Editor / latexmk leftovers
+*.bak
+*.tmp
+.latexmk
+auxil/
+
+# Compiled output is kept in-repo as the deliverable. To stop tracking it,
+# uncomment the next line:
+# DoAn.pdf
+
+/sample
+/DATNCN_dieppv_20194016.pdf
