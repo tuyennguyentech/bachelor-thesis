@@ -1,0 +1,26 @@
+@startuml clientserver
+!pragma layout smetana
+left to right direction
+!include <tupadr3/common>
+!include <tupadr3/font-awesome-5/mobile>
+!include <tupadr3/font-awesome-5/laptop>
+!include <tupadr3/font-awesome-5/desktop>
+!include <tupadr3/font-awesome-5/cloud>
+!include <tupadr3/font-awesome-5/server>
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam ArrowFontSize 12
+
+FA5_MOBILE(m,"Điện thoại")
+FA5_LAPTOP(l,"Máy tính xách tay")
+FA5_DESKTOP(d,"Máy tính để bàn")
+FA5_CLOUD(net,"Mạng")
+FA5_SERVER(s,"Máy chủ")
+
+m --> net
+l --> net
+d --> net
+net --> s : Yêu cầu (request)
+s --> net : Phản hồi (response)
+@enduml

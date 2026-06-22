@@ -1,0 +1,52 @@
+@startuml chitietgoi
+!pragma layout smetana
+top to bottom direction
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam packageStyle folder
+skinparam classBackgroundColor #FAFAFA
+skinparam classBorderColor #555555
+
+package ai {
+  class AISvc
+}
+package taskqueue {
+  class Worker
+  class Task
+  interface Executor
+}
+package aitasks {
+  class PipelineRunExecutor
+  interface TranscribeService
+  interface ChunkService
+  interface QuizGenService
+}
+package transcript {
+  class "Service" as svcTranscript
+}
+package generation {
+  class "Service" as svcGeneration
+}
+package genengine {
+  interface Engine
+}
+package db {
+  class Queries
+}
+
+AISvc ..> Queries : InsertTask
+AISvc ..> Task : enqueue
+Worker --> Task
+Worker ..> Executor
+PipelineRunExecutor ..|> Executor
+PipelineRunExecutor ..> TranscribeService
+PipelineRunExecutor ..> ChunkService
+PipelineRunExecutor ..> QuizGenService
+TranscribeService ..> svcTranscript
+ChunkService ..> svcTranscript
+QuizGenService ..> svcGeneration
+svcGeneration ..> Engine
+svcTranscript ..> Queries
+svcGeneration ..> Queries
+@enduml

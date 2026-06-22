@@ -1,0 +1,35 @@
+@startuml seq_sinhbai
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam sequenceMessageAlign center
+
+actor "Giảng viên" as U
+participant "Giao diện web" as W
+participant "AISvc" as A
+database "Hàng đợi tác vụ" as Q
+participant "Worker" as WK
+participant "PipelineRunExecutor" as P
+participant "transcript.Service" as T
+participant "generation.Service" as G
+participant "Engine (Gemini)" as E
+
+U -> W : Yêu cầu sinh bài giảng
+W -> A : StartLessonTask (Connect RPC)
+A -> Q : InsertTask (pipeline_run)
+A --> W : Mã tác vụ
+W --> U : Hiển thị tiến độ
+
+== Xử lý nền ==
+Q -> WK : Lấy tác vụ
+WK -> P : Execute
+P -> T : Phiên âm lời thoại
+T --> P : Phụ đề
+P -> T : Phân đoạn nội dung
+T --> P : Các đoạn nội dung
+P -> G : Sinh bài tập tương tác
+G -> E : Generate
+E --> G : JSON bài tập
+G --> P : Đã lưu tương tác
+P --> WK : Hoàn tất
+@enduml

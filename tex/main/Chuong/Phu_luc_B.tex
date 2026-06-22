@@ -1,11 +1,225 @@
 \documentclass[../DoAn.tex]{subfiles}
 \begin{document}
-Nếu trong nội dung chính không đủ không gian cho các use case khác (ngoài các use case nghiệp vụ chính) thì đặc tả thêm cho các use case đó ở đây.
 
-\section{Đặc tả use case ``Thống kê tình hình mượn sách''}
-\ldots
+Phụ lục này đặc tả bổ sung một số use case đã được phân rã ở Chương~\ref{chapter:Related_works} nhưng không trình bày chi tiết trong phần nội dung chính. Các use case này thuộc nhóm chức năng quản trị nội dung, quản trị người dùng và vận hành hệ thống.
 
-\section{Đặc tả use case ``Đăng ký làm thẻ mượn''}
-\ldots
+\section{Đặc tả use case ``Quản lý khóa học, chương và bài giảng''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Quản lý khóa học, chương và bài giảng \\ \hline
+Tác nhân & Giảng viên \\ \hline
+Mục đích & Cho phép giảng viên tổ chức nội dung đào tạo theo cấu trúc khóa học, chương và bài giảng; đồng thời quản lý trạng thái xuất bản của khóa học. \\ \hline
+Tiền điều kiện & Giảng viên đã đăng nhập và có quyền quản lý trong tổ chức hoặc khóa học tương ứng. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Giảng viên & Tạo hoặc mở một khóa học trong tổ chức. \\[2pt]
+2 & Giảng viên & Cập nhật thông tin khóa học như tiêu đề, mô tả, trạng thái và ảnh đại diện nếu có. \\[2pt]
+3 & Giảng viên & Tạo các chương trong khóa học và sắp xếp thứ tự hiển thị. \\[2pt]
+4 & Giảng viên & Tạo bài giảng trong từng chương, nhập thông tin bài giảng và tải video lên. \\[2pt]
+5 & Hệ thống & Lưu cấu trúc khóa học, chương và bài giảng; cập nhật danh sách nội dung cho người dùng có quyền truy cập. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+4a & Hệ thống & Nếu tệp tải lên không phải video hợp lệ hoặc vượt giới hạn, hệ thống từ chối và hiển thị lỗi. \\[2pt]
+5a & Giảng viên & Xóa hoặc đổi trạng thái một bài giảng/khóa học; hệ thống cập nhật lại danh sách hiển thị. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Cấu trúc khóa học được lưu và sẵn sàng cho bước phân tích video hoặc xuất bản tới người học. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Quản lý khóa học, chương và bài giảng}
+\label{table:pl_uc_quanlykhoahoc}
+\end{table}
+
+\section{Đặc tả use case ``Biên tập bản chép lời''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Biên tập bản chép lời \\ \hline
+Tác nhân & Giảng viên \\ \hline
+Mục đích & Cho phép giảng viên hiệu chỉnh bản chép lời và các đoạn nội dung được sinh tự động trước khi dùng làm cơ sở tạo hoạt động tương tác. \\ \hline
+Tiền điều kiện & Bài giảng đã được phân tích hoặc đã có bản chép lời/phân đoạn nội dung. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Giảng viên & Mở màn hình phân tích của bài giảng. \\[2pt]
+2 & Hệ thống & Hiển thị các đoạn nội dung theo thứ tự thời gian, kèm mốc bắt đầu, mốc kết thúc và tóm tắt. \\[2pt]
+3 & Giảng viên & Chỉnh sửa nội dung đoạn, cấu hình số lượng câu hỏi hoặc ranh giới thời gian của đoạn. \\[2pt]
+4 & Hệ thống & Kiểm tra tính hợp lệ của dữ liệu và lưu thay đổi. \\[2pt]
+5 & Giảng viên & Sinh lại hoạt động tương tác cho đoạn đã chỉnh sửa nếu cần. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+3a & Giảng viên & Thêm một đoạn nội dung thủ công khi bản chép lời thiếu đoạn quan trọng. \\[2pt]
+3b & Giảng viên & Xóa đoạn không phù hợp; hệ thống cập nhật lại thứ tự các đoạn còn lại. \\[2pt]
+4a & Hệ thống & Nếu mốc thời gian không hợp lệ hoặc dữ liệu rỗng, hệ thống không lưu và yêu cầu chỉnh sửa lại. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Bản chép lời và các đoạn nội dung được cập nhật, bảo đảm phù hợp hơn cho bước sinh hoạt động tương tác. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Biên tập bản chép lời}
+\label{table:pl_uc_bientapbanchep}
+\end{table}
+
+\section{Đặc tả use case ``Quản lý thành viên và duyệt yêu cầu tham gia''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Quản lý thành viên và duyệt yêu cầu tham gia \\ \hline
+Tác nhân & Giảng viên \\ \hline
+Mục đích & Cho phép giảng viên kiểm soát danh sách học viên trong khóa học và xử lý các yêu cầu tham gia khóa học. \\ \hline
+Tiền điều kiện & Khóa học đã tồn tại; giảng viên có quyền quản lý khóa học. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Giảng viên & Mở danh sách yêu cầu tham gia khóa học. \\[2pt]
+2 & Hệ thống & Hiển thị các yêu cầu đang chờ duyệt cùng thông tin người học. \\[2pt]
+3 & Giảng viên & Chấp nhận một yêu cầu tham gia. \\[2pt]
+4 & Hệ thống & Cập nhật trạng thái yêu cầu thành đã duyệt và thêm người học vào danh sách thành viên khóa học. \\[2pt]
+5 & Giảng viên & Xem hoặc cập nhật danh sách thành viên hiện tại của khóa học. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+3a & Giảng viên & Từ chối yêu cầu; hệ thống cập nhật trạng thái bị từ chối và không thêm người học vào khóa học. \\[2pt]
+5a & Giảng viên & Thêm trực tiếp một người học là thành viên tổ chức vào khóa học. \\[2pt]
+5b & Giảng viên & Xóa một thành viên khỏi khóa học khi người đó không còn tham gia lớp. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Danh sách thành viên khóa học và trạng thái yêu cầu tham gia được cập nhật nhất quán. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Quản lý thành viên và duyệt yêu cầu tham gia}
+\label{table:pl_uc_thanhvien}
+\end{table}
+
+\section{Đặc tả use case ``Xem kết quả và phản hồi''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Xem kết quả và phản hồi \\ \hline
+Tác nhân & Người học \\ \hline
+Mục đích & Cho phép người học xem lại điểm, câu trả lời và phản hồi sau khi hoàn thành các hoạt động tương tác trong bài giảng. \\ \hline
+Tiền điều kiện & Người học đã làm ít nhất một hoạt động tương tác hoặc đã nộp bài cho bài giảng. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Người học & Mở bài giảng hoặc trang kết quả học tập cá nhân. \\[2pt]
+2 & Hệ thống & Tải các lần làm bài, điểm số, tiến độ xem video và phản hồi đã lưu. \\[2pt]
+3 & Người học & Chọn một lần làm bài để xem chi tiết. \\[2pt]
+4 & Hệ thống & Hiển thị từng câu trả lời, điểm đạt được và nhận xét tương ứng. \\[2pt]
+5 & Người học & Dựa trên phản hồi để xem lại đoạn video hoặc thực hiện lần làm tiếp theo nếu còn lượt. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+2a & Hệ thống & Nếu chưa có dữ liệu làm bài, hệ thống hiển thị trạng thái trống và hướng dẫn người học bắt đầu bài giảng. \\[2pt]
+4a & Hệ thống & Nếu cấu hình phản hồi của bài giảng chưa cho phép xem đáp án, hệ thống chỉ hiển thị điểm và nhận xét phù hợp. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Người học nắm được kết quả học tập cá nhân và có cơ sở cải thiện ở những lần học tiếp theo. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Xem kết quả và phản hồi}
+\label{table:pl_uc_xemketqua}
+\end{table}
+
+\section{Đặc tả use case ``Quản lý người dùng và phân quyền''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Quản lý người dùng và phân quyền \\ \hline
+Tác nhân & Quản trị viên \\ \hline
+Mục đích & Cho phép quản trị viên quản lý tài khoản người dùng, trạng thái tài khoản và vai trò hệ thống. \\ \hline
+Tiền điều kiện & Quản trị viên đã đăng nhập bằng tài khoản có quyền quản trị toàn hệ thống. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Quản trị viên & Mở màn hình danh sách người dùng. \\[2pt]
+2 & Hệ thống & Hiển thị danh sách người dùng và hỗ trợ tìm kiếm theo định danh, email hoặc tên phù hợp. \\[2pt]
+3 & Quản trị viên & Tạo mới hoặc cập nhật thông tin tài khoản người dùng. \\[2pt]
+4 & Quản trị viên & Gán vai trò hệ thống hoặc thay đổi trạng thái hoạt động của tài khoản. \\[2pt]
+5 & Hệ thống & Lưu thay đổi và áp dụng quyền mới cho các lần truy cập sau. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+3a & Hệ thống & Nếu email đã tồn tại hoặc dữ liệu không hợp lệ, hệ thống từ chối tạo/cập nhật và hiển thị lỗi. \\[2pt]
+4a & Quản trị viên & Khóa tài khoản; hệ thống không cho phép tài khoản đó đăng nhập hoặc truy cập chức năng yêu cầu quyền. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Thông tin tài khoản, vai trò và trạng thái người dùng được cập nhật trong hệ thống. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Quản lý người dùng và phân quyền}
+\label{table:pl_uc_nguoidung}
+\end{table}
+
+\section{Đặc tả use case ``Quản lý tổ chức và thành viên''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Quản lý tổ chức và thành viên \\ \hline
+Tác nhân & Quản trị viên \\ \hline
+Mục đích & Cho phép quản trị viên tạo tổ chức đào tạo, cập nhật thông tin tổ chức và quản lý thành viên trong từng tổ chức. \\ \hline
+Tiền điều kiện & Quản trị viên đã đăng nhập; người dùng cần thêm vào tổ chức đã có tài khoản trong hệ thống. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Quản trị viên & Tạo mới hoặc mở một tổ chức đào tạo. \\[2pt]
+2 & Quản trị viên & Cập nhật tên, đường dẫn định danh và trạng thái của tổ chức. \\[2pt]
+3 & Quản trị viên & Thêm người dùng vào tổ chức. \\[2pt]
+4 & Quản trị viên & Gán vai trò thành viên như chủ sở hữu, quản trị, giảng viên hoặc học viên. \\[2pt]
+5 & Hệ thống & Lưu thông tin tổ chức và quyền thành viên tương ứng. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+2a & Hệ thống & Nếu đường dẫn định danh của tổ chức bị trùng, hệ thống yêu cầu nhập giá trị khác. \\[2pt]
+4a & Quản trị viên & Thay đổi trạng thái hoặc xóa thành viên khỏi tổ chức; hệ thống cập nhật quyền truy cập tương ứng. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Tổ chức và danh sách thành viên được cập nhật, làm cơ sở phân quyền cho khóa học và bài giảng. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Quản lý tổ chức và thành viên}
+\label{table:pl_uc_tochuc}
+\end{table}
+
+\section{Đặc tả use case ``Giám sát tác vụ phân tích''}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
+\hline
+Tên use case & Giám sát tác vụ phân tích \\ \hline
+Tác nhân & Quản trị viên \\ \hline
+Mục đích & Cho phép quản trị viên theo dõi các tác vụ phân tích video đang chạy, đã hoàn thành hoặc thất bại trên toàn hệ thống. \\ \hline
+Tiền điều kiện & Hệ thống đã phát sinh ít nhất một tác vụ phân tích hoặc sinh nội dung tương tác. \\ \hline
+Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+1 & Quản trị viên & Mở màn hình giám sát tác vụ. \\[2pt]
+2 & Hệ thống & Hiển thị danh sách tác vụ kèm loại tác vụ, trạng thái, tiến độ, thời điểm tạo và người khởi tạo. \\[2pt]
+3 & Quản trị viên & Mở chi tiết một tác vụ. \\[2pt]
+4 & Hệ thống & Hiển thị thông tin bài giảng liên quan, bước xử lý hiện tại, thông báo lỗi nếu có và dữ liệu tiến độ. \\[2pt]
+5 & Quản trị viên & Theo dõi trạng thái để phát hiện tác vụ lỗi hoặc tồn đọng bất thường. \\[2pt]
+\end{tabular} \\ \hline
+Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
+\textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
+5a & Quản trị viên & Hủy một tác vụ đang chờ xử lý hoặc đang chạy; hệ thống cập nhật trạng thái tác vụ thành đã hủy. \\[2pt]
+5b & Hệ thống & Nếu tác vụ thất bại, hệ thống lưu thông điệp lỗi để quản trị viên hoặc giảng viên có cơ sở xử lý lại. \\[2pt]
+\end{tabular} \\ \hline
+Hậu điều kiện & Trạng thái vận hành của các tác vụ phân tích được theo dõi tập trung, hỗ trợ phát hiện và xử lý lỗi trong quá trình vận hành. \\ \hline
+\end{tabular}
+\caption{Đặc tả use case Giám sát tác vụ phân tích}
+\label{table:pl_uc_giamsat}
+\end{table}
 
 \end{document}

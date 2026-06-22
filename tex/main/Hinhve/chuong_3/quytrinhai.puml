@@ -13,10 +13,13 @@ rectangle "Video\nbài giảng" as V
 rectangle "Phiên âm\n(Whisper)" as STT
 rectangle "Phân đoạn\nnội dung\n(Gemini)" as CHUNK
 rectangle "Sinh hoạt động\ntương tác\n(Gemini)" as GEN
+rectangle "Tạo bài nghe\n(Piper)" as TTS
 rectangle "Bài học\ntương tác" as OUT #E8EEF7
 
 V --> STT
 STT --> CHUNK
 CHUNK --> GEN
 GEN --> OUT
+GEN --> TTS : hoạt động\nluyện nghe
+TTS --> OUT
 @enduml

@@ -1,0 +1,148 @@
+@startuml erd
+!pragma layout smetana
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam linetype ortho
+hide circle
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555555
+}
+
+entity "users" as users {
+  * id : UUID
+  --
+  email : citext
+  role : user_role
+  status : user_status
+}
+
+entity "organizations" as orgs {
+  * id : UUID
+  --
+  created_by : UUID
+  name : text
+  status : org_status
+}
+
+entity "organization_members" as orgmem {
+  * organization_id : UUID
+  * user_id : UUID
+  --
+  role : org_role
+  status : member_status
+}
+
+entity "courses" as courses {
+  * id : UUID
+  --
+  organization_id : UUID
+  owner_id : UUID
+  title : text
+  status : course_status
+}
+
+entity "course_members" as crsmem {
+  * course_id : UUID
+  * user_id : UUID
+  --
+  role : course_role
+}
+
+entity "course_join_requests" as joinreq {
+  * course_id : UUID
+  * user_id : UUID
+  --
+  status : join_status
+}
+
+entity "course_modules" as modules {
+  * id : UUID
+  --
+  course_id : UUID
+  title : text
+  order_index : int
+}
+
+entity "lessons" as lessons {
+  * id : UUID
+  --
+  module_id : UUID
+  title : text
+  video_storage_key : text
+  max_attempts : int
+}
+
+entity "lesson_analyses" as analyses {
+  * id : UUID
+  --
+  lesson_id : UUID
+  status : analysis_status
+}
+
+entity "lesson_transcript_chunks" as chunks {
+  * id : UUID
+  --
+  lesson_id : UUID
+  order_index : int
+  summary : text
+}
+
+entity "lesson_interactions" as inter {
+  * id : UUID
+  --
+  lesson_id : UUID
+  chunk_id : UUID
+  kind : text
+  config : jsonb
+}
+
+entity "lesson_attempts" as attempts {
+  * id : UUID
+  --
+  user_id : UUID
+  lesson_id : UUID
+  total_score : float
+  status : text
+}
+
+entity "lesson_attempt_responses" as responses {
+  * attempt_id : UUID
+  * interaction_id : UUID
+  --
+  score : float
+  feedback : text
+}
+
+entity "tasks" as tasks {
+  * id : UUID
+  --
+  lesson_id : UUID
+  chunk_id : UUID
+  task_type : text
+  status : task_status
+}
+
+users ||--o{ orgs : created_by
+orgs ||--o{ orgmem
+users ||--o{ orgmem
+orgs ||--o{ courses
+users ||--o{ courses : owner
+courses ||--o{ crsmem
+users ||--o{ crsmem
+courses ||--o{ joinreq
+users ||--o{ joinreq
+courses ||--o{ modules
+modules ||--o{ lessons
+lessons ||--|| analyses
+lessons ||--o{ chunks
+lessons ||--o{ inter
+chunks ||--o{ inter
+users ||--o{ attempts
+lessons ||--o{ attempts
+attempts ||--o{ responses
+inter ||--o{ responses
+lessons ||--o{ tasks
+chunks ||--o{ tasks
+@enduml

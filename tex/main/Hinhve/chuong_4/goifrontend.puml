@@ -1,0 +1,30 @@
+@startuml goifrontend
+!pragma layout smetana
+top to bottom direction
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam packageStyle folder
+skinparam packageBackgroundColor #F7F7F7
+skinparam packageBorderColor #555555
+
+package app
+package actions
+package components
+package interactions
+package lib
+package proxy
+package proto
+
+app ..> actions
+app ..> components
+app ..> interactions
+app ..> lib
+proxy ..> lib
+interactions ..> components
+interactions ..> lib
+components ..> lib
+actions ..> lib
+lib ..> proto
+components ..> proto
+@enduml

@@ -1,0 +1,60 @@
+@startuml chitietlop
+!pragma layout smetana
+top to bottom direction
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555555
+}
+
+class AISvc {
+  - pg : PostgresSvc
+  - tqDB : taskqueue.DB
+  - transcript : transcript.Service
+  - generation : generation.Service
+  + StartLessonTask(StartLessonTaskRequest) : StartLessonTaskResponse
+  + CancelLessonTask(CancelLessonTaskRequest) : CancelLessonTaskResponse
+  + GetLessonAnalysis(GetLessonAnalysisRequest) : GetLessonAnalysisResponse
+}
+
+class PipelineRunExecutor {
+  - transcribe : TranscribeService
+  - chunk : ChunkService
+  - quizGen : QuizGenService
+  + Kind() : string
+  + Execute(Env) : []byte
+}
+
+class "transcript.Service" as Transcript {
+  - Transcription : STTRunner
+  - Chunk : ChunkRunner
+  + RunExtract(UUID, string, string, ProgressFn) : error
+  + RunChunk(UUID, ProgressFn) : error
+}
+
+class "generation.Service" as GenService {
+  - engine : Engine
+  + Run(UUID, GenerateInteractionsRequest, ProgressFunc) : error
+}
+
+interface "genengine.Engine" as Engine {
+  + Generate(Request) : string
+}
+
+class geminiEngine {
+  - cfg : GeminiCfg
+  - client : genai.Client
+  + Generate(Request) : string
+  + Name() : string
+}
+
+AISvc o--> Transcript
+AISvc o--> GenService
+PipelineRunExecutor ..> Transcript
+PipelineRunExecutor ..> GenService
+GenService o--> Engine
+geminiEngine ..|> Engine
+@enduml

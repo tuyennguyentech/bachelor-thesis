@@ -1,0 +1,65 @@
+@startuml chitietlop_tuongtac
+!pragma layout smetana
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555555
+}
+
+class LessonInteraction {
+  - id : UUID
+  - lessonID : UUID
+  - chunkID : UUID
+  - kind : string
+  - prompt : string
+  - startSeconds : float32
+  - maxScore : float32
+  - config : InteractionConfig
+}
+
+abstract class InteractionConfig
+
+class McqConfig {
+  - options : McqOption[]
+  - correctAnswer : int32
+  - correctAnswers : int32[]
+  - question : string
+}
+
+class FillBlankConfig {
+  - template : string
+  - blanks : Blank[]
+}
+
+class ReadingConfig {
+  - mode : ReadingMode
+  - passageMarkdown : string
+  - question : string
+  - expectedAnswer : string
+}
+
+class ListeningConfig {
+  - audioObjectKey : string
+  - durationSeconds : int32
+  - audioSourceText : string
+  - comprehensionQuestions : McqConfig[]
+}
+
+class WritingConfig {
+  - prompt : string
+  - rubric : string
+  - expectedAnswer : string
+  - minWords : int32
+}
+
+LessonInteraction *--> InteractionConfig
+McqConfig --|> InteractionConfig
+FillBlankConfig --|> InteractionConfig
+ReadingConfig --|> InteractionConfig
+ListeningConfig --|> InteractionConfig
+WritingConfig --|> InteractionConfig
+@enduml

@@ -9,23 +9,23 @@ Hệ thống dựa trên một số nguyên lý đã được kiểm chứng tro
 
 \section{Công nghệ xử lý trí tuệ nhân tạo}
 \label{section:3.2}
-Khối xử lý trí tuệ nhân tạo là thành phần cốt lõi giúp hệ thống tự động chuyển một video bài giảng thành bài học tương tác. Khối này kết hợp ba loại công nghệ: nhận dạng tiếng nói để lấy lời thoại, mô hình ngôn ngữ lớn để phân đoạn nội dung và sinh hoạt động, và tổng hợp tiếng nói để tạo bài nghe. Toàn bộ quy trình được minh họa ở Hình~\ref{fig:pipeline_ai}: video bài giảng lần lượt đi qua ba giai đoạn phiên âm, phân đoạn nội dung và sinh hoạt động, toàn bộ chạy ở chế độ nền; riêng bước tạo bài nghe chỉ thực hiện đối với các hoạt động luyện nghe.
+Khối xử lý trí tuệ nhân tạo là thành phần cốt lõi giúp hệ thống tự động chuyển một video bài giảng thành bài học tương tác. Khối này kết hợp ba loại công nghệ: nhận dạng tiếng nói để lấy lời thoại, mô hình ngôn ngữ lớn để phân đoạn nội dung và sinh hoạt động, và tổng hợp tiếng nói để tạo bài nghe. Toàn bộ quy trình được minh họa ở Hình~\ref{fig:pipeline_ai}: video bài giảng lần lượt đi qua các giai đoạn phiên âm, phân đoạn nội dung và sinh hoạt động tương tác, toàn bộ chạy ở chế độ nền.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\textwidth]{Hinhve/chuong_3/quytrinhai.pdf}
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_3/quytrinhai.pdf}
 \caption{Quy trình xử lý trí tuệ nhân tạo sinh bài học}
 \label{fig:pipeline_ai}
 \end{figure}
 
 \subsection{Nhận dạng tiếng nói}
-Để phân tích nội dung bài giảng, hệ thống cần chuyển lời thoại trong video thành văn bản, đáp ứng yêu cầu trích xuất bản chép lời ở Chương~\ref{chapter:Related_works}. Nhiệm vụ này do mô hình nhận dạng tiếng nói Whisper~\cite{radford2023whisper} đảm nhận, được triển khai tại chỗ qua dịch vụ Speaches\footnote{\url{https://github.com/speaches-ai/speaches}}. Whisper có một số đặc điểm phù hợp với bài toán:
+Để phân tích nội dung bài giảng, hệ thống cần chuyển lời thoại trong video thành văn bản, đáp ứng yêu cầu trích xuất bản chép lời ở Chương~\ref{chapter:Related_works}. Nhiệm vụ này do mô hình nhận dạng tiếng nói Whisper~\cite{radford2023whisper} đảm nhận, được triển khai tại chỗ trên hạ tầng riêng. Whisper có một số đặc điểm phù hợp với bài toán:
 
 \textbf{Độ chính xác đa ngôn ngữ} -- Whisper là mô hình mã nguồn mở được huấn luyện trên khối dữ liệu âm thanh quy mô lớn, cho độ chính xác cao và hỗ trợ tốt tiếng Việt.
 
 \textbf{Mốc thời gian} -- kết quả nhận dạng kèm theo mốc thời gian, cần thiết để gắn các hoạt động tương tác vào đúng vị trí trong video.
 
-\textbf{Triển khai tại chỗ} -- mô hình chạy trên hạ tầng riêng nên dữ liệu bài giảng không phải gửi ra dịch vụ bên thứ ba. Với những video dài, âm thanh được chia thành các đoạn ngắn rồi nhận dạng lần lượt để xử lý được cả tệp lớn.
+\textbf{Triển khai tại chỗ} -- mô hình chạy trên hạ tầng riêng nên dữ liệu bài giảng không phải gửi ra dịch vụ bên thứ ba.
 
 Các lựa chọn thay thế gồm dịch vụ đám mây như Google Cloud Speech-to-Text hay Amazon Transcribe, và thư viện ngoại tuyến nhẹ như Vosk. Bảng~\ref{table:stt} so sánh các lựa chọn theo độ chính xác, chi phí, khả năng giữ dữ liệu tại chỗ và công sức vận hành.
 
@@ -54,7 +54,7 @@ Sau khi có bản chép lời, hệ thống tự động phân đoạn nội dun
 
 \textbf{Hiểu ngữ cảnh dài} -- mô hình nắm bắt được toàn bộ một đoạn nội dung để đặt câu hỏi bám sát bài giảng và chấm tự động các câu trả lời tự luận.
 
-\textbf{Khả năng thay thế} -- lời gọi mô hình được đặt sau một lớp trừu tượng, cho phép thay đổi nhà cung cấp hoặc dùng mô hình giả lập khi kiểm thử mà không ảnh hưởng phần còn lại.
+\textbf{Khả năng thay thế} -- thiết kế cho phép dễ dàng đổi sang một nhà cung cấp mô hình khác khi cần, không phụ thuộc cứng vào một dịch vụ.
 
 \begin{figure}[H]
 \centering
@@ -85,7 +85,7 @@ Như Bảng~\ref{table:llm} cho thấy, Gemini đạt chất lượng đầu ra 
 \subsection{Tổng hợp tiếng nói}
 Một số hoạt động, đặc biệt là bài nghe ở Chương~\ref{chapter:Related_works}, cần chuyển văn bản thành âm thanh. Hệ thống dùng Piper~\cite{piper2023}, một công cụ tổng hợp tiếng nói bằng mạng nơ-ron, với hai đặc điểm phù hợp với bài toán:
 
-\textbf{Chạy trên CPU} -- Piper là mô hình mã nguồn mở, hoạt động hoàn toàn trên CPU thông thường nên không đòi hỏi phần cứng chuyên dụng, và được triển khai chung với khối nhận dạng tiếng nói trong dịch vụ Speaches.
+\textbf{Chạy trên CPU} -- Piper là mô hình mã nguồn mở, hoạt động hoàn toàn trên CPU thông thường nên không đòi hỏi phần cứng chuyên dụng.
 
 \textbf{Hỗ trợ tiếng Việt} -- Piper có sẵn giọng đọc tiếng Việt, phù hợp để tạo nội dung bài nghe cho người học.
 
@@ -97,7 +97,7 @@ Phía máy chủ chịu trách nhiệm xử lý nghiệp vụ, lưu trữ dữ l
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.9\textwidth]{Hinhve/chuong_3/kientructongthe.pdf}
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_3/kientructongthe.pdf}
 \caption{Kiến trúc tổng thể của hệ thống}
 \label{fig:kientruc}
 \end{figure}
@@ -109,14 +109,14 @@ Máy chủ được xây dựng bằng ngôn ngữ Go~\cite{golang}, đáp ứng
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.42\textwidth]{Hinhve/chuong_3/goworker.pdf}
+\includegraphics[width=0.5\textwidth]{Hinhve/chuong_3/goworker.pdf}
 \caption{Nhiều worker (goroutine) lấy việc từ hàng đợi và xử lý song song}
 \label{fig:goworker}
 \end{figure}
 
 \textbf{Hiệu năng} -- chương trình được biên dịch thành mã máy chạy nhanh và ít tiêu tốn tài nguyên.
 
-\textbf{Dễ bảo trì} -- mã nguồn được tổ chức theo cơ chế tiêm phụ thuộc, tách rời các thành phần nên dễ kiểm thử và mở rộng.
+\textbf{Dễ bảo trì} -- Go có cú pháp đơn giản và bộ công cụ chuẩn hóa, giúp mã nguồn dễ đọc và dễ bảo trì.
 
 Các lựa chọn thay thế gồm Node.js (dùng chung ngôn ngữ với giao diện nhưng yếu hơn ở các tác vụ nặng về tính toán) và Java cùng Spring (hệ sinh thái trưởng thành nhưng môi trường chạy nặng hơn). Go được chọn nhờ cân bằng tốt giữa hiệu năng, khả năng xử lý đồng thời và độ gọn nhẹ.
 
@@ -127,39 +127,39 @@ Giao diện và máy chủ trao đổi dữ liệu qua Connect RPC~\cite{connect
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.55\textwidth]{Hinhve/chuong_3/protobuf.pdf}
+\includegraphics[width=0.6\textwidth]{Hinhve/chuong_3/protobuf.pdf}
 \caption{Sinh mã tự động cho máy chủ và giao diện từ một hợp đồng Protocol Buffers}
 \label{fig:protobuf}
 \end{figure}
 
-\textbf{An toàn kiểu và kiểm tra đầu vào} -- kiểu dữ liệu được kiểm tra ngay khi biên dịch, đồng thời dữ liệu đầu vào của mỗi yêu cầu được kiểm tra tính hợp lệ tại biên dựa trên ràng buộc khai báo trong hợp đồng.
+\textbf{An toàn kiểu} -- kiểu dữ liệu được kiểm tra chặt chẽ ngay khi biên dịch, giảm lỗi khi hai phía giao tiếp.
 
 Các lựa chọn thay thế gồm REST kèm JSON (phổ biến nhưng không bảo đảm an toàn kiểu khi biên dịch), gRPC thuần (cần thêm thành phần trung gian để trình duyệt sử dụng) và GraphQL (linh hoạt nhưng làm máy chủ phức tạp hơn). Hệ thống chọn Connect RPC và Protocol Buffers vì vừa an toàn kiểu vừa sinh mã cho cả hai phía từ một định nghĩa chung.
 
 \subsection{Lưu trữ dữ liệu}
 Hệ thống lưu trữ dữ liệu trên ba kho khác nhau, mỗi kho phù hợp với một loại dữ liệu, đáp ứng yêu cầu lưu trữ bền vững và an toàn ở Chương~\ref{chapter:Related_works}.
 
-\textbf{PostgreSQL} -- cơ sở dữ liệu quan hệ~\cite{postgresql} lưu các dữ liệu nghiệp vụ chính như người dùng, tổ chức, khóa học và bài giảng; các truy vấn được sinh mã an toàn kiểu bằng sqlc~\cite{sqlc}.
+\textbf{PostgreSQL} -- cơ sở dữ liệu quan hệ~\cite{postgresql} lưu các dữ liệu nghiệp vụ chính như người dùng, tổ chức, khóa học và bài giảng.
 
-\textbf{FoundationDB} -- kho khóa--giá trị giao dịch~\cite{foundationdb} lưu các khối dữ liệu lớn như bản chép lời và tiến độ xem của người học, giúp các bảng quan hệ gọn nhẹ.
+\textbf{FoundationDB} -- kho khóa--giá trị giao dịch~\cite{foundationdb}, phù hợp lưu các khối dữ liệu lớn như bản chép lời và tiến độ xem của người học.
 
-\textbf{SeaweedFS} -- kho lưu trữ đối tượng tương thích S3\footnote{\url{https://github.com/seaweedfs/seaweedfs}} lưu video tải lên và âm thanh sinh ra, cho phép trình duyệt tải trực tiếp để giảm tải cho máy chủ.
+\textbf{SeaweedFS} -- kho lưu trữ đối tượng tương thích S3\footnote{\url{https://github.com/seaweedfs/seaweedfs}}, lưu video tải lên và âm thanh sinh ra.
 
-Các lựa chọn thay thế gồm MySQL hay MongoDB cho cơ sở dữ liệu và dùng ORM thay cho sqlc; hệ thống chọn cách kết hợp trên để mỗi loại dữ liệu được lưu ở nơi phù hợp nhất với đặc tính của nó.
+Các lựa chọn thay thế gồm MySQL hay MongoDB cho cơ sở dữ liệu; hệ thống chọn cách kết hợp trên để mỗi loại dữ liệu được lưu ở nơi phù hợp nhất với đặc tính của nó.
 
 \subsection{Hàng đợi tác vụ bền vững}
-Hệ thống xử lý các tác vụ phân tích video chạy dài một cách bất đồng bộ qua một hàng đợi tác vụ bền vững xây dựng trên PostgreSQL, đáp ứng yêu cầu xử lý ở chế độ nền và phục hồi tác vụ ở Chương~\ref{chapter:Related_works}. Đây cũng là nền tảng cho kiến trúc quản lý các tác vụ phân tích đã giới thiệu ở Chương~\ref{chapter:Introduction}.
-
-\textbf{Bền vững} -- mọi tác vụ được lưu trong cơ sở dữ liệu nên không thất lạc khi máy chủ gặp sự cố.
-
-\textbf{Có khả năng phục hồi} -- một tác vụ bị gián đoạn được tự động đưa trở lại hàng đợi và tiếp tục thay vì làm lại từ đầu. Vòng đời của một tác vụ qua các trạng thái chờ xử lý, đang xử lý và hoàn tất hoặc thất bại được tóm tắt ở Hình~\ref{fig:hangdoi}.
+Hệ thống xử lý các tác vụ phân tích video chạy dài một cách bất đồng bộ qua một hàng đợi tác vụ bền vững xây dựng trên PostgreSQL, đáp ứng yêu cầu xử lý ở chế độ nền và phục hồi tác vụ ở Chương~\ref{chapter:Related_works}. Đây cũng là nền tảng cho kiến trúc quản lý các tác vụ phân tích đã giới thiệu ở Chương~\ref{chapter:Introduction}. Hình~\ref{fig:hangdoi} minh họa luồng một tác vụ đi qua hàng đợi.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.62\textwidth]{Hinhve/chuong_3/maytrangthaihangdoi.pdf}
-\caption{Máy trạng thái của một tác vụ trong hàng đợi}
+\includegraphics[width=0.9\textwidth]{Hinhve/chuong_3/hangdoi.pdf}
+\caption{Luồng xử lý tác vụ qua hàng đợi bền vững}
 \label{fig:hangdoi}
 \end{figure}
+
+\textbf{Bền vững} -- mọi tác vụ được lưu trong cơ sở dữ liệu nên không thất lạc khi máy chủ gặp sự cố.
+
+\textbf{Có khả năng phục hồi} -- một tác vụ bị gián đoạn được tự động đưa trở lại hàng đợi để xử lý lại thay vì bị bỏ dở.
 
 Các lựa chọn thay thế gồm hàng đợi trên Redis hoặc hệ môi giới thông điệp như RabbitMQ, Kafka. Bảng~\ref{table:queue} so sánh các lựa chọn theo hạ tầng bổ sung, độ bền và độ phức tạp vận hành.
 
@@ -168,11 +168,11 @@ Các lựa chọn thay thế gồm hàng đợi trên Redis hoặc hệ môi gi�
 \small
 \caption{So sánh các cơ chế hàng đợi tác vụ}
 \label{table:queue}
-\begin{tabular}{|>{\raggedright\arraybackslash}p{3.3cm}|>{\raggedright\arraybackslash}p{3.3cm}|>{\raggedright\arraybackslash}p{2.7cm}|>{\raggedright\arraybackslash}p{2.9cm}|}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{3.3cm}|>{\raggedright\arraybackslash}p{3cm}|>{\raggedright\arraybackslash}p{2.8cm}|>{\raggedright\arraybackslash}p{3cm}|}
 \hline
-\textbf{Tiêu chí} & \textbf{PostgreSQL (LISTEN/NOTIFY)} & \textbf{Redis (Asynq)} & \textbf{RabbitMQ, Kafka} \\ \hline
+\textbf{Tiêu chí} & \textbf{PostgreSQL} & \textbf{Redis} & \textbf{RabbitMQ, Kafka} \\ \hline
 Hạ tầng bổ sung & Không & Có & Có \\ \hline
-Đưa vào hàng đợi nguyên tử & Có & Không & Không \\ \hline
+Đảm bảo không mất tác vụ & Cao & Trung bình & Cao \\ \hline
 Độ bền dữ liệu & Cao & Trung bình & Cao \\ \hline
 Thông lượng tối đa & Trung bình & Cao & Rất cao \\ \hline
 Độ phức tạp vận hành & Thấp & Trung bình & Cao \\ \hline
@@ -184,11 +184,11 @@ Như Bảng~\ref{table:queue} cho thấy, hàng đợi trên nền PostgreSQL kh
 \subsection{Xác thực và bảo mật}
 Hệ thống đáp ứng yêu cầu bảo mật ở Chương~\ref{chapter:Related_works} bằng ba cơ chế chính.
 
-\textbf{Xác thực phi trạng thái} -- người dùng được xác thực bằng JSON Web Token~\cite{rfc7519}, dùng theo cặp gồm một token truy cập ngắn hạn và một token làm mới dài hạn, giúp máy chủ không cần lưu trạng thái phiên. Hình~\ref{fig:jwt} minh họa quy trình đăng nhập và gọi dịch vụ kèm token.
+\textbf{Xác thực phi trạng thái} -- người dùng được xác thực bằng JSON Web Token~\cite{rfc7519}, giúp máy chủ không cần lưu trạng thái phiên. Hình~\ref{fig:jwt} minh họa quy trình đăng nhập và gọi dịch vụ kèm token. Ở phía giao diện, token được lưu trong cookie HTTP-only và tự động làm mới, nên người dùng không phải đăng nhập lại thường xuyên.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.68\textwidth]{Hinhve/chuong_3/jwt.pdf}
+\includegraphics[width=0.85\textwidth]{Hinhve/chuong_3/jwt.pdf}
 \caption{Quy trình xác thực bằng JSON Web Token}
 \label{fig:jwt}
 \end{figure}
@@ -208,16 +208,18 @@ Giao diện web được xây dựng bằng thư viện React~\cite{react} trên
 
 \textbf{Kết xuất phía máy chủ} -- Next.js kết xuất trang ở phía máy chủ giúp trang tải nhanh.
 
-\textbf{Xác thực tại tầng proxy} -- Next.js cung cấp một tầng trung gian chạy trước mỗi yêu cầu để kiểm soát xác thực trước khi người dùng truy cập các trang cần đăng nhập; Hình~\ref{fig:nextjs} minh họa luồng kiểm tra xác thực và kết xuất trang.
+\textbf{Xác thực tích hợp} -- Next.js hỗ trợ kiểm soát xác thực ngay ở phía máy chủ trước khi người dùng truy cập các trang cần đăng nhập; Hình~\ref{fig:nextjs} minh họa luồng xác thực và kết xuất trang.
 
-\textbf{Thành phần tái sử dụng} -- React cho phép dựng giao diện từ các thành phần tái sử dụng, phù hợp với giao diện giàu tương tác như trình phát video gắn kèm hoạt động. Toàn bộ giao diện được trình bày bằng tiếng Việt theo đúng nhóm người dùng mục tiêu.
+\textbf{Thành phần tái sử dụng} -- React cho phép dựng giao diện từ các thành phần tái sử dụng. Toàn bộ giao diện được trình bày bằng tiếng Việt theo đúng nhóm người dùng mục tiêu.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.8\textwidth]{Hinhve/chuong_3/nextjs.pdf}
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_3/nextjs.pdf}
 \caption{Luồng xác thực tại tầng proxy và kết xuất trang phía máy chủ của Next.js}
 \label{fig:nextjs}
 \end{figure}
+
+\textbf{Trình phát video tương tác} -- giao diện học tập sử dụng một trình phát video tùy biến cho phép chèn hoạt động vào đúng mốc thời gian, tạm dừng để người học trả lời, hạn chế tua nhanh qua phần chưa xem và tự động lưu lại tiến độ học; mỗi loại hoạt động được ánh xạ tới một thành phần hiển thị riêng để dễ bổ sung loại mới.
 
 Các lựa chọn thay thế gồm Angular, Vue cùng Nuxt, hay ứng dụng một trang thuần; hệ thống chọn Next.js và React vì hệ sinh thái lớn và hỗ trợ tốt việc kết xuất phía máy chủ.
 

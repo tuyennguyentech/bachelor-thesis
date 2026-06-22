@@ -1,0 +1,48 @@
+@startuml trienkhai
+!pragma layout smetana
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam linetype ortho
+skinparam node {
+  BackgroundColor #FAFAFA
+  BorderColor #555555
+}
+skinparam database {
+  BackgroundColor #FAFAFA
+  BorderColor #555555
+}
+skinparam cloud {
+  BackgroundColor #FAFAFA
+  BorderColor #555555
+}
+
+actor "Người dùng\n(trình duyệt)" as U
+
+node "Caddy — proxy ngược\n:80 / :443" as caddy
+
+package "Ứng dụng\n(container)" {
+  node "heino (Next.js)\n:3000" as heino
+  node "richter (Go)\n:8080" as richter
+}
+
+package "Lưu trữ dữ liệu" {
+  database "PostgreSQL\n:5432" as pg
+  database "FoundationDB\n:4500" as fdb
+  node "SeaweedFS (S3)\n:9000" as s3
+}
+
+node "Speaches :8000\nWhisper STT + Piper TTS" as speaches
+cloud "Gemini API\n(dịch vụ ngoài)" as gemini
+
+U --> caddy : HTTPS
+caddy --> heino : "/"
+caddy --> richter : "/api/richter"
+caddy --> s3 : "/api/storage"
+heino --> richter : Connect RPC
+richter --> pg : SQL, hàng đợi tác vụ
+richter --> fdb : lời thoại, tiến độ xem
+richter --> s3 : đối tượng (S3)
+richter --> speaches : STT / TTS
+richter --> gemini : sinh nội dung
+@enduml

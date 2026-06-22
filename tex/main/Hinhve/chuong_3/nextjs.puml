@@ -1,24 +1,18 @@
 @startuml nextjs
 skinparam defaultFontName "DejaVu Sans"
-skinparam defaultFontSize 14
+skinparam defaultFontSize 15
 skinparam shadowing false
 skinparam sequenceMessageAlign center
 
-actor "Người dùng" as U
 participant "Trình duyệt" as B
-participant "Next.js Proxy\n(tầng xác thực)" as P
-participant "Next.js\n(kết xuất máy chủ)" as N
-participant "Máy chủ richter" as R
+participant "Next.js Proxy" as P
+participant "Next.js (SSR)" as N
+participant "Máy chủ ứng dụng" as R
 
-U -> B : Mở trang cần đăng nhập
 B -> P : Yêu cầu trang
-P -> P : Kiểm tra token
-alt Token hợp lệ
-  P -> N : Cho qua
-  N -> R : Lấy dữ liệu (Connect RPC)
-  R --> N : Dữ liệu
-  N --> B : Trang đã kết xuất sẵn
-else Chưa đăng nhập
-  P --> B : Chuyển hướng tới trang đăng nhập
-end
+P -> P : Kiểm tra xác thực
+P -> N : Cho qua
+N -> R : Lấy dữ liệu (Connect RPC)
+R --> N : Dữ liệu
+N --> B : Trang đã kết xuất
 @enduml

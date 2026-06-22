@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mockup quản lý khóa học và bài giảng</title>
+    <link rel="stylesheet" href="./_style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="top-left">
+          <div class="ghost-button">‹ Tổ chức</div>
+          <div style="height:20px;width:1px;background:#e4e4e7"></div>
+          <div class="title-block">
+            <div class="crumbs caption"><span>Tổ chức Dyadia</span><span>›</span><span>Khóa học</span></div>
+            <div class="top-title">Cấu trúc dữ liệu và giải thuật</div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <div class="icon-button">◐</div>
+          <div class="ghost-button">Đăng xuất</div>
+        </div>
+      </header>
+
+      <section class="page-body">
+        <div class="workspace">
+          <aside class="route-sidebar">
+            <div class="route-sidebar-head">
+              <div class="route-title"><span class="icon i-book"></span>Không gian khóa học</div>
+            </div>
+            <div class="module" style="padding-top:12px">
+              <div class="lesson-link active"><span class="icon i-book" style="color:#1447e6"></span><span><span class="name">Tổng quan</span><span class="meta">Thông tin khóa học</span></span><span></span></div>
+              <div class="lesson-link"><span class="icon i-video" style="color:#71717a"></span><span><span class="name">Bài học</span><span class="meta">Chương, bài giảng, video</span></span><span>›</span></div>
+              <div class="lesson-link"><span class="icon i-user" style="color:#71717a"></span><span><span class="name">Thành viên</span><span class="meta">86 học viên</span></span><span>›</span></div>
+              <div class="lesson-link"><span class="icon i-chart" style="color:#71717a"></span><span><span class="name">Kết quả</span><span class="meta">Thống kê và phân tích</span></span><span>›</span></div>
+            </div>
+          </aside>
+
+          <section class="main">
+            <div class="lesson-heading">
+              <div>
+                <div class="caption">Tổ chức Dyadia › Khóa học</div>
+                <h1>Cấu trúc dữ liệu và giải thuật</h1>
+                <div class="inline muted"><span>12 bài giảng</span><span>·</span><span>86 thành viên</span><span>·</span><span class="badge green">Đã xuất bản</span></div>
+              </div>
+              <div class="inline">
+                <div class="button">Vào học</div>
+                <div class="button primary"><span class="icon i-spark"></span>Tạo nhanh bài học</div>
+              </div>
+            </div>
+
+            <div class="metric-grid">
+              <div class="card metric"><span class="caption">Chương</span><strong>4</strong></div>
+              <div class="card metric"><span class="caption">Bài giảng</span><strong>12</strong></div>
+              <div class="card metric"><span class="caption">Yêu cầu tham gia</span><strong>5</strong></div>
+            </div>
+
+            <section class="studio-card">
+              <div class="studio-head">
+                <div class="inline"><span class="icon i-video" style="color:#1447e6"></span><strong>Danh sách bài giảng</strong></div>
+                <div class="inline"><div class="button">Thêm chương</div><div class="button primary">Thêm bài học</div></div>
+              </div>
+              <div class="lesson-cards">
+                <article class="lesson-card">
+                  <div class="inline" style="justify-content:space-between"><h3>Bài 1: Mảng và danh sách</h3><span class="badge green">Sẵn sàng</span></div>
+                  <p class="caption">Video 18 phút · 7 hoạt động tương tác</p>
+                  <div class="progress"><span style="width:100%"></span></div>
+                </article>
+                <article class="lesson-card">
+                  <div class="inline" style="justify-content:space-between"><h3>Bài 2: Ngăn xếp và hàng đợi</h3><span class="badge yellow">Đang xử lý</span></div>
+                  <p class="caption">Phiên âm xong, đang sinh bài tập</p>
+                  <div class="progress"><span style="width:68%"></span></div>
+                </article>
+                <article class="lesson-card">
+                  <div class="inline" style="justify-content:space-between"><h3>Bài 3: Độ phức tạp thuật toán</h3><span class="badge">Bản nháp</span></div>
+                  <p class="caption">Chưa tải video, có thể dùng tạo nhanh</p>
+                  <div class="progress"><span style="width:18%"></span></div>
+                </article>
+                <article class="lesson-card">
+                  <div class="inline" style="justify-content:space-between"><h3>Bài 4: Cây nhị phân</h3><span class="badge green">Sẵn sàng</span></div>
+                  <p class="caption">Video 27 phút · 10 hoạt động tương tác</p>
+                  <div class="progress"><span style="width:100%"></span></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="studio-card">
+              <div class="tabs">
+                <div class="tab">Bài giảng</div>
+                <div class="tab active"><span class="icon i-spark"></span>Xử lý video</div>
+                <div class="tab">Kết quả & Thống kê <span class="badge primary">42</span></div>
+              </div>
+              <div class="processing-panel">
+                <div>
+                  <div class="step"><span class="step-num">1</span><div><strong>Tải video</strong><div class="caption">Lưu video bài giảng vào kho đối tượng</div></div><span class="badge green">Xong</span></div>
+                  <div class="step"><span class="step-num">2</span><div><strong>Phiên âm</strong><div class="caption">Nhận dạng lời thoại bằng Speaches/Whisper</div></div><span class="badge green">Xong</span></div>
+                  <div class="step"><span class="step-num">3</span><div><strong>Phân đoạn và sinh bài tập</strong><div class="caption">LLM tạo dàn bài và hoạt động tương tác</div></div><span class="badge yellow">Đang chạy</span></div>
+                </div>
+                <div class="card metric">
+                  <span class="caption">Tiến độ tác vụ nền</span>
+                  <strong>68%</strong>
+                  <div class="progress" style="margin:10px 0 12px"><span style="width:68%"></span></div>
+                  <p class="caption">Giảng viên có thể xem thử, sinh lại từng đoạn hoặc chuyển sang tab kết quả sau khi học viên nộp bài.</p>
+                </div>
+              </div>
+            </section>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

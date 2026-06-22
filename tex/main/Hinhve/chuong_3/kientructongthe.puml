@@ -13,19 +13,19 @@ left to right direction
 !include <tupadr3/font-awesome-5/cloud>
 skinparam shadowing false
 skinparam defaultFontName "DejaVu Sans"
-skinparam defaultFontSize 14
-skinparam ArrowFontSize 12
+skinparam defaultFontSize 18
+skinparam ArrowFontSize 16
 
-FA5_USERS(user,"Người dùng\n(Giảng viên / Người học)")
-FA5_LAPTOP(browser,"Trình duyệt web")
-FA5_SHIELD_ALT(caddy,"Caddy\n(Reverse proxy)")
-FA5_WINDOW_RESTORE(heino,"Giao diện web\n(heino, Next.js)")
-FA5_SERVER(richter,"Máy chủ (richter)\nGo, worker hàng đợi")
-FA5_DATABASE(pg,"PostgreSQL\ndữ liệu quan hệ\n+ hàng đợi tác vụ")
-FA5_DATABASE(fdb,"FoundationDB\nbản chép lời,\ntiến độ xem")
-FA5_HDD(s3,"SeaweedFS (S3)\nvideo, âm thanh")
-FA5_MICROPHONE(speaches,"Speaches\nWhisper, Piper")
-FA5_CLOUD(gemini,"Google Gemini API\n(dịch vụ ngoài)")
+FA5_USERS(user,"Người dùng")
+FA5_LAPTOP(browser,"Trình duyệt")
+FA5_SHIELD_ALT(caddy,"Máy chủ proxy")
+FA5_WINDOW_RESTORE(heino,"Giao diện web\n(Next.js)")
+FA5_SERVER(richter,"Máy chủ ứng dụng\n(Go)")
+FA5_DATABASE(pg,"PostgreSQL\n(dữ liệu, hàng đợi)")
+FA5_DATABASE(fdb,"FoundationDB\n(dữ liệu lớn)")
+FA5_HDD(s3,"SeaweedFS\n(video, âm thanh)")
+FA5_MICROPHONE(speaches,"Dịch vụ AI\n(Whisper, Piper)")
+FA5_CLOUD(gemini,"Gemini API")
 
 user --> browser
 browser --> caddy : HTTP
@@ -35,6 +35,6 @@ heino --> richter : Connect RPC
 richter --> pg
 richter --> fdb
 richter --> s3
-richter --> speaches : HTTP
-richter --> gemini : HTTPS
+richter --> speaches
+richter --> gemini
 @enduml

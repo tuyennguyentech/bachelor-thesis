@@ -1,0 +1,21 @@
+@startuml hangdoi
+!pragma layout smetana
+left to right direction
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 16
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #F5F5F5
+  BorderColor #555555
+}
+
+rectangle "Yêu cầu\nphân tích video" as REQ
+rectangle "Hàng đợi bền vững\n(PostgreSQL)" as Q #E8EEF7
+rectangle "Worker\nxử lý nền" as W
+rectangle "Hoàn tất" as DONE
+
+REQ --> Q
+Q --> W
+W --> DONE
+note bottom of Q : Tác vụ bị gián đoạn được đưa\nlại hàng đợi để xử lý lại
+@enduml

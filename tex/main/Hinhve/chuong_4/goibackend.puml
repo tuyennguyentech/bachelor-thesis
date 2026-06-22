@@ -1,0 +1,35 @@
+@startuml goibackend
+!pragma layout smetana
+top to bottom direction
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam packageStyle folder
+skinparam packageBackgroundColor #F7F7F7
+skinparam packageBorderColor #555555
+
+package api
+package svc
+package authz
+package secure
+package taskqueue
+package db
+package kv
+package cfg
+package log
+package proto
+package sqlc
+
+api ..> svc
+api ..> authz
+api ..> proto
+api ..> cfg
+authz ..> secure
+svc ..> db
+svc ..> kv
+svc ..> taskqueue
+svc ..> secure
+svc ..> proto
+svc ..> log
+db ..> sqlc
+@enduml

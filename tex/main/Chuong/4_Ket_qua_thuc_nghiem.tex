@@ -3,89 +3,556 @@
 
 \section{Thiết kế kiến trúc}
 \subsection{Lựa chọn kiến trúc phần mềm}
-Dựa trên các yêu cầu chức năng và phi chức năng đã xác định ở Chương~\ref{chapter:Related_works}, đặc biệt là nhu cầu xử lý các tác vụ phân tích nặng ở chế độ nền tách biệt với giao diện và khả năng mở rộng từng phần, hệ thống được xây dựng theo kiến trúc khách--chủ (client--server), trong đó phía máy chủ được tổ chức thành nhiều dịch vụ độc lập và máy chủ ứng dụng được thiết kế theo kiến trúc phân tầng.
-
-Trong mô hình khách--chủ, máy khách gửi yêu cầu còn máy chủ tiếp nhận, xử lý và trả về kết quả thông qua một giao thức truyền thông thống nhất. Việc tách phía máy chủ thành nhiều dịch vụ cho phép mỗi dịch vụ đảm nhận một nhóm nhiệm vụ riêng gồm xử lý nghiệp vụ, phân tích bằng trí tuệ nhân tạo và lưu trữ, nhờ đó có thể triển khai, thay thế và mở rộng từng phần một cách độc lập.
-
-\textbf{Áp dụng kiến trúc vào hệ thống.} Người dùng truy cập hệ thống qua trình duyệt web, đóng vai trò máy khách. Phía máy chủ gồm các dịch vụ đã trình bày trong kiến trúc tổng thể (Hình~\ref{fig:kientruc}, Chương~\ref{chapter:Methodology}): một máy chủ proxy tiếp nhận và điều hướng yêu cầu, giao diện web kết xuất trang, máy chủ ứng dụng xử lý nghiệp vụ, các dịch vụ trí tuệ nhân tạo phục vụ phân tích, và các kho lưu trữ dữ liệu. Giao diện và máy chủ ứng dụng trao đổi dữ liệu qua Connect RPC, còn các dịch vụ phụ trợ được gọi qua giao thức HTTP.
-
-\textbf{Kiến trúc phân tầng của máy chủ ứng dụng.} Bản thân máy chủ ứng dụng được tổ chức theo kiến trúc phân tầng gồm ba tầng như Hình~\ref{fig:phantang}.
+Dựa trên các yêu cầu chức năng và phi chức năng đã xác định ở Chương~\ref{chapter:Related_works}, đặc biệt là nhu cầu xử lý các tác vụ phân tích nặng ở chế độ nền tách biệt với giao diện và khả năng mở rộng từng phần, hệ thống được xây dựng theo kiến trúc khách--chủ (client--server), trong đó phía máy chủ gồm một máy chủ ứng dụng được thiết kế theo kiến trúc phân tầng, phối hợp cùng các dịch vụ chuyên biệt (giao diện web, dịch vụ trí tuệ nhân tạo và kho lưu trữ) được triển khai tách biệt.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.6\textwidth]{Hinhve/chuong_4/phantang.pdf}
-\caption{Kiến trúc phân tầng của máy chủ ứng dụng}
-\label{fig:phantang}
+\includegraphics[width=0.65\textwidth]{Hinhve/chuong_4/clientserver.pdf}
+\caption{Mô hình kiến trúc khách--chủ}
+\label{fig:clientserver}
 \end{figure}
 
-\textbf{Tầng giao tiếp} -- tiếp nhận các lời gọi từ giao diện qua Connect RPC, kiểm tra xác thực và phân quyền rồi chuyển yêu cầu hợp lệ xuống tầng nghiệp vụ; tầng này tương ứng với gói \texttt{api} cùng các bộ xử lý dịch vụ.
+Trong mô hình khách--chủ (Hình~\ref{fig:clientserver}), máy khách gửi yêu cầu còn máy chủ tiếp nhận, xử lý và trả về kết quả thông qua một giao thức truyền thông thống nhất. Phía máy chủ tách phần xử lý nghiệp vụ chính khỏi các chức năng nặng và chuyên biệt như phân tích bằng trí tuệ nhân tạo và lưu trữ; nhờ đặt các chức năng này ở những dịch vụ riêng, chúng có thể được thay thế hoặc mở rộng độc lập với máy chủ ứng dụng.
 
-\textbf{Tầng nghiệp vụ} -- chứa logic xử lý của từng miền chức năng như người dùng, tổ chức, khóa học, bài giảng, hoạt động tương tác và các tác vụ phân tích bằng trí tuệ nhân tạo; tầng này tương ứng với các gói trong \texttt{svc}.
+\textbf{Áp dụng kiến trúc vào hệ thống.} Người dùng truy cập hệ thống qua trình duyệt web, đóng vai trò máy khách. Một máy chủ proxy tiếp nhận và điều hướng yêu cầu tới giao diện web để kết xuất trang và tới máy chủ ứng dụng để xử lý nghiệp vụ. Cả trình duyệt và phần kết xuất phía máy chủ của giao diện web đều gọi máy chủ ứng dụng thông qua Connect RPC; máy chủ ứng dụng kết nối tới các kho lưu trữ dữ liệu và các dịch vụ trí tuệ nhân tạo qua các giao thức tương ứng của từng thành phần. Toàn bộ kiến trúc triển khai được minh họa ở Hình~\ref{fig:kientrucphanmem}.
 
-\textbf{Tầng truy cập dữ liệu} -- đảm nhận việc đọc và ghi dữ liệu xuống các kho lưu trữ, gồm các truy vấn được sinh mã bằng sqlc cho PostgreSQL và gói \texttt{kv} cho FoundationDB.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/kientrucphanmem.pdf}
+\caption{Kiến trúc client--server áp dụng cho hệ thống}
+\label{fig:kientrucphanmem}
+\end{figure}
 
-Các tầng được liên kết qua cơ chế tiêm phụ thuộc: tầng trên gọi xuống tầng dưới và không có chiều phụ thuộc ngược lại, giúp tách biệt rõ trách nhiệm, dễ thay thế thành phần và thuận tiện cho kiểm thử. Thiết kế chi tiết của từng gói trong các tầng này được trình bày ở phần tiếp theo.
+Bên trong, máy chủ ứng dụng được tổ chức theo kiến trúc phân tầng gồm ba tầng. Tầng giao tiếp tiếp nhận các lời gọi từ trình duyệt và giao diện web rồi kiểm tra xác thực, tầng nghiệp vụ xử lý logic của từng miền chức năng, còn tầng truy cập dữ liệu đảm nhận việc đọc và ghi xuống các kho lưu trữ. Các tầng được liên kết qua cơ chế tiêm phụ thuộc theo nguyên tắc tầng trên chỉ phụ thuộc tầng dưới, giúp tách biệt rõ trách nhiệm và thuận tiện cho kiểm thử. Một điểm khác biệt so với mô hình lý thuyết là điểm cuối giao tiếp và logic nghiệp vụ của mỗi miền được đặt chung trong một thành phần thay vì tách thành lớp điều khiển và lớp dịch vụ riêng, nhằm giảm bớt tầng trung gian. Cách phân chia thành các gói cụ thể cùng quan hệ phụ thuộc giữa chúng được trình bày ở phần thiết kế tổng quan tiếp theo.
 
 \subsection{Thiết kế tổng quan}
-Sinh viên vẽ biểu đồ gói UML (UML package diagram), nêu rõ sự phụ thuộc giữa các gói (package). SV cần vẽ các gói sao cho chúng được phân theo các tầng rõ ràng, không được sắp đặt package lộn xộn trong hình vẽ. Sinh viên chú ý các quy tắc thiết kế (Các gói không phụ thuộc lẫn nhau, gói tầng dưới không phụ thuộc gói tầng trên, không phụ thuộc bỏ qua tầng, v.v.) và cần giải thích sơ lược về mục đích/nhiệm vụ của từng package. SV tham khảo ví dụ minh họa trong Hình \ref{fig:Fig1}
+Phần này trình bày thiết kế tổng quan của hệ thống dưới dạng biểu đồ gói (package diagram), tách riêng cho máy chủ ứng dụng và giao diện web. Các gói được phân theo ba tầng đã nêu ở phần trước, tuân theo nguyên tắc gói ở tầng trên chỉ phụ thuộc gói ở tầng dưới và không phụ thuộc vượt tầng.
+
+\textbf{a) Thiết kế tổng quan máy chủ ứng dụng.} Hình~\ref{fig:goibackend} trình bày các gói chính của máy chủ ứng dụng cùng quan hệ phụ thuộc giữa chúng.
+
 \begin{figure}[H]
-    \centering
-    \includegraphics{Hinhve/Picture1.png}
-    \caption{Ví dụ biểu đồ phụ thuộc gói}
-    \label{fig:Fig1}
+\centering
+\includegraphics[width=0.9\textwidth]{Hinhve/chuong_4/goibackend.pdf}
+\caption{Biểu đồ gói của máy chủ ứng dụng}
+\label{fig:goibackend}
 \end{figure}
+
+Gói \texttt{api} thuộc tầng giao tiếp, chịu trách nhiệm đăng ký các điểm cuối Connect RPC, định tuyến yêu cầu và gắn các bộ chặn (interceptor) để kiểm tra tính hợp lệ và phân quyền cho mỗi lời gọi.
+
+Gói \texttt{svc} thuộc tầng nghiệp vụ, chứa logic của từng miền chức năng như người dùng, tổ chức, khóa học, bài giảng, tương tác học tập, lưu trữ và phân tích bằng trí tuệ nhân tạo; mỗi miền được đặt trong một gói con riêng.
+
+Gói \texttt{db} và \texttt{kv} thuộc tầng truy cập dữ liệu, lần lượt đọc và ghi PostgreSQL (thông qua các truy vấn sinh tự động trong gói \texttt{sqlc}) và FoundationDB.
+
+Gói \texttt{authz} và \texttt{secure} đảm nhận bảo mật: \texttt{authz} kiểm tra quyền truy cập ngay tại tầng giao tiếp, còn \texttt{secure} cung cấp mã hóa mật khẩu và phát hành, kiểm tra chuỗi JWT.
+
+Gói \texttt{taskqueue} quản lý hàng đợi tác vụ bền vững, cho phép chạy nền các tác vụ phân tích kéo dài và phục hồi khi gặp sự cố.
+
+Hai gói mã sinh \texttt{proto} (kiểu thông điệp Connect RPC, đóng vai trò đối tượng truyền dữ liệu giữa các bên) và \texttt{sqlc} (kiểu dữ liệu ánh xạ từ các bảng cơ sở dữ liệu) được các tầng phía trên sử dụng. Gói \texttt{cfg} và \texttt{log} cung cấp cấu hình và ghi log dùng chung cho toàn bộ máy chủ.
+
+\textbf{b) Thiết kế tổng quan giao diện web.} Hình~\ref{fig:goifrontend} trình bày các gói chính của giao diện web.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.55\textwidth]{Hinhve/chuong_4/goifrontend.pdf}
+\caption{Biểu đồ gói của giao diện web}
+\label{fig:goifrontend}
+\end{figure}
+
+Gói \texttt{app} chứa các trang và định tuyến theo App Router của Next.js, đồng thời đảm nhận việc kết xuất giao diện phía máy chủ.
+
+Gói \texttt{components} chứa các thành phần giao diện dùng lại, bao gồm cả bộ thành phần cơ sở \texttt{ui}.
+
+Gói \texttt{interactions} cài đặt các loại tương tác học tập (trắc nghiệm, điền khuyết, đọc hiểu, nghe hiểu, viết) theo một sổ đăng ký chung để dễ bổ sung loại mới.
+
+Gói \texttt{actions} chứa các server action thực hiện thao tác ghi dữ liệu được kích hoạt từ biểu mẫu.
+
+Gói \texttt{lib} chứa các tiện ích dùng chung và hai client gọi RPC: một client phía máy chủ và một client phía trình duyệt, cùng các hàm xác thực và làm mới phiên đăng nhập.
+
+Gói \texttt{proxy} là middleware kiểm tra xác thực trước khi cho phép truy cập các trang. Gói \texttt{proto} cung cấp kiểu thông điệp Connect RPC dùng chung với máy chủ ứng dụng.
 \subsection{Thiết kế chi tiết gói}
-Sinh viên thiết kế và lần lượt vẽ biểu đồ thiết kế cho từng package, hoặc một nhóm các package liên quan để giải quyết một vấn đề gì đó. Khi vẽ thiết kế gói, sinh viên chỉ cần đưa tên lớp, không cần chỉ ra các thành viên phương thức và thuộc tính. SV tham khảo ví dụ minh họa trong Hình \ref{fig:Fig2}.
-
-Sinh viên cần vẽ rõ ràng quan hệ giữa các lớp trong biểu đồ. Các quan hệ bao gồm: phụ thuộc (dependency), kết hợp (association), kết tập (aggregation), hợp thành (composition), kế thừa (inheritance), và thực thi (implementation). Các quan hệ này đều đã được minh họa trong \ref{fig:Fig2}.
-
-Sau khi vẽ hình minh họa, sinh viên cần giải thích ngắn gọn về thiết kế của mình. 
+Phần này minh họa thiết kế ở mức lớp cho một chức năng tiêu biểu và phức tạp nhất của hệ thống là \textbf{sinh bài giảng tương tác từ video}. Chức năng này huy động nhiều gói phối hợp với nhau, trải từ tầng giao tiếp xuống tầng truy cập dữ liệu. Theo quy ước, biểu đồ chỉ thể hiện tên lớp cùng quan hệ giữa chúng, không đi vào thuộc tính và phương thức. Hình~\ref{fig:chitietgoi} trình bày các lớp tham gia.
 
 \begin{figure}[H]
-    \centering
-    \includegraphics{Hinhve/Picture2.png}
-    \caption{Ví dụ thiết kế gói}
-    \label{fig:Fig2}
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/chitietgoi.pdf}
+\caption{Thiết kế chi tiết các lớp cho chức năng sinh bài giảng tương tác}
+\label{fig:chitietgoi}
 \end{figure}
+
+Khi người dùng yêu cầu sinh bài giảng, lớp \texttt{AISvc} (gói \texttt{ai}) không xử lý trực tiếp mà tạo một tác vụ \texttt{Task} và ghi vào hàng đợi thông qua \texttt{Queries} (gói \texttt{db}). Nhờ vậy yêu cầu được phản hồi ngay, còn việc phân tích nặng diễn ra ở chế độ nền.
+
+Trong gói \texttt{taskqueue}, lớp \texttt{Worker} lấy tác vụ từ hàng đợi và chuyển cho một lớp hiện thực giao diện \texttt{Executor}. Với tác vụ sinh bài giảng, lớp đảm nhận là \texttt{PipelineRunExecutor} (gói con \texttt{executors} trong mô-đun \texttt{aitasks}); lớp này hiện thực \texttt{Executor} (quan hệ thực thi) và điều phối toàn bộ quy trình ba bước.
+
+Lớp \texttt{PipelineRunExecutor} phụ thuộc vào ba giao diện \texttt{TranscribeService}, \texttt{ChunkService} và \texttt{QuizGenService}, tương ứng ba bước phiên âm lời thoại, phân đoạn nội dung và sinh bài tập tương tác. Hai bước đầu ủy thác cho lớp \texttt{Service} của gói \texttt{transcript}, còn bước sinh bài tập ủy thác cho lớp \texttt{Service} của gói \texttt{generation}.
+
+Lớp \texttt{Service} của gói \texttt{generation} phụ thuộc vào giao diện \texttt{Engine} (gói \texttt{genengine}) để gọi mô hình ngôn ngữ lớn; việc tách \texttt{Engine} thành giao diện cho phép thay bằng một hiện thực giả lập khi kiểm thử. Kết quả của từng bước được ghi xuống cơ sở dữ liệu qua \texttt{Queries}.
+
+Có thể thấy các quan hệ chủ yếu trong biểu đồ là phụ thuộc và thực thi giao diện, phản ánh nguyên tắc hướng giao diện: các lớp điều phối chỉ phụ thuộc vào trừu tượng (\texttt{TranscribeService}, \texttt{Engine}, v.v.) thay vì hiện thực cụ thể, nhờ đó dễ thay thế và kiểm thử từng thành phần một cách độc lập.
 
 \section{Thiết kế chi tiết}
 \subsection{Thiết kế giao diện}
-Phần này có độ dài từ hai đến ba trang. Sinh viên đặc tả thông tin về màn hình mà ứng dụng của mình hướng tới, bao gồm độ phân giải màn hình, kích thước màn hình, số lượng màu sắc hỗ trợ, v.v. Tiếp đến, sinh viên đưa ra các thống nhất/chuẩn hóa của mình khi thiết kế giao diện như thiết kế nút, điều khiển, vị trí hiển thị thông điệp phản hồi, phối màu, v.v. Sau cùng sinh viên đưa ra một số hình ảnh minh họa thiết kế giao diện cho các chức năng quan trọng nhất. Lưu ý, sinh viên không nhầm lẫn giao diện thiết kế với giao diện của sản phẩm sau cùng.
-\subsection{Thiết kế lớp}
-Phần này có độ dài từ ba đến bốn trang. Sinh viên trình bày thiết kế chi tiết các thuộc tính và phương thức cho một số lớp chủ đạo/quan trọng nhất của ứng dụng (từ 2-4 lớp). Thiết kế chi tiết cho các lớp khác, nếu muốn trình bày, sinh viên đưa vào phần phụ lục.
+\label{subsec:thietkegiaodien}
+Giao diện của hệ thống là một ứng dụng web chạy trên trình duyệt, được thiết kế theo hướng đáp ứng (responsive) nhằm hiển thị tốt trên nhiều kích thước màn hình khác nhau.
 
-Để minh họa thiết kế lớp, sinh viên thiết kế luồng truyền thông điệp giữa các đối tượng tham gia cho 2 đến 3 use case quan trọng nào đó bằng biểu đồ trình tự (hoặc biểu đồ giao tiếp).
+\textbf{Thông tin về màn hình mà ứng dụng hướng tới.} Bảng~\ref{table:devices} mô tả các loại thiết bị cùng kích thước và độ phân giải màn hình mà ứng dụng hướng tới.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|l|}
+\hline
+\textbf{STT} & \textbf{Loại thiết bị} & \textbf{Kích thước} & \textbf{Độ phân giải} \\ \hline
+1 & Máy tính để bàn, xách tay & 13--27 inch & 1366x768, 1920x1080, 2K, 4K \\ \hline
+2 & Máy tính bảng & 8--12 inch & từ 1280x800 \\ \hline
+3 & Điện thoại thông minh & 5,5--7 inch & từ 360x640 \\ \hline
+\end{tabular}
+\caption{Thông tin về màn hình mà ứng dụng hướng tới}
+\label{table:devices}
+\end{table}
+
+Nhờ bố cục co giãn theo các điểm ngắt (breakpoint) của trình duyệt, ứng dụng đáp ứng được hầu hết thiết bị di động, máy tính bảng và máy tính cá nhân với kích thước, độ phân giải khác nhau.
+
+\textbf{Chuẩn hóa thiết kế.} Ứng dụng sử dụng một bộ thành phần giao diện thống nhất (dựa trên Radix UI và shadcn/ui) để bảo đảm tính nhất quán. Nút bấm có ba biến thể chính: nút chính (nền màu chủ đạo, dùng cho hành động quan trọng), nút viền (chỉ có đường viền, dùng cho hành động phụ) và nút mờ hoặc nút dạng văn bản (dùng cho thao tác ít quan trọng); các hành động xóa hay nguy hiểm dùng màu cảnh báo. Các ô nhập liệu, hộp thoại và menu thả xuống đều dùng chung bộ thành phần này.
+
+Về bố cục, các trang công khai (đăng nhập, đăng ký, trang chủ) trình bày nội dung ở giữa màn hình. Khu vực làm việc sau khi đăng nhập dùng bố cục hai cột gồm thanh điều hướng bên trái và vùng nội dung chính bên phải; trên màn hình nhỏ, thanh điều hướng được thu gọn lại và mở ra khi cần. Thông điệp phản hồi cho người dùng hiển thị dưới dạng thông báo nổi (toast) ở góc trên bên phải màn hình, dùng màu xanh cho thông báo thành công và màu đỏ cho thông báo lỗi.
+
+Về phối màu, giao diện lấy màu trắng làm nền chính, văn bản màu gần đen và một màu chủ đạo xanh lam dùng cho nút chính, liên kết cùng các điểm cần nhấn mạnh. Bảng màu được định nghĩa theo Tailwind CSS và hỗ trợ thêm chế độ nền tối. Phông chữ là phông không chân của hệ thống (ưu tiên Arial) nhằm bảo đảm tốc độ tải và khả năng đọc. Bảng~\ref{table:colors} liệt kê các màu chuẩn hóa chính.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|}
+\hline
+\textbf{STT} & \textbf{Thành phần} & \textbf{Mã màu (hex)} \\ \hline
+1 & Màu nền & \#FFFFFF -- trắng \\ \hline
+2 & Màu chữ chính & \#09090B -- gần đen \\ \hline
+3 & Màu chủ đạo & \#1447E6 -- xanh lam \\ \hline
+4 & Màu nền phụ & \#F4F4F5 -- xám rất nhạt \\ \hline
+5 & Màu chữ phụ & \#71717B -- xám \\ \hline
+6 & Màu viền, ô nhập liệu & \#E4E4E7 -- xám nhạt \\ \hline
+7 & Màu cảnh báo & \#E7000B -- đỏ \\ \hline
+\end{tabular}
+\caption{Chuẩn hóa màu sắc trong ứng dụng}
+\label{table:colors}
+\end{table}
+
+\textbf{Hình ảnh minh họa thiết kế giao diện.} Dưới đây là bản thiết kế (mockup) cho một số chức năng quan trọng nhất của hệ thống. Các bản thiết kế tuân theo những chuẩn hóa đã nêu, tập trung mô tả bố cục và luồng thao tác chứ chưa phải giao diện của sản phẩm cuối cùng.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/gd_hocbai.pdf}
+\caption{Thiết kế giao diện màn hình học bài giảng tương tác}
+\label{fig:gd_hocbai}
+\end{figure}
+
+Màn hình học bài giảng (Hình~\ref{fig:gd_hocbai}) dùng bố cục hai cột: cột trái liệt kê danh sách bài học trong khóa kèm trạng thái hoàn thành, cột phải hiển thị video bài giảng cùng các thẻ chuyển giữa phụ đề, hoạt động tương tác và ghi chú. Học viên trả lời các hoạt động tương tác (ví dụ câu hỏi trắc nghiệm) ngay bên dưới video; tiến độ được lưu tự động và phản hồi qua thông báo nổi ở góc trên bên phải.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/gd_quanly.pdf}
+\caption{Thiết kế giao diện quản lý khóa học và bài giảng}
+\label{fig:gd_quanly}
+\end{figure}
+
+Màn hình quản lý dành cho giảng viên (Hình~\ref{fig:gd_quanly}) cũng dùng bố cục hai cột với thanh điều hướng các mục quản trị bên trái. Khu vực chính liệt kê các bài giảng của một khóa học dưới dạng thẻ, mỗi thẻ kèm trạng thái (bản nháp, đang sinh nội dung, đã xuất bản) và tiến độ; nút ``Tạo bài giảng từ video'' là điểm vào của chức năng sinh bài giảng tự động.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/gd_tiendo.pdf}
+\caption{Thiết kế giao diện theo dõi tiến độ học viên}
+\label{fig:gd_tiendo}
+\end{figure}
+
+Màn hình theo dõi tiến độ (Hình~\ref{fig:gd_tiendo}) trình bày các chỉ số tổng hợp ở phía trên và bảng chi tiết từng học viên bên dưới gồm bài giảng gần nhất, thanh tiến độ, điểm số và thời điểm truy cập, giúp giảng viên nắm được tình hình học tập của cả lớp.
+\subsection{Thiết kế lớp}
+Phần này trình bày thiết kế ở mức lớp cho cụm chức năng quan trọng nhất của hệ thống là sinh và sử dụng nội dung tương tác, gồm các lớp chủ đạo cùng thuộc tính, phương thức, và minh họa luồng truyền thông điệp giữa các đối tượng cho hai use case tiêu biểu bằng biểu đồ tuần tự.
+
+\textbf{Thiết kế các lớp chủ đạo.} Hình~\ref{fig:chitietlop} trình bày các lớp chính tham gia quá trình sinh bài giảng cùng thuộc tính và phương thức của chúng.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/chitietlop.pdf}
+\caption{Thiết kế lớp cho chức năng sinh nội dung tương tác}
+\label{fig:chitietlop}
+\end{figure}
+
+Lớp \texttt{AISvc} là điểm vào ở tầng giao tiếp cho các chức năng trí tuệ nhân tạo. Nó giữ tham chiếu tới các thành phần phụ thuộc (kết nối cơ sở dữ liệu \texttt{pg}, hàng đợi \texttt{tqDB}, dịch vụ \texttt{generation} và \texttt{transcript}) được tiêm qua cơ chế tiêm phụ thuộc, và cung cấp các phương thức như \texttt{StartLessonTask} (tạo rồi đưa tác vụ sinh bài giảng vào hàng đợi), \texttt{CancelLessonTask} và \texttt{GetLessonAnalysis}.
+
+Lớp \texttt{PipelineRunExecutor} điều phối quy trình sinh bài giảng ở chế độ nền. Nó phụ thuộc vào ba dịch vụ con \texttt{TranscribeService}, \texttt{ChunkService}, \texttt{QuizGenService} và cung cấp phương thức \texttt{Execute} thực hiện tuần tự ba bước, cùng \texttt{Kind} cho biết loại tác vụ mà nó đảm nhận.
+
+Lớp \texttt{transcript.Service} đảm nhận hai bước đầu của luồng xử lý video. Phương thức \texttt{RunExtract} dùng phụ thuộc \texttt{Transcription} (mô hình nhận dạng tiếng nói) để phiên âm lời thoại trong video thành văn bản kèm dấu thời gian; phương thức \texttt{RunChunk} dùng phụ thuộc \texttt{Chunk} để phân đoạn văn bản đó thành các đoạn nội dung mạch lạc, làm đầu vào cho bước sinh bài tập.
+
+Lớp \texttt{generation.Service} chịu trách nhiệm sinh bài tập tương tác từ nội dung đã phân đoạn qua phương thức \texttt{Run}. Điểm đáng chú ý trong thiết kế là nó không phụ thuộc trực tiếp vào một mô hình ngôn ngữ cụ thể mà phụ thuộc vào giao diện \texttt{Engine} (chỉ gồm phương thức \texttt{Generate}), với hiện thực chính là \texttt{geminiEngine} gọi mô hình Gemini. Nhờ lập trình hướng giao diện, có thể thay mô hình khác hoặc thay bằng một hiện thực giả lập khi kiểm thử mà không phải sửa lớp \texttt{generation.Service}.
+
+\textbf{Mô hình các loại tương tác.} Mỗi bài tập tương tác sinh ra được lưu thành một bản ghi \texttt{LessonInteraction} (Hình~\ref{fig:chitietlop_tuongtac}) gồm các thuộc tính như loại tương tác (\texttt{kind}), nội dung câu hỏi (\texttt{prompt}), mốc thời gian trong video (\texttt{startSeconds}), cấu hình riêng theo loại (\texttt{config}) và điểm tối đa (\texttt{maxScore}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\textwidth]{Hinhve/chuong_4/chitietlop_tuongtac.pdf}
+\caption{Thiết kế lớp cho mô hình các loại tương tác}
+\label{fig:chitietlop_tuongtac}
+\end{figure}
+
+Phần dữ liệu chung của mọi câu hỏi nằm ở lớp \texttt{LessonInteraction}, còn phần dữ liệu đặc thù theo từng loại được tách vào cấu hình (\texttt{config}) và kế thừa lớp trừu tượng \texttt{InteractionConfig}. Hệ thống có năm lớp cấu hình con tương ứng các loại tương tác, mỗi lớp mang những thuộc tính riêng: \texttt{McqConfig} cho trắc nghiệm một và nhiều đáp án (danh sách lựa chọn và đáp án đúng); \texttt{FillBlankConfig} cho điền khuyết (mẫu câu và các chỗ trống); \texttt{ReadingConfig} cho đọc hiểu (đoạn văn, câu hỏi và đáp án mẫu); \texttt{ListeningConfig} cho nghe hiểu (khóa tệp âm thanh, thời lượng và câu hỏi nghe); và \texttt{WritingConfig} cho viết (đề bài, tiêu chí chấm và đáp án mẫu). Cách tách cấu hình theo lớp cha chung giúp hệ thống bổ sung loại tương tác mới mà ít ảnh hưởng tới các phần còn lại.
+
+\textbf{Biểu đồ tuần tự use case sinh bài giảng tương tác.} Hình~\ref{fig:seq_sinhbai} mô tả luồng xử lý. Khi giảng viên gửi yêu cầu, giao diện web gọi \texttt{StartLessonTask}; \texttt{AISvc} chỉ ghi một tác vụ vào hàng đợi rồi trả về ngay mã tác vụ nên giao diện không bị chặn. Ở chế độ nền, \texttt{Worker} lấy tác vụ và gọi \texttt{PipelineRunExecutor.Execute}, lần lượt phiên âm lời thoại (qua \texttt{transcript.Service}), phân đoạn nội dung, rồi sinh bài tập (qua \texttt{generation.Service}, gọi \texttt{Engine.Generate}); kết quả được lưu lại sau mỗi bước.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/seq_sinhbai.pdf}
+\caption{Biểu đồ tuần tự luồng sinh bài giảng tương tác}
+\label{fig:seq_sinhbai}
+\end{figure}
+
+\textbf{Biểu đồ tuần tự use case nộp câu trả lời tương tác.} Hình~\ref{fig:seq_nopbai} mô tả luồng khi học viên nộp bài. Lớp \texttt{InteractionsSvc} trước hết kiểm tra quyền truy cập khóa học, tải bài học cùng danh sách tương tác, rồi với mỗi câu trả lời gọi bộ xử lý tương ứng với loại tương tác để chấm điểm. Riêng câu trả lời viết được chấm tự động bằng mô hình ngôn ngữ thông qua \texttt{Engine}; câu đọc (đọc to) được chấm bằng cách phiên âm bản ghi âm của học viên rồi đối chiếu, có sự hỗ trợ của mô hình ngôn ngữ; các câu trắc nghiệm và nghe hiểu được chấm trực tiếp, còn câu điền khuyết được chấm theo so khớp và chỉ nhờ tới mô hình ngôn ngữ khi câu trả lời không khớp chính xác. Cuối cùng kết quả được lưu lại và trả về điểm cùng nhận xét cho học viên.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_4/seq_nopbai.pdf}
+\caption{Biểu đồ tuần tự luồng nộp và chấm câu trả lời tương tác}
+\label{fig:seq_nopbai}
+\end{figure}
 \subsection{Thiết kế cơ sở dữ liệu}
-Phần này có độ dài từ hai đến bốn trang. Sinh viên thiết kế, vẽ và giải thích biểu đồ thực thể liên kết (E-R diagram). Từ đó, sinh viên thiết kế cơ sở dữ liệu tùy theo hệ quản trị cơ sở dữ liệu mà mình sử dụng (SQL, NoSQL, Firebase, v.v.)
+Hệ thống sử dụng kết hợp ba kho dữ liệu: PostgreSQL (cơ sở dữ liệu quan hệ) cho phần lớn dữ liệu có cấu trúc, FoundationDB (kho khóa--giá trị) và SeaweedFS (kho đối tượng) cho một số loại dữ liệu chuyên biệt. Phần lớn dữ liệu nằm ở PostgreSQL và được mô tả qua sơ đồ thực thể liên kết dưới đây.
+
+\textbf{a) Sơ đồ thực thể liên kết.} Hình~\ref{fig:erd} trình bày sơ đồ thực thể liên kết của cơ sở dữ liệu, gồm mười bốn thực thể chính cùng các quan hệ giữa chúng.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{Hinhve/chuong_4/erd.pdf}
+\caption{Sơ đồ thực thể liên kết của cơ sở dữ liệu}
+\label{fig:erd}
+\end{figure}
+
+\textbf{Nhóm người dùng và tổ chức.} Thực thể \texttt{users} lưu tài khoản người dùng, còn \texttt{organizations} đại diện cho các tổ chức đào tạo. Quan hệ nhiều--nhiều giữa người dùng và tổ chức được biểu diễn qua bảng trung gian \texttt{organization\_members}, kèm vai trò và trạng thái của từng thành viên.
+
+\textbf{Nhóm khóa học.} Mỗi \texttt{courses} thuộc về một tổ chức và có một người sở hữu. Việc tham gia khóa học được quản lý bởi \texttt{course\_members} (thành viên đã tham gia) và \texttt{course\_join\_requests} (yêu cầu xin tham gia). Mỗi khóa học gồm nhiều \texttt{course\_modules} (học phần), và mỗi học phần gồm nhiều \texttt{lessons} (bài giảng).
+
+\textbf{Nhóm bài giảng và nội dung sinh bởi trí tuệ nhân tạo.} Mỗi \texttt{lessons} có một bản ghi \texttt{lesson\_analyses} theo dõi trạng thái phân tích video, nhiều \texttt{lesson\_transcript\_chunks} (các đoạn nội dung tách ra từ lời thoại) và nhiều \texttt{lesson\_interactions} (bài tập tương tác, mỗi câu gắn với một đoạn). Các tác vụ phân tích chạy nền được lưu trong bảng \texttt{tasks}, tham chiếu tới bài giảng và đoạn nội dung tương ứng.
+
+\textbf{Nhóm làm bài.} Mỗi lần học viên làm một bài giảng tạo ra một bản ghi \texttt{lesson\_attempts}; từng câu trả lời được lưu trong \texttt{lesson\_attempt\_responses}, liên kết tới câu hỏi tương ứng kèm điểm và nhận xét.
+
+Về thiết kế vật lý, phần lớn các quan hệ một--nhiều được thực thi bằng khóa ngoại (foreign key) với ràng buộc toàn vẹn tham chiếu; các trường trạng thái và vai trò dùng kiểu liệt kê (enum) của PostgreSQL để giới hạn giá trị hợp lệ; còn dữ liệu có cấu trúc thay đổi theo loại như cấu hình câu hỏi (\texttt{config}) và kết quả chấm được lưu ở kiểu \texttt{jsonb} nhằm linh hoạt với từng loại tương tác.
+
+\textbf{b) Xây dựng cơ sở dữ liệu.} Phần này đặc tả chi tiết ba bảng cốt lõi tiêu biểu của cơ sở dữ liệu gồm tên cột, kiểu dữ liệu và ý nghĩa; các bảng còn lại được thiết kế theo cùng quy ước. Bảng~\ref{tbl:users}, Bảng~\ref{tbl:lessons} và Bảng~\ref{tbl:interactions} lần lượt mô tả các bảng \texttt{users}, \texttt{lessons} và \texttt{lesson\_interactions}.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh người dùng (khóa chính) \\ \hline
+2 & email & citext & Địa chỉ email, duy nhất, dùng để đăng nhập \\ \hline
+3 & password\_hash & text & Mật khẩu đã được băm \\ \hline
+4 & first\_name & text & Tên \\ \hline
+5 & middle\_name & text & Tên đệm \\ \hline
+6 & last\_name & text & Họ \\ \hline
+7 & role & user\_role & Vai trò hệ thống (kiểu liệt kê) \\ \hline
+8 & status & user\_status & Trạng thái tài khoản (kiểu liệt kê) \\ \hline
+9 & created\_at & timestamp & Thời điểm tạo \\ \hline
+10 & updated\_at & timestamp & Thời điểm cập nhật \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{users}}
+\label{tbl:users}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|p{5.8cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh bài giảng (khóa chính) \\ \hline
+2 & module\_id & uuid & Học phần chứa bài giảng (khóa ngoại) \\ \hline
+3 & title & text & Tiêu đề bài giảng \\ \hline
+4 & description & text & Mô tả \\ \hline
+5 & order\_index & integer & Thứ tự trong học phần \\ \hline
+6 & video\_storage\_key & text & Khóa tệp video trong kho lưu trữ \\ \hline
+7 & duration\_seconds & integer & Thời lượng video (giây) \\ \hline
+8 & feedback\_mode & text & Chế độ hiển thị phản hồi \\ \hline
+9 & default\_interaction\_config & jsonb & Cấu hình sinh bài tập mặc định \\ \hline
+10 & language & varchar(8) & Ngôn ngữ nội dung sinh ra \\ \hline
+11 & audio\_language & varchar(8) & Ngôn ngữ giọng nói trong video \\ \hline
+12 & max\_attempts & integer & Số lần làm bài tối đa \\ \hline
+13 & created\_at & timestamp & Thời điểm tạo \\ \hline
+14 & updated\_at & timestamp & Thời điểm cập nhật \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{lessons}}
+\label{tbl:lessons}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|p{5.8cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh câu hỏi (khóa chính) \\ \hline
+2 & lesson\_id & uuid & Bài giảng chứa câu hỏi (khóa ngoại) \\ \hline
+3 & chunk\_id & uuid & Đoạn nội dung gắn câu hỏi (khóa ngoại, có thể rỗng) \\ \hline
+4 & kind & text & Loại tương tác \\ \hline
+5 & start\_seconds & real & Mốc thời gian xuất hiện trong video \\ \hline
+6 & order\_index & integer & Thứ tự câu hỏi \\ \hline
+7 & prompt & text & Nội dung câu hỏi \\ \hline
+8 & explanation & text & Giải thích đáp án \\ \hline
+9 & config & jsonb & Cấu hình riêng theo loại tương tác \\ \hline
+10 & max\_score & real & Điểm tối đa \\ \hline
+11 & generated\_by & text & Nguồn tạo (tự động hoặc thủ công) \\ \hline
+12 & created\_at & timestamptz & Thời điểm tạo \\ \hline
+13 & updated\_at & timestamptz & Thời điểm cập nhật \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{lesson\_interactions}}
+\label{tbl:interactions}
+\end{table}
+
+\textbf{c) Dữ liệu phi quan hệ.} Bên cạnh PostgreSQL, hệ thống dùng thêm hai kho lưu trữ chuyên biệt. \textbf{FoundationDB} là kho khóa--giá trị lưu hai loại dữ liệu: bản chép lời cùng các đoạn nội dung có kích thước lớn (được tách thành nhiều mảnh do giới hạn kích thước giá trị của FoundationDB), và bản đồ bit (bitmap) theo dõi tiến độ xem video cho từng cặp người dùng--bài giảng, trong đó mỗi bit ứng với một giây video đã xem. Việc tách các dữ liệu kích thước lớn hoặc bị ghi với tần suất cao này khỏi cơ sở dữ liệu quan hệ giúp giảm tải cho PostgreSQL. \textbf{SeaweedFS} là kho lưu trữ đối tượng tương thích giao thức S3, lưu các tệp nhị phân gồm video bài giảng tải lên, tệp âm thanh sinh bởi tổng hợp tiếng nói (cho dạng bài nghe) và bản ghi âm câu trả lời của học viên. Mỗi tệp được định danh bằng một khóa đối tượng dạng \texttt{lessons/<id>/<tên tệp>}; khóa này được lưu trong cơ sở dữ liệu quan hệ (ví dụ cột \texttt{video\_storage\_key} của bảng \texttt{lessons}) để liên kết tệp với bản ghi tương ứng.
 
 \section{Xây dựng ứng dụng}
 \subsection{Thư viện và công cụ sử dụng}
-Sinh viên liệt kê các công cụ, ngôn ngữ lập trình, API, thư viện, IDE, công cụ kiểm thử, v.v. mà mình sử dụng để phát triển ứng dụng. Mỗi công cụ phải được chỉ rõ phiên bản sử dụng. SV nên kẻ bảng mô tả tương tự như Bảng \ref{table:my_label}. Nếu có nhiều nội dung trình bày, sinh viên cần xoay ngang bảng.
+Ứng dụng được phát triển bằng nhiều ngôn ngữ, framework, thư viện và công cụ; mỗi thành phần đều được chỉ rõ phiên bản sử dụng. Bảng~\ref{tbl:tools1} liệt kê các công cụ phía giao diện web; Bảng~\ref{tbl:tools2} liệt kê các thư viện phía máy chủ ứng dụng và giao tiếp RPC; Bảng~\ref{tbl:tools3} liệt kê hạ tầng, dịch vụ trí tuệ nhân tạo và các công cụ phát triển.
 
 \begin{table}[H]
-\centering{}
-    \begin{tabular}{lll}
-        \hline
-        \textbf{Mục đích} & \textbf{Công cụ}       & \textbf{Địa chỉ URL}    \\ \hline
-        IDE lập trình     & Eclipse Oxygen a64 bit & http://www.eclipse.org/ \\ \hline
-        v.v.              & v.v.                   & v.v.                    \\ \hline
-        \end{tabular}
-    \caption{Danh sách thư viện và công cụ sử dụng}
-    \label{fig:my_label}
+\centering
+\small
+\begin{tabular}{|c|p{3.2cm}|p{2.5cm}|p{2cm}|p{3.3cm}|}
+\hline
+\textbf{STT} & \textbf{Mục đích} & \textbf{Công cụ} & \textbf{Phiên bản} & \textbf{Địa chỉ URL} \\ \hline
+1 & Ngôn ngữ lập trình giao diện & TypeScript & 6.0.2 & \url{https://www.typescriptlang.org} \\ \hline
+2 & Môi trường chạy giao diện & Node.js & 24.15.0 & \url{https://nodejs.org} \\ \hline
+3 & Framework giao diện (React, SSR) & Next.js & 16.2.2 & \url{https://nextjs.org} \\ \hline
+4 & Thư viện xây dựng giao diện & React & 19.2.4 & \url{https://react.dev} \\ \hline
+5 & Thư viện CSS tiện ích & TailwindCSS & 4.2.2 & \url{https://tailwindcss.com} \\ \hline
+6 & Bộ primitive giao diện & Radix UI & 1.4.3 & \url{https://www.radix-ui.com} \\ \hline
+7 & Bộ biểu tượng giao diện & lucide-react & 1.7.0 & \url{https://lucide.dev} \\ \hline
+8 & Thông báo nổi (toast) & sonner & 2.0.7 & \url{https://github.com/emilkowalski/sonner} \\ \hline
+9 & Kết xuất nội dung Markdown & react-markdown & 10.1.0 & \url{https://github.com/remarkjs/react-markdown} \\ \hline
+10 & Xử lý JWT phía trình duyệt & jose & 6.2.3 & \url{https://github.com/panva/jose} \\ \hline
+\end{tabular}
+\caption{Công cụ và thư viện phía giao diện web}
+\label{tbl:tools1}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{|c|p{3.2cm}|p{2.5cm}|p{2cm}|p{3.3cm}|}
+\hline
+\textbf{STT} & \textbf{Mục đích} & \textbf{Công cụ} & \textbf{Phiên bản} & \textbf{Địa chỉ URL} \\ \hline
+1 & Ngôn ngữ máy chủ ứng dụng & Go & 1.26.2 & \url{https://go.dev} \\ \hline
+2 & RPC tương thích gRPC (máy chủ) & Connect & 1.19.2 & \url{https://connectrpc.com} \\ \hline
+3 & Client RPC phía trình duyệt & connect-web & 2.1.1 & \url{https://connectrpc.com} \\ \hline
+4 & Client RPC phía máy chủ (SSR) & connect-node & 2.1.1 & \url{https://connectrpc.com} \\ \hline
+5 & Định nghĩa, sinh mã hợp đồng RPC & Protocol Buffers, Buf & 1.68.4 & \url{https://buf.build} \\ \hline
+6 & Kiểm tra hợp lệ thông điệp RPC & protovalidate & 0.6.0 & \url{https://github.com/connectrpc/validate-go} \\ \hline
+7 & Driver kết nối PostgreSQL & pgx & 5.9.2 & \url{https://github.com/jackc/pgx} \\ \hline
+8 & Tiêm phụ thuộc (DI) & samber/do & 2.0.0 & \url{https://github.com/samber/do} \\ \hline
+9 & Client lưu trữ đối tượng S3 & minio-go & 7.1.0 & \url{https://github.com/minio/minio-go} \\ \hline
+10 & Client mô hình Gemini & generative-ai-go & 0.20.1 & \url{https://github.com/google/generative-ai-go} \\ \hline
+11 & Phát hành, kiểm tra JWT (máy chủ) & golang-jwt & 5.3.1 & \url{https://github.com/golang-jwt/jwt} \\ \hline
+12 & Băm mật khẩu (bcrypt) & x/crypto & 0.50.0 & \url{https://pkg.go.dev/golang.org/x/crypto} \\ \hline
+13 & Khung dòng lệnh (CLI) & cobra & 1.10.2 & \url{https://github.com/spf13/cobra} \\ \hline
+14 & Đọc cấu hình phân tầng & viper & 1.21.0 & \url{https://github.com/spf13/viper} \\ \hline
+15 & Sinh và xử lý định danh UUID & google/uuid & 1.6.0 & \url{https://github.com/google/uuid} \\ \hline
+\end{tabular}
+\caption{Thư viện phía máy chủ ứng dụng và giao tiếp RPC}
+\label{tbl:tools2}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{|c|p{3.2cm}|p{2.5cm}|p{2cm}|p{3.3cm}|}
+\hline
+\textbf{STT} & \textbf{Mục đích} & \textbf{Công cụ} & \textbf{Phiên bản} & \textbf{Địa chỉ URL} \\ \hline
+1 & Hệ quản trị cơ sở dữ liệu quan hệ & PostgreSQL & 18.3 & \url{https://www.postgresql.org} \\ \hline
+2 & Kho khóa--giá trị & FoundationDB & 7.3.69 & \url{https://www.foundationdb.org} \\ \hline
+3 & Kho lưu trữ đối tượng & SeaweedFS & 3.88 & \url{https://github.com/seaweedfs/seaweedfs} \\ \hline
+4 & Máy chủ proxy ngược & Caddy & 2.11.2 & \url{https://caddyserver.com} \\ \hline
+5 & Máy chủ AI tự host (STT, TTS) & Speaches & latest-cpu & \url{https://github.com/speaches-ai/speaches} \\ \hline
+6 & Mô hình nhận dạng tiếng nói & faster-whisper & small & \url{https://github.com/SYSTRAN/faster-whisper} \\ \hline
+7 & Mô hình tổng hợp tiếng nói & Piper & vi\_VN (medium) & \url{https://github.com/rhasspy/piper} \\ \hline
+8 & Mô hình ngôn ngữ lớn & Google Gemini & gemini-3.1-flash-lite & \url{https://ai.google.dev} \\ \hline
+9 & Sinh mã truy vấn SQL an toàn kiểu & sqlc & 1.30.0 & \url{https://sqlc.dev} \\ \hline
+10 & Quản lý di trú cơ sở dữ liệu & goose & 3.27.1 & \url{https://github.com/pressly/goose} \\ \hline
+11 & Kiểm thử đầu--cuối (E2E) & Playwright & 1.59.1 & \url{https://playwright.dev} \\ \hline
+12 & Sinh dữ liệu giả cho kiểm thử & gofakeit & 7.14.1 & \url{https://github.com/brianvoe/gofakeit} \\ \hline
+13 & Kiểm tra mã nguồn giao diện & ESLint & 9.39.4 & \url{https://eslint.org} \\ \hline
+14 & Quản lý gói JavaScript (monorepo) & pnpm & 11.2.2 & \url{https://pnpm.io} \\ \hline
+15 & Đóng gói, chạy container & Podman & 5.8.2 & \url{https://podman.io} \\ \hline
+16 & Trình soạn thảo mã nguồn & Visual Studio Code & 1.125.1 & \url{https://code.visualstudio.com} \\ \hline
+17 & Quản lý phiên bản mã nguồn & Git & 2.54.0 & \url{https://git-scm.com} \\ \hline
+\end{tabular}
+\caption{Hạ tầng, dịch vụ AI và công cụ phát triển}
+\label{tbl:tools3}
 \end{table}
 
 \subsection{Kết quả đạt được}
-Sinh viên trước tiên mô tả kết quả đạt được của mình là gì, ví dụ như các sản phẩm được đóng gói là gì, bao gồm những thành phần nào, ý nghĩa, vai trò?
+Sản phẩm của đồ án là một hệ thống hoàn chỉnh gồm nhiều thành phần được triển khai cùng nhau bằng \texttt{podman compose}. Hai thành phần tự xây dựng là máy chủ ứng dụng (richter, viết bằng Go) và giao diện web (heino, viết bằng Next.js) --- đã được chuẩn bị để đóng gói thành ảnh container khi triển khai chính thức; đi kèm là phần định nghĩa hợp đồng giao tiếp bằng Protocol Buffers và lược đồ cơ sở dữ liệu bằng SQL. Các thành phần hạ tầng và dịch vụ trí tuệ nhân tạo (PostgreSQL, FoundationDB, SeaweedFS, Speaches, Caddy) sử dụng các ảnh container có sẵn.
 
-Sinh viên cần thống kê các thông tin về ứng dụng của mình như: số dòng code, số lớp, số gói, dung lượng toàn bộ mã nguồn, dung lượng của từng sản phẩm đóng gói, v.v. Tương tự như phần liệt kê về công cụ sử dụng, sinh viên cũng nên dùng bảng để mô tả phần thông tin thống kê này.
+Máy chủ ứng dụng đảm nhận toàn bộ logic nghiệp vụ, phân quyền và điều phối các tác vụ phân tích bằng trí tuệ nhân tạo ở chế độ nền; giao diện web cung cấp trải nghiệm cho cả giảng viên (tạo khóa học, sinh bài giảng từ video, theo dõi tiến độ) và học viên (xem video, làm các bài tập tương tác). Để sử dụng ứng dụng, người dùng chỉ cần thiết bị có kết nối internet, dùng trình duyệt web truy cập hệ thống qua địa chỉ tên miền (domain).
+
+\textbf{Thống kê chi tiết thông tin ứng dụng.} Bảng~\ref{tbl:stats} thống kê chi tiết về mã nguồn của từng thành phần.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|l|l|}
+\hline
+\textbf{STT} & \textbf{Tên thông số} & \textbf{Kết quả} \\ \hline
+\multicolumn{3}{|l|}{\textbf{Máy chủ ứng dụng (richter -- Go)}} \\ \hline
+1 & Số dòng code & 20.302 \\ \hline
+2 & Số lượng gói & 32 \\ \hline
+3 & Kích thước bản thực thi & 52 MB \\ \hline
+\multicolumn{3}{|l|}{\textbf{Giao diện web (heino -- Next.js)}} \\ \hline
+1 & Số dòng code & 30.237 \\ \hline
+2 & Số tệp nguồn (\texttt{.ts}, \texttt{.tsx}) & 210 \\ \hline
+3 & Kích thước bản dựng & 33 MB \\ \hline
+\multicolumn{3}{|l|}{\textbf{Định nghĩa hợp đồng và lược đồ dữ liệu}} \\ \hline
+1 & Số dòng định nghĩa Protobuf & 2.223 \\ \hline
+2 & Số dòng SQL (migration, truy vấn) & 1.904 \\ \hline
+\end{tabular}
+\caption{Thống kê mã nguồn các thành phần ứng dụng}
+\label{tbl:stats}
+\end{table}
 
 \subsection{Minh họa các chức năng chính}
-Sinh viên lựa chọn và đưa ra màn hình cho các chức năng chính, quan trọng, và thú vị nhất. Mỗi giao diện cần phải có lời giải thích ngắn gọn. Khi giải thích, sinh viên có thể kết hợp với các chú thích ở trong hình ảnh giao diện.
+Phần này minh họa những chức năng cốt lõi và đặc trưng nhất của hệ thống: quy trình tự động chuyển video bài giảng thành bài học tương tác, trải nghiệm học tập của học viên và các công cụ phân tích kết quả cho giảng viên. Các chức năng phụ trợ quen thuộc như đăng nhập hay quản lý tài khoản không được trình bày ở đây. Khác với các bản thiết kế (mockup) ở Mục~\ref{subsec:thietkegiaodien}, các hình dưới đây là ảnh chụp màn hình thực tế của ứng dụng đã chạy; với phần lớn các màn hình hướng tới người dùng cuối, ảnh được trình bày song song trên máy tính và trên điện thoại để minh chứng cho thiết kế đáp ứng. Mỗi chức năng được kèm theo một lời giải thích ngắn gọn.
+
+\textbf{Tạo nhanh bài học từ video.} Đây là điểm khởi đầu của quy trình biến video bài giảng thành bài học tương tác. Khi giảng viên bấm ``Tạo nhanh bài học'', hộp thoại ở Hình~\ref{fig:sp_taonhanh} hiện ra để khai báo thông tin và tải lên video bài giảng. Giảng viên nhập tiêu đề, mô tả, chọn chương chứa bài học, chọn ngôn ngữ câu hỏi và ngôn ngữ âm thanh (giọng nói trong video), rồi kéo thả tập video vào vùng tải lên. Mục ``Cấu hình bài tập'' cho phép đặt số lượng từng loại bài tập sẽ sinh ra (trắc nghiệm, điền khuyết, đọc hiểu, nghe hiểu, viết) cùng độ khó và số lần làm lại. Sau khi bấm xác nhận, hệ thống tải video lên và tự động khởi chạy quy trình xử lý bằng trí tuệ nhân tạo.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{Hinhve/chuong_4/sp_taonhanh_pc.png}
+\caption{Hộp thoại tạo nhanh bài học từ video}
+\label{fig:sp_taonhanh}
+\end{figure}
+
+\textbf{Phân tích video và sinh bài tập bằng trí tuệ nhân tạo.} Sau khi gửi yêu cầu, thẻ ``Xử lý'' của bài học (Hình~\ref{fig:sp_xulyai}) hiển thị bộ chỉ dẫn tiến trình gồm các bước: tải video, phiên âm, phân đoạn, sinh bài tập và xem thử. Trong đó, ba bước cốt lõi do quy trình tự động hóa đảm nhiệm là phiên âm bằng mô hình nhận dạng giọng nói, phân đoạn nội dung và sinh bài tập tương tác. Mỗi bước có trạng thái riêng để giảng viên theo dõi; khi hoàn tất, giảng viên có thể xem lại nội dung được sinh ra và yêu cầu sinh lại nếu chưa ưng ý. Đây là phần thể hiện rõ nhất giá trị tự động hóa mà hệ thống mang lại: từ một video bài giảng thô, hệ thống tạo ra phụ đề, dàn bài và bộ bài tập tương tác mà không cần giảng viên soạn thủ công.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_4/sp_xulyai_pc.png}
+\caption{Giao diện theo dõi quá trình phân tích video và sinh bài tập bằng trí tuệ nhân tạo}
+\label{fig:sp_xulyai}
+\end{figure}
+
+\textbf{Học bài giảng tương tác.} Hình~\ref{fig:sp_hocbai} là màn hình học bài của học viên. Bố cục gồm ba phần: cột trái là lộ trình bài giảng của khóa học kèm trạng thái hoàn thành, vùng giữa là trình phát video, cột phải là dàn bài (các đoạn nội dung kèm mốc thời gian) cùng các thẻ chuyển sang phụ đề. Trên thanh thời gian của video có các điểm đánh dấu màu đỏ ứng với vị trí các bài tập tương tác; video sẽ tự động tạm dừng tại mỗi mốc để học viên trả lời trước khi xem tiếp. Kết quả làm bài được lưu tự động. Trên điện thoại, ba phần này xếp chồng theo chiều dọc để vừa với màn hình hẹp.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[c]{0.62\textwidth}\centering\includegraphics[width=\linewidth]{Hinhve/chuong_4/sp_hocbai_pc.png}\end{minipage}\hfill
+\begin{minipage}[c]{0.215\textwidth}\centering\includegraphics[width=\linewidth]{Hinhve/chuong_4/sp_hocbai_mb.png}\end{minipage}
+\caption{Giao diện học bài giảng tương tác trên máy tính (trái) và trên điện thoại (phải)}
+\label{fig:sp_hocbai}
+\end{figure}
+
+\textbf{Làm bài tập tương tác.} Tại mỗi mốc câu hỏi, bài tập hiện ra dưới dạng một lớp phủ lên khung video đang tạm dừng (Hình~\ref{fig:sp_baitap}). Học viên phải hoàn thành bài tập mới được xem tiếp; nếu cố tua vượt qua một mốc chưa làm, trình phát sẽ tự quay lại đúng mốc đó. Hình minh họa một câu hỏi trắc nghiệm một đáp án với phần dẫn ``Big-O notation dùng để biểu diễn điều gì?'' cùng bốn phương án trả lời. Ngoài trắc nghiệm, hệ thống còn hỗ trợ các dạng điền khuyết, đọc hiểu, nghe hiểu và viết như đã trình bày ở phần thiết kế lớp; tùy theo chế độ phản hồi của bài học, nhận xét đúng hay sai cùng lời giải thích được hiển thị ngay sau mỗi câu hoặc sau khi nộp toàn bộ bài làm.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{Hinhve/chuong_4/sp_baitap_pc.png}
+\caption{Bài tập trắc nghiệm tương tác hiện ra khi video tạm dừng tại một mốc câu hỏi}
+\label{fig:sp_baitap}
+\end{figure}
+
+\textbf{Bản đồ nhiệt phân tích bài học.} Với mỗi bài học, giảng viên có thể xem bản đồ nhiệt thể hiện mức độ nắm bài của cả lớp theo từng phân đoạn (Hình~\ref{fig:sp_heatmap}). Mỗi ô tương ứng một mốc câu hỏi trong bài và được tô màu theo tỷ lệ trả lời đúng: xanh khi đạt từ 80\% trở lên, vàng khi từ 50\% đến 79\% và đỏ khi dưới 50\%, nhờ đó các phân đoạn mà học viên gặp khó khăn được làm nổi bật ngay lập tức. Phía trên bản đồ, hệ thống tự động chỉ ra câu hỏi khó nhất và danh sách học viên có mức tương tác thấp cần được chú ý; giảng viên có thể bấm vào một ô để xem danh sách học viên đã làm phân đoạn đó, xếp theo điểm từ thấp lên cao.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[c]{0.62\textwidth}\centering\includegraphics[width=\linewidth]{Hinhve/chuong_4/sp_heatmap_pc.png}\end{minipage}\hfill
+\begin{minipage}[c]{0.215\textwidth}\centering\includegraphics[width=\linewidth]{Hinhve/chuong_4/sp_heatmap_mb.png}\end{minipage}
+\caption{Bản đồ nhiệt phân tích mức độ nắm bài theo phân đoạn trên máy tính (trái) và trên điện thoại (phải)}
+\label{fig:sp_heatmap}
+\end{figure}
+
+\textbf{Giám sát và phân tích kết quả học viên.} Hình~\ref{fig:sp_ketqua} trình bày màn hình kết quả học tập dành cho giảng viên. Phía trên là các chỉ số tổng hợp của lớp gồm số học viên hoạt động, tiến độ trung bình và điểm trung bình; bên dưới có các thẻ chuyển giữa danh sách kết quả, biểu đồ phân bố điểm, biểu đồ tương quan tương tác và điểm, cùng danh sách học viên cần chú ý. Bảng chi tiết liệt kê từng học viên với tiến độ, điểm trung bình, tỷ lệ xem video, số lần tương tác và thời điểm hoạt động gần nhất; những học viên có nguy cơ tụt lại được gắn nhãn ``Cần chú ý'' để giảng viên can thiệp kịp thời.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[c]{0.62\textwidth}\centering\includegraphics[width=\linewidth]{Hinhve/chuong_4/sp_ketqua_pc.png}\end{minipage}\hfill
+\begin{minipage}[c]{0.215\textwidth}\centering\includegraphics[width=\linewidth]{Hinhve/chuong_4/sp_ketqua_mb.png}\end{minipage}
+\caption{Giao diện theo dõi và phân tích kết quả học viên trên máy tính (trái) và trên điện thoại (phải)}
+\label{fig:sp_ketqua}
+\end{figure}
 
 \section{Kiểm thử}
-Phần này có độ dài từ hai đến ba trang. Sinh viên thiết kế các trường hợp kiểm thử cho hai đến ba chức năng quan trọng nhất. Sinh viên cần chỉ rõ các kỹ thuật kiểm thử đã sử dụng. Chi tiết các trường hợp kiểm thử khác, nếu muốn trình bày, sinh viên đưa vào phần phụ lục.
-Sinh viên sau cùng tổng kết về số lượng các trường hợp kiểm thử và kết quả kiểm thử. Sinh viên cần phân tích lý do nếu kết quả kiểm thử không đạt.
+Sau khi xây dựng, hệ thống được kiểm thử để bảo đảm các luồng nghiệp vụ và dữ liệu hoạt động chính xác. Hệ thống áp dụng kiểm thử tự động ở nhiều mức. Ở mức đơn vị và tích hợp, máy chủ ứng dụng (viết bằng Go) có các bộ kiểm thử cho từng miền chức năng; trong đó kiểm thử tích hợp chạy trực tiếp trên cơ sở dữ liệu PostgreSQL, kho lưu trữ đối tượng và FoundationDB thật nhằm kiểm tra cả tầng truy cập dữ liệu. Ở mức đầu--cuối (end-to-end), toàn hệ thống được kiểm thử bằng Playwright: kịch bản mô phỏng thao tác người dùng thật trên trình duyệt và đi qua máy chủ proxy Caddy đúng như khi vận hành, nên đây là kiểm thử hộp đen. Bên cạnh đó, mọi đầu vào của các lời gọi đều được ràng buộc bằng \texttt{protovalidate}, làm cơ sở để thiết kế các trường hợp kiểm thử theo kỹ thuật phân lớp tương đương (hợp lệ và không hợp lệ). Trong phạm vi báo cáo, hai chức năng quan trọng nhất được trình bày chi tiết là ``Tạo nhanh bài học từ video'' và ``Nộp bài làm bài tập tương tác''.
+
+\textbf{Kiểm thử chức năng tạo nhanh bài học từ video.} Bảng~\ref{tbl:test_taonhanh} trình bày các trường hợp kiểm thử được thiết kế theo phân lớp tương đương cho chức năng này.
+
+\begin{table}[H]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{|c|p{2.2cm}|p{2.9cm}|p{2.7cm}|p{2.7cm}|c|}
+\hline
+\textbf{STT} & \textbf{Dữ liệu kiểm thử} & \textbf{Quy trình kiểm thử} & \textbf{Kết quả mong muốn} & \textbf{Kết quả thực tế} & \textbf{Trạng thái} \\ \hline
+1 & Tiêu đề để trống, các trường khác hợp lệ & Bỏ trống tiêu đề, chọn chương, tải video, xác nhận tạo & Từ chối, báo tiêu đề không được để trống & Từ chối, báo tiêu đề không được để trống & Đạt \\ \hline
+2 & Tiêu đề dài quá 255 ký tự & Nhập tiêu đề 300 ký tự, các trường còn lại hợp lệ, xác nhận & Từ chối do tiêu đề vượt độ dài cho phép & Từ chối do tiêu đề vượt độ dài cho phép & Đạt \\ \hline
+3 & Tệp tải lên không phải video (tệp \texttt{.pdf}) & Kéo thả tệp \texttt{.pdf} vào vùng tải video & Không nhận tệp, báo định dạng không hợp lệ & Không nhận tệp, báo định dạng không hợp lệ & Đạt \\ \hline
+4 & Tổng số câu hỏi mỗi phân đoạn vượt giới hạn & Yêu cầu sinh bài tập với tổng số câu mỗi phân đoạn bằng 30 (tối đa 20) & Từ chối do vượt số lượng tối đa cho phép & Từ chối do vượt số lượng tối đa cho phép & Đạt \\ \hline
+5 & Tài khoản không có quyền giảng viên & Đăng nhập học viên, gọi tạo bài học trong khóa & Từ chối do không đủ quyền & Từ chối do không đủ quyền & Đạt \\ \hline
+6 & Thông tin đầy đủ và hợp lệ, video \texttt{.mp4} & Nhập tiêu đề, chọn chương, tải video, cấu hình bài tập, xác nhận & Tạo bài học thành công và khởi chạy quy trình xử lý & Tạo bài học thành công, chuyển sang thẻ Xử lý và bắt đầu phân tích & Đạt \\ \hline
+\end{tabular}
+\caption{Kiểm thử chức năng tạo nhanh bài học từ video}
+\label{tbl:test_taonhanh}
+\end{table}
+
+Với chức năng tạo nhanh bài học từ video, đã thực hiện sáu trường hợp kiểm thử, gồm năm trường hợp ở phân lớp không hợp lệ (invalid) và một trường hợp ở phân lớp hợp lệ (valid). Hệ thống đều cho ra kết quả đúng với kết quả mong muốn trong mọi trường hợp.
+
+\textbf{Kiểm thử chức năng nộp bài làm bài tập tương tác.} Bảng~\ref{tbl:test_nopbai} trình bày các trường hợp kiểm thử được thiết kế cho chức năng này.
+
+\begin{table}[H]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{|c|p{2.2cm}|p{2.9cm}|p{2.7cm}|p{2.7cm}|c|}
+\hline
+\textbf{STT} & \textbf{Dữ liệu kiểm thử} & \textbf{Quy trình kiểm thử} & \textbf{Kết quả mong muốn} & \textbf{Kết quả thực tế} & \textbf{Trạng thái} \\ \hline
+1 & Người dùng không phải thành viên khóa học & Đăng nhập tài khoản ngoài khóa, nộp bài làm & Từ chối do không có quyền truy cập khóa học & Từ chối do không có quyền truy cập khóa học & Đạt \\ \hline
+2 & Danh sách câu trả lời rỗng & Gọi nộp bài không kèm câu trả lời nào & Từ chối do thiếu câu trả lời & Từ chối do thiếu câu trả lời & Đạt \\ \hline
+3 & Mã tương tác không thuộc bài học & Nộp câu trả lời với mã tương tác lạ & Báo lỗi không tìm thấy tương tác & Báo lỗi không tìm thấy tương tác & Đạt \\ \hline
+4 & Vượt quá số lần làm bài cho phép & Bài giới hạn một lần; nộp bài lần thứ hai & Từ chối, báo đã hết số lần làm bài & Từ chối, báo đã hết số lần làm bài & Đạt \\ \hline
+5 & Thành viên khóa học, trả lời hợp lệ, còn lượt làm & Chọn đáp án cho các câu hỏi, nộp bài & Chấm điểm và lưu kết quả, trả về điểm và nhận xét & Chấm điểm, lưu kết quả, hiển thị điểm và nhận xét & Đạt \\ \hline
+\end{tabular}
+\caption{Kiểm thử chức năng nộp bài làm bài tập tương tác}
+\label{tbl:test_nopbai}
+\end{table}
+
+Với chức năng nộp bài làm bài tập tương tác, đã thực hiện năm trường hợp kiểm thử, gồm bốn trường hợp không hợp lệ và một trường hợp hợp lệ. Hệ thống đều cho ra kết quả đúng với kết quả mong muốn.
+
+\textbf{Tổng kết kiểm thử.} Bên cạnh các trường hợp kiểm thử trình bày ở trên, hệ thống còn được phủ bởi một bộ kiểm thử tự động lớn, gồm 199 ca kiểm thử cho máy chủ ứng dụng (kết hợp kiểm thử đơn vị và kiểm thử tích hợp trên cơ sở dữ liệu, kho lưu trữ và FoundationDB thật) cùng 402 ca kiểm thử đầu--cuối bằng Playwright cho giao diện, tổng cộng 601 ca. Khi chạy lại, toàn bộ các gói kiểm thử của máy chủ ứng dụng đều đạt, không có ca nào thất bại; bộ kiểm thử đầu--cuối phủ các luồng nghiệp vụ chính và được duy trì ở trạng thái đạt trong môi trường kiểm thử. Để bộ kiểm thử cho kết quả ổn định và xác định, một số kỹ thuật đã được áp dụng: thay mô hình ngôn ngữ lớn bằng một bộ máy sinh nội dung giả lập (mock) khi kiểm thử để không phụ thuộc mạng và hạn ngạch của dịch vụ ngoài; dùng dữ liệu mẫu chuẩn (golden fixture) để các kịch bản có dữ liệu ổn định; tổ chức kiểm thử theo bảng (table-driven) và chạy song song nhằm rút ngắn thời gian.
 \section{Triển khai}
-Sinh viên trình bày mô hình và/hoặc cách thức triển khai thử nghiệm/thực tế. Ứng dụng của sinh viên được triển khai trên server/thiết bị gì, cấu hình như thế nào. Kết quả triển khai thử nghiệm nếu có (số lượng người dùng, số lượng truy cập, thời gian phản hồi, phản hồi người dùng, khả năng chịu tải, các thống kê, v.v.)
+Hệ thống được triển khai theo mô hình nhiều dịch vụ container, trong đó mỗi thành phần chính được đóng gói và vận hành độc lập nhưng cùng nằm trong một mạng nội bộ do Podman Compose điều phối. Cách triển khai này giúp tách rõ giao diện web, máy chủ ứng dụng, các kho lưu trữ và dịch vụ xử lý giọng nói; đồng thời cho phép thay thế, nâng cấp hoặc mở rộng từng thành phần mà không ảnh hưởng tới toàn bộ hệ thống. Mô hình triển khai thực tế của hệ thống được minh họa ở Hình~\ref{fig:trienkhai}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1\textwidth]{Hinhve/chuong_4/trienkhai.pdf}
+\caption{Mô hình triển khai hệ thống}
+\label{fig:trienkhai}
+\end{figure}
+
+Bảng~\ref{tbl:services} liệt kê các thành phần được triển khai cùng công nghệ, cổng sử dụng và vai trò trong hệ thống. Trong đó, Caddy là điểm vào duy nhất từ bên ngoài; các dịch vụ còn lại chỉ trao đổi với nhau qua mạng nội bộ của cụm container.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{|c|p{2.6cm}|p{2.6cm}|c|p{5cm}|}
+\hline
+\textbf{STT} & \textbf{Thành phần} & \textbf{Công nghệ} & \textbf{Cổng} & \textbf{Vai trò} \\ \hline
+1 & Máy chủ proxy & Caddy 2.11 & 80, 443 & Tiếp nhận yêu cầu bên ngoài, kết thúc TLS và định tuyến tới các dịch vụ nội bộ \\ \hline
+2 & Giao diện web (heino) & Next.js & 3000 & Kết xuất trang phía máy chủ và phục vụ giao diện người dùng \\ \hline
+3 & Máy chủ ứng dụng (richter) & Go & 8080 & Xử lý nghiệp vụ qua Connect RPC, điều phối tác vụ nền và kết nối tới các kho dữ liệu \\ \hline
+4 & CSDL quan hệ & PostgreSQL 18 & 5432 & Lưu dữ liệu nghiệp vụ chính và hàng đợi tác vụ bền vững \\ \hline
+5 & CSDL khóa--giá trị & FoundationDB 7.3 & 4500 & Lưu bản chép lời, phân đoạn nội dung và tiến độ xem video \\ \hline
+6 & Kho đối tượng & SeaweedFS 3.88 & 9000 & Lưu video bài giảng, âm thanh sinh ra và cung cấp giao thức tương thích S3 \\ \hline
+7 & Dịch vụ giọng nói & Speaches (CPU) & 8000 & Cung cấp nhận dạng tiếng nói bằng Whisper và tổng hợp tiếng nói bằng Piper \\ \hline
+\end{tabular}
+\caption{Các thành phần được triển khai của hệ thống}
+\label{tbl:services}
+\end{table}
+
+Người dùng truy cập hệ thống qua một tên miền duy nhất bằng giao thức HTTPS. Caddy tiếp nhận yêu cầu, xử lý chứng chỉ TLS và định tuyến theo tiền tố đường dẫn. Các yêu cầu tới \texttt{/api/richter} được chuyển tới máy chủ ứng dụng richter để xử lý các lời gọi Connect RPC; các yêu cầu tới \texttt{/api/storage} được chuyển tới SeaweedFS để trình duyệt có thể tải lên hoặc tải xuống video, âm thanh thông qua URL ký trước; phần còn lại được chuyển tới heino để kết xuất và phục vụ giao diện web. Với cách bố trí này, trình duyệt không truy cập trực tiếp vào các dịch vụ nội bộ như PostgreSQL, FoundationDB, Speaches hay máy chủ ứng dụng.
+
+Máy chủ ứng dụng richter đọc cấu hình từ tệp TOML kết hợp biến môi trường, trong đó các thông tin nhạy cảm như khóa JWT, thông tin kết nối cơ sở dữ liệu và khóa gọi Gemini API được truyền qua biến môi trường khi triển khai. Richter kết nối tới PostgreSQL để lưu dữ liệu nghiệp vụ và hàng đợi tác vụ, tới FoundationDB để lưu các dữ liệu dạng khóa--giá trị như bản chép lời và tiến độ xem, tới SeaweedFS để lưu đối tượng lớn, và tới Speaches để thực hiện nhận dạng cũng như tổng hợp tiếng nói. Riêng bước phân đoạn nội dung, sinh bài tập và chấm một số dạng câu trả lời mở sử dụng dịch vụ Gemini bên ngoài thông qua Internet.
+
+Dữ liệu bền vững của hệ thống được đặt trên các volume riêng cho PostgreSQL, FoundationDB, SeaweedFS, bộ nhớ đệm mô hình giọng nói và dữ liệu cấu hình của Caddy. Nhờ đó, việc cập nhật hoặc khởi động lại container ứng dụng không làm mất dữ liệu đã lưu. Các dịch vụ được cấu hình khởi động theo thứ tự phụ thuộc: các kho dữ liệu và dịch vụ giọng nói được khởi động trước, sau đó máy chủ ứng dụng và giao diện web được đưa vào hoạt động sau khi các dịch vụ nền sẵn sàng.
+
+Quy trình triển khai thực tế gồm các bước chính: xây dựng ảnh container cho heino và richter, chuẩn bị tệp cấu hình và biến môi trường, khởi động toàn bộ cụm dịch vụ bằng Podman Compose, thực hiện di trú lược đồ cơ sở dữ liệu, nạp tài khoản quản trị ban đầu và kiểm tra trạng thái hoạt động của các dịch vụ. Toàn bộ hệ thống có thể vận hành trên CPU; khi có GPU, dịch vụ Speaches có thể được cấu hình sử dụng GPU để tăng tốc bước nhận dạng tiếng nói cho các video dài.
 
 \end{document}

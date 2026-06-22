@@ -1,0 +1,44 @@
+@startuml seq_nopbai
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam sequenceMessageAlign center
+
+actor "Học viên" as U
+participant "Giao diện web" as W
+participant "InteractionsSvc" as I
+participant "authz" as Z
+database "CSDL" as DB
+participant "Handler theo loại" as H
+participant "Engine (Gemini)" as E
+
+U -> W : Nộp câu trả lời
+W -> I : SubmitAttempt (Connect RPC)
+I -> Z : RequireCourseMember
+Z --> I : Hợp lệ
+I -> DB : Tải bài học và danh sách tương tác
+DB --> I : Danh sách tương tác
+loop mỗi câu trả lời
+  I -> H : Grade(cấu hình, câu trả lời)
+  alt trắc nghiệm, nghe hiểu
+    H -> H : Chấm trực tiếp
+  else điền khuyết
+    H -> H : So khớp đáp án
+    opt không khớp chính xác
+      H -> E : Chấm bằng mô hình ngôn ngữ
+      E --> H : Điểm và nhận xét
+    end
+  else viết
+    H -> E : Chấm bằng mô hình ngôn ngữ
+    E --> H : Điểm và nhận xét
+  else đọc (đọc to)
+    H -> H : Phiên âm bản ghi âm
+    H -> E : Đối chiếu và chấm
+    E --> H : Điểm và nhận xét
+  end
+  H --> I : Điểm và nhận xét
+end
+I -> DB : Lưu lần làm bài
+I --> W : Kết quả và nhận xét
+W --> U : Hiển thị kết quả
+@enduml

@@ -1,0 +1,51 @@
+@startuml kientrucphanmem
+!pragma layout smetana
+left to right direction
+!include <tupadr3/common>
+!include <tupadr3/font-awesome-5/mobile>
+!include <tupadr3/font-awesome-5/laptop>
+!include <tupadr3/font-awesome-5/desktop>
+!include <tupadr3/font-awesome-5/shield_alt>
+!include <tupadr3/font-awesome-5/window_restore>
+!include <tupadr3/font-awesome-5/server>
+!include <tupadr3/font-awesome-5/database>
+!include <tupadr3/font-awesome-5/hdd>
+!include <tupadr3/font-awesome-5/microphone>
+!include <tupadr3/font-awesome-5/cloud>
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 16
+skinparam ArrowFontSize 13
+
+rectangle "Máy khách (trình duyệt web)" as clients {
+  FA5_MOBILE(phone,"Điện thoại")
+  FA5_LAPTOP(laptop,"Máy tính xách tay")
+  FA5_DESKTOP(desktop,"Máy tính để bàn")
+}
+
+FA5_SHIELD_ALT(proxy,"Máy chủ proxy")
+FA5_WINDOW_RESTORE(web,"Giao diện web\n(Next.js)")
+FA5_SERVER(app,"Máy chủ ứng dụng\n(Go)")
+
+rectangle "Kho lưu trữ" as stores {
+  FA5_DATABASE(pg,"PostgreSQL")
+  FA5_DATABASE(fdb,"FoundationDB")
+  FA5_HDD(s3,"SeaweedFS")
+}
+rectangle "Dịch vụ AI" as ai {
+  FA5_MICROPHONE(speaches,"Whisper, Piper")
+  FA5_CLOUD(gemini,"Gemini API")
+}
+
+phone   --> proxy : HTTPS
+laptop  --> proxy : HTTPS
+desktop --> proxy : HTTPS
+proxy --> web : tải trang
+proxy --> app : Connect RPC (trình duyệt)
+web   --> app : Connect RPC (SSR)
+app --> pg
+app --> fdb
+app --> s3
+app --> speaches
+app --> gemini
+@enduml
