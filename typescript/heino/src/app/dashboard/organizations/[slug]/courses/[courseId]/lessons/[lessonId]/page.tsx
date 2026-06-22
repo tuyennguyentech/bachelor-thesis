@@ -414,14 +414,20 @@ export default async function LessonDetailPage({
                 videoUrl ? (
                   <StudentLessonView
                     key={`${isPreview ? "preview" : "student"}:${lesson.id}:${lesson.videoStorageKey}:${videoVersion}`}
-                    videoUrl={withFirstFramePoster(videoUrl, isPreview ? 0 : initialPosition)}
+                    // Resume the saved position only for an IN-PROGRESS lesson. On a
+                    // completed lesson (previousResult) the saved position is clamped to
+                    // the first unanswered gate, so resuming would slam the learner into
+                    // that question with no video lead-up — start a re-watch from 0 instead.
+                    // (initialPosition ≈ 0 also suppresses the resume gate-surface, so no
+                    // checkpoint pops on mount.) Preview always starts at 0 too.
+                    videoUrl={withFirstFramePoster(videoUrl, isPreview || previousResult ? 0 : initialPosition)}
                     videoStorageKey={lesson.videoStorageKey || undefined}
                     nextLessonHref={nextLessonHref}
                     segments={analysis?.transcriptSegments ?? []}
                     transcript={analysis?.transcript ?? ""}
                     chunks={initialChunks}
                     lessonId={lessonId}
-                    initialPosition={isPreview ? 0 : initialPosition}
+                    initialPosition={isPreview || previousResult ? 0 : initialPosition}
                     token={token}
                     interactions={interactions}
                     previousResult={isPreview ? null : previousResult}
@@ -469,11 +475,13 @@ export default async function LessonDetailPage({
                         <div className="p-4 flex flex-col gap-4">
                           <VideoPlayer
                             key={`${lesson.id}:${lesson.videoStorageKey}:${videoVersion}`}
-                            videoUrl={withFirstFramePoster(videoUrl, initialPosition)}
+                            // Studio (teacher authoring) view always starts at 0 — only the
+                            // student learn view resumes the saved watch position.
+                            videoUrl={withFirstFramePoster(videoUrl, 0)}
                             segments={analysis?.transcriptSegments ?? []}
                             transcript={analysis?.transcript ?? ""}
                             lessonId={lessonId}
-                            initialPosition={initialPosition}
+                            initialPosition={0}
                             token={token}
                             videoStorageKey={lesson.videoStorageKey ? `${lesson.videoStorageKey}:${videoVersion}` : undefined}
                             allowNativeFullscreen={true}
@@ -541,7 +549,7 @@ export default async function LessonDetailPage({
                           initialFeedbackMode={lesson.feedbackMode ?? FeedbackMode.AFTER_SUBMIT}
                           initialDefaultInteractionConfig={analysis?.defaultInteractionConfig}
                           initialLanguage={lesson.language || "vi"}
-                          initialAudioLanguage={lesson.audioLanguage}
+                          initialAudioLanguage={lesson.audioLanguage || "vi"}
                           initialMaxAttempts={lesson.maxAttempts}
                           title={lesson.title}
                           description={lesson.description}

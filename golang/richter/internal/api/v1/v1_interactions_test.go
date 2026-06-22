@@ -396,9 +396,9 @@ func TestManualInteractionKindMatrix(t *testing.T) {
 	listening := create(t, &richterv1.CreateManualInteractionRequest{
 		LessonId: lessonID, Prompt: "Listening prompt", StartSeconds: 5,
 		Config: &richterv1.CreateManualInteractionRequest_Listening{Listening: &richterv1.ListeningConfig{
-			AudioObjectKey:  "lessons/" + lessonID + "/audio/manual.mp3",
 			DurationSeconds: 3,
-			Mode:            richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION,
+			// Audio-as-question: the audio is synthesised from this text on save.
+			AudioSourceText: "Audio này dùng để kiểm tra luồng nghe nào?",
 			ComprehensionQuestions: []*richterv1.McqConfig{{
 				Question:      "Audio kiểm tra luồng nào?",
 				Options:       []*richterv1.McqOption{{Text: "Nghe"}, {Text: "Đọc"}, {Text: "Xóa"}, {Text: "Theme"}},
@@ -921,8 +921,8 @@ func TestListeningInteractionLifecycle(t *testing.T) {
 		StartSeconds: 0,
 		Config: &richterv1.CreateManualInteractionRequest_Listening{
 			Listening: &richterv1.ListeningConfig{
-				AudioObjectKey: "lessons/test/audio.mp3",
-				Mode:           richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION,
+				// Audio-as-question: the audio is synthesised from this text on save.
+				AudioSourceText: "Chủ đề chính của đoạn audio này là gì?",
 				ComprehensionQuestions: []*richterv1.McqConfig{
 					{Question: "What is the main topic?", Options: []*richterv1.McqOption{{Text: "A"}, {Text: "B"}, {Text: "C"}, {Text: "D"}}, CorrectAnswer: 1},
 					{Question: "What detail was mentioned?", Options: []*richterv1.McqOption{{Text: "P"}, {Text: "Q"}, {Text: "R"}, {Text: "S"}}, CorrectAnswer: 3},

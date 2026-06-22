@@ -81,10 +81,23 @@ test.describe.serial("Teacher course lifecycle", () => {
     await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     const newTitle = uid("Tên Sửa Giáo viên E2E");
     const titleInput = page.getByLabel("Tên khóa học");
+    await expect(titleInput).toBeEnabled({ timeout: 15000 });
     await titleInput.clear();
     await titleInput.fill(newTitle);
-    await page.getByRole("button", { name: "Lưu" }).click();
-    await expect(page.getByRole("heading", { name: newTitle })).toBeVisible();
+    // Click only after the Save button hydrates (a disabled click is a no-op, so the
+    // save never fires), and wait for the UpdateCourse RPC response as the commit
+    // signal — deterministic, unlike the "Đã lưu" message which is cleared when
+    // router.refresh() remounts the title-keyed form. Then re-render from the server.
+    const save = page.getByRole("button", { name: "Lưu" });
+    await expect(save).toBeEnabled({ timeout: 15000 });
+    const resp = page.waitForResponse(
+      (r) => r.url().includes("UpdateCourse") && r.request().method() === "POST",
+      { timeout: 20000 },
+    );
+    await save.click();
+    expect((await resp).ok(), "UpdateCourse response ok").toBeTruthy();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: newTitle })).toBeVisible({ timeout: 15000 });
   });
 
   test("adds a module", async ({ teacherPage: page }) => {
@@ -241,13 +254,20 @@ test.describe("Admin course status and delete", () => {
   test("changes course status to published and persists after reload", async ({ userPage: page }) => {
     await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
     const statusTrigger = page.locator("[data-slot='select-trigger']");
+    await expect(statusTrigger).toBeEnabled({ timeout: 15000 });
     await statusTrigger.click();
     await page.getByRole("option", { name: "Đã xuất bản" }).click();
     await expect(statusTrigger).toContainText("Đã xuất bản");
-    // wait for the server action to finish (select re-enables when transition completes)
-    await expect(statusTrigger).not.toBeDisabled();
-    await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
-    await expect(page.locator("[data-slot='select-trigger']")).toContainText("Đã xuất bản");
+    // Verify persistence by re-rendering from the server until the status sticks. The
+    // status select is server-rendered, so each goto reflects the committed value at
+    // domcontentloaded. The toPass loop absorbs the RPC commit latency and any
+    // in-flight soft refresh — far more robust than gating on the select re-enabling,
+    // which is tied to the heavy overview page's router.refresh() and lagged past
+    // fixed timeouts under load.
+    await expect(async () => {
+      await page.goto(`${courseUrl}?tab=overview`, { waitUntil: "domcontentloaded" });
+      await expect(page.locator("[data-slot='select-trigger']")).toContainText("Đã xuất bản", { timeout: 4000 });
+    }).toPass({ timeout: 25000 });
   });
 
   test("deletes course and redirects to courses list", async ({ userPage: page }) => {

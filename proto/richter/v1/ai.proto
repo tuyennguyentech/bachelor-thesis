@@ -443,6 +443,23 @@ service AIService {
   // Full reset: wipe the video + transcript + chunks + generated exercises +
   // student attempts, returning the lesson to its blank pre-quick-create state.
   rpc ResetLessonContent(ResetLessonContentRequest) returns (ResetLessonContentResponse) {}
+
+  // Synthesise a listening question's text to audio for PREVIEW (teacher hears it
+  // while editing, before saving). Uploads to a temporary key and returns a
+  // presigned download URL; does NOT touch the interaction config.
+  rpc PreviewListeningAudio(PreviewListeningAudioRequest) returns (PreviewListeningAudioResponse) {}
+}
+
+message PreviewListeningAudioRequest {
+  string lesson_id = 1 [(buf.validate.field).string.uuid = true];
+  // The question text to synthesise (bounded to cap TTS cost/latency).
+  string text = 2 [(buf.validate.field).string = {min_len: 1, max_len: 2000}];
+}
+
+message PreviewListeningAudioResponse {
+  // Temporary storage key for the synthesised preview audio. The client fetches a
+  // browser-reachable URL via StorageService.GetDownloadUrl (same as any clip).
+  string audio_object_key = 1;
 }
 
 message ResetLessonContentRequest {

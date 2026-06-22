@@ -68,20 +68,12 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "video/x-matroska",
 ]);
 
+// Used for both the question/output language and the spoken-audio language. The
+// audio language is always a concrete choice (vi/en) — the old "Tự động" option
+// was removed; transcription always sends a concrete language hint to Whisper.
 const LANGUAGE_OPTIONS = [
   { value: "vi", label: "🇻🇳 Tiếng Việt" },
   { value: "en", label: "🇬🇧 English" },
-];
-
-// Audio language additionally offers "Tự động (theo cấu hình)" — the SAME choice
-// the manual lesson settings bar provides. It persists as an empty audio_language,
-// so transcription defers to the deployment STT config (or Whisper auto-detect).
-// Radix <Select> forbids an empty-string item value, so the UI uses a sentinel and
-// maps it back to "" when saving (see AUDIO_AUTO handling in updateLesson below).
-const AUDIO_AUTO = "auto";
-const AUDIO_LANGUAGE_OPTIONS = [
-  { value: AUDIO_AUTO, label: "Tự động (theo cấu hình)" },
-  ...LANGUAGE_OPTIONS,
 ];
 
 const FEEDBACK_OPTIONS = [
@@ -253,11 +245,9 @@ export function QuickCreateLessonDialog({
   const [isDragActive, setIsDragActive] = useState(false);
   const [language, setLanguage] = useState("vi");
   // Spoken/audio language of the uploaded video — drives the transcription hint
-  // (separate from `language`, the question/output language). Defaults to "Tự động
-  // (theo cấu hình)" to match the manual lesson settings bar: a fresh lesson is
-  // born with an empty audio_language, so transcription defers to the deployment
-  // STT config / Whisper auto-detect. The teacher pins "vi"/"en" only when needed.
-  const [audioLanguage, setAudioLanguage] = useState(AUDIO_AUTO);
+  // (separate from `language`, the question/output language). Always a concrete
+  // choice (vi/en); defaults to Vietnamese, the platform's primary language.
+  const [audioLanguage, setAudioLanguage] = useState("vi");
   const [config, setConfig] = useState<AdvancedConfig>({
     difficulty: "medium",
     focusPrompt: "",
@@ -278,7 +268,7 @@ export function QuickCreateLessonDialog({
       setSelectedModuleId(modules[0]?.id ?? "");
       setVideoFile(null);
       setLanguage("vi");
-      setAudioLanguage(AUDIO_AUTO);
+      setAudioLanguage("vi");
       setConfig({
         difficulty: "medium",
         focusPrompt: "",
@@ -363,9 +353,7 @@ export function QuickCreateLessonDialog({
         description: description.trim(),
         orderIndex: 0,
         language,
-        // Map the "Tự động" sentinel back to an empty audio_language (the manual
-        // flow's "" value) so the backend leaves it unpinned / auto-detected.
-        audioLanguage: audioLanguage === AUDIO_AUTO ? "" : audioLanguage,
+        audioLanguage,
         maxAttempts: config.maxAttempts,
       });
       await lessonClient.updateLessonFeedbackMode({ id: lessonId, feedbackMode: config.feedbackMode });
@@ -572,7 +560,7 @@ export function QuickCreateLessonDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {AUDIO_LANGUAGE_OPTIONS.map((o) => (
+                  {LANGUAGE_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>

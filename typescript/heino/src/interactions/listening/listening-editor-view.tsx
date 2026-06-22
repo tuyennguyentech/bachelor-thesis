@@ -1,21 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { UploadCloudIcon, PlusIcon, Loader2Icon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useRef, useState } from "react";
+import { Volume2Icon, Loader2Icon, HeadphonesIcon, AlertCircleIcon } from "lucide-react";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
 import { StorageService } from "buf/gen/richter/v1/storage_pb";
 import { useRichterWebClient } from "@/lib/connect-webclient";
 import type { EditorViewProps, ListeningConfig, McqConfig } from "../types";
 import { NestedMcqEditor } from "../_shared/nested-mcq";
-
-const AUDIO_CONTENT_TYPES = new Set([
-  "audio/mpeg",
-  "audio/wav",
-  "audio/ogg",
-  "audio/mp4",
-  "audio/webm",
-  "audio/aac",
-]);
 
 const EMPTY_MCQ: McqConfig = {
   question: "",
@@ -24,129 +15,109 @@ const EMPTY_MCQ: McqConfig = {
 };
 
 export function ListeningEditorView({ config, onChange, lessonId = "", token = "" }: EditorViewProps<ListeningConfig>) {
+  const aiClient = useRichterWebClient(AIService, token);
   const storageClient = useRichterWebClient(StorageService, token);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
-  async function handleAudioFile(file: File) {
-    const ct = file.type || "audio/mpeg";
-    if (!AUDIO_CONTENT_TYPES.has(ct) && !ct.startsWith("audio/")) {
-      setUploadError("Chỉ hỗ trợ tệp nghe (mp3, wav, ogg, m4a...).");
-      return;
-    }
-    setUploading(true);
-    setUploadError(null);
+  // Autoplay the preview once the new <audio> is committed (runs after render, so
+  // the ref exists even on the FIRST "Nghe thử" — a rAF would fire too early).
+  useEffect(() => {
+    if (previewUrl) audioRef.current?.play().catch(() => {});
+  }, [previewUrl]);
+
+  // A listening exercise is a single MCQ whose question is SPOKEN: the teacher edits
+  // the question text and the audio is synthesised from it on save.
+  const mcq = config.comprehensionQuestions[0] ?? EMPTY_MCQ;
+  const setMcq = (updated: McqConfig) => onChange({ ...config, comprehensionQuestions: [updated] });
+
+  async function handlePreview() {
+    const text = config.audioSourceText?.trim();
+    if (!text || !lessonId) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
     try {
-      const ext = file.name.split(".").pop() ?? "mp3";
-      const key = `lessons/${lessonId}/audio-${Date.now()}.${ext}`;
-      const { uploadUrl } = await storageClient.getUploadUrl({ key, contentType: ct, expiresInSeconds: 3600 });
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.addEventListener("load", () => xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`)));
-        xhr.addEventListener("error", () => reject(new Error("Lỗi mạng")));
-        xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader("Content-Type", ct);
-        xhr.send(file);
-      });
-
-      let duration = 0;
-      try {
-        duration = await new Promise<number>((resolve) => {
-          const audio = document.createElement("audio");
-          const url = URL.createObjectURL(file);
-          const cleanup = () => URL.revokeObjectURL(url);
-          const t = setTimeout(() => { cleanup(); resolve(0); }, 8000);
-          audio.addEventListener("loadedmetadata", () => { clearTimeout(t); cleanup(); resolve(isFinite(audio.duration) ? Math.round(audio.duration) : 0); });
-          audio.addEventListener("error", () => { clearTimeout(t); cleanup(); resolve(0); });
-          audio.src = url;
-        });
-      } catch { duration = 0; }
-
-      onChange({ ...config, audioObjectKey: key, durationSeconds: duration });
-    } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "Tải tệp nghe thất bại");
+      const { audioObjectKey } = await aiClient.previewListeningAudio({ lessonId, text });
+      const { downloadUrl } = await storageClient.getDownloadUrl({ key: audioObjectKey, expiresInSeconds: 3600 });
+      setPreviewUrl(downloadUrl);
+    } catch {
+      setPreviewError("Không tạo được audio nghe thử. Vui lòng thử lại.");
     } finally {
-      setUploading(false);
+      setPreviewLoading(false);
     }
   }
 
-  function addQuestion() {
-    onChange({ ...config, comprehensionQuestions: [...config.comprehensionQuestions, { ...EMPTY_MCQ, options: EMPTY_MCQ.options.map((o) => ({ ...o })) }] });
-  }
-
-  function updateQuestion(qi: number, q: McqConfig) {
-    onChange({ ...config, comprehensionQuestions: config.comprehensionQuestions.map((c, i) => (i === qi ? q : c)) });
-  }
-
-  function removeQuestion(qi: number) {
-    onChange({ ...config, comprehensionQuestions: config.comprehensionQuestions.filter((_, i) => i !== qi) });
-  }
+  const hasText = !!config.audioSourceText?.trim();
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Audio upload */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-muted-foreground">Tệp nghe</label>
+    <div className="flex flex-col gap-4">
+      {/* ── Câu hỏi nói: edit text + audio synthesised from it ── */}
+      <div className="flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary/[0.03] p-3">
         <div className="flex items-center gap-2">
-          <label className={`inline-flex items-center gap-1.5 text-sm cursor-pointer rounded border border-input px-3 py-1.5 hover:bg-muted/50 transition-colors ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
-            {uploading ? <Loader2Icon className="size-3.5 animate-spin" /> : <UploadCloudIcon className="size-3.5" />}
-            {uploading ? "Đang tải..." : config.audioObjectKey ? "Thay tệp nghe" : "Tải tệp nghe lên"}
-            <input type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAudioFile(f); e.target.value = ""; }} />
-          </label>
-          {config.audioObjectKey && <span className="text-xs text-muted-foreground truncate max-w-[160px]">{config.audioObjectKey.split("/").pop()}</span>}
+          <span className="inline-flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <HeadphonesIcon className="size-3.5" />
+          </span>
+          <div className="flex flex-col">
+            <label htmlFor="listening-question" className="text-sm font-medium leading-none">
+              Câu hỏi (học viên sẽ nghe)
+            </label>
+            <span className="text-[11px] text-muted-foreground">
+              Audio được tạo tự động từ đoạn chữ này khi lưu.
+            </span>
+          </div>
         </div>
-        {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
-      </div>
 
-      {/* Mode select */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-muted-foreground">Dạng bài</label>
-        <div className="flex gap-2">
-          {(["dictation", "comprehension"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => onChange({ ...config, mode: m })}
-              className={`text-sm px-3 py-1.5 rounded border transition-colors ${config.mode === m ? "border-primary bg-primary/10 text-primary font-medium" : "border-input hover:border-primary/50"}`}
-            >
-              {m === "dictation" ? "Nghe chép" : "Nghe hiểu"}
-            </button>
-          ))}
-        </div>
-      </div>
+        <textarea
+          id="listening-question"
+          rows={3}
+          value={config.audioSourceText}
+          onChange={(e) => { onChange({ ...config, audioSourceText: e.target.value }); setPreviewUrl(null); }}
+          placeholder="Nhập câu hỏi. Học viên sẽ nghe câu hỏi này rồi chọn đáp án…"
+          className="w-full text-sm rounded-md border border-input bg-background px-3 py-2 leading-relaxed resize-y min-h-[4.5rem] focus:outline-none focus:ring-2 focus:ring-ring/50"
+        />
 
-      {/* Dictation: expected text */}
-      {config.mode === "dictation" && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground">Đáp án mẫu (nội dung nghe được)</label>
-          <textarea
-            rows={3}
-            value={config.expectedText}
-            onChange={(e) => onChange({ ...config, expectedText: e.target.value })}
-            placeholder="Nhập nội dung đúng mà học sinh cần nghe..."
-            className="text-sm rounded border border-input bg-background px-2 py-1.5 resize-none"
-          />
-        </div>
-      )}
-
-      {/* Comprehension: MCQ list */}
-      {config.mode === "comprehension" && (
+        {/* Preview row: Nghe thử + an inline, full-width player once ready. */}
         <div className="flex flex-col gap-2">
-          <label className="text-xs text-muted-foreground">Câu hỏi ({config.comprehensionQuestions.length})</label>
-          {config.comprehensionQuestions.map((q, qi) => (
-            <NestedMcqEditor
-              key={qi}
-              questionIndex={qi}
-              config={q}
-              onChange={(updated) => updateQuestion(qi, updated)}
-              onRemove={() => removeQuestion(qi)}
-            />
-          ))}
-          <Button type="button" variant="outline" size="sm" className="gap-1.5 self-start" onClick={addQuestion}>
-            <PlusIcon className="size-3.5" /> Thêm câu hỏi
-          </Button>
+          <button
+            type="button"
+            onClick={handlePreview}
+            disabled={!hasText || previewLoading}
+            className="inline-flex w-fit items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {previewLoading ? <Loader2Icon className="size-4 animate-spin" /> : <Volume2Icon className="size-4" />}
+            {previewLoading ? "Đang tạo audio…" : previewUrl ? "Tạo lại audio" : "Nghe thử"}
+          </button>
+
+          {previewUrl && (
+            <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2">
+              <Volume2Icon className="size-4 shrink-0 text-primary" />
+              <audio
+                ref={audioRef}
+                src={previewUrl}
+                controls
+                className="h-9 w-full"
+                data-testid="listening-preview-audio"
+              />
+            </div>
+          )}
+
+          {previewError && (
+            <p className="flex items-center gap-1.5 text-[11px] text-destructive">
+              <AlertCircleIcon className="size-3.5 shrink-0" />
+              {previewError}
+            </p>
+          )}
+          {!hasText && (
+            <p className="text-[11px] text-muted-foreground">
+              Nhập câu hỏi ở trên để bật nút nghe thử.
+            </p>
+          )}
         </div>
-      )}
+      </div>
+
+      <NestedMcqEditor questionIndex={0} config={mcq} hideQuestion label="Các phương án trả lời" onChange={setMcq} />
     </div>
   );
 }

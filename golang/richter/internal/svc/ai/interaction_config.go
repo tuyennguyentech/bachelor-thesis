@@ -130,3 +130,26 @@ func (s *AISvc) doRegenerateInteraction(
 	}
 	return &updated, nil
 }
+
+// synthesizeListeningAudio is provided to InteractionsSvc as ListeningAudioSynthesizer
+// via DI. It synthesises the listening question `text` to speech in the lesson's
+// output language and embeds the uploaded audio_object_key into configJSON — so a
+// manual create/edit of a listening question regenerates its audio from the text.
+func (s *AISvc) synthesizeListeningAudio(
+	ctx context.Context,
+	lessonID pgtype.UUID,
+	configJSON []byte,
+	text string,
+) ([]byte, error) {
+	lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
+		return q.GetLessonByID(ctx, lessonID)
+	})
+	if err != nil {
+		return nil, svc.ConnectDBError(err)
+	}
+	prov, ok := svcinteractions.Get(richterv1.InteractionKind_INTERACTION_KIND_LISTENING).(svcinteractions.TTSProvider)
+	if !ok {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("listening handler is not a TTSProvider"))
+	}
+	return s.synthesiseAndEmbed(ctx, prov, configJSON, text, lesson.Language, lessonID.String())
+}

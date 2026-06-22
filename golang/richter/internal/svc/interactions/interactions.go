@@ -38,6 +38,12 @@ type GradingDepsProvider func(ctx context.Context, lessonID pgtype.UUID) (Gradin
 // It deletes a student audio recording from S3 (best-effort; used after retake).
 type AudioObjectDeleter func(ctx context.Context, objectKey string) error
 
+// ListeningAudioSynthesizer is provided by the AI service via DI. For a listening
+// COMPREHENSION interaction it (re)synthesises the spoken audio from `text` (the
+// question), uploads it, and returns configJSON with audio_object_key embedded —
+// so editing only the question text auto-regenerates the audio. Nil in test/unit contexts.
+type ListeningAudioSynthesizer func(ctx context.Context, lessonID pgtype.UUID, configJSON []byte, text string) ([]byte, error)
+
 var Package = do.Package(
 	do.Lazy(NewInteractionsSvc),
 )
@@ -52,9 +58,10 @@ type InteractionsSvc struct {
 	log         *log.LogSvc
 	authz       *authz.AuthzSvc
 	intCfg      *cfg.InteractionsCfg
-	aiRegen     AIRegenerateFunc    // injected by AISvc; nil in test/unit contexts
-	gradingDeps GradingDepsProvider // injected by AISvc; nil in test/unit contexts
-	deleteAudio AudioObjectDeleter  // injected by AISvc; nil in test/unit contexts
+	aiRegen      AIRegenerateFunc          // injected by AISvc; nil in test/unit contexts
+	gradingDeps  GradingDepsProvider       // injected by AISvc; nil in test/unit contexts
+	deleteAudio  AudioObjectDeleter        // injected by AISvc; nil in test/unit contexts
+	listeningTTS ListeningAudioSynthesizer // injected by AISvc; nil in test/unit contexts
 }
 
 var _ richterv1connect.InteractionServiceHandler = (*InteractionsSvc)(nil)
@@ -81,7 +88,8 @@ func NewInteractionsSvc(i do.Injector) (*InteractionsSvc, error) {
 	aiRegen, _ := do.Invoke[AIRegenerateFunc](i)
 	gradingDeps, _ := do.Invoke[GradingDepsProvider](i)
 	deleteAudio, _ := do.Invoke[AudioObjectDeleter](i)
-	return &InteractionsSvc{pg: pg, kv: kvSvc, log: lg, authz: az, intCfg: intCfg, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio}, nil
+	listeningTTS, _ := do.Invoke[ListeningAudioSynthesizer](i)
+	return &InteractionsSvc{pg: pg, kv: kvSvc, log: lg, authz: az, intCfg: intCfg, aiRegen: aiRegen, gradingDeps: gradingDeps, deleteAudio: deleteAudio, listeningTTS: listeningTTS}, nil
 }
 
 // aiCtx returns a child of ctx with the given timeout, or returns ctx
@@ -171,6 +179,60 @@ func (s *InteractionsSvc) ListLessonInteractions(
 	return &richterv1.ListLessonInteractionsResponse{Interactions: out}, nil
 }
 
+// maybeSynthesizeListeningAudio (re)generates the spoken audio for a listening
+// interaction from its question text (audio_source_text) and embeds the resulting
+// audio_object_key — so editing the text refreshes the audio. On an update where
+// the text is UNCHANGED, it carries over the existing key instead of re-synthesising
+// (avoids a needless TTS call). On a CHANGED text it synthesises a new key and
+// best-effort deletes the now-orphaned previous wav. For any other kind, empty text,
+// or when no synthesizer is injected (unit tests), it returns configJSON unchanged.
+// oldConfigJSON is the previous stored config on update, nil on create.
+func (s *InteractionsSvc) maybeSynthesizeListeningAudio(
+	ctx context.Context,
+	kind richterv1.InteractionKind,
+	lessonID pgtype.UUID,
+	h Handler,
+	configJSON []byte,
+	oldConfigJSON []byte,
+) ([]byte, error) {
+	if kind != richterv1.InteractionKind_INTERACTION_KIND_LISTENING || s.listeningTTS == nil {
+		return configJSON, nil
+	}
+	tp, ok := h.(TTSProvider)
+	if !ok {
+		return configJSON, nil
+	}
+	text := strings.TrimSpace(tp.AudioSourceText(configJSON))
+	if text == "" {
+		return configJSON, nil // nothing to speak
+	}
+	// Capture the previous audio key (if any) so we can either reuse it (unchanged
+	// text) or clean it up after a re-synth (changed text).
+	var oldKey string
+	keyer, hasKeyer := h.(interface{ AudioObjectKey([]byte) string })
+	if oldConfigJSON != nil && hasKeyer {
+		oldKey = keyer.AudioObjectKey(oldConfigJSON)
+		// Update with unchanged question text → reuse the existing audio (no re-synth).
+		if oldKey != "" && strings.TrimSpace(tp.AudioSourceText(oldConfigJSON)) == text {
+			return tp.SetAudioObjectKey(configJSON, oldKey)
+		}
+	}
+	updated, err := s.listeningTTS(ctx, lessonID, configJSON, text)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("listening: synthesise audio from question text: %w", err))
+	}
+	// Best-effort: the re-synth wrote a fresh key, so delete the now-orphaned previous
+	// wav (mirrors the retake cleanup in SubmitAttempt). ResetLessonContent's prefix
+	// sweep is the backstop if this misses.
+	if oldKey != "" && s.deleteAudio != nil && hasKeyer {
+		if newKey := keyer.AudioObjectKey(updated); newKey != "" && newKey != oldKey {
+			deleter, key := s.deleteAudio, oldKey
+			go func() { _ = deleter(context.Background(), key) }()
+		}
+	}
+	return updated, nil
+}
+
 // ── CreateManualInteraction ───────────────────────────────────────────────────
 
 func (s *InteractionsSvc) CreateManualInteraction(
@@ -212,6 +274,11 @@ func (s *InteractionsSvc) CreateManualInteraction(
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no handler for kind %v", kind))
 	}
 	configJSON, err := h.ConfigFromCreateProto(req)
+	if err != nil {
+		return nil, err
+	}
+	// Listening (audio-as-question): synthesise the spoken audio from the question text.
+	configJSON, err = s.maybeSynthesizeListeningAudio(ctx, kind, lessonID, h, configJSON, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -352,6 +419,12 @@ func (s *InteractionsSvc) UpdateInteraction(
 			return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("no listening handler"))
 		}
 		configJSON, err = h.ConfigFromUpdateProto(req)
+		if err != nil {
+			return nil, err
+		}
+		// Re-synthesise the spoken audio from the (possibly edited) question text.
+		// Pass the previous config so an unchanged question text reuses its audio.
+		configJSON, err = s.maybeSynthesizeListeningAudio(ctx, kind, existing.LessonID, h, configJSON, existing.Config)
 		if err != nil {
 			return nil, err
 		}

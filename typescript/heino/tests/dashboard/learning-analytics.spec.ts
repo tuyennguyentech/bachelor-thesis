@@ -417,8 +417,10 @@ test.describe("Analytics/processing bug fixes (teacher view)", () => {
     await page.goto(`${lessonHref}?tab=processing`, { waitUntil: "domcontentloaded" });
     const audioSel = page.getByTestId("audio-language-select");
     await expect(audioSel).toBeVisible({ timeout: 30000 });
-    // It is DISTINCT from the question/output language and offers vi/en + auto.
-    await expect(audioSel.locator("option")).toHaveCount(3);
+    // It is DISTINCT from the question/output language and offers exactly vi/en
+    // (the old "Tự động (theo cấu hình)" option was removed — a concrete spoken
+    // language is always required and sent to Whisper).
+    await expect(audioSel.locator("option")).toHaveCount(2);
   });
 
   test("lesson processing tab offers a guarded 'reset everything' action", async ({ teacherPage: page }) => {

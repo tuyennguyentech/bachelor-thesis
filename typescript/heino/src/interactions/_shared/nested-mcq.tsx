@@ -2,6 +2,7 @@
 
 import { CheckCircleIcon, XCircleIcon, CheckIcon } from "lucide-react";
 import type { McqConfig } from "../types";
+import { AutoTextarea } from "./auto-textarea";
 
 // ── Student view ──────────────────────────────────────────────────────────────
 
@@ -113,9 +114,13 @@ interface NestedMcqEditorProps {
   config: McqConfig;
   onChange: (cfg: McqConfig) => void;
   onRemove?: () => void;
+  // When the question lives elsewhere (e.g. listening, where the spoken audio IS
+  // the question), hide the question text input and show a custom header label.
+  hideQuestion?: boolean;
+  label?: string;
 }
 
-export function NestedMcqEditor({ questionIndex, config, onChange, onRemove }: NestedMcqEditorProps) {
+export function NestedMcqEditor({ questionIndex, config, onChange, onRemove, hideQuestion, label }: NestedMcqEditorProps) {
   function setOptionText(idx: number, text: string) {
     onChange({ ...config, options: config.options.map((o, i) => (i === idx ? { text } : o)) });
   }
@@ -123,42 +128,43 @@ export function NestedMcqEditor({ questionIndex, config, onChange, onRemove }: N
   return (
     <div className="flex flex-col gap-2 p-3 rounded-md border border-border bg-muted/20">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">Câu {questionIndex + 1}</span>
+        <span className="text-xs font-medium text-muted-foreground">{label ?? `Câu ${questionIndex + 1}`}</span>
         {onRemove && (
           <button type="button" onClick={onRemove} className="text-xs text-destructive hover:underline">
             Xóa
           </button>
         )}
       </div>
-      <input
-        type="text"
-        value={config.question ?? ""}
-        onChange={(e) => onChange({ ...config, question: e.target.value })}
-        placeholder={`Nội dung câu hỏi ${questionIndex + 1}`}
-        className="rounded border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-      />
+      {!hideQuestion && (
+        <AutoTextarea
+          minRows={2}
+          value={config.question ?? ""}
+          onChange={(text) => onChange({ ...config, question: text })}
+          placeholder={`Nội dung câu hỏi ${questionIndex + 1}`}
+          className="rounded border border-input bg-background px-2 py-1.5 text-sm"
+        />
+      )}
       {config.options.map((opt, oi) => (
-        <div key={oi} className="flex items-center gap-2">
+        <div key={oi} className="flex items-start gap-2">
           <button
             type="button"
             title={config.correctAnswer === oi ? "Đáp án đúng" : "Chọn làm đáp án đúng"}
             onClick={() => onChange({ ...config, correctAnswer: oi })}
-            className={`shrink-0 size-5 rounded-full border-2 flex items-center justify-center transition-colors
+            className={`mt-1 shrink-0 size-5 rounded-full border-2 flex items-center justify-center transition-colors
               ${config.correctAnswer === oi
                 ? "border-green-500 bg-green-500 text-white"
                 : "border-border hover:border-green-400"}`}
           >
             {config.correctAnswer === oi && <CheckIcon className="size-3" />}
           </button>
-          <span className="text-xs text-muted-foreground w-4 shrink-0 text-center">
+          <span className="mt-1.5 text-xs text-muted-foreground w-4 shrink-0 text-center">
             {String.fromCharCode(65 + oi)}.
           </span>
-          <input
-            type="text"
+          <AutoTextarea
             value={opt.text}
-            onChange={(e) => setOptionText(oi, e.target.value)}
+            onChange={(text) => setOptionText(oi, text)}
             placeholder={`Lựa chọn ${String.fromCharCode(65 + oi)}`}
-            className="flex-1 rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="flex-1 rounded border border-input bg-background px-2 py-1.5 text-sm"
           />
         </div>
       ))}

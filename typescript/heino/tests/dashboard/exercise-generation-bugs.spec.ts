@@ -109,7 +109,8 @@ test.describe("AI exercise generation — parallel manual add", () => {
     await prompt.fill(manualPrompt);
 
     // Fill the single-choice options and pick a correct answer so the form validates.
-    const optionInputs = form.locator('input[type="text"]');
+    // Option fields are auto-growing textareas placeholdered "Lựa chọn A/B/…".
+    const optionInputs = form.getByPlaceholder(/^Lựa chọn /);
     const optionCount = await optionInputs.count();
     for (let i = 0; i < optionCount; i++) {
       await optionInputs.nth(i).fill(`Lựa chọn ${i + 1}`);

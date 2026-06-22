@@ -117,11 +117,10 @@ test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => 
     const removeBtn = form.getByTitle("Xóa lựa chọn này").nth(3);
     await removeBtn.click({ force: true });
 
-    // Fill 3 options
-    const optionInputs = form.locator('input[type="text"]');
-    await optionInputs.nth(0).fill("Python");
-    await optionInputs.nth(1).fill("Go");
-    await optionInputs.nth(2).fill("Java");
+    // Fill 3 options (option fields are auto-growing textareas keyed by placeholder)
+    await form.getByPlaceholder("Lựa chọn A", { exact: true }).fill("Python");
+    await form.getByPlaceholder("Lựa chọn B", { exact: true }).fill("Go");
+    await form.getByPlaceholder("Lựa chọn C", { exact: true }).fill("Java");
 
     // Select Option B (index 1) as correct
     await form.getByTitle("Chọn làm đáp án đúng").nth(1).click({ force: true });
@@ -145,12 +144,11 @@ test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => 
     // Add a 5th option
     await form.getByRole("button", { name: "Thêm lựa chọn" }).click({ force: true });
 
-    const mcOptionInputs = form.locator('input[type="text"]');
-    await mcOptionInputs.nth(0).fill("Option A");
-    await mcOptionInputs.nth(1).fill("Option B");
-    await mcOptionInputs.nth(2).fill("Option C");
-    await mcOptionInputs.nth(3).fill("Option D");
-    await mcOptionInputs.nth(4).fill("Option E");
+    await form.getByPlaceholder("Lựa chọn A", { exact: true }).fill("Option A");
+    await form.getByPlaceholder("Lựa chọn B", { exact: true }).fill("Option B");
+    await form.getByPlaceholder("Lựa chọn C", { exact: true }).fill("Option C");
+    await form.getByPlaceholder("Lựa chọn D", { exact: true }).fill("Option D");
+    await form.getByPlaceholder("Lựa chọn E", { exact: true }).fill("Option E");
 
     // Select Option A (index 0) and Option C (index 2) as correct
     await form.getByTitle("Chọn làm đáp án đúng").nth(0).click({ force: true });
@@ -191,18 +189,13 @@ test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => 
     await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
     await expect(teacher.getByTestId("interaction-row").filter({ hasText: readingPrompt }).first()).toBeVisible({ timeout: 5000 });
 
-    // ── STEP 5: Teacher creates Listening interaction ──
+    // ── STEP 5: Teacher creates Listening interaction (text-driven; audio auto-TTS) ──
     const listeningPrompt = `Listening-Manual-${stamp}`;
     form = await openManualForm(InteractionKind.LISTENING);
     await fillPrompt(form, listeningPrompt);
-    await form.locator('input[type="file"][accept="audio/*"]').setInputFiles({
-      name: "manual-listening.mp3",
-      mimeType: "audio/mpeg",
-      buffer: Buffer.from("ID3\u0003\u0000\u0000\u0000\u0000\u0000\u0000"),
-    });
-    await expect(teacher.getByText(/audio-\d+\.mp3/)).toBeVisible({ timeout: 15000 });
-    await form.getByRole("button", { name: "Thêm câu hỏi" }).click({ force: true });
-    await form.getByPlaceholder("Nội dung câu hỏi 1").fill("Âm thanh này dùng để kiểm tra luồng nào?");
+    // The question TEXT is the source of truth — the audio is synthesised from it on
+    // save (no upload). Fill the question textarea, then the 4 options.
+    await form.getByPlaceholder(/Học viên sẽ nghe câu hỏi/).fill("Âm thanh này dùng để kiểm tra luồng nào?");
     await form.getByPlaceholder("Lựa chọn A").fill("Luồng nghe thủ công");
     await form.getByPlaceholder("Lựa chọn B").fill("Luồng xoá khóa học");
     await form.getByPlaceholder("Lựa chọn C").fill("Luồng đổi mật khẩu");
@@ -210,7 +203,8 @@ test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => 
     await form.locator('input[type="number"]').first().fill("9992");
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 
-    await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 15000 });
+    // Saving runs a real TTS synthesis (question -> audio), so allow extra time.
+    await expect(teacher.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 30000 });
     await expect(teacher.getByTestId("interaction-row").filter({ hasText: listeningPrompt }).first()).toBeVisible({ timeout: 5000 });
 
     } finally {

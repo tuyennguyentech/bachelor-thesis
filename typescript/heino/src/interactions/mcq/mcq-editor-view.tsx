@@ -2,6 +2,7 @@
 
 import { CheckIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import type { EditorViewProps, McqConfig } from "../types";
+import { AutoTextarea } from "../_shared/auto-textarea";
 
 export function McqEditorView({ config, onChange }: EditorViewProps<McqConfig>) {
   const isMultiple = Array.isArray(config.correctAnswers);
@@ -84,12 +85,12 @@ export function McqEditorView({ config, onChange }: EditorViewProps<McqConfig>) 
             : config.correctAnswer === oi;
 
           return (
-            <div key={oi} className="flex items-center gap-2 group">
+            <div key={oi} className="flex items-start gap-2 group">
               <button
                 type="button"
                 title={isCorrect ? "Đang là đáp án đúng" : "Chọn làm đáp án đúng"}
                 onClick={() => toggleCorrect(oi)}
-                className={`shrink-0 size-5 rounded border-2 flex items-center justify-center transition-colors
+                className={`mt-1 shrink-0 size-5 rounded border-2 flex items-center justify-center transition-colors
                   ${isCorrect
                     ? "border-green-500 bg-green-500 text-white"
                     : "border-border hover:border-green-400"}
@@ -97,22 +98,21 @@ export function McqEditorView({ config, onChange }: EditorViewProps<McqConfig>) 
               >
                 {isCorrect && <CheckIcon className="size-3" />}
               </button>
-              <span className="text-xs font-semibold text-muted-foreground w-4 shrink-0 text-center">
+              <span className="mt-1.5 text-xs font-semibold text-muted-foreground w-4 shrink-0 text-center">
                 {String.fromCharCode(65 + oi)}.
               </span>
-              <input
-                type="text"
+              <AutoTextarea
                 value={opt.text}
-                onChange={(e) => setOptionText(oi, e.target.value)}
+                onChange={(text) => setOptionText(oi, text)}
                 placeholder={`Lựa chọn ${String.fromCharCode(65 + oi)}`}
-                className="flex-1 rounded border border-input bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring"
+                className="flex-1 rounded border border-input bg-background px-3 py-1.5 text-sm text-foreground"
               />
               {options.length > 2 && (
                 <button
                   type="button"
                   title="Xóa lựa chọn này"
                   onClick={() => removeOption(oi)}
-                  className="shrink-0 p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  className="mt-0.5 shrink-0 p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                 >
                   <Trash2Icon className="size-4" />
                 </button>

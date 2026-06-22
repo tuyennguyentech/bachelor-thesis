@@ -5,69 +5,41 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"connectrpc.com/connect"
 	richterv1 "example.com/buf/gen/richter/v1"
-	"golang.org/x/text/unicode/norm"
 )
 
 func init() {
 	registerHandler(&listeningHandler{})
 }
 
-// minListeningWords is the minimum word count for a generated listening passage.
-// The prompt requests 60–100 words; passages below this floor are rejected so
-// the generation retry loop re-requests a fuller one (a too-short passage TTS's
-// into meaningless audio with seemingly-unrelated questions).
-//
-// Kept low enough (a real 2–3 sentence passage is ~30+ words; a degenerate
-// 1-sentence blurb is ~10–15) that it still rejects degenerate audio but no
-// longer drops otherwise-valid passages that land just under the aspirational
-// 60-word target — over-rejection here was the main cause of listening items
-// "frequently missing", since a dropped item under AI_CHOOSE was not re-requested.
-const minListeningWords = 30
+// minListeningQuestionWords is the floor for a generated listening question. The
+// QUESTION text is what gets synthesised to audio (the learner hears it and picks
+// an option), so a degenerate 1–2 word "question" TTS's into meaningless audio. A
+// real question is ≥4 words; anything shorter is rejected so the generation retry
+// loop re-requests one.
+const minListeningQuestionWords = 4
 
-// instructionalMarkers are meta/instruction phrases that must never appear in a
-// listening passage (the text spoken by TTS). Their presence means Gemini leaked
-// the prompt or the questions into audio_source_text instead of writing lecture
-// content — which makes the audio say things like "answer the following questions".
-var instructionalMarkers = []string{
-	"trả lời các câu hỏi", "trả lời câu hỏi sau", "các câu hỏi sau đây",
-	"hãy nghe", "nghe đoạn", "nghe bài giảng sau",
-	"answer the following", "following question", "listen to the",
-}
+// listeningQuestionPrompt is the (fixed) instruction shown above a listening item.
+// The question itself lives in the AUDIO, so the on-screen prompt is generic.
+const listeningQuestionPrompt = "Nghe câu hỏi và chọn đáp án đúng:"
 
-// looksInstructional reports whether s reads like task instructions rather than
-// spoken lecture content.
-func looksInstructional(s string) bool {
-	lower := strings.ToLower(s)
-	for _, m := range instructionalMarkers {
-		if strings.Contains(lower, m) {
-			return true
-		}
-	}
-	return false
-}
-
+// listeningConfigJSON is a single MCQ whose QUESTION is the spoken audio,
+// synthesised from AudioSourceText. The stored per-question text stays empty (the
+// audio IS the question); only the options + correct_answer are graded.
 type listeningConfigJSON struct {
 	AudioObjectKey string `json:"audio_object_key"`
-	// AudioSourceText is the passage that gets synthesised to audio during AI
-	// generation. INVARIANT: the spoken audio is produced from a TTS-normalized
-	// copy of this text (math/CS notation → words; see ai.normalizeForTTS), but
-	// THIS field keeps the original. So it must NOT be used for grading or shown
-	// as a transcript/caption — it would diverge from what the learner hears.
-	// (Today it isn't: auto-gen is always comprehension mode, which grades the
-	// MCQ questions, and the student view never renders this string.)
+	// AudioSourceText is the question text synthesised to audio. INVARIANT: the
+	// spoken audio is produced from a TTS-normalized copy (math/CS notation → words;
+	// see ai.normalizeForTTS), but THIS keeps the original — don't grade on it or
+	// render it as a caption.
 	AudioSourceText        string                `json:"audio_source_text,omitempty"`
 	DurationSeconds        int32                 `json:"duration_seconds,omitempty"`
-	Mode                   string                `json:"mode"`
-	ExpectedText           string                `json:"expected_text,omitempty"`
 	ComprehensionQuestions []nestedMcqConfigJSON `json:"comprehension_questions,omitempty"`
 }
 
 type listeningResponseJSON struct {
-	Transcription        string  `json:"transcription,omitempty"`
 	ComprehensionAnswers []int32 `json:"comprehension_answers,omitempty"`
 }
 
@@ -75,6 +47,23 @@ type listeningHandler struct{}
 
 func (h *listeningHandler) Kind() richterv1.InteractionKind {
 	return richterv1.InteractionKind_INTERACTION_KIND_LISTENING
+}
+
+// gradeAnswers scores the selected option indices against the stored MCQs.
+func (h *listeningHandler) gradeAnswers(cfg listeningConfigJSON, answers []int32) (correct, total int) {
+	configs := make([]*richterv1.McqConfig, 0, len(cfg.ComprehensionQuestions))
+	for _, q := range cfg.ComprehensionQuestions {
+		opts := make([]*richterv1.McqOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			opts = append(opts, &richterv1.McqOption{Text: o})
+		}
+		configs = append(configs, &richterv1.McqConfig{
+			Options:       opts,
+			CorrectAnswer: int32(q.CorrectAnswer),
+		})
+	}
+	correct, total, _ = gradeMcqList(configs, answers)
+	return correct, total
 }
 
 func (h *listeningHandler) Grade(configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
@@ -86,35 +75,11 @@ func (h *listeningHandler) Grade(configJSON, responseJSON []byte) (score, maxSco
 	if err = json.Unmarshal(responseJSON, &resp); err != nil {
 		return 0, 1, "", fmt.Errorf("listening: unmarshal response: %w", err)
 	}
-
-	switch cfg.Mode {
-	case "dictation":
-		maxScore = 1.0
-		ratio := wordOverlapRatio(resp.Transcription, cfg.ExpectedText)
-		score = float32(ratio)
-	case "comprehension":
-		configs := make([]*richterv1.McqConfig, 0, len(cfg.ComprehensionQuestions))
-		for _, q := range cfg.ComprehensionQuestions {
-			opts := make([]*richterv1.McqOption, 0, len(q.Options))
-			for _, o := range q.Options {
-				opts = append(opts, &richterv1.McqOption{Text: o})
-			}
-			configs = append(configs, &richterv1.McqConfig{
-				Question:      q.Question,
-				Options:       opts,
-				CorrectAnswer: int32(q.CorrectAnswer),
-			})
-		}
-		correct, total, _ := gradeMcqList(configs, resp.ComprehensionAnswers)
-		score = float32(correct)
-		maxScore = float32(total)
-	default:
-		return 0, 1, "", fmt.Errorf("listening: unknown mode %q", cfg.Mode)
-	}
-	return score, maxScore, "", nil
+	correct, total := h.gradeAnswers(cfg, resp.ComprehensionAnswers)
+	return float32(correct), float32(total), "", nil
 }
 
-func (h *listeningHandler) GradeWithContext(ctx context.Context, deps GradingDeps, configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
+func (h *listeningHandler) GradeWithContext(_ context.Context, _ GradingDeps, configJSON, responseJSON []byte) (score, maxScore float32, feedback string, err error) {
 	var cfg listeningConfigJSON
 	if err = json.Unmarshal(configJSON, &cfg); err != nil {
 		return 0, 1, "", fmt.Errorf("listening: unmarshal config: %w", err)
@@ -123,70 +88,8 @@ func (h *listeningHandler) GradeWithContext(ctx context.Context, deps GradingDep
 	if err = json.Unmarshal(responseJSON, &resp); err != nil {
 		return 0, 1, "", fmt.Errorf("listening: unmarshal response: %w", err)
 	}
-
-	switch cfg.Mode {
-	case "dictation":
-		maxScore = 1.0
-		got := strings.TrimSpace(resp.Transcription)
-		if got == "" {
-			return 0, 1.0, "Bạn chưa điền câu trả lời nghe chính tả.", nil
-		}
-
-		// 1. So khớp tĩnh bằng word overlap ratio trước
-		ratio := wordOverlapRatio(got, cfg.ExpectedText)
-		if ratio >= 0.95 {
-			return 1.0, 1.0, "Xuất sắc! Bạn đã nghe và viết lại rất chính xác.", nil
-		}
-
-		// 2. Nếu overlap ratio thấp, dùng LLM chấm ngữ nghĩa (nếu có deps.GradeText)
-		if deps.GradeText != nil {
-			question := "Nghe và ghi lại chính xác nội dung đoạn âm thanh học được (Dictation/Chính tả)."
-			aiScore, _, aiFeedback, aiErr := deps.GradeText(ctx, question, got, cfg.ExpectedText)
-			if aiErr == nil {
-				feedback = fmt.Sprintf("Kết quả chấm điểm tự động từ AI: %.0f%% chính xác.", aiScore*100)
-				if aiFeedback != "" {
-					feedback += " Nhận xét: " + aiFeedback
-				}
-				feedback += fmt.Sprintf("\nĐáp án mẫu: \"%s\"", cfg.ExpectedText)
-				return aiScore, 1.0, feedback, nil
-			}
-		}
-
-		// Fallback nếu không có AI hoặc lỗi AI
-		feedback = fmt.Sprintf("Độ khớp từ vựng: %.0f%%. Đáp án mẫu: \"%s\"", ratio*100, cfg.ExpectedText)
-		return float32(ratio), 1.0, feedback, nil
-
-	case "comprehension":
-		configs := make([]*richterv1.McqConfig, 0, len(cfg.ComprehensionQuestions))
-		for _, q := range cfg.ComprehensionQuestions {
-			opts := make([]*richterv1.McqOption, 0, len(q.Options))
-			for _, o := range q.Options {
-				opts = append(opts, &richterv1.McqOption{Text: o})
-			}
-			configs = append(configs, &richterv1.McqConfig{
-				Question:      q.Question,
-				Options:       opts,
-				CorrectAnswer: int32(q.CorrectAnswer),
-			})
-		}
-		correct, total, _ := gradeMcqList(configs, resp.ComprehensionAnswers)
-		score = float32(correct)
-		maxScore = float32(total)
-		feedback = fmt.Sprintf("Trả lời đúng %d/%d câu hỏi tìm hiểu nội dung.", correct, total)
-		return score, maxScore, feedback, nil
-	default:
-		return 0, 1, "", fmt.Errorf("listening: unknown mode %q", cfg.Mode)
-	}
-}
-
-// ResponseWordCount implements TextResponseMeasurer: counts words in the
-// dictation transcription field.
-func (h *listeningHandler) ResponseWordCount(responseJSON []byte) (int, bool) {
-	var resp listeningResponseJSON
-	if err := json.Unmarshal(responseJSON, &resp); err != nil {
-		return 0, false
-	}
-	return len(strings.Fields(resp.Transcription)), true
+	correct, total := h.gradeAnswers(cfg, resp.ComprehensionAnswers)
+	return float32(correct), float32(total), fmt.Sprintf("Trả lời đúng %d/%d câu hỏi nghe hiểu.", correct, total), nil
 }
 
 func (h *listeningHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInput) ([]byte, error) {
@@ -195,7 +98,6 @@ func (h *listeningHandler) ResponseProtoToJSON(req *richterv1.AttemptResponseInp
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: missing listening response"))
 	}
 	return json.Marshal(listeningResponseJSON{
-		Transcription:        lr.Listening.Transcription,
 		ComprehensionAnswers: lr.Listening.ComprehensionAnswers,
 	})
 }
@@ -211,7 +113,6 @@ func (h *listeningHandler) BuildResponseProto(interactionID string, responseJSON
 	if err := json.Unmarshal(responseJSON, &resp); err == nil {
 		r.Response = &richterv1.LessonAttemptResponse_Listening{
 			Listening: &richterv1.ListeningResponse{
-				Transcription:        resp.Transcription,
 				ComprehensionAnswers: resp.ComprehensionAnswers,
 			},
 		}
@@ -227,10 +128,11 @@ func (h *listeningHandler) ApplyConfig(p *richterv1.LessonInteraction, configJSO
 	lc := &richterv1.ListeningConfig{
 		AudioObjectKey:  cfg.AudioObjectKey,
 		DurationSeconds: cfg.DurationSeconds,
-		Mode:            listeningModeFromString(cfg.Mode),
 	}
 	if !stripAnswers {
-		lc.ExpectedText = cfg.ExpectedText
+		// audio_source_text is the editable question text — surface it to the teacher
+		// editor only. Students must NOT receive it (they hear the audio, not read it).
+		lc.AudioSourceText = cfg.AudioSourceText
 	}
 	lc.ComprehensionQuestions = mcqConfigsFromJSON(cfg.ComprehensionQuestions, stripAnswers)
 	p.Config = &richterv1.LessonInteraction_Listening{Listening: lc}
@@ -254,105 +156,74 @@ func (h *listeningHandler) ConfigFromUpdateProto(req *richterv1.UpdateInteractio
 }
 
 func (h *listeningHandler) protoToJSON(lc *richterv1.ListeningConfig) ([]byte, error) {
-	if lc.AudioObjectKey == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: audio_object_key required"))
+	// Audio-as-question model: the QUESTION TEXT is the source of truth (the teacher
+	// edits it) and the spoken audio is synthesised from it on save, so
+	// audio_object_key may be empty here — AISvc fills it via the TTS synthesizer.
+	question := strings.TrimSpace(lc.AudioSourceText)
+	if question == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: audio_source_text (the question) required"))
 	}
-	cfg := listeningConfigJSON{
-		AudioObjectKey:  lc.AudioObjectKey,
-		DurationSeconds: lc.DurationSeconds,
-		Mode:            listeningModeToString(lc.Mode),
+	if err := validateMcqList(lc.ComprehensionQuestions); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: %w", err))
 	}
-	switch lc.Mode {
-	case richterv1.ListeningMode_LISTENING_MODE_DICTATION:
-		if strings.TrimSpace(lc.ExpectedText) == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: expected_text required for dictation mode"))
-		}
-		cfg.ExpectedText = lc.ExpectedText
-	case richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION:
-		if err := validateMcqList(lc.ComprehensionQuestions); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: %w", err))
-		}
-		for i, q := range lc.ComprehensionQuestions {
-			if strings.TrimSpace(q.Question) == "" {
-				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: question %d: question text required", i))
-			}
-		}
-		var err error
-		cfg.ComprehensionQuestions, err = mcqConfigsToJSON(lc.ComprehensionQuestions)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-	default:
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("listening: mode must be dictation or comprehension"))
+	mcqs, err := mcqConfigsToJSON(lc.ComprehensionQuestions)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	return json.Marshal(cfg)
+	// The audio IS the question, so the stored per-question text stays empty — the
+	// student view renders audio + options only.
+	for i := range mcqs {
+		mcqs[i].Question = ""
+	}
+	return json.Marshal(listeningConfigJSON{
+		AudioObjectKey:         lc.AudioObjectKey,
+		DurationSeconds:        lc.DurationSeconds,
+		AudioSourceText:        question,
+		ComprehensionQuestions: mcqs,
+	})
 }
 
 // ── GeminiGenerator ───────────────────────────────────────────────────────────
 
+// listeningGeminiItem is ONE listening MCQ: the question (synthesised to audio),
+// its 4 options (shown as text), the correct index, and an explanation.
 type listeningGeminiItem struct {
-	Prompt          string                `json:"prompt"`
-	Explanation     string                `json:"explanation"`
-	StartSeconds    float32               `json:"start_seconds"`
-	AudioSourceText string                `json:"audio_source_text,omitempty"`
-	Questions       []mcqGeminiItemNested `json:"questions"`
-}
-
-type mcqGeminiItemNested struct {
 	Question      string   `json:"question"`
 	Options       []string `json:"options"`
 	CorrectAnswer int      `json:"correct_answer"`
+	Explanation   string   `json:"explanation"`
+	StartSeconds  float32  `json:"start_seconds"`
 }
 
 func (h *listeningHandler) GeminiSchema() string {
 	return `{
   "type": "object",
-  "required": ["prompt","audio_source_text","questions","start_seconds"],
+  "required": ["question","options","correct_answer","start_seconds"],
   "properties": {
-    "prompt":            {"type": "string"},
-    "explanation":       {"type": "string"},
-    "start_seconds":     {"type": "number"},
-    "audio_source_text": {"type": "string", "minLength": 150},
-    "questions": {
-      "type": "array", "minItems": 1, "maxItems": 4,
-      "items": {
-        "type": "object",
-        "required": ["question","options","correct_answer"],
-        "properties": {
-          "question":       {"type": "string", "minLength": 8},
-          "options":        {"type": "array", "items": {"type": "string"}, "minItems": 4, "maxItems": 4},
-          "correct_answer": {"type": "integer"}
-        }
-      }
-    }
+    "question":       {"type": "string", "minLength": 12},
+    "options":        {"type": "array", "items": {"type": "string"}, "minItems": 4, "maxItems": 4},
+    "correct_answer": {"type": "integer"},
+    "explanation":    {"type": "string"},
+    "start_seconds":  {"type": "number"}
   }
 }`
 }
 
 func (h *listeningHandler) GeminiPromptHint() string {
-	return `Tạo bài nghe hiểu (listening comprehension) đòi hỏi người học xử lý và suy luận thông tin — không phải nghe lại một câu rồi chọn đáp án hiển nhiên.
+	return `Tạo MỘT (1) câu hỏi trắc nghiệm NGHE HIỂU duy nhất từ ĐOẠN TRANSCRIPT được cung cấp ở trên. CHỈ một câu hỏi cho mỗi bài — KHÔNG tạo nhiều câu, KHÔNG kèm đoạn văn để nghe.
 
-QUAN TRỌNG NHẤT — audio_source_text là VĂN BẢN SẼ ĐƯỢC ĐỌC THÀNH TIẾNG (text-to-speech) cho học viên nghe. Vì vậy nó CHỈ được chứa NỘI DUNG bài giảng để nghe, viết như một người đang GIẢNG/KỂ. TUYỆT ĐỐI KHÔNG được chứa:
-- Lời dẫn hay hướng dẫn làm bài (vd: "Hãy nghe đoạn sau", "Trả lời các câu hỏi sau đây", "Nghe đoạn giảng về…").
-- Bản thân các câu hỏi hoặc đáp án.
-- Bất kỳ chữ "câu hỏi", "đáp án", "phương án" nào.
-Những thứ đó thuộc về trường "prompt" và "questions", KHÔNG thuộc audio_source_text. Nếu audio_source_text đọc lên nghe như một lời dẫn/đề bài thì là SAI.
+CÁCH HOẠT ĐỘNG: Trường "question" sẽ được ĐỌC THÀNH TIẾNG (text-to-speech) cho học viên NGHE. Học viên KHÔNG nhìn thấy chữ câu hỏi — chỉ NGHE. Sau khi nghe, học viên chọn 1 trong 4 phương án (các phương án hiển thị dạng CHỮ). Vì vậy bài tập là MỘT câu trắc nghiệm mà đề bài nằm trong âm thanh.
 
-audio_source_text (đoạn nghe — nội dung để nghe):
-- BẮT BUỘC dài 60–100 từ (tối thiểu 30 từ). Đoạn quá ngắn sẽ bị loại.
-- PHẢI bám sát và diễn giải lại NỘI DUNG CỤ THỂ của ĐOẠN TRANSCRIPT được cung cấp ở trên (cùng chủ đề, cùng số liệu/khái niệm) — TUYỆT ĐỐI KHÔNG bịa nội dung chung chung, không dùng lời giới thiệu khoá học sáo rỗng, không nói lan man ngoài đoạn.
-- Là một đoạn GIẢNG GIẢI tự nhiên, mạch lạc, một Ý TƯỞNG HOÀN CHỈNH (không cắt ngang), tự đủ ngữ cảnh — như trích một đoạn người thầy đang nói.
-- Đoạn phải chứa đủ thông tin để trả lời tất cả câu hỏi phía dưới — không phụ thuộc vào kiến thức bên ngoài.
-- Viết bằng văn phong nói tự nhiên, mạch lạc (không phải danh sách bullet, không tiêu đề).
-- VÌ ĐOẠN SẼ ĐƯỢC ĐỌC THÀNH TIẾNG: mọi công thức, ký hiệu, notation toán/CS PHẢI viết HOÀN TOÀN BẰNG CHỮ, KHÔNG dùng ký hiệu. Ví dụ: "O(n²)" → "ô lớn của n bình phương"; "Θ(n log n)" → "theta của n nhân lốc n"; "T(n) = aT(n/b)" → "T của n bằng a nhân T của n chia b"; "7 % 2" → "7 chia 2 lấy phần dư". TUYỆT ĐỐI không để các ký hiệu như ( ) ² ³ Θ Ω Σ = % ^ _ / × ≤ ≥ trong đoạn nghe — máy đọc không phát âm được, sẽ thành tiếng ồn vô nghĩa.
+question (câu hỏi — sẽ được đọc thành tiếng):
+- Là MỘT câu hỏi trắc nghiệm hoàn chỉnh, rõ ràng, tự đủ ngữ cảnh, bám sát NỘI DUNG CỤ THỂ của đoạn transcript (khái niệm/số liệu/quan hệ nhân quả được nêu trong đoạn) — KHÔNG bịa nội dung ngoài đoạn.
+- Đòi hỏi HIỂU và SUY LUẬN, không phải nghe lại một câu rồi chọn đáp án hiển nhiên. Người không nắm nội dung không thể đoán mò.
+- Độ dài vừa phải (1–2 câu), đủ để đọc thành tiếng trong vài giây.
+- KHÔNG chứa lời dẫn kiểu "Hãy nghe đoạn sau", KHÔNG đọc các phương án trong câu hỏi — chỉ là bản thân câu hỏi.
+- VÌ SẼ ĐƯỢC ĐỌC THÀNH TIẾNG: viết bằng văn nói tự nhiên; mọi công thức/ký hiệu toán-CS PHẢI viết HOÀN TOÀN BẰNG CHỮ. Ví dụ: "O(n²)" → "ô lớn của n bình phương"; "Θ(n log n)" → "theta của n nhân lốc n"; "7 % 2" → "7 chia 2 lấy phần dư". TUYỆT ĐỐI không để ký hiệu ( ) ² ³ Θ Ω Σ = % ^ _ / × ≤ ≥ trong câu hỏi — máy đọc không phát âm được.
 
-Câu hỏi (2–4 câu, phân loại theo mức độ tư duy):
-- ÍT NHẤT 1 câu hỏi YÊU CẦU SUY LUẬN hoặc TỔNG HỢP: "Mục đích chính của … là gì?", "Tại sao tác giả nói …?", "Điều gì sẽ xảy ra nếu …?"
-- ÍT NHẤT 1 câu hỏi về CHI TIẾT CỤ THỂ không thể đoán nếu không nghe: con số, tên riêng, mối quan hệ nhân quả được nêu trong đoạn.
-- CẤM: câu hỏi mà câu trả lời được lặp lại nguyên văn trong đoạn nghe (tránh echo). CẤM câu hỏi hiển nhiên chỉ cần đọc lướt.
-- Mỗi câu hỏi: 4 lựa chọn, chỉ 1 đúng. Các đáp án sai phải hợp lý (không phải vô nghĩa).
-- prompt: mô tả ngắn gọn nội dung đoạn nghe và yêu cầu người học (ví dụ: "Nghe đoạn giảng về [chủ đề] và trả lời các câu hỏi sau:").
-- explanation: giải thích câu trả lời đúng và lý do các đáp án sai bị loại.`
+options: ĐÚNG 4 phương án dạng chữ, chỉ 1 đúng. 3 phương án sai phải HỢP LÝ (gây nhiễu thật sự, không vô nghĩa), không trùng lặp nhau.
+correct_answer: chỉ số (0–3) của phương án đúng trong mảng options.
+explanation: giải thích vì sao đáp án đúng và vì sao các phương án còn lại bị loại, liên hệ lại nội dung đoạn.`
 }
 
 func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explanation string, startSecs float32, configJSON []byte, err error) {
@@ -360,56 +231,40 @@ func (h *listeningHandler) ParseGeminiItem(raw json.RawMessage) (prompt, explana
 	if err = json.Unmarshal(raw, &item); err != nil {
 		return "", "", 0, nil, fmt.Errorf("listening: parse gemini item: %w", err)
 	}
-	if strings.TrimSpace(item.AudioSourceText) == "" {
-		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text empty")
+	question := strings.TrimSpace(item.Question)
+	if question == "" {
+		return "", "", 0, nil, fmt.Errorf("listening: question empty")
 	}
-	// Reject too-short passages: Gemini sometimes returns a ~1-sentence blurb
-	// that TTS turns into "very short meaningless audio" with questions that
-	// feel unrelated. Returning an error makes the generation retry loop
-	// (items.go) re-request a fuller passage. The prompt asks for 60–100 words;
-	// 40 is a safe floor that still rejects the degenerate cases.
-	if n := len(strings.Fields(item.AudioSourceText)); n < minListeningWords {
-		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text too short (%d words, need >= %d)", n, minListeningWords)
+	if n := len(strings.Fields(question)); n < minListeningQuestionWords {
+		return "", "", 0, nil, fmt.Errorf("listening: question too short (%d words, need >= %d)", n, minListeningQuestionWords)
 	}
-	// Reject passages that leaked task instructions / the questions themselves into
-	// the spoken content — the #1 cause of "the listening audio just says 'answer
-	// the following questions'". Those belong to the prompt/questions, never to the
-	// TTS-spoken passage; rejecting makes the retry loop re-request a clean one.
-	if looksInstructional(item.AudioSourceText) {
-		return "", "", 0, nil, fmt.Errorf("listening: audio_source_text reads like task instructions, not lecture content")
+	if len(item.Options) != 4 {
+		return "", "", 0, nil, fmt.Errorf("listening: exactly 4 options required, got %d", len(item.Options))
 	}
-	if len(item.Questions) == 0 {
-		return "", "", 0, nil, fmt.Errorf("listening: questions empty")
-	}
-	questions := make([]nestedMcqConfigJSON, 0, len(item.Questions))
-	for i, q := range item.Questions {
-		question := strings.TrimSpace(q.Question)
-		if question == "" {
-			return "", "", 0, nil, fmt.Errorf("listening: question %d: question text empty", i)
+	for i, o := range item.Options {
+		if strings.TrimSpace(o) == "" {
+			return "", "", 0, nil, fmt.Errorf("listening: option %d empty", i)
 		}
-		if len(q.Options) != 4 {
-			return "", "", 0, nil, fmt.Errorf("listening: question %d: exactly 4 options required", i)
-		}
-		if q.CorrectAnswer < 0 || q.CorrectAnswer >= len(q.Options) {
-			return "", "", 0, nil, fmt.Errorf("listening: question %d: correct_answer out of range", i)
-		}
-		questions = append(questions, nestedMcqConfigJSON{
-			Question:      question,
-			Options:       q.Options,
-			CorrectAnswer: q.CorrectAnswer,
-		})
 	}
-	// audio_object_key is empty here; AISvc will call TTS + upload and set it via TTSProvider.
+	if item.CorrectAnswer < 0 || item.CorrectAnswer >= len(item.Options) {
+		return "", "", 0, nil, fmt.Errorf("listening: correct_answer %d out of range [0,%d)", item.CorrectAnswer, len(item.Options))
+	}
+	// The QUESTION is the audio. audio_source_text holds the question (AISvc TTS's it
+	// + uploads + sets audio_object_key via TTSProvider). The stored comprehension
+	// question keeps an EMPTY question text so the student view shows audio + options.
 	configJSON, err = json.Marshal(listeningConfigJSON{
-		AudioObjectKey:         "",
-		AudioSourceText:        item.AudioSourceText,
-		Mode:                   "comprehension",
-		ComprehensionQuestions: questions,
+		AudioObjectKey:  "",
+		AudioSourceText: question,
+		ComprehensionQuestions: []nestedMcqConfigJSON{{
+			Question:      "",
+			Options:       item.Options,
+			CorrectAnswer: item.CorrectAnswer,
+		}},
 	})
 	if err != nil {
 		return "", "", 0, nil, err
 	}
-	return item.Prompt, item.Explanation, item.StartSeconds, configJSON, nil
+	return listeningQuestionPrompt, item.Explanation, item.StartSeconds, configJSON, nil
 }
 
 // ── TTSProvider ───────────────────────────────────────────────────────────────
@@ -431,73 +286,13 @@ func (h *listeningHandler) SetAudioObjectKey(configJSON []byte, key string) ([]b
 	return json.Marshal(cfg)
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-func listeningModeToString(m richterv1.ListeningMode) string {
-	switch m {
-	case richterv1.ListeningMode_LISTENING_MODE_DICTATION:
-		return "dictation"
-	case richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION:
-		return "comprehension"
-	default:
-		return "unspecified"
+// AudioObjectKey returns the currently-stored audio key — used to carry it over
+// when an edit leaves the question text unchanged, so we don't needlessly re-synth
+// (and orphan the previous wav).
+func (h *listeningHandler) AudioObjectKey(configJSON []byte) string {
+	var cfg listeningConfigJSON
+	if err := json.Unmarshal(configJSON, &cfg); err != nil {
+		return ""
 	}
-}
-
-func listeningModeFromString(s string) richterv1.ListeningMode {
-	switch s {
-	case "dictation":
-		return richterv1.ListeningMode_LISTENING_MODE_DICTATION
-	case "comprehension":
-		return richterv1.ListeningMode_LISTENING_MODE_COMPREHENSION
-	default:
-		return richterv1.ListeningMode_LISTENING_MODE_UNSPECIFIED
-	}
-}
-
-// normalizeText lowercases and strips punctuation + extra whitespace for dictation grading.
-func normalizeText(s string) string {
-	s = norm.NFKD.String(strings.ToLower(s))
-	var b strings.Builder
-	prevSpace := true
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) {
-			b.WriteRune(r)
-			prevSpace = false
-		} else if !prevSpace {
-			b.WriteByte(' ')
-			prevSpace = true
-		}
-	}
-	return strings.TrimSpace(b.String())
-}
-
-// wordOverlapRatio returns Jaccard similarity of word sets between a and b.
-func wordOverlapRatio(a, b string) float64 {
-	wa := wordSet(normalizeText(a))
-	wb := wordSet(normalizeText(b))
-	if len(wa) == 0 && len(wb) == 0 {
-		return 1.0
-	}
-	intersection := 0
-	for w := range wa {
-		if wb[w] {
-			intersection++
-		}
-	}
-	union := len(wa) + len(wb) - intersection
-	if union == 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
-}
-
-func wordSet(s string) map[string]bool {
-	m := map[string]bool{}
-	for _, w := range strings.Fields(s) {
-		if w != "" {
-			m[w] = true
-		}
-	}
-	return m
+	return cfg.AudioObjectKey
 }

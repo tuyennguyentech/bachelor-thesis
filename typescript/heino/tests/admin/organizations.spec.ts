@@ -158,22 +158,25 @@ test.describe("Org detail CRUD", () => {
   test("edits org name", async ({ adminPage: page }) => {
     await page.goto(orgUrl);
     const newName = `Renamed ${uid("")}`;
-    await page.getByLabel("Tên").clear();
-    await page.getByLabel("Tên").fill(newName);
-    // Wait for the Save control to hydrate before clicking (a click during the
-    // hydration window is a no-op, so the action never fires and the heading never
-    // updates), then allow the in-place revalidate a generous budget under load.
+    const nameInput = page.getByLabel("Tên");
+    await expect(nameInput).toBeEnabled({ timeout: 15000 });
+    await nameInput.clear();
+    await nameInput.fill(newName);
+    // Click only after the Save button hydrates — a click while it is still disabled
+    // (`disabled={!hydrated || pending}`) is a no-op, so the action never fires (a
+    // cause of the prior flakiness). Wait for the UpdateOrganization RPC response as
+    // the commit signal — deterministic, unlike the "Đã lưu" message which is cleared
+    // when router.refresh() remounts the name-keyed form. Then re-render from server.
     const save = page.getByRole("button", { name: "Lưu" });
-    await expect(save).toBeVisible({ timeout: 10000 });
+    await expect(save).toBeEnabled({ timeout: 15000 });
+    const resp = page.waitForResponse(
+      (r) => r.url().includes("UpdateOrganization") && r.request().method() === "POST",
+      { timeout: 20000 },
+    );
     await save.click();
-    // The action revalidates the route in-place; that soft router.refresh() is async
-    // and, under full-suite load, can lag past any fixed timeout. The new name IS
-    // persisted, so re-render the page from the server (a fresh render reads it from
-    // the DB) until the heading shows it — robust regardless of the in-place refresh.
-    await expect(async () => {
-      await page.goto(orgUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 3000 });
-    }).toPass({ timeout: 20000 });
+    expect((await resp).ok(), "UpdateOrganization response ok").toBeTruthy();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: newName, level: 1 })).toBeVisible({ timeout: 15000 });
   });
 
   test("updates org status", async ({ adminPage: page }) => {

@@ -344,19 +344,21 @@ func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath stri
 			return
 		}
 		// Spoken-language hint for the AUDIO (NOT the lesson's output language).
-		// The per-lesson hint (audioLang) wins; otherwise fall back to the
-		// deployment default (s.sttCfg.Language); empty = Whisper auto-detect.
-		// This keeps a Vietnamese clip from being mis-labelled English AND an
-		// English clip from being forced to Vietnamese.
+		// We ALWAYS send a concrete language hint now — the "auto-detect" option was
+		// removed. The per-lesson audio_language wins, else the deployment default
+		// (s.sttCfg.Language), else "vi" (the platform's primary language). A
+		// concrete hint stops Whisper mis-detecting Vietnamese technical audio
+		// (e.g. "O(n)", "stack") as English.
 		lang := strings.TrimSpace(audioLang)
 		if lang == "" {
 			lang = strings.TrimSpace(s.sttCfg.Language)
 		}
-		if lang != "" {
-			if err := w.WriteField("language", lang); err != nil {
-				writeErr = fmt.Errorf("write language field: %w", err)
-				return
-			}
+		if lang == "" {
+			lang = "vi"
+		}
+		if err := w.WriteField("language", lang); err != nil {
+			writeErr = fmt.Errorf("write language field: %w", err)
+			return
 		}
 		if err := w.WriteField("response_format", "verbose_json"); err != nil {
 			writeErr = fmt.Errorf("write response_format: %w", err)

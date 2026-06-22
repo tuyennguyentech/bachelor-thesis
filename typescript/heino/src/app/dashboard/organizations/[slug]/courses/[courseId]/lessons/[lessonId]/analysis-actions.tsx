@@ -65,7 +65,6 @@ export function LessonSettingsBar({
           data-testid="audio-language-select"
           className="text-xs rounded border border-input bg-background px-2 py-1 focus:ring-1 focus:ring-primary focus:outline-none"
         >
-          <option value="">Tự động (theo cấu hình)</option>
           <option value="vi">🇻🇳 Tiếng Việt</option>
           <option value="en">🇬🇧 English</option>
         </select>

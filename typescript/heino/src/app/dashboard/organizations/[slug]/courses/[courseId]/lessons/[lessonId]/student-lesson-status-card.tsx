@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { InfoIcon, PlayIcon, SendIcon } from "lucide-react";
+import { InfoIcon, PlayIcon, SendIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { LessonInteraction, FeedbackMode } from "buf/gen/richter/v1/interactions_pb";
 import { LessonResult } from "./lesson-result";
@@ -16,6 +16,9 @@ interface StudentLessonStatusCardProps {
   maxAttempts?: number;
   onRetake: () => void;
   onSubmit: () => void;
+  /** Re-fire a submit that failed mid-flight (e.g. a refresh auto-submit network
+   *  blip) — surfaced only when no other submit button is on screen. */
+  onRetrySubmit?: () => void;
   passedCount: number;
   readyToSubmit: boolean;
   result: QuizResult | null;
@@ -34,6 +37,7 @@ export function StudentLessonStatusCard({
   maxAttempts,
   onRetake,
   onSubmit,
+  onRetrySubmit,
   passedCount,
   readyToSubmit,
   result,
@@ -112,7 +116,25 @@ export function StudentLessonStatusCard({
         />
       )}
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-destructive">{error}</p>
+          {/* A failed PARTIAL / AFTER_EACH auto-submit has no readyToSubmit button to
+              retry with — surface an explicit retry so the student isn't stranded. */}
+          {onRetrySubmit && !submitted && !readyToSubmit && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start gap-2"
+              disabled={isPending}
+              onClick={onRetrySubmit}
+            >
+              <RotateCcwIcon className="size-4" />
+              {isPending ? "Đang nộp..." : "Thử nộp lại"}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

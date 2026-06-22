@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { EditorViewProps, ReadingConfig } from "../types";
+import { AutoTextarea } from "../_shared/auto-textarea";
 
 export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingConfig>) {
   const [previewPassage, setPreviewPassage] = useState(false);
@@ -54,10 +55,10 @@ export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingC
         <>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Câu hỏi</label>
-            <input
-              type="text"
+            <AutoTextarea
+              minRows={2}
               value={config.question ?? ""}
-              onChange={(e) => onChange({ ...config, question: e.target.value })}
+              onChange={(text) => onChange({ ...config, question: text })}
               placeholder="Câu hỏi học sinh phải trả lời bằng lời nói…"
               className="text-sm rounded border border-input bg-background px-2 py-1.5"
             />

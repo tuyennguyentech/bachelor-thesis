@@ -15,8 +15,8 @@ export function ListeningStudentView({
   locked,
   initialResponse,
   onAnswer,
-  onContinue,
   hasNextInCheckpoint,
+  onContinue,
   token = "",
   onReplayCount,
 }: StudentViewProps<ListeningConfig, ListeningResponse>) {
@@ -26,19 +26,17 @@ export function ListeningStudentView({
   const audioRef = useRef<HTMLAudioElement>(null);
   const playCountRef = useRef(0);
 
-  // Dictation state
-  const [transcription, setTranscription] = useState(initialResponse?.transcription ?? "");
-  const [dictationSubmitted, setDictationSubmitted] = useState(!!initialResponse?.transcription);
-
-  // Comprehension state
   const [answers, setAnswers] = useState<number[]>(
     initialResponse?.comprehensionAnswers ?? config.comprehensionQuestions.map(() => -1)
   );
-  const allComprehensionAnswered =
-    config.mode === "comprehension" && config.comprehensionQuestions.length > 0 && answers.every((a) => a >= 0);
-  const hasAnswered = config.mode === "dictation" ? dictationSubmitted : allComprehensionAnswered;
   const audioReady = !!audioUrl;
-  const dictationLocked = locked || (dictationSubmitted && feedbackMode === FeedbackMode.AFTER_EACH);
+  const hasAnswered = config.comprehensionQuestions.length > 0 && answers.every((a) => a >= 0);
+
+  // Single MCQ where the audio IS the question (the stored question text is empty):
+  // label the player "Nghe câu hỏi" and drop the per-question "Câu N" heading.
+  const isAudioQuestion =
+    config.comprehensionQuestions.length === 1 && !config.comprehensionQuestions[0]?.question?.trim();
+  const audioLabel = isAudioQuestion ? "Nghe câu hỏi" : "Nghe tệp";
 
   useEffect(() => {
     if (!config.audioObjectKey) {
@@ -46,12 +44,8 @@ export function ListeningStudentView({
       return;
     }
     storageClient.getDownloadUrl({ key: config.audioObjectKey, expiresInSeconds: 3600 })
-      .then((res) => {
-        setAudioUrl(res.downloadUrl);
-      })
-      .catch(() => {
-        setAudioUrl(null);
-      })
+      .then((res) => setAudioUrl(res.downloadUrl))
+      .catch(() => setAudioUrl(null))
       .finally(() => setLoadingUrl(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.audioObjectKey]);
@@ -60,21 +54,7 @@ export function ListeningStudentView({
     if (!audioReady || locked) return;
     const next = answers.map((a, i) => (i === qi ? selected : a));
     setAnswers(next);
-    onAnswer({ transcription: "", comprehensionAnswers: next });
-  }
-
-  function handleDictationSubmit() {
-    if (!audioReady || locked || !transcription.trim()) return;
-    setDictationSubmitted(true);
-    onAnswer({ transcription, comprehensionAnswers: [] });
-  }
-
-  function handleDictationChange(value: string) {
-    if (dictationLocked) return;
-    setTranscription(value);
-    if (dictationSubmitted) {
-      onAnswer({ transcription: value, comprehensionAnswers: [] });
-    }
+    onAnswer({ comprehensionAnswers: next });
   }
 
   if (loadingUrl) {
@@ -91,7 +71,7 @@ export function ListeningStudentView({
       {audioUrl ? (
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Volume2Icon className="size-3.5" /> Nghe tệp
+            <Volume2Icon className="size-3.5" /> {audioLabel}
           </div>
           <audio
             ref={audioRef}
@@ -107,55 +87,19 @@ export function ListeningStudentView({
         </div>
       ) : (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-          Không tải được tệp nghe. Vui lòng báo giáo viên tạo lại hoặc tải tệp khác.
+          Không tải được tệp nghe. Vui lòng báo giáo viên tạo lại.
         </div>
       )}
 
-      {/* Dictation */}
-      {config.mode === "dictation" && (
-        <div className="flex flex-col gap-2">
-          <label className="text-sm">Gõ lại những gì bạn nghe được:</label>
-          <textarea
-            rows={3}
-            value={transcription}
-            onChange={(e) => handleDictationChange(e.target.value)}
-            disabled={!audioReady || dictationLocked}
-            placeholder="Nhập nội dung bạn nghe được…"
-            className="text-sm rounded border border-input bg-background px-2 py-1.5 resize-none"
-          />
-          {!dictationSubmitted && (
-            <Button
-              size="sm"
-              className="self-start"
-              disabled={!audioReady || locked || !transcription.trim()}
-              onClick={handleDictationSubmit}
-            >
-              Trả lời
-            </Button>
-          )}
-          {dictationSubmitted && feedbackMode === FeedbackMode.AFTER_EACH && config.expectedText && (
-            <div className="text-xs space-y-0.5">
-              <p className="text-muted-foreground">Đáp án gợi ý:</p>
-              <p className="font-medium">{config.expectedText}</p>
-            </div>
-          )}
-          {dictationSubmitted && feedbackMode !== FeedbackMode.AFTER_EACH && (
-            <p className="text-xs text-muted-foreground">✓ Đã ghi nhận</p>
-          )}
-        </div>
-      )}
-
-      {/* Comprehension */}
-      {config.mode === "comprehension" && (
+      {config.comprehensionQuestions.length === 0 ? (
+        <p className="text-sm text-muted-foreground italic">Bài nghe chưa có câu hỏi.</p>
+      ) : (
         <div className="flex flex-col gap-4">
-          {config.comprehensionQuestions.length === 0 && (
-            <p className="text-sm text-muted-foreground italic">
-              Bài nghe chưa có câu hỏi nghe hiểu.
-            </p>
-          )}
           {config.comprehensionQuestions.map((q, qi) => (
             <div key={qi} className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Câu {qi + 1}</p>
+              {config.comprehensionQuestions.length > 1 && (
+                <p className="text-sm font-medium">Câu {qi + 1}</p>
+              )}
               <NestedMcqStudent
                 questionIndex={qi}
                 config={q}

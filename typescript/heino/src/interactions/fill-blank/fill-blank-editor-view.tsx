@@ -1,6 +1,7 @@
 "use client";
 
 import type { EditorViewProps, FillBlankConfig } from "../types";
+import { AutoTextarea } from "../_shared/auto-textarea";
 
 const PLACEHOLDER_RE = /\{\{(\d+)\}\}/g;
 
@@ -62,12 +63,11 @@ export function FillBlankEditorView({ config, onChange }: EditorViewProps<FillBl
           <p className="text-xs font-medium text-muted-foreground">Chỗ trống {"{{"}{i}{"}}"}</p>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Đáp án chấp nhận (phân cách bằng dấu phẩy)</label>
-            <input
-              type="text"
+            <AutoTextarea
               value={blank.accepted.join(", ")}
-              onChange={(e) => setAccepted(i, e.target.value)}
+              onChange={(text) => setAccepted(i, text)}
               placeholder="ví dụ: tự sinh ra, được tạo ra"
-              className="rounded border border-input bg-background px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="rounded border border-input bg-background px-2 py-1 text-sm text-foreground"
             />
           </div>
           <div className="flex items-center gap-4">

@@ -29,12 +29,6 @@ enum InteractionKind {
   INTERACTION_KIND_WRITING = 6;
 }
 
-enum ListeningMode {
-  LISTENING_MODE_UNSPECIFIED = 0;
-  LISTENING_MODE_DICTATION = 1;
-  LISTENING_MODE_COMPREHENSION = 2;
-}
-
 enum ReadingMode {
   READING_MODE_UNSPECIFIED = 0;
   // Student reads the passage aloud; AI grades pronunciation.
@@ -81,21 +75,30 @@ message FillBlankResponse {
 
 // ── Listening config ──────────────────────────────────────────────────────────
 
+// A listening exercise is a single multiple-choice question whose QUESTION is
+// delivered as AUDIO, synthesised from audio_source_text. (The legacy dictation
+// mode + its expected_text were removed; fields 3 and 4 are reserved.)
 message ListeningConfig {
-  // Storage object key — frontend fetches presigned download URL at render time
-  string audio_object_key = 1 [(buf.validate.field).string.min_len = 1];
+  reserved 3, 4;
+  reserved "mode", "expected_text";
+  // Storage object key — frontend fetches a presigned download URL at render time.
+  // Empty on the editor's write: the audio is synthesised server-side from
+  // audio_source_text (the question) and the key is filled in by the handler.
+  string audio_object_key = 1;
   int32 duration_seconds = 2;
-  ListeningMode mode = 3;
-  // DICTATION: expected verbatim text (used for grading)
-  string expected_text = 4;
-  // COMPREHENSION: nested MCQs about the audio
+  // The single MCQ's answer options (its question text stays empty — the audio is
+  // the question). Kept as a list for storage/grading compatibility.
   repeated McqConfig comprehension_questions = 5;
+  // The question TEXT — the source of truth the teacher edits; the spoken audio is
+  // (re)synthesised from it on save (TTS). Exposed to the editor only; the student
+  // hears the audio and never reads it. Bounded to cap TTS cost/latency.
+  string audio_source_text = 6 [(buf.validate.field).string.max_len = 2000];
 }
 
 message ListeningResponse {
-  // DICTATION: student's transcription
-  string transcription = 1;
-  // COMPREHENSION: selected option index per comprehension_question (parallel array)
+  reserved 1;
+  reserved "transcription";
+  // Selected option index per comprehension_question (parallel array).
   repeated int32 comprehension_answers = 2;
 }
 

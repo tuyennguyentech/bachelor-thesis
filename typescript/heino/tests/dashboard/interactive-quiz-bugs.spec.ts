@@ -375,4 +375,93 @@ test.describe.serial("Interactive Video Quiz Overlay & Retake Constraints", () =
     // Clean up: reset maxAttempts to 0
     await setMaxAttempts(page, lessonId, 0);
   });
+
+  test("refresh mid-attempt finalises the attempt instead of restarting", async ({
+    teacherPage: page,
+  }) => {
+    // Reproduces the reported bug: a REAL student answering some questions then
+    // refreshing used to wipe progress and restart from scratch. The fix finalises
+    // the attempt at that moment — answered kept, rest score 0, result shown. Uses
+    // ?mode=learn (a real, persisted attempt); preview is intentionally always fresh.
+    test.slow();
+    const { lessonId, lessonUrl } = sharedState;
+    await setMaxAttempts(page, lessonId, 0); // unlimited, so the auto-submit isn't blocked
+
+    await page.goto(`${lessonUrl}?mode=learn`);
+    await expect(page.locator('[data-testid="video-player"]')).toBeVisible({ timeout: 10_000 });
+
+    // Answer ONLY the first checkpoint; leave the other four unanswered.
+    await page.evaluate((s) => {
+      const v = document.querySelector("video");
+      if (v) v.currentTime = Math.max(0, s - 0.1);
+    }, CHECKPOINT_SECONDS[0]);
+    await triggerCheckpoint(page, CHECKPOINT_SECONDS[0] + 0.05);
+    const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
+    await expect(checkpoint).toBeVisible({ timeout: 5_000 });
+    await checkpoint.locator("button").first().click();
+    await page.getByRole("button", { name: "Tiếp tục xem" }).click();
+    await expect(checkpoint).not.toBeVisible({ timeout: 5_000 });
+
+    // Not all answered → no result yet (the attempt is genuinely in progress).
+    await expect(page.getByText("🎯 Kết quả")).not.toBeVisible();
+
+    // Refresh: the in-progress draft survives the same-tab reload, and the attempt
+    // is finalised automatically (the 4 unanswered questions score 0) — the student
+    // lands on the result screen, NOT a fresh quiz restarted from zero.
+    await page.reload();
+    await expect(page.locator('[data-testid="video-player"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("retake then refresh mid-attempt shows the NEW partial result, not the old one", async ({
+    teacherPage: page,
+  }) => {
+    // Reproduces the reported bug: after "Làm lại" the prior attempt is still in the DB,
+    // so on a mid-retake refresh the page used to render the OLD result instead of
+    // finalising the new partial. Verifies the new attempt's score wins.
+    test.slow();
+    const { lessonId, lessonUrl } = sharedState;
+    await setMaxAttempts(page, lessonId, 0);
+
+    await page.goto(`${lessonUrl}?mode=learn`);
+    await expect(page.locator('[data-testid="video-player"]')).toBeVisible({ timeout: 10_000 });
+
+    const answerCheckpoint = async (s: number) => {
+      await page.evaluate((sec) => {
+        const v = document.querySelector("video");
+        if (v) v.currentTime = Math.max(0, sec - 0.1);
+      }, s);
+      await triggerCheckpoint(page, s + 0.05);
+      const cp = page.locator('[data-testid="quiz-checkpoint"]');
+      await expect(cp).toBeVisible({ timeout: 5_000 });
+      await cp.locator("button").first().click(); // first option = correct (seed correctAnswer 0)
+      await page.getByRole("button", { name: "Tiếp tục xem" }).click();
+      await expect(cp).not.toBeVisible({ timeout: 5_000 });
+    };
+    const retake = async () => {
+      // The retake button reads "Làm lại" (score ≥ 50%) or "Làm lại để cải thiện"
+      // (score < 50%) — match both.
+      await page.getByRole("button", { name: /Làm lại/ }).first().click();
+      await expect(page.getByText("🎯 Kết quả")).not.toBeVisible({ timeout: 5_000 });
+    };
+
+    // Start from a clean attempt regardless of what earlier tests left behind.
+    if (await page.getByText("🎯 Kết quả").isVisible().catch(() => false)) await retake();
+
+    // First attempt: answer 1 → refresh → finalised as 1/5.
+    await answerCheckpoint(CHECKPOINT_SECONDS[0]);
+    await page.reload();
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/Bạn đúng 1\/5 câu/)).toBeVisible({ timeout: 10_000 });
+
+    // Retake → answer 2 → refresh mid-attempt (bỏ ngang). The NEW partial (2 correct,
+    // 3 unanswered = 0) must show — NOT the stale 1/5 from the previous attempt.
+    await retake();
+    await answerCheckpoint(CHECKPOINT_SECONDS[0]);
+    await answerCheckpoint(CHECKPOINT_SECONDS[1]);
+    await page.reload();
+    await expect(page.getByText("🎯 Kết quả")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/Bạn đúng 2\/5 câu/)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Bạn đúng 1\/5 câu/)).not.toBeVisible();
+  });
 });

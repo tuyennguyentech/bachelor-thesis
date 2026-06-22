@@ -168,24 +168,24 @@ func TestSTTSem_CtxCancelUnblocks(t *testing.T) {
 }
 
 // TestSTTLanguageHint verifies the SPOKEN-language hint sent to Whisper as the
-// "language" multipart field. PRECEDENCE: the per-lesson audio language (passed
-// to sttTranscribe) wins; otherwise the deployment default (sttCfg.Language);
-// empty/whitespace on both => the field is omitted (Whisper auto-detect). This
-// is the audio language — independent of the lesson's output/exercise language —
-// and is what keeps a Vietnamese clip from being read as English AND an English
-// clip from being forced to Vietnamese.
+// "language" multipart field. We ALWAYS send a concrete hint now (the "auto-detect"
+// option was removed). PRECEDENCE: the per-lesson audio language (passed to
+// sttTranscribe) wins; else the deployment default (sttCfg.Language); else "vi"
+// (the platform's primary language). This is the audio language — independent of
+// the lesson's output/exercise language — and keeps a Vietnamese clip from being
+// read as English AND an English clip from being forced to Vietnamese.
 func TestSTTLanguageHint(t *testing.T) {
 	cases := []struct {
 		name      string
 		perLesson string // audioLang argument (per-lesson)
 		cfgLang   string // sttCfg.Language (deployment default)
-		wantSent  string // "" => the field must be ABSENT (auto-detect)
+		wantSent  string // the "language" field is ALWAYS present now
 	}{
 		{"per_lesson_vi", "vi", "", "vi"},
 		{"per_lesson_overrides_cfg", "en", "vi", "en"}, // EN video on a vi-default deployment
 		{"cfg_fallback_when_no_per_lesson", "", "vi", "vi"},
-		{"both_empty_autodetect", "", "", ""},
-		{"whitespace_autodetect", "  ", "  ", ""},
+		{"both_empty_defaults_vi", "", "", "vi"},
+		{"whitespace_defaults_vi", "  ", "  ", "vi"},
 		{"per_lesson_trimmed", "  en ", "", "en"},
 	}
 	for _, tc := range cases {
@@ -231,16 +231,11 @@ func TestSTTLanguageHint(t *testing.T) {
 
 			mu.Lock()
 			defer mu.Unlock()
-			if tc.wantSent == "" {
-				if hadField {
-					t.Errorf("language field present (%q), want ABSENT (auto-detect) for perLesson=%q cfg=%q", gotLang, tc.perLesson, tc.cfgLang)
-				}
-			} else {
-				if !hadField {
-					t.Errorf("language field absent, want %q (perLesson=%q cfg=%q)", tc.wantSent, tc.perLesson, tc.cfgLang)
-				} else if gotLang != tc.wantSent {
-					t.Errorf("language = %q, want %q", gotLang, tc.wantSent)
-				}
+			// The language field is always sent now (no auto-detect).
+			if !hadField {
+				t.Errorf("language field absent, want %q (perLesson=%q cfg=%q)", tc.wantSent, tc.perLesson, tc.cfgLang)
+			} else if gotLang != tc.wantSent {
+				t.Errorf("language = %q, want %q (perLesson=%q cfg=%q)", gotLang, tc.wantSent, tc.perLesson, tc.cfgLang)
 			}
 		})
 	}

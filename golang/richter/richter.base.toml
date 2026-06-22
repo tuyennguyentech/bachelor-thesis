@@ -27,12 +27,14 @@ last_name = "Admin"
 [stt]
 endpoint = "speaches:8000"
 model = "Systran/faster-whisper-small"
-# Spoken-language hint for the source AUDIO (ISO-639-1, e.g. "vi", "en"). This is
+# Default SPOKEN language of the source AUDIO (ISO-639-1, e.g. "vi", "en"). This is
 # the language SPOKEN in the video — NOT the lesson's output language (which lives
-# on each lesson and controls the generated questions/exercises). Empty = Whisper
-# auto-detect; pin it to the audio language to avoid mis-detection (e.g. a
-# Vietnamese clip transcribed as English). Override per env via RICHTER_STT_LANGUAGE.
-language = ""
+# on each lesson and controls the generated questions/exercises). Each lesson pins
+# its own audio language (the UI requires it); this is only the fallback for a
+# lesson that has none. We always send a concrete hint to Whisper (no auto-detect)
+# to avoid mis-detection (e.g. a Vietnamese clip transcribed as English); if left
+# empty here, transcription falls back to "vi". Override per env via RICHTER_STT_LANGUAGE.
+language = "vi"
 
 # Text-to-speech via Speaches' OpenAI-compatible /v1/audio/speech. Each language
 # maps to a Piper model + voice. The vi/en models are pre-pulled at compose up by

@@ -30,39 +30,20 @@ export function ListeningReviewRow({
         </span>
         <div className="flex-1 flex flex-col gap-1">
           <p className="text-sm">{prompt}</p>
-          <span className="text-xs text-muted-foreground">
-            {config.mode === "dictation" ? "🎧 Nghe chép" : "🎧 Nghe hiểu"}
-          </span>
+          <span className="text-xs text-muted-foreground">🎧 Nghe hiểu</span>
         </div>
       </div>
 
       <div className="ml-7 flex flex-col gap-2">
-        {canReveal && config.expectedText && (
-          <div className="rounded border border-border bg-muted/20 px-3 py-2">
-            <p className="text-xs font-medium text-muted-foreground">Nội dung nghe</p>
-            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed">{config.expectedText}</p>
-          </div>
-        )}
-
-        {config.mode === "dictation" && (
-          <div className="flex flex-col gap-1">
-            <p className="text-xs text-muted-foreground">Bài làm của học sinh:</p>
-            <p className="text-sm border border-border rounded px-2 py-1.5 bg-muted/20">
-              {response?.transcription || <span className="italic text-muted-foreground">Chưa trả lời</span>}
-            </p>
-          </div>
-        )}
-
-        {config.mode === "comprehension" &&
-          config.comprehensionQuestions.map((q, qi) => (
-            <NestedMcqReview
-              key={qi}
-              questionIndex={qi}
-              config={q}
-              selected={response?.comprehensionAnswers?.[qi] ?? -1}
-              canReveal={canReveal}
-            />
-          ))}
+        {config.comprehensionQuestions.map((q, qi) => (
+          <NestedMcqReview
+            key={qi}
+            questionIndex={qi}
+            config={q}
+            selected={response?.comprehensionAnswers?.[qi] ?? -1}
+            canReveal={canReveal}
+          />
+        ))}
       </div>
     </div>
   );

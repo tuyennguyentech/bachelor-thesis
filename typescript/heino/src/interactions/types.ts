@@ -32,16 +32,18 @@ export interface FillBlankResponse {
   answers: string[];
 }
 
+// A listening exercise is a single MCQ whose QUESTION is the spoken audio,
+// synthesised from audioSourceText (the teacher edits the text; the audio
+// regenerates on save). The student hears the audio and picks an option.
 export interface ListeningConfig {
   audioObjectKey: string;
   durationSeconds: number;
-  mode: "dictation" | "comprehension";
-  expectedText: string;
   comprehensionQuestions: McqConfig[];
+  // The question TEXT the teacher edits (the source the audio is synthesised from).
+  audioSourceText: string;
 }
 
 export interface ListeningResponse {
-  transcription: string;
   comprehensionAnswers: number[];
 }
 

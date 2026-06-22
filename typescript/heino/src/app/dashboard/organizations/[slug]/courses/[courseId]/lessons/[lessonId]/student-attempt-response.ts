@@ -62,7 +62,6 @@ export function buildAttemptResponseInput(it: LessonInteraction, localResp: unkn
         response: {
           case: "listening" as const,
           value: {
-            transcription: r?.transcription ?? "",
             comprehensionAnswers: r?.comprehensionAnswers ?? [],
           },
         },
@@ -73,9 +72,13 @@ export function buildAttemptResponseInput(it: LessonInteraction, localResp: unkn
         interactionId: it.id,
         timeToAnswerMs,
         replayCount,
+        // Unanswered single-choice MUST send -1 (not 0): the grader scores 1.0 when
+        // selected === correctAnswer, so defaulting an unanswered question to 0 would
+        // give it full marks whenever the correct option is index 0. -1 never matches
+        // a valid option index, so an unanswered question reliably scores 0.
         response: {
           case: "mcqSelected" as const,
-          value: (localResp as McqResponse | undefined)?.selected ?? 0,
+          value: (localResp as McqResponse | undefined)?.selected ?? -1,
         },
       };
   }

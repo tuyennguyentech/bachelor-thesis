@@ -487,11 +487,11 @@ func TestChunkSummaryLanguageRealGemini(t *testing.T) {
 }
 
 // TestListeningGenerationRealGemini is a GATED real-API test (skips unless
-// RICHTER_GEMINI_API_KEY is set). It proves the P5 fix end-to-end against the
-// real model: a listening item generated from a real transcript yields a
-// SUBSTANTIAL passage (>= minListeningWords) with >= 2 questions, instead of the
-// old short/meaningless one. Exercises the real listening prompt + schema +
-// ParseGeminiItem validation.
+// RICHTER_GEMINI_API_KEY is set). It proves the single-MCQ model end-to-end
+// against the real model: a listening item generated from a real transcript
+// yields ONE question (synthesised to audio) with exactly 4 options + a valid
+// correct_answer — no passage, no multi-question list. Exercises the real
+// listening prompt + schema + ParseGeminiItem validation.
 func TestListeningGenerationRealGemini(t *testing.T) {
 	key := os.Getenv("RICHTER_GEMINI_API_KEY")
 	if key == "" {
@@ -520,7 +520,7 @@ func TestListeningGenerationRealGemini(t *testing.T) {
 	// Mirror the real listening prompt assembly (generation/items.go): the
 	// kind hint + the language instruction (strongLanguageInstruction) + the
 	// transcript context + the kind's JSON schema.
-	const langInstruction = "BẮT BUỘC SỬ DỤNG TIẾNG ANH cho toàn bộ đoạn nghe (audio_source_text), câu hỏi, phương án và giải thích. KHÔNG viết tiếng Việt."
+	const langInstruction = "BẮT BUỘC SỬ DỤNG TIẾNG ANH cho câu hỏi, phương án và giải thích. KHÔNG viết tiếng Việt."
 	prompt := fmt.Sprintf(`Bạn là chuyên gia thiết kế câu hỏi giáo dục. Tạo 1 bài tập nghe hiểu CHẤT LƯỢNG CAO từ đoạn bài giảng dưới đây.
 
 %s
@@ -561,20 +561,33 @@ Trả về JSON object: {"items": [...]}`, g.GeminiPromptHint(), langInstruction
 	for i, item := range result.Items {
 		_, _, _, configJSON, perr := g.ParseGeminiItem(item)
 		if perr != nil {
-			// The validation floor REJECTING a short passage is the fix working —
-			// but the prompt now also asks for a long passage, so a real run should
-			// usually produce a valid one. A rejection here is acceptable (retry
-			// would re-request); a malformed item is the only hard failure.
+			// A rejection here is acceptable (the retry loop would re-request);
+			// a malformed item is the only hard failure.
 			t.Logf("item %d rejected by validation (acceptable): %v", i, perr)
 			continue
 		}
-		passage := tts.AudioSourceText(configJSON)
-		words := len(strings.Fields(passage))
-		t.Logf("listening item %d: %d words, vietnamese=%v — %q", i, words, hasVietnameseDiacritics(passage), passage)
-		// HARD check — the P5 fix: a substantial passage (no more short/meaningless
-		// audio). The validation floor would have rejected anything under 40 words.
-		if words < 40 {
-			t.Errorf("listening passage %d has only %d words, want >= 40", i, words)
+		// The QUESTION is the audio source now (TTS'd by AISvc later).
+		question := tts.AudioSourceText(configJSON)
+		words := len(strings.Fields(question))
+		t.Logf("listening item %d question: %d words, vietnamese=%v — %q", i, words, hasVietnameseDiacritics(question), question)
+		// HARD checks — single-MCQ model: a non-trivial spoken question + exactly
+		// ONE comprehension question with 4 options.
+		if words < 4 {
+			t.Errorf("listening question %d has only %d words, want >= 4", i, words)
+		}
+		var cfg struct {
+			ComprehensionQuestions []struct {
+				Options []string `json:"options"`
+			} `json:"comprehension_questions"`
+		}
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			t.Errorf("item %d: unmarshal config: %v", i, err)
+			continue
+		}
+		if len(cfg.ComprehensionQuestions) != 1 {
+			t.Errorf("item %d: want exactly 1 comprehension question, got %d", i, len(cfg.ComprehensionQuestions))
+		} else if len(cfg.ComprehensionQuestions[0].Options) != 4 {
+			t.Errorf("item %d: want 4 options, got %d", i, len(cfg.ComprehensionQuestions[0].Options))
 		}
 	}
 }

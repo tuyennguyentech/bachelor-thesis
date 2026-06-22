@@ -68,6 +68,22 @@ func (s *AISvc) ResetLessonContent(
 		}
 	}
 
+	// Delete generated + preview listening audio (accumulated from AI generation,
+	// manual edits, and "Nghe thử" previews). Best-effort, prefix sweep.
+	for _, prefix := range []string{
+		"lessons/" + lessonID.String() + "/ai-audio/",
+		"lessons/" + lessonID.String() + "/ai-audio-preview/",
+	} {
+		for obj := range s.s3client.ListObjects(ctx, s.s3cfg.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+			if obj.Err != nil {
+				continue
+			}
+			if rerr := s.s3client.RemoveObject(ctx, s.s3cfg.Bucket, obj.Key, minio.RemoveObjectOptions{}); rerr != nil {
+				s.log.WarnContext(ctx, "reset: remove ai-audio object failed", "err", rerr, "key", obj.Key)
+			}
+		}
+	}
+
 	// Wipe all DB-side content + clear the lesson's video pointer in one go.
 	// Order: interactions (cascades attempt_responses) → chunks → attempts →
 	// analysis row → clear video pointer.

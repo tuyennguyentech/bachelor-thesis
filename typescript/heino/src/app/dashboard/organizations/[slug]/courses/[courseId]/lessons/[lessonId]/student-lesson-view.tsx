@@ -143,19 +143,38 @@ export function StudentLessonView({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   // ── In-progress draft persistence ──────────────────────────────────────────
-  // Mirror the student's answers + passed checkpoints to sessionStorage so a
-  // page refresh mid-attempt doesn't wipe their progress. (Video position
-  // already persists server-side via getWatchProgress → initialPosition.)
-  // Skipped in preview mode (teacher testing) and cleared once submitted.
+  // Mirror the REAL student's answers + passed checkpoints to sessionStorage so a
+  // page refresh mid-attempt finalises the attempt (answered kept, rest score 0)
+  // instead of restarting. Preview (?preview=1) is a non-persisted quick peek: it
+  // never reads or writes a draft and never auto-submits, so a teacher re-opening
+  // a preview always gets a fresh run of the CURRENT content (and "bài đã nộp"
+  // only ever means a real submission).
   const draftKey = `dyadia:attempt-draft:v1:${lessonId}`;
   const draftHydratedRef = useRef(false);
+  // Set by the hydrate effect when a refresh/re-open restores a draft that has at
+  // least one answered question: the restored answers are SUBMITTED (the rest score
+  // 0) rather than silently resumed, so the attempt is finalised "at that moment".
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [autoSubmitDraft, setAutoSubmitDraft] = useState<Map<string, any> | null>(null);
+  const autoSubmittedDraftRef = useRef(false);
+  // Synchronous guard shared by every submit path (manual, AFTER_EACH auto-submit,
+  // refresh auto-submit). `isPending`/`submitted` only flip asynchronously, so two
+  // submit calls in the same commit (e.g. a fully-answered AFTER_EACH draft restored
+  // on refresh) would both pass their async guards — this ref blocks the second.
+  const submittingRef = useRef(false);
 
   // Hydrate once on mount. Reading sessionStorage in a useState initializer would
   // diverge between SSR and the client and trigger a hydration mismatch, so we
   // restore here (client-only) after the first paint instead.
   useEffect(() => {
     draftHydratedRef.current = true;
-    if (isPreview || previousResult !== null) return;
+    // Real students only (preview is always fresh). A draft is restored even when a
+    // previously-submitted result already exists: that happens after "Làm lại" (which
+    // resets the FE but leaves the prior attempt in the DB, so `previousResult` is
+    // still the OLD attempt on reload). The presence of an answered draft means the
+    // student is mid-(re)attempt, so we finalise THAT attempt — overriding the stale
+    // result — rather than showing the previous one.
+    if (isPreview) return;
     try {
       const raw = sessionStorage.getItem(draftKey);
       if (!raw) return;
@@ -165,10 +184,19 @@ export function StudentLessonView({
         passedIds?: string[];
       };
       if (Array.isArray(saved.responses) && saved.responses.length > 0) {
-        setResponses(new Map(saved.responses));
-      }
-      if (Array.isArray(saved.passedIds) && saved.passedIds.length > 0) {
-        setPassedIds(new Set(saved.passedIds));
+        const restored = new Map(saved.responses);
+        // Override any stale previousResult-derived state: this is an in-progress
+        // (re)attempt that must be finalised, not the old completed one.
+        setSubmitted(false);
+        setResult(null);
+        setResponses(restored);
+        if (Array.isArray(saved.passedIds) && saved.passedIds.length > 0) {
+          setPassedIds(new Set(saved.passedIds));
+        }
+        // The answered questions are submitted as-is and the rest score 0 (handled by
+        // the auto-submit effect below); responses stay in state so the result screen
+        // can render each answer.
+        setAutoSubmitDraft(restored);
       }
     } catch {
       // corrupt or unavailable storage — start fresh
@@ -182,7 +210,7 @@ export function StudentLessonView({
   // it just restored. Writing only when there's progress, and removing only on
   // submit, avoids that destructive window.
   useEffect(() => {
-    if (!draftHydratedRef.current || isPreview) return;
+    if (isPreview || !draftHydratedRef.current) return;
     try {
       if (submitted) {
         sessionStorage.removeItem(draftKey);
@@ -198,7 +226,7 @@ export function StudentLessonView({
     } catch {
       // storage full/unavailable — non-fatal
     }
-  }, [responses, passedIds, submitted, isPreview, draftKey]);
+  }, [responses, passedIds, submitted, draftKey, isPreview]);
   // Whether the active checkpoint overlay is collapsed for review. Collapsing does
   // NOT clear activeId (the answer gate stays) — it only frees the scrubber so the
   // student can rewatch the already-seen region before answering.
@@ -210,7 +238,10 @@ export function StudentLessonView({
   } = useStudentFullscreen({ activeId, containerRef, videoRef });
 
   const allAnswered = lessonInteractions.length > 0 && passedIds.size >= lessonInteractions.length;
-  const readyToSubmit = allAnswered && !submitted;
+  // In AFTER_EACH the result auto-surfaces once the last question is dismissed
+  // (see the auto-submit effect below), so the manual "Nộp bài" button only
+  // applies to the other feedback modes.
+  const readyToSubmit = allAnswered && !submitted && feedbackMode !== FeedbackMode.AFTER_EACH;
 
   // The current active interaction object
   const activeInteraction = activeId
@@ -428,6 +459,35 @@ export function StudentLessonView({
     }
   }, [isPreview, submitted, lessonInteractions, pendingCheckpoints, initialPosition]);
 
+  // AFTER_EACH: the learner sees each answer as they go, so once the FINAL question
+  // is answered and its card dismissed (activeId === null), surface the result
+  // automatically — a separate "Nộp bài" click is redundant in this mode.
+  const autoSubmittedRef = useRef(false);
+  useEffect(() => {
+    if (feedbackMode !== FeedbackMode.AFTER_EACH) return;
+    // A restored draft is finalised by the refresh auto-submit path below, not here —
+    // keep the two auto-submit paths mutually exclusive by design (rather than relying
+    // on submittingRef ordering) so a fully-answered AFTER_EACH draft can't double-fire.
+    if (autoSubmitDraft) return;
+    if (autoSubmittedRef.current || submitted || isPending) return;
+    if (!allAnswered || activeId !== null) return;
+    autoSubmittedRef.current = true;
+    handleSubmit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedbackMode, allAnswered, submitted, isPending, activeId, autoSubmitDraft]);
+
+  // Refresh-mid-attempt → finalise: once the restored draft is in state, submit
+  // the answered questions (the rest score 0). Fires at most once per mount; the
+  // submit clears the draft so a second refresh lands on the submitted result.
+  useEffect(() => {
+    if (!autoSubmitDraft || autoSubmittedDraftRef.current) return;
+    if (submitted || isPending) return;
+    if (lessonInteractions.length === 0) return;
+    autoSubmittedDraftRef.current = true;
+    runSubmit(autoSubmitDraft, { partial: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSubmitDraft, submitted, lessonInteractions]);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleAnswer(id: string, response: any) {
     setResponses((prev) => new Map(prev).set(id, response));
@@ -513,6 +573,9 @@ export function StudentLessonView({
   }
 
   function handleRetake() {
+    // Drop any saved draft so a retake starts clean (and a later refresh doesn't
+    // resurrect the pre-retake answers).
+    try { sessionStorage.removeItem(draftKey); } catch { /* non-fatal */ }
     prevTimeRef.current = 0;
     watchedSecondsRef.current = 0;
     maxWatchedSecondsRef.current = 0;
@@ -530,6 +593,8 @@ export function StudentLessonView({
       setPreviewAttemptCount((prev) => prev + 1);
     }
     setSubmitted(false);
+    autoSubmittedRef.current = false;
+    submittingRef.current = false;
     setResult(null);
     setPassedIds(new Set());
     setResponses(new Map());
@@ -547,8 +612,20 @@ export function StudentLessonView({
     return Math.min(1, Math.max(0, watchedSecondsRef.current / duration));
   }
 
-  function handleSubmit() {
-    if (!allAnswered || submitted || isPending) return;
+  // Submit the attempt. `responsesMap` is passed explicitly (not read from state)
+  // so the refresh auto-submit can finalise the just-restored draft before the
+  // setState has flushed. `partial: true` bypasses the all-answered gate — any
+  // interaction missing from the map is sent with an empty response and graded 0,
+  // and totalMaxScore still counts every interaction (the FE always submits all of
+  // them), so unanswered questions reliably score 0 out of the full total.
+  function runSubmit(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    responsesMap: Map<string, any>,
+    opts?: { partial?: boolean },
+  ) {
+    if (submittingRef.current || submitted || isPending) return;
+    if (!opts?.partial && !allAnswered) return;
+    submittingRef.current = true;
     setError(null);
     startTransition(async () => {
       try {
@@ -562,7 +639,7 @@ export function StudentLessonView({
           }
 
           const respList = await Promise.all(lessonInteractions.map(async (it) => {
-            const localResp = responses.get(it.id) ?? null;
+            const localResp = responsesMap.get(it.id) ?? null;
             const config = extractConfig(it);
             let score = 0, maxScore = 1;
             const draftGrade = draftGrades.get(it.id);
@@ -610,7 +687,7 @@ export function StudentLessonView({
         } else {
           const protoResponses = lessonInteractions.map((it) => buildAttemptResponseInput(
             it,
-            responses.get(it.id),
+            responsesMap.get(it.id),
             {
               timeToAnswerMs: timeToAnswerMsRef.current.get(it.id) ?? 0,
               replayCount: replayCountsRef.current.get(it.id) ?? 0,
@@ -649,9 +726,25 @@ export function StudentLessonView({
           router.refresh();
         }
       } catch (err) {
+        // Allow a retry after a failed submit (success keeps the guard set so no
+        // duplicate fires; a retake resets it explicitly).
+        submittingRef.current = false;
         setError(submitAttemptErrorMessage(err));
       }
     });
+  }
+
+  function handleSubmit() {
+    runSubmit(responses, { partial: false });
+  }
+
+  // Re-fire a submit that failed mid-flight (e.g. a refresh auto-submit network
+  // blip). The catch reset submittingRef, but a PARTIAL/AFTER_EACH attempt has no
+  // readyToSubmit button, so this is the only on-screen recovery short of reloading.
+  // Re-uses the restored draft when the attempt isn't fully answered, else the
+  // current responses; the partial flag mirrors that.
+  function retrySubmit() {
+    runSubmit(autoSubmitDraft ?? responses, { partial: !allAnswered });
   }
 
   const hasSidebar = chunks.length > 0 || segments.length > 0 || !!transcript;
@@ -787,6 +880,7 @@ export function StudentLessonView({
           maxAttempts={maxAttempts}
           onRetake={handleRetake}
           onSubmit={handleSubmit}
+          onRetrySubmit={error && !submitted ? retrySubmit : undefined}
           passedCount={passedIds.size}
           readyToSubmit={readyToSubmit}
           result={result}

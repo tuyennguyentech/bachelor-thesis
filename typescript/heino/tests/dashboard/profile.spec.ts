@@ -46,8 +46,18 @@ test.describe("Dashboard profile page", () => {
     // profile form has "Tên đệm" label too — exact: true targets only "Tên"
     await page.getByLabel("Tên", { exact: true }).clear();
     await page.getByLabel("Tên", { exact: true }).fill("Fresh");
-    await page.getByRole("button", { name: "Lưu thay đổi" }).click();
-    await expect(page.getByText("Đã lưu thay đổi")).toBeVisible();
+    // Click only after the Save button hydrates (a disabled click is a no-op), and
+    // wait for the UpdateUserProfile RPC response as the commit signal — deterministic,
+    // unlike the "Đã lưu thay đổi" message which is cleared if router.refresh() remounts
+    // the form.
+    const save = page.getByRole("button", { name: "Lưu thay đổi" });
+    await expect(save).toBeEnabled({ timeout: 15000 });
+    const resp = page.waitForResponse(
+      (r) => r.url().includes("UpdateUserProfile") && r.request().method() === "POST",
+      { timeout: 20000 },
+    );
+    await save.click();
+    expect((await resp).ok(), "UpdateUserProfile response ok").toBeTruthy();
   });
 
   test("shows error when password mismatch", async ({ userPage: page }) => {

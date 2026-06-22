@@ -47,7 +47,6 @@ import { cookies } from "next/headers";
 import { parseRecentAccessCookie, RECENT_ACCESS_COOKIE } from "@/lib/recent-access";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/pagination";
-import { scoreTextClass } from "@/components/score-viz";
 import { InfoHint } from "@/components/ui/info-hint";
 import { CourseResults } from "./course-results";
 import { CourseClassPulse, CourseClassPulseSkeleton } from "./course-class-pulse";
@@ -215,7 +214,7 @@ export default async function CourseWorkspacePage({
   // Per-module score totals (for per-chapter mastery) + a per-lesson score trend
   // (for the "am I improving?" sparkline) — both from the same getMyAttempt fan-out.
   const moduleScore = new Map<string, { score: number; max: number }>();
-  const lessonTrend: { lessonId: string; title: string; frac: number; when: number }[] = [];
+  const lessonTrend: { lessonId: string; title: string; lessonNumber: number; moduleTitle: string; frac: number; when: number }[] = [];
   if (course.canAccess || canManage) {
     const moduleClient = createRichterClient(CourseModuleService, token);
     const lessonClient = createRichterClient(LessonService, token);
@@ -247,6 +246,17 @@ export default async function CourseWorkspacePage({
       }
       modulesWithLessons = modules.map((m) => ({ ...m, lessons: lessonsByModule.get(m.id) ?? [] }));
 
+      // Module title by id — so the score-trend tooltip can name the chapter a
+      // lesson belongs to (not just an ordinal).
+      const moduleTitleById = new Map<string, string>(modules.map((m) => [m.id, m.title]));
+      // Lesson NUMBER (1-based position within its chapter) by id — so the
+      // score-trend tooltip can say "Bài 3" (the real lesson, as numbered in the
+      // Bài học tab), not the submission-order index the X axis already shows.
+      const lessonNumberById = new Map<string, number>();
+      for (const m of modulesWithLessons) {
+        m.lessons.forEach((l, li) => lessonNumberById.set(l.id, li + 1));
+      }
+
       // For students (incl. a manager in learn mode), resolve which lessons have
       // at least one attempt. No bulk RPC exists, so fan out GetMyAttempt once
       // per lesson in a single batch.
@@ -269,6 +279,8 @@ export default async function CourseWorkspacePage({
                     lessonTrend.push({
                       lessonId: l.id,
                       title: stripLessonPrefix(l.title),
+                      lessonNumber: lessonNumberById.get(l.id) ?? 0,
+                      moduleTitle: moduleTitleById.get(l.moduleId) ?? "",
                       frac: res.attempt.totalScore / res.attempt.maxScore,
                       when: res.attempt.submittedAt ? Number(res.attempt.submittedAt.seconds) : 0,
                     });
@@ -417,7 +429,7 @@ export default async function CourseWorkspacePage({
   // Per-lesson score trend in submission order (the "am I improving?" sparkline).
   const scoreTrend = [...lessonTrend]
     .sort((a, b) => a.when - b.when)
-    .map((t) => ({ frac: t.frac, label: t.title }));
+    .map((t) => ({ frac: t.frac, lessonId: t.lessonId, lessonTitle: t.title, lessonNumber: t.lessonNumber, moduleTitle: t.moduleTitle }));
   // "Bắt đầu/Tiếp tục học" is a LEARNER call-to-action. A manager in manage mode
   // enters learning via the Vào học | Quản lý toggle, not a resume card — so the
   // card is shown only when rendering as a student (incl. a manager in learn mode).
@@ -621,111 +633,79 @@ export default async function CourseWorkspacePage({
                   </Suspense>
                 )}
 
-                {/* ── Quick-resume + course-structure chart (replaces the outline
-                    that duplicated the Bài học tab) ── */}
-                {totalLessons > 0 && (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {showResumeCard && resumeTarget && (
-                      <div
-                        className="rounded-md border bg-background p-4 flex flex-col gap-3"
-                        data-testid="course-resume-card"
-                      >
-                        <div className="flex items-center gap-2">
-                          <PlayIcon className="size-4 text-emerald-500" />
-                          <h2 className="font-medium">
-                            {resumeTarget.isResume ? "Tiếp tục học gần đây" : "Bắt đầu học"}
-                          </h2>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{resumeTarget.title}</p>
-                            {resumeTarget.when && (
-                              <p className="text-xs text-muted-foreground">
-                                Bạn đã mở {resumeTarget.when}
-                              </p>
-                            )}
-                          </div>
-                          <Button asChild className="gap-2 shrink-0">
-                            <Link href={resumeTarget.href}>
-                              <PlayIcon className="size-4" />
-                              {resumeTarget.isResume ? "Tiếp tục" : "Vào học"}
-                            </Link>
-                          </Button>
-                        </div>
+                {/* Resume the most recently opened lesson (students who have one).
+                    The next-lesson CTA lives in the progress card above; this is the
+                    distinct "pick up where you left off" shortcut. */}
+                {showResumeCard && resumeTarget && (
+                  <div
+                    className="rounded-md border bg-background p-4 flex flex-col gap-3"
+                    data-testid="course-resume-card"
+                  >
+                    <div className="flex items-center gap-2">
+                      <PlayIcon className="size-4 text-emerald-500" />
+                      <h2 className="font-medium">
+                        {resumeTarget.isResume ? "Tiếp tục học gần đây" : "Bắt đầu học"}
+                      </h2>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{resumeTarget.title}</p>
+                        {resumeTarget.when && (
+                          <p className="text-xs text-muted-foreground">
+                            Bạn đã mở {resumeTarget.when}
+                          </p>
+                        )}
                       </div>
-                    )}
+                      <Button asChild className="gap-2 shrink-0">
+                        <Link href={resumeTarget.href}>
+                          <PlayIcon className="size-4" />
+                          {resumeTarget.isResume ? "Tiếp tục" : "Vào học"}
+                        </Link>
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
-                    <div
-                      className={`rounded-md border bg-background p-4 flex flex-col gap-3${showResumeCard ? "" : " md:col-span-2"}`}
-                      data-testid="module-chart"
-                    >
-                      <div className="flex items-center gap-2">
-                        <BarChart2Icon className="size-4 text-muted-foreground" />
-                        <h2 className="font-medium">
-                          {renderAsManager ? "Nội dung theo chương" : "Tiến độ theo chương"}
-                        </h2>
-                        <InfoHint
-                          text={
-                            renderAsManager
-                              ? "Mức độ sẵn sàng nội dung của mỗi chương: số bài đã có video tải lên trên tổng số bài, kèm tổng thời lượng video."
-                              : "Tiến độ và điểm trung bình của bạn trong từng chương. Thanh = số bài đã làm; · % = điểm trung bình của chương."
-                          }
-                        />
-                      </div>
-                      <div className="flex flex-col gap-2.5">
-                        {moduleStats.map((m, mi) => {
-                          // Manager: bar = "content readiness" = fraction of the chapter's
-                          //   lessons that have an uploaded video (always meaningful — an
-                          //   empty bar honestly means "no content authored yet", not a glitch).
-                          // Student: bar = fraction of the chapter's lessons completed.
-                          const pct =
-                            m.lessonCount > 0
-                              ? ((renderAsManager ? m.withVideo : m.completed) / m.lessonCount) * 100
-                              : 0;
-                          // Fully ready (manager: all lessons have video) / fully done (student).
-                          const chapterFull =
-                            m.lessonCount > 0 &&
-                            (renderAsManager ? m.withVideo === m.lessonCount : m.completed === m.lessonCount);
-                          return (
-                            <div key={m.id} className="flex items-center gap-2.5">
-                              <span className="text-xs text-muted-foreground w-5 shrink-0 text-right tabular-nums">
-                                {mi + 1}
-                              </span>
-                              <span className="text-xs truncate flex-1 min-w-0" title={m.title}>
-                                {m.title}
-                              </span>
-                              <div className="h-2 w-24 sm:w-36 shrink-0 rounded-full bg-muted overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    renderAsManager
-                                      ? chapterFull
-                                        ? "bg-primary"
-                                        : "bg-primary/60"
-                                      : chapterFull
-                                        ? "bg-emerald-500"
-                                        : "bg-emerald-500/70"
-                                  }`}
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-muted-foreground tabular-nums w-32 shrink-0 text-right">
-                                {renderAsManager ? (
-                                  `${m.withVideo}/${m.lessonCount} bài có video · ${m.durationMin} phút`
-                                ) : (
-                                  <>
-                                    {m.completed}/{m.lessonCount} bài
-                                    {m.scoreFrac !== null && (
-                                      <span className={`ml-1 font-medium ${scoreTextClass(m.scoreFrac)}`}>
-                                        · {Math.round(m.scoreFrac * 100)}%
-                                      </span>
-                                    )}
-                                  </>
-                                )}
-                              </span>
+                {/* Content readiness per chapter — MANAGER ONLY. Students already get
+                    the richer per-chapter progress in their StudentProgressCard above,
+                    so rendering this for them duplicated the "Tiến độ theo chương" box. */}
+                {totalLessons > 0 && renderAsManager && (
+                  <div
+                    className="rounded-md border bg-background p-4 flex flex-col gap-3"
+                    data-testid="module-chart"
+                  >
+                    <div className="flex items-center gap-2">
+                      <BarChart2Icon className="size-4 text-muted-foreground" />
+                      <h2 className="font-medium">Nội dung theo chương</h2>
+                      <InfoHint text="Mức độ sẵn sàng nội dung của mỗi chương: số bài đã có video tải lên trên tổng số bài, kèm tổng thời lượng video." />
+                    </div>
+                    <div className="flex flex-col gap-2.5">
+                      {moduleStats.map((m, mi) => {
+                        // "Content readiness" = fraction of the chapter's lessons with an
+                        // uploaded video (an empty bar honestly means "no content authored
+                        // yet", not a glitch).
+                        const pct = m.lessonCount > 0 ? (m.withVideo / m.lessonCount) * 100 : 0;
+                        const chapterFull = m.lessonCount > 0 && m.withVideo === m.lessonCount;
+                        return (
+                          <div key={m.id} className="flex items-center gap-2.5">
+                            <span className="text-xs text-muted-foreground w-5 shrink-0 text-right tabular-nums">
+                              {mi + 1}
+                            </span>
+                            <span className="text-xs truncate flex-1 min-w-0" title={m.title}>
+                              {m.title}
+                            </span>
+                            <div className="h-2 w-24 sm:w-36 shrink-0 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${chapterFull ? "bg-primary" : "bg-primary/60"}`}
+                                style={{ width: `${pct}%` }}
+                              />
                             </div>
-                          );
-                        })}
-                      </div>
+                            <span className="text-xs text-muted-foreground tabular-nums w-32 shrink-0 text-right">
+                              {m.withVideo}/{m.lessonCount} bài có video · {m.durationMin} phút
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

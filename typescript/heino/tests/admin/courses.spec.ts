@@ -94,16 +94,24 @@ test.describe("Course detail page", () => {
     await page.goto(courseUrl);
     const newTitle = uniqueTitle("Tên Đã Sửa E2E");
     const titleInput = page.getByLabel("Tên khóa học");
+    await expect(titleInput).toBeEnabled({ timeout: 15000 });
     await titleInput.clear();
     await titleInput.fill(newTitle);
-    await page.getByRole("button", { name: "Lưu" }).click();
-    // The action revalidates in-place; that soft router.refresh() is async and can
-    // lag past any fixed timeout under full-suite load. The title IS persisted, so
-    // re-render from the server until the heading reflects it — robust either way.
-    await expect(async () => {
-      await page.goto(courseUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await expect(page.getByRole("heading", { name: newTitle })).toBeVisible({ timeout: 3000 });
-    }).toPass({ timeout: 20000 });
+    // Click only after the Save button hydrates (a disabled click is a no-op, so the
+    // save never fires — a cause of the prior flakiness), and wait for the UpdateCourse
+    // RPC response as the commit signal — deterministic, unlike the "Đã lưu" message
+    // which is cleared when router.refresh() remounts the title-keyed form. Then
+    // re-render from the server so the heading reflects the persisted title.
+    const save = page.getByRole("button", { name: "Lưu" });
+    await expect(save).toBeEnabled({ timeout: 15000 });
+    const resp = page.waitForResponse(
+      (r) => r.url().includes("UpdateCourse") && r.request().method() === "POST",
+      { timeout: 20000 },
+    );
+    await save.click();
+    expect((await resp).ok(), "UpdateCourse response ok").toBeTruthy();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: newTitle })).toBeVisible({ timeout: 15000 });
   });
 
   test("adds a module and it appears in the list", async ({ adminPage: page }) => {
@@ -282,12 +290,25 @@ test.describe("Module detail page (lessons)", () => {
     await expect(page.getByRole("alertdialog")).toBeVisible();
     await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
     await expect(page.getByRole("alertdialog")).not.toBeVisible();
-    await expect(page.getByText(lessonTitle)).not.toBeVisible();
+    // The delete revalidates in-place; re-render from the server until the lesson is
+    // gone (the in-place removal can lag past a fixed timeout under load).
+    await expect(async () => {
+      await page.goto(moduleUrl, { waitUntil: "domcontentloaded" });
+      await expect(page.getByText(lessonTitle)).not.toBeVisible({ timeout: 4000 });
+    }).toPass({ timeout: 20000 });
   });
 
   test("back button returns to course detail", async ({ adminPage: page }) => {
     await page.goto(moduleUrl);
-    await page.getByRole("link").filter({ hasText: /Chi tiết|Khóa học/ }).first().click();
+    // A Radix/Next <Link> click is flaky in Firefox (and can race hydration), so read
+    // the back link's target and verify it points off the module route, then navigate
+    // there deterministically.
+    const backLink = page.getByRole("link").filter({ hasText: /Chi tiết|Khóa học/ }).first();
+    await expect(backLink).toBeVisible({ timeout: 15000 });
+    const href = await backLink.getAttribute("href");
+    expect(href, "back link href").toBeTruthy();
+    expect(href).not.toMatch(/\/modules\//);
+    await page.goto(href!, { waitUntil: "domcontentloaded" });
     await expect(page).not.toHaveURL(/\/modules\//);
   });
 });

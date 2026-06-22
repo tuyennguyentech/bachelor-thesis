@@ -1161,11 +1161,10 @@ test.describe.serial("Teacher question editing", () => {
 
     // Fill in the add form.
     await page.getByPlaceholder("Nhập câu hỏi...").fill("Câu hỏi thủ công mới");
-    const optionInputs = page.locator('input[type="text"]');
-    await optionInputs.nth(0).fill("Phương án A");
-    await optionInputs.nth(1).fill("Phương án B");
-    await optionInputs.nth(2).fill("Phương án C");
-    await optionInputs.nth(3).fill("Phương án D");
+    await page.getByPlaceholder("Lựa chọn A", { exact: true }).fill("Phương án A");
+    await page.getByPlaceholder("Lựa chọn B", { exact: true }).fill("Phương án B");
+    await page.getByPlaceholder("Lựa chọn C", { exact: true }).fill("Phương án C");
+    await page.getByPlaceholder("Lựa chọn D", { exact: true }).fill("Phương án D");
 
     await page.getByRole("button", { name: "Lưu" }).last().click();
     // Scope to step body to match the visible paragraph row, not hidden title bar preview.
@@ -1185,11 +1184,10 @@ test.describe.serial("Teacher question editing", () => {
     async function addMcq(question: string) {
       await page.getByTestId("add-interaction-btn").first().click();
       await page.getByPlaceholder("Nhập câu hỏi...").fill(question);
-      const opts = page.locator('input[type="text"]');
-      await opts.nth(0).fill("A");
-      await opts.nth(1).fill("B");
-      await opts.nth(2).fill("C");
-      await opts.nth(3).fill("D");
+      await page.getByPlaceholder("Lựa chọn A", { exact: true }).fill("A");
+      await page.getByPlaceholder("Lựa chọn B", { exact: true }).fill("B");
+      await page.getByPlaceholder("Lựa chọn C", { exact: true }).fill("C");
+      await page.getByPlaceholder("Lựa chọn D", { exact: true }).fill("D");
       await page.getByRole("button", { name: "Lưu" }).last().click();
       // Wait for form to close.
       await expect(page.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 5_000 });
@@ -1225,9 +1223,10 @@ test.describe.serial("Teacher question editing", () => {
     const deleteTarget = uid("Câu hỏi tạm xóa");
     await page.getByTestId("add-interaction-btn").first().click();
     await page.getByPlaceholder("Nhập câu hỏi...").fill(deleteTarget);
-    const opts = page.locator('input[type="text"]');
-    await opts.nth(0).fill("A"); await opts.nth(1).fill("B");
-    await opts.nth(2).fill("C"); await opts.nth(3).fill("D");
+    await page.getByPlaceholder("Lựa chọn A", { exact: true }).fill("A");
+    await page.getByPlaceholder("Lựa chọn B", { exact: true }).fill("B");
+    await page.getByPlaceholder("Lựa chọn C", { exact: true }).fill("C");
+    await page.getByPlaceholder("Lựa chọn D", { exact: true }).fill("D");
     await page.getByRole("button", { name: "Lưu" }).last().click();
     await expect(page.getByText(deleteTarget)).toBeVisible({ timeout: 5_000 });
 

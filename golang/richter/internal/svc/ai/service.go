@@ -61,6 +61,15 @@ var Package = do.Package(
 			return ai.s3client.RemoveObject(ctx, ai.s3cfg.Bucket, objectKey, minio.RemoveObjectOptions{})
 		}, nil
 	}),
+	// Provide ListeningAudioSynthesizer so InteractionsSvc can (re)synthesise the
+	// spoken audio for a listening question from its text on manual create/edit.
+	do.Lazy[svcinteractions.ListeningAudioSynthesizer](func(i do.Injector) (svcinteractions.ListeningAudioSynthesizer, error) {
+		ai, err := do.Invoke[*AISvc](i)
+		if err != nil {
+			return nil, err
+		}
+		return ai.synthesizeListeningAudio, nil
+	}),
 	// Wire the new taskqueue system.
 	do.Lazy(taskqueue.NewDB),
 	do.Lazy(taskqueue.NewScanner),

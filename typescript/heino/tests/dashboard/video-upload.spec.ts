@@ -203,17 +203,23 @@ test.describe("Video upload flow", () => {
 
     // Reload so button is server-rendered as "Thay video"
     await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
-    // activeStep defaults to "transcript" after reload when video exists; navigate to upload step
-    await page.getByTestId("workflow-step-upload").click();
-    await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
+    // activeStep defaults to "transcript" after reload when video exists; switch to the
+    // upload step. The switch is a client-side tab change, so a click before the
+    // stepper hydrates is a no-op — retry until the upload step's "Thay video" renders.
+    await expect(async () => {
+      await page.getByTestId("workflow-step-upload").click();
+      await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible({ timeout: 5000 });
+    }).toPass({ timeout: 20000 });
 
     // Second upload via the replace button (same hidden input, button label irrelevant to setInputFiles)
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     // After replace, workflow advances to transcript step again — confirms second upload succeeded.
     await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
-    // Navigate to upload step to verify the button label is still "Thay video"
-    await page.getByTestId("workflow-step-upload").click();
-    await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
+    // Switch back to the upload step and confirm the label is still "Thay video".
+    await expect(async () => {
+      await page.getByTestId("workflow-step-upload").click();
+      await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible({ timeout: 5000 });
+    }).toPass({ timeout: 20000 });
   });
 });
 

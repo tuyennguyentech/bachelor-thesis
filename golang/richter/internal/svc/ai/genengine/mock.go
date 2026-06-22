@@ -114,27 +114,16 @@ const (
 		"expected_answer": "Kiểm thử tự động."
 	}`
 
-	// audio_source_text is deliberately >= 40 words and there are >= 2 questions
-	// so the mock satisfies the listening validation floor (minListeningWords +
-	// the schema's minItems:2). A shorter passage would be rejected by
-	// ParseGeminiItem and break content-asserting tests under engine=mock.
+	// Single-MCQ listening: "question" (>= the minListeningQuestionWords floor) is
+	// the text TTS'd to audio; exactly 4 options + a valid correct_answer. A shorter
+	// or malformed item would be rejected by ParseGeminiItem and break content-
+	// asserting tests under engine=mock.
 	mockListening = `{
 		"kind": "listening",
-		"prompt": "Mock: nghe đoạn giảng và trả lời.",
 		"explanation": "Đáp án mẫu cho kiểm thử tự động.",
 		"start_seconds": 3.0,
-		"audio_source_text": "Đây là một đoạn giảng mẫu khá đầy đủ dùng cho kiểm thử tự động của tính năng nghe hiểu. Đoạn này trình bày một ý tưởng hoàn chỉnh với độ dài hợp lý để hệ thống tổng hợp giọng nói tạo ra tệp âm thanh có ý nghĩa. Nội dung mô tả cách một thuật toán xử lý dữ liệu đầu vào, thực hiện các bước tính toán trung gian, rồi trả về kết quả đầu ra cuối cùng cho người dùng.",
-		"questions": [
-			{
-				"question": "Đoạn giảng mẫu này chủ yếu mô tả điều gì?",
-				"options": ["Cách một thuật toán xử lý dữ liệu", "Luật bóng đá", "Dự báo thời tiết", "Công thức nấu ăn"],
-				"correct_answer": 0
-			},
-			{
-				"question": "Bước cuối cùng được nhắc đến trong đoạn là gì?",
-				"options": ["Trả về kết quả đầu ra", "Xoá dữ liệu", "Khởi động lại máy", "Gửi email"],
-				"correct_answer": 0
-			}
-		]
+		"question": "Theo đoạn giảng, sau khi nhận dữ liệu đầu vào và thực hiện các bước tính toán trung gian, thuật toán làm gì ở bước cuối cùng?",
+		"options": ["Trả về kết quả đầu ra cuối cùng", "Xoá toàn bộ dữ liệu đầu vào", "Khởi động lại hệ thống", "Gửi email cho người dùng"],
+		"correct_answer": 0
 	}`
 )

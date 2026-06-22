@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 /**
  * Interactive per-lesson score-trend chart for the student progress card.
@@ -16,8 +17,14 @@ import { useState } from "react";
 export interface ScoreTrendPoint {
   /** Score as a 0..1 fraction. */
   frac: number;
-  /** Lesson label (shown in the tooltip). */
-  label: string;
+  /** Lesson id — used to navigate to the lesson on click. */
+  lessonId: string;
+  /** Lesson name (shown in the tooltip). */
+  lessonTitle: string;
+  /** Lesson number — its 1-based position within its chapter (e.g. "Bài 3"). 0 if unknown. */
+  lessonNumber: number;
+  /** Chapter (module) name the lesson belongs to (shown in the tooltip). */
+  moduleTitle: string;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -33,9 +40,25 @@ function tierText(pct: number): string {
   return "text-red-600 dark:text-red-400";
 }
 
-export function ScoreTrendChart({ points }: { points: ScoreTrendPoint[] }) {
+export function ScoreTrendChart({
+  points,
+  slug,
+  courseId,
+  learnMode = false,
+}: {
+  points: ScoreTrendPoint[];
+  slug: string;
+  courseId: string;
+  learnMode?: boolean;
+}) {
+  const router = useRouter();
   const [hover, setHover] = useState<number | null>(null);
   if (points.length === 0) return null;
+
+  // Carry mode=learn so a manager previewing as a student stays in the learner
+  // view after navigating to the lesson (mirrors the card's lessonHref).
+  const lessonHref = (lessonId: string) =>
+    `/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lessonId}${learnMode ? "?mode=learn" : ""}`;
 
   const W = 640;
   const H = 188;
@@ -124,13 +147,14 @@ export function ScoreTrendChart({ points }: { points: ScoreTrendPoint[] }) {
               onMouseLeave={() => setHover(null)}
               className="cursor-pointer"
             >
-              {/* Full-height hit strip so hovering is forgiving */}
+              {/* Full-height hit strip so hovering is forgiving + click opens the lesson */}
               <rect
                 x={cx - pw / (2 * Math.max(1, n - 1 || 1))}
                 y={M.t}
                 width={pw / Math.max(1, n - 1 || 1)}
                 height={ph}
-                className="fill-transparent"
+                className="cursor-pointer fill-transparent"
+                onClick={() => router.push(lessonHref(p.lessonId))}
               />
               {showValueLabels && (
                 <text
@@ -170,25 +194,55 @@ export function ScoreTrendChart({ points }: { points: ScoreTrendPoint[] }) {
         )}
       </svg>
 
-      {/* Hover tooltip — lesson name + exact score (positioned over the point). */}
-      {hover !== null && points[hover] && (
-        <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full"
-          style={{ left: `${(xOf(hover) / W) * 100}%`, top: `${(yOf(points[hover].frac) / H) * 100}%` }}
-        >
-          <div className="mb-2 max-w-[220px] rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md">
-            <div className="truncate font-medium" title={points[hover].label}>
-              Bài {hover + 1}: {points[hover].label}
+      {/* Hover tooltip — chapter + lesson name + exact score (positioned over the point).
+          Anchor by the point's horizontal third so the box never overflows the
+          container edge: left-anchored near the left edge, right-anchored near the
+          right edge, centered in the middle (CSS-only, no portal). */}
+      {hover !== null &&
+        points[hover] &&
+        (() => {
+          const frac = n === 1 ? 0.5 : hover / (n - 1);
+          // left third → anchor left edge; right third → anchor right edge; else center.
+          const anchor = frac < 1 / 3 ? "left" : frac > 2 / 3 ? "right" : "center";
+          const translateX =
+            anchor === "left" ? "translate-x-0" : anchor === "right" ? "-translate-x-full" : "-translate-x-1/2";
+          // A point in the upper half sits near the top — drop the tooltip BELOW it so
+          // it doesn't overlap the chart header (mirrors the labelAbove logic above).
+          const below = points[hover].frac > 0.5;
+          const translateY = below ? "translate-y-0" : "-translate-y-full";
+          const gap = below ? "mt-2" : "mb-2";
+          return (
+            <div
+              className={`pointer-events-none absolute z-10 ${translateY} ${translateX}`}
+              style={{ left: `${(xOf(hover) / W) * 100}%`, top: `${(yOf(points[hover].frac) / H) * 100}%` }}
+            >
+              {/* FIXED width (not max-w): a right-anchored box positioned by `left` +
+                  translate-x-full would otherwise shrink-to-fit against the few px of
+                  space left of the container edge and collapse into a clipped column.
+                  Narrower on small screens so a centre-anchored box doesn't clip the
+                  edge on a narrow viewport. */}
+              <div className={`${gap} w-52 sm:w-60 whitespace-normal break-words rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md`}>
+                {points[hover].moduleTitle && (
+                  <div className="text-[10px] font-medium text-muted-foreground">
+                    {points[hover].moduleTitle}
+                  </div>
+                )}
+                <div className="font-medium">
+                  {points[hover].lessonNumber > 0 && (
+                    <span className="text-primary">Bài {points[hover].lessonNumber}: </span>
+                  )}
+                  {points[hover].lessonTitle}
+                </div>
+                <div className="tabular-nums text-muted-foreground">
+                  Điểm:{" "}
+                  <span className={`font-semibold ${tierText(Math.round(points[hover].frac * 100))}`}>
+                    {Math.round(points[hover].frac * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="tabular-nums text-muted-foreground">
-              Điểm:{" "}
-              <span className={`font-semibold ${tierText(Math.round(points[hover].frac * 100))}`}>
-                {Math.round(points[hover].frac * 100)}%
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+          );
+        })()}
     </div>
   );
 }

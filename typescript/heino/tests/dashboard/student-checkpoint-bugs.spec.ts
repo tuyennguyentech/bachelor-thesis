@@ -84,6 +84,30 @@ async function triggerCheckpoint(page: Page, seconds: number) {
   }, seconds);
 }
 
+// Walk the active checkpoint cluster until the listening audio player appears
+// (other interactions in the cluster, if any, are answered/skipped past).
+async function reachListeningCheckpoint(page: Page): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    // Give the listening's audio a moment to load before deciding to walk past —
+    // the player renders only after the presigned download URL resolves. Clicking
+    // too early would answer + dismiss the very checkpoint we're waiting for.
+    const hasAudio = await page
+      .locator('[data-testid="audio-player"]')
+      .waitFor({ state: "visible", timeout: 2500 })
+      .then(() => true)
+      .catch(() => false);
+    if (hasAudio) return;
+    const cp = page.locator('[data-testid="quiz-checkpoint"]');
+    if (!(await cp.count())) break;
+    // A different interaction is showing — answer/skip it to advance the cluster.
+    const opt = cp.locator("button").filter({ hasText: /./ }).first();
+    if (await opt.count()) await opt.click().catch(() => {});
+    const cont = page.getByRole("button", { name: /Câu tiếp theo|Tiếp tục xem/ });
+    if (await cont.count()) await cont.click().catch(() => {});
+    await page.waitForTimeout(150);
+  }
+}
+
 // ── Shared state (set in beforeAll, read by tests) ────────────────────────────
 
 const freshLesson: LessonRef = { url: "", lessonId: "" };
@@ -167,6 +191,96 @@ test.describe.serial("Student Checkpoint Bugs", () => {
         // Width set in `ch` should accommodate the full hint with no overflow.
         expect(dims.scrollWidth).toBeLessThanOrEqual(dims.clientWidth + 1);
         expect(dims.styleWidth).toMatch(/^\d+ch$/);
+      } finally {
+        await deleteInteractions(teacherPage, createdIds);
+      }
+    });
+  });
+
+  test.describe("Bug C — Listening single-MCQ (audio is the question)", () => {
+    // The AI listening refactor makes a listening item ONE MCQ whose QUESTION is the
+    // audio: the stored comprehension question has an EMPTY text, so the student sees
+    // audio + options only (no question text, no "2 questions in 1"). Covers the full
+    // flow: create → do (answer + grade) → edit (a question text can be surfaced).
+    test("synthesises audio from the question text, grades the answer, and an edit updates it", async ({
+      teacherPage,
+      isolatedLesson,
+    }) => {
+      await setFeedbackMode(teacherPage, isolatedLesson.lessonId, "FEEDBACK_MODE_AFTER_EACH");
+      const createdIds: string[] = [];
+      try {
+        // CREATE: text-driven — the question TEXT (audioSourceText) is synthesised to
+        // audio on save (no uploaded clip). The stored per-question text stays empty.
+        const id = await addInteraction(teacherPage, isolatedLesson.lessonId, {
+          prompt: "Nghe câu hỏi và chọn đáp án đúng:",
+          explanation: "Đệ quy chia bài toán thành các bài toán con nhỏ hơn.",
+          startSeconds: 3,
+          listening: {            audioSourceText: "Đệ quy chia bài toán lớn thành gì?",
+            comprehensionQuestions: [
+              {
+                question: "",
+                options: [
+                  { text: "Chia thành bài toán con nhỏ hơn" },
+                  { text: "Tăng bộ nhớ" },
+                  { text: "Xoá dữ liệu đầu vào" },
+                  { text: "Khởi động lại máy" },
+                ],
+                correctAnswer: 0,
+              },
+            ],
+          },
+        });
+        createdIds.push(id);
+
+        // DO: student preview renders the synthesised audio + 4 options, no question text.
+        await teacherPage.goto(`${isolatedLesson.url}?preview=1`);
+        await expect(teacherPage.locator('[data-testid="video-player"]')).toBeAttached();
+        await triggerCheckpoint(teacherPage, 4);
+        await reachListeningCheckpoint(teacherPage);
+
+        const checkpoint = teacherPage.locator('[data-testid="quiz-checkpoint"]');
+        await expect(teacherPage.locator('[data-testid="audio-player"]')).toBeVisible({ timeout: 10_000 });
+        await expect(checkpoint.getByText("Nghe câu hỏi", { exact: true })).toBeVisible();
+        for (let i = 0; i < 4; i++) {
+          await expect(teacherPage.locator(`[data-testid="nested-mcq-0-option-${i}"]`)).toBeVisible();
+        }
+        // Exactly ONE 4-option MCQ: no 5th option, no bare "Câu 1" heading.
+        await expect(teacherPage.locator('[data-testid="nested-mcq-0-option-4"]')).toHaveCount(0);
+        await expect(checkpoint.getByText(/^Câu 1$/)).toHaveCount(0);
+
+        // Answer the correct option → AFTER_EACH reveals correctness.
+        await teacherPage.locator('[data-testid="nested-mcq-0-option-0"]').click();
+        await expect(teacherPage.getByText(/Chính xác/).first()).toBeVisible({ timeout: 5_000 });
+
+        // EDIT: change the question text (audio re-synthesised) + the options. The student
+        // still only HEARS the question; verify the NEW option text now renders.
+        await rpc(teacherPage, "richter.v1.InteractionService", "UpdateInteraction", {
+          interactionId: id,
+          prompt: "Nghe câu hỏi và chọn đáp án đúng:",
+          explanation: "Đã chỉnh sửa.",
+          startSeconds: 3,
+          listening: {            audioSourceText: "Câu hỏi đã chỉnh sửa — chọn phương án mới?",
+            comprehensionQuestions: [
+              {
+                question: "",
+                options: [
+                  { text: "Phương án mới A" },
+                  { text: "Phương án mới B" },
+                  { text: "Phương án mới C" },
+                  { text: "Phương án mới D" },
+                ],
+                correctAnswer: 1,
+              },
+            ],
+          },
+        });
+
+        await teacherPage.goto(`${isolatedLesson.url}?preview=1`);
+        await expect(teacherPage.locator('[data-testid="video-player"]')).toBeAttached();
+        await triggerCheckpoint(teacherPage, 4);
+        await reachListeningCheckpoint(teacherPage);
+        await expect(teacherPage.locator('[data-testid="audio-player"]')).toBeVisible({ timeout: 10_000 });
+        await expect(teacherPage.getByText("Phương án mới A")).toBeVisible({ timeout: 10_000 });
       } finally {
         await deleteInteractions(teacherPage, createdIds);
       }

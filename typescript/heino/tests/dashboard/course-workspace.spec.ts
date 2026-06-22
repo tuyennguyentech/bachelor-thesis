@@ -136,15 +136,18 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(cta.or(done).first()).toBeVisible();
   });
 
-  test("learner sees 'Tiến độ theo chương' with per-chapter progress + mastery score", async ({ studentPage: page }) => {
+  test("learner sees 'Tiến độ theo chương' inside the progress card (no duplicate)", async ({ studentPage: page }) => {
     const href = await goToCourseWorkspace(page);
     await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
-    const chart = page.getByTestId("module-chart");
-    await expect(chart.getByRole("heading", { name: "Tiến độ theo chương" })).toBeVisible();
-    // Each chapter row shows the learner's completion as "done/total bài".
-    await expect(chart.getByText(/\d+\/\d+ bài/).first()).toBeVisible();
-    // bob has attempts → at least one chapter shows a mastery score "· NN%".
-    await expect(chart.getByText(/· \d+%/).first()).toBeVisible();
+    // The per-chapter breakdown now lives inside the learner progress card; students
+    // no longer get a separate module-chart (it duplicated this section).
+    const progress = page.getByTestId("my-course-progress");
+    await expect(progress.getByRole("heading", { name: "Tiến độ theo chương" })).toBeVisible();
+    // Each chapter row shows completion as "done/total bài".
+    await expect(progress.getByText(/\d+\/\d+ bài/).first()).toBeVisible();
+    // Regression: the manager-only content-readiness chart must NOT appear for a
+    // student (that was the duplicate "Tiến độ theo chương" box).
+    await expect(page.getByTestId("module-chart")).toHaveCount(0);
   });
 
   test("learner sees the interactive score-trend chart with a hover tooltip", async ({ studentPage: page }) => {
@@ -203,17 +206,16 @@ test.describe("Course workspace — ?tab=overview", () => {
     await expect(page.getByTestId("results-subtab-at-risk")).toHaveAttribute("aria-selected", "true");
   });
 
-  test("overview replaces the lesson outline with a per-chapter chart", async ({ studentPage: page }) => {
+  test("overview replaces the lesson outline with the learner progress card", async ({ studentPage: page }) => {
     const href = await goToCourseWorkspace(page);
     await page.goto(`${href}?tab=overview`, { waitUntil: "domcontentloaded" });
     // The old "Nội dung khóa học" outline (duplicating the Bài học tab) is gone…
     await expect(page.getByRole("heading", { name: "Nội dung khóa học" })).toHaveCount(0);
-    // …replaced by the per-chapter chart. A student sees their progress per chapter.
-    // (The standalone resume card is now conditional — only for a genuinely recent
-    // lesson — so it is not asserted here; the progress card already carries the CTA.)
-    const chart = page.getByTestId("module-chart");
-    await expect(chart).toBeVisible();
-    await expect(chart.getByRole("heading", { name: "Tiến độ theo chương" })).toBeVisible();
+    // …replaced by the learner progress card, which carries the per-chapter breakdown
+    // (the standalone resume card is conditional on a genuinely recent lesson).
+    const progress = page.getByTestId("my-course-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress.getByRole("heading", { name: "Tiến độ theo chương" })).toBeVisible();
   });
 });
 

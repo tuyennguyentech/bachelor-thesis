@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -18,6 +19,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { getRenderer, extractConfig } from "@/interactions/registry";
 import type { McqConfig, FillBlankConfig, ListeningConfig, ReadingConfig, WritingConfig } from "@/interactions/types";
 import { RegenerateModal } from "./regenerate-modal";
+import { AutoTextarea } from "@/interactions/_shared/auto-textarea";
 import { formatTime } from "@/lib/format";
 
 // ── Kind badge utilities ───────────────────────────────────────────────────────
@@ -62,7 +64,10 @@ export function emptyFormForKind(kind: InteractionKind): InteractionFormData {
   if (kind === InteractionKind.LISTENING) {
     return {
       kind, prompt: "",
-      config: { audioObjectKey: "", durationSeconds: 0, mode: "comprehension", expectedText: "", comprehensionQuestions: [] } satisfies ListeningConfig,
+      config: {
+        audioObjectKey: "", durationSeconds: 0, audioSourceText: "",
+        comprehensionQuestions: [{ question: "", options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: 0 }],
+      } satisfies ListeningConfig,
       explanation: "", startSeconds: 0,
     };
   }
@@ -116,11 +121,12 @@ export function isSaveable(form: InteractionFormData): boolean {
   }
   if (form.kind === InteractionKind.LISTENING) {
     const c = form.config as ListeningConfig;
-    if (!c.audioObjectKey) return false;
-    if (c.mode === "dictation") return c.expectedText.trim() !== "";
-    return c.comprehensionQuestions.length > 0 && c.comprehensionQuestions.every((q) =>
-      (q.question?.trim() ?? "") !== "" && q.options.every((o) => o.text.trim() !== ""),
-    );
+    // Text-driven: the question text is the source of truth (the audio is synthesised
+    // from it on save). Require the question + filled options — NOT an uploaded audio
+    // key, and NOT the per-question text (the audio IS the question).
+    return (c.audioSourceText?.trim() ?? "") !== "" &&
+      c.comprehensionQuestions.length > 0 &&
+      c.comprehensionQuestions.every((q) => q.options.every((o) => o.text.trim() !== ""));
   }
   if (form.kind === InteractionKind.READING) {
     const c = form.config as ReadingConfig;
@@ -146,8 +152,8 @@ export function buildProtoConfig(form: InteractionFormData) {
     return {
       case: "listening" as const,
       value: {
-        audioObjectKey: c.audioObjectKey, durationSeconds: c.durationSeconds, mode: c.mode === "dictation" ? 1 : 2,
-        expectedText: c.expectedText,
+        audioObjectKey: c.audioObjectKey, durationSeconds: c.durationSeconds,
+        audioSourceText: c.audioSourceText ?? "",
         comprehensionQuestions: c.comprehensionQuestions.map((q) => ({
           question: q.question ?? "",
           options: q.options.map((o) => ({ text: o.text })),
@@ -202,9 +208,14 @@ export interface InteractionFormProps {
   error: string | null;
   lessonId: string;
   token: string;
+  // When embedded in a parent card (the create flow) drop the own border/background
+  // so the form doesn't read as a box-in-a-box. Standalone (edit) keeps its card.
+  flush?: boolean;
+  // Optional ordinal shown next to the form heading (e.g. "2" in the create flow).
+  stepLabel?: string;
 }
 
-export function InteractionForm({ initial, onSave, onCancel, saving, error, lessonId, token }: InteractionFormProps) {
+export function InteractionForm({ initial, onSave, onCancel, saving, error, lessonId, token, flush, stepLabel }: InteractionFormProps) {
   const [form, setForm] = useState<InteractionFormData>(initial);
 
   let renderer;
@@ -212,8 +223,13 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
   catch { return <p className="text-xs text-destructive">Loại câu hỏi không được hỗ trợ.</p>; }
 
   return (
-    <div className="flex flex-col gap-4 p-4 bg-muted/20 rounded-lg border border-border">
-      <p className="text-sm font-medium text-muted-foreground">{renderer.label}</p>
+    <div className={`flex flex-col gap-4 p-4 ${flush ? "" : "rounded-lg border border-border bg-muted/20"}`}>
+      <div className="flex items-baseline gap-2">
+        {stepLabel && (
+          <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">{stepLabel}</span>
+        )}
+        <p className="text-sm font-semibold tracking-tight">{stepLabel ? "Nội dung bài tập" : renderer.label}</p>
+      </div>
 
       {/* WRITING mirrors its prompt from the editor's "Đề bài" field, so the
           generic top-level prompt textarea is hidden to avoid double entry. */}
@@ -257,13 +273,13 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_8rem] sm:items-start">
         <div className="flex flex-col gap-1.5">
           <label className="text-sm text-muted-foreground">Giải thích đáp án</label>
-          <input
-            type="text"
+          <AutoTextarea
+            minRows={2}
             value={form.explanation}
-            onChange={(e) => setForm((f) => ({ ...f, explanation: e.target.value }))}
+            onChange={(text) => setForm((f) => ({ ...f, explanation: text }))}
             disabled={saving}
             placeholder="Không bắt buộc"
             className="text-sm rounded-lg border border-input bg-background px-3 py-2"
@@ -308,6 +324,7 @@ interface Props {
 
 export function InteractionRow({ interaction: it, index, lessonId, token, disabled, onUpdate, onDelete }: Props) {
   const interactionClient = useRichterWebClient(InteractionService, token);
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [saving, startSave] = useTransition();
@@ -329,7 +346,13 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
           startSeconds: data.startSeconds,
           config: buildProtoConfig(data),
         });
-        if (res.interaction) { onUpdate(res.interaction); setEditing(false); }
+        if (res.interaction) {
+          onUpdate(res.interaction);
+          setEditing(false);
+          // The audio may have been re-synthesised (listening) — invalidate the RSC
+          // cache so the student/preview view picks up the new audio_object_key.
+          router.refresh();
+        }
       } catch (err) {
         setSaveError(err instanceof ConnectError ? err.message : "Không thể lưu câu hỏi");
       }
@@ -352,7 +375,7 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
 
   const editDialog = (
     <Dialog open={editing} onOpenChange={(o) => !o && !saving && setEditing(false)}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl lg:max-w-4xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Chỉnh sửa bài tập</DialogTitle>
         </DialogHeader>
