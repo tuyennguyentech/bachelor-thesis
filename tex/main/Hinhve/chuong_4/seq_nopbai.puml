@@ -31,9 +31,9 @@ loop mỗi câu trả lời
   else viết
     H -> E : Chấm bằng mô hình ngôn ngữ
     E --> H : Điểm và nhận xét
-  else đọc (đọc to)
-    H -> H : Phiên âm bản ghi âm
-    H -> E : Đối chiếu và chấm
+  else đọc
+    H -> H : Tải bản ghi âm
+    H -> E : Phiên âm và chấm bằng AI
     E --> H : Điểm và nhận xét
   end
   H --> I : Điểm và nhận xét

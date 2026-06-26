@@ -202,7 +202,7 @@ Phần dữ liệu chung của mọi câu hỏi nằm ở lớp \texttt{LessonIn
 \label{fig:seq_sinhbai}
 \end{figure}
 
-\textbf{Biểu đồ tuần tự use case nộp câu trả lời tương tác.} Hình~\ref{fig:seq_nopbai} mô tả luồng khi học viên nộp bài. Lớp \texttt{InteractionsSvc} trước hết kiểm tra quyền truy cập khóa học, tải bài học cùng danh sách tương tác, rồi với mỗi câu trả lời gọi bộ xử lý tương ứng với loại tương tác để chấm điểm. Riêng câu trả lời viết được chấm tự động bằng mô hình ngôn ngữ thông qua \texttt{Engine}; câu đọc (đọc to) được chấm bằng cách phiên âm bản ghi âm của học viên rồi đối chiếu, có sự hỗ trợ của mô hình ngôn ngữ; các câu trắc nghiệm và nghe hiểu được chấm trực tiếp, còn câu điền khuyết được chấm theo so khớp và chỉ nhờ tới mô hình ngôn ngữ khi câu trả lời không khớp chính xác. Cuối cùng kết quả được lưu lại và trả về điểm cùng nhận xét cho học viên.
+\textbf{Biểu đồ tuần tự use case nộp câu trả lời tương tác.} Hình~\ref{fig:seq_nopbai} mô tả luồng khi học viên nộp bài. Lớp \texttt{InteractionsSvc} trước hết kiểm tra quyền truy cập khóa học, tải bài học cùng danh sách tương tác, rồi với mỗi câu trả lời gọi bộ xử lý tương ứng với loại tương tác để chấm điểm. Riêng câu trả lời viết được chấm tự động bằng mô hình ngôn ngữ thông qua \texttt{Engine}; với câu đọc, hệ thống tải tệp âm thanh, phiên âm và đánh giá bằng dịch vụ AI; các câu trắc nghiệm và nghe hiểu được chấm trực tiếp, còn câu điền khuyết được chấm theo so khớp và chỉ nhờ tới mô hình ngôn ngữ khi câu trả lời không khớp chính xác. Cuối cùng kết quả được lưu lại và trả về điểm cùng nhận xét cho học viên.
 
 \begin{figure}[H]
 \centering

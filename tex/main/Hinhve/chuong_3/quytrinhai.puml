@@ -1,8 +1,7 @@
 @startuml quytrinhai
 !pragma layout smetana
-left to right direction
 skinparam defaultFontName "DejaVu Sans"
-skinparam defaultFontSize 16
+skinparam defaultFontSize 14
 skinparam shadowing false
 skinparam rectangle {
   BackgroundColor #F5F5F5
@@ -10,16 +9,24 @@ skinparam rectangle {
 }
 
 rectangle "Video\nbài giảng" as V
-rectangle "Phiên âm\n(Whisper)" as STT
+rectangle "Trích xuất\nâm thanh" as AUDIO
+rectangle "Phiên âm STT\n(Speaches/Whisper)" as STT
+rectangle "Bản chép lời\ncó mốc thời gian" as TRANSCRIPT #FFF7E6
 rectangle "Phân đoạn\nnội dung\n(Gemini)" as CHUNK
+rectangle "Các đoạn nội dung\nvà tóm tắt" as SEGMENTS #FFF7E6
 rectangle "Sinh hoạt động\ntương tác\n(Gemini)" as GEN
-rectangle "Tạo bài nghe\n(Piper)" as TTS
-rectangle "Bài học\ntương tác" as OUT #E8EEF7
+rectangle "Hoạt động tương tác\nnháp" as DRAFT #FFF7E6
+rectangle "Tổng hợp âm thanh\n(Speaches/Piper)" as TTS
+rectangle "Bản nháp bài học\ntương tác" as OUT #E8EEF7
 
-V --> STT
-STT --> CHUNK
-CHUNK --> GEN
-GEN --> OUT
-GEN --> TTS : hoạt động\nluyện nghe
-TTS --> OUT
+V --> AUDIO
+AUDIO --> STT
+STT --> TRANSCRIPT
+TRANSCRIPT --> CHUNK
+CHUNK --> SEGMENTS
+SEGMENTS --> GEN
+GEN --> DRAFT
+DRAFT --> OUT
+GEN --> TTS : nếu là\nbài nghe
+TTS --> DRAFT : âm thanh WAV
 @enduml

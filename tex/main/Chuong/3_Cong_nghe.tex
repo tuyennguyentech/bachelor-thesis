@@ -9,12 +9,12 @@ Hệ thống dựa trên một số nguyên lý đã được kiểm chứng tro
 
 \section{Công nghệ xử lý trí tuệ nhân tạo}
 \label{section:3.2}
-Khối xử lý trí tuệ nhân tạo là thành phần cốt lõi giúp hệ thống tự động chuyển một video bài giảng thành bài học tương tác. Khối này kết hợp ba loại công nghệ: nhận dạng tiếng nói để lấy lời thoại, mô hình ngôn ngữ lớn để phân đoạn nội dung và sinh hoạt động, và tổng hợp tiếng nói để tạo bài nghe. Toàn bộ quy trình được minh họa ở Hình~\ref{fig:pipeline_ai}: video bài giảng lần lượt đi qua các giai đoạn phiên âm, phân đoạn nội dung và sinh hoạt động tương tác, toàn bộ chạy ở chế độ nền.
+Khối xử lý trí tuệ nhân tạo là thành phần cốt lõi giúp hệ thống tự động chuyển một video bài giảng thành bài học tương tác. Khối này kết hợp ba loại công nghệ: nhận dạng tiếng nói để lấy lời thoại, mô hình ngôn ngữ lớn để phân đoạn nội dung và sinh hoạt động, và tổng hợp tiếng nói để tạo âm thanh cho dạng bài nghe. Toàn bộ quy trình được minh họa ở Hình~\ref{fig:pipeline_ai}: video bài giảng được trích xuất âm thanh, phiên âm thành bản chép lời có mốc thời gian, phân đoạn thành các đoạn nội dung, rồi sinh các hoạt động tương tác nháp để giảng viên xem trước và biên tập. Riêng với hoạt động nghe hiểu, hệ thống gọi thêm bước tổng hợp tiếng nói để tạo tệp âm thanh tương ứng.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\textwidth]{Hinhve/chuong_3/quytrinhai.pdf}
-\caption{Quy trình xử lý trí tuệ nhân tạo sinh bài học}
+\caption{Quy trình xử lý trí tuệ nhân tạo sinh bản nháp bài học tương tác}
 \label{fig:pipeline_ai}
 \end{figure}
 
