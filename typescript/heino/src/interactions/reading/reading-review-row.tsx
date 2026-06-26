@@ -48,7 +48,7 @@ export function ReadingReviewRow({
         <div className="flex-1 flex flex-col gap-1">
           <p className="text-sm">{prompt}</p>
           <span className="text-xs text-muted-foreground">
-            {config.mode === "open_answer" ? "💬 Trả lời câu hỏi" : "🗣 Đọc to"}
+            {config.mode === "open_answer" ? "💬 Trả lời câu hỏi" : "🗣 Đọc thành tiếng"}
           </span>
         </div>
       </div>

@@ -110,7 +110,7 @@ export function ReadingStudentView({
       <p className="text-xs text-muted-foreground">
         {config.mode === "open_answer"
           ? "Trả lời câu hỏi bằng lời nói, sau đó nộp bản ghi âm."
-          : "Đọc to đoạn văn trên, sau đó nộp bản ghi âm để chấm điểm."}
+          : "Đọc thành tiếng đoạn văn trên, sau đó nộp bản ghi âm để chấm điểm."}
       </p>
 
       {/* Audio recorder */}

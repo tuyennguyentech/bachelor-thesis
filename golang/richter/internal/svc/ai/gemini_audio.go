@@ -146,14 +146,14 @@ func buildTextGradingPrompt(language, passageMarkdown, question, expectedAnswer,
 			sb.WriteString("content_score [0.0–1.0]: Đánh giá mức độ trả lời ĐÚNG VỀ NGỮ NGHĨA — không yêu cầu trùng từng chữ với đáp án tham chiếu. 1.0 = nắm đúng khái niệm cốt lõi, dù diễn đạt khác; 0.5–0.8 = đúng một phần hoặc thiếu một điểm quan trọng; 0.0 = sai hoàn toàn hoặc không liên quan. Nếu không có đáp án tham chiếu, chấm dựa trên nội dung đoạn văn.\n")
 			sb.WriteString("feedback: 1–2 câu tiếng Việt, KHUYẾN KHÍCH và CỤ THỂ: xác nhận điểm đúng hoặc chỉ rõ khái niệm nào còn thiếu/sai (không chỉ nói 'chưa đúng').\n")
 		} else {
-			sb.WriteString("Bạn là giám khảo ngôn ngữ chuyên nghiệp. Chấm điểm bài đọc to của học sinh dựa trên bản ghi phiên âm từ giọng nói.\n\n")
-			sb.WriteString("Đoạn văn học sinh được yêu cầu đọc to:\n")
+			sb.WriteString("Bạn là giám khảo ngôn ngữ chuyên nghiệp. Chấm điểm bài đọc thành tiếng của học sinh dựa trên bản ghi phiên âm từ giọng nói.\n\n")
+			sb.WriteString("Đoạn văn học sinh được yêu cầu đọc thành tiếng:\n")
 			sb.WriteString(passageMarkdown)
 			sb.WriteString("\n\nBản ghi phiên âm bài đọc của học sinh: ")
 			sb.WriteString(transcript)
 			sb.WriteString("\n\nRubric chấm điểm:\n")
 			sb.WriteString("pronunciation_score [0.0–1.0]: So sánh phiên âm với đoạn văn gốc theo từng từ nội dung. 1.0 = phiên âm khớp chặt với đoạn văn (có thể bỏ sót mạo từ/liên từ nhỏ); trừ điểm tỷ lệ cho từ nội dung bị thiếu, bị đọc sai, hoặc câu bị bỏ qua hoàn toàn. 0.0 = phiên âm không giống đoạn văn.\n")
-			sb.WriteString("content_score: đặt = 0 (không áp dụng cho bài đọc to).\n")
+			sb.WriteString("content_score: đặt = 0 (không áp dụng cho bài đọc thành tiếng).\n")
 			sb.WriteString("feedback: 1–2 câu tiếng Việt, KHUYẾN KHÍCH. Nêu cụ thể từ/câu được đọc tốt hoặc cần cải thiện; không chỉ nhận xét chung chung.\n")
 		}
 	}

@@ -216,7 +216,7 @@ MODE "pronunciation" (dùng khi đoạn transcript chứa nhiều thuật ngữ 
 - passage_markdown: đoạn văn 60–150 từ, mật độ thuật ngữ vừa phải, câu đa dạng về độ dài và cấu trúc để thử thách khả năng đọc.
 - question và expected_answer: để trống (không cần cho pronunciation mode).
 
-prompt: hướng dẫn rõ cho người học (ví dụ: "Đọc to đoạn văn sau:" hoặc "Đọc đoạn văn và trả lời câu hỏi bằng giọng nói:").
+prompt: hướng dẫn rõ cho người học (ví dụ: "Đọc thành tiếng đoạn văn sau:" hoặc "Đọc đoạn văn và trả lời câu hỏi bằng giọng nói:").
 explanation: giải thích mục tiêu học tập của bài đọc này (ví dụ: thuật ngữ nào cần nắm, khái niệm gì được kiểm tra).`
 }
 

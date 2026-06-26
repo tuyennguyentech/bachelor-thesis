@@ -2827,7 +2827,7 @@ func TestLessonHeatmap(t *testing.T) {
 	t.Run("ManualInteractionAttributedByTime", func(t *testing.T) {
 		createRes, err := c.interactions.CreateManualInteraction(ctx, &richterv1.CreateManualInteractionRequest{
 			LessonId:     lessonID,
-			Prompt:       "Đọc to đoạn này",
+			Prompt:       "Đọc thành tiếng đoạn này",
 			StartSeconds: 90,
 			// No ChunkId — must be resolved by timestamp.
 			Config: &richterv1.CreateManualInteractionRequest_Reading{

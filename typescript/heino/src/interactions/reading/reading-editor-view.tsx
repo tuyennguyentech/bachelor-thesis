@@ -18,7 +18,7 @@ export function ReadingEditorView({ config, onChange }: EditorViewProps<ReadingC
           onChange={(e) => onChange({ ...config, mode: e.target.value as "pronunciation" | "open_answer" })}
           className="text-sm rounded border border-input bg-background px-2 py-1.5"
         >
-          <option value="pronunciation">Đọc to</option>
+          <option value="pronunciation">Đọc thành tiếng</option>
           <option value="open_answer">Trả lời câu hỏi</option>
         </select>
       </div>
