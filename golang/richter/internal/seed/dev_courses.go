@@ -4,15 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	richterv1 "example.com/buf/gen/richter/v1"
+	"example.com/richter/internal"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/svc/ai"
 	"example.com/richter/internal/svc/ai/segment"
 	"example.com/sql/gen"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/minio/minio-go/v7"
+	"github.com/samber/do/v2"
 )
 
 func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec) error {
@@ -123,8 +130,23 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 				}
 
 				if l.Analysis != nil {
-					if err := s.seedLessonAnalysis(ctx, lesson.ID, owner.ID, l.Analysis); err != nil {
-						return fmt.Errorf("seed analysis for lesson %q: %w", l.Title, err)
+					runReal := false
+					if c.Title == "Tự học Machine Learning" && l.VideoKey != "" && s.pg.Config().ConnConfig.Database != "dyadia_test" {
+						localVideoPath := "seed-assets/videos/ml/" + filepath.Base(l.VideoKey)
+						if _, err := os.Stat(localVideoPath); err == nil {
+							runReal = true
+						}
+					}
+
+					if runReal {
+						s.log.InfoContext(ctx, "seed: running real video analysis pipeline", "lesson", l.Title)
+						if err := s.seedLessonRealAnalysis(ctx, lesson.ID, owner.ID, l); err != nil {
+							return fmt.Errorf("seed real analysis for lesson %q: %w", l.Title, err)
+						}
+					} else {
+						if err := s.seedLessonAnalysis(ctx, lesson.ID, owner.ID, l.Analysis); err != nil {
+							return fmt.Errorf("seed analysis for lesson %q: %w", l.Title, err)
+						}
 					}
 				}
 			}
@@ -414,5 +436,138 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 		}
 	}
 
+	return nil
+}
+
+func (s *SeederSvc) seedLessonRealAnalysis(ctx context.Context, lessonID pgtype.UUID, createdBy pgtype.UUID, l devLessonSpec) error {
+	// 1. Idempotency Check: if chunks and interactions already exist, skip.
+	dbChunks, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
+		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{
+			LessonID: lessonID,
+			Limit:    1,
+			Offset:   0,
+		})
+	})
+	if err == nil && len(dbChunks) > 0 {
+		dbInteractions, intErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+			return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{
+				LessonID: lessonID,
+				Limit:    1,
+				Offset:   0,
+			})
+		})
+		if intErr == nil && len(dbInteractions) > 0 {
+			s.log.InfoContext(ctx, "seed: lesson already has real analysis, skipping pipeline run", "lesson_id", lessonID.String(), "title", l.Title)
+			return nil
+		}
+	}
+
+	// 2. Pre-upload video if not already present in S3 bucket.
+	if _, err := s.s3client.StatObject(ctx, s.s3cfg.Bucket, l.VideoKey, minio.StatObjectOptions{}); err != nil {
+		localVideoPath := "seed-assets/videos/ml/" + filepath.Base(l.VideoKey)
+		s.log.InfoContext(ctx, "seed: uploading video to S3 before real analysis", "key", l.VideoKey, "file", localVideoPath)
+		if err := s.uploadFromFile(ctx, l.VideoKey, localVideoPath); err != nil {
+			return fmt.Errorf("pre-upload video %q: %w", localVideoPath, err)
+		}
+		s.log.InfoContext(ctx, "seed: video uploaded successfully", "key", l.VideoKey)
+	}
+
+	// 3. Clear any partial analysis / chunks / tasks to ensure a clean start
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.DeleteLessonTranscriptChunks(ctx, lessonID)
+	}); err != nil {
+		return fmt.Errorf("delete chunks: %w", err)
+	}
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.DeleteTasksForLesson(ctx, lessonID)
+	}); err != nil {
+		return fmt.Errorf("delete tasks: %w", err)
+	}
+
+	// 4. Retrieve *ai.AISvc
+	aiSvc, err := do.Invoke[*ai.AISvc](internal.Injector)
+	if err != nil {
+		return fmt.Errorf("invoke AISvc: %w", err)
+	}
+
+	// 5. Run transcription
+	s.log.InfoContext(ctx, "seed: transcribing video...", "lesson_id", lessonID.String(), "key", l.VideoKey)
+	err = aiSvc.Transcript().RunExtract(ctx, lessonID, l.VideoKey, "vi", func(step richterv1.AnalysisProgressStep, msg string) error {
+		s.log.InfoContext(ctx, "seed pipeline [Extract]", "step", step.String(), "msg", msg)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("RunExtract failed: %w", err)
+	}
+
+	// 6. Run chunking
+	s.log.InfoContext(ctx, "seed: chunking transcript...", "lesson_id", lessonID.String())
+	err = aiSvc.Transcript().RunChunk(ctx, lessonID, func(step richterv1.AnalysisProgressStep, msg string) error {
+		s.log.InfoContext(ctx, "seed pipeline [Chunk]", "step", step.String(), "msg", msg)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("RunChunk failed: %w", err)
+	}
+
+	// 7. Run quiz generation (interactions)
+	s.log.InfoContext(ctx, "seed: generating interactions...", "lesson_id", lessonID.String())
+	req := &richterv1.GenerateInteractionsRequest{
+		LessonId:         uuid.UUID(lessonID.Bytes).String(),
+		InteractionKinds: []richterv1.InteractionKind{
+			richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE,
+			richterv1.InteractionKind_INTERACTION_KIND_FILL_BLANK,
+			richterv1.InteractionKind_INTERACTION_KIND_LISTENING,
+			richterv1.InteractionKind_INTERACTION_KIND_READING,
+			richterv1.InteractionKind_INTERACTION_KIND_WRITING,
+		},
+		CountPerChunk:    1, // At least 1 exercise per chunk
+		Strategy:         richterv1.GenerationStrategy_GENERATION_STRATEGY_AI_CHOOSE,
+		Difficulty:       "medium",
+		ForceRegenerate:  true,
+	}
+	err = aiSvc.Generation().Run(ctx, lessonID, req, func(step richterv1.GenerateInteractionsStep, msg string, chunkIndex, totalChunks int32) error {
+		s.log.InfoContext(ctx, "seed pipeline [Gen]", "step", step.String(), "msg", msg, "chunkIndex", chunkIndex, "totalChunks", totalChunks)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("Generation failed: %w", err)
+	}
+
+	// 8. Insert the task rows as succeeded
+	for _, taskType := range []string{"transcribe", "chunk", "quiz_gen"} {
+		taskID, err := uuid.NewV7()
+		if err != nil {
+			return fmt.Errorf("generate task ID: %w", err)
+		}
+		tid := pgtype.UUID{Bytes: [16]byte(taskID), Valid: true}
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+			_, err := q.InsertSeededTask(ctx, gen.InsertSeededTaskParams{
+				ID:           tid,
+				LessonID:     lessonID,
+				TaskType:     taskType,
+				Status:       gen.TaskStatusSucceeded,
+				InputPayload: nil,
+				CreatedBy:    createdBy,
+			})
+			return err
+		}); err != nil {
+			return fmt.Errorf("insert %s task: %w", taskType, err)
+		}
+	}
+
+	// 9. Update lesson analysis status to done
+	if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		_, err := q.UpsertLessonAnalysisStatus(ctx, gen.UpsertLessonAnalysisStatusParams{
+			LessonID: lessonID,
+			Status:   gen.LessonAnalysisStatusDone,
+			ErrorMsg: pgtype.Text{},
+		})
+		return err
+	}); err != nil {
+		return fmt.Errorf("upsert analysis status: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "seed: real video analysis pipeline completed successfully", "lesson", l.Title)
 	return nil
 }
