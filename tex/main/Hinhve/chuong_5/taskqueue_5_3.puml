@@ -1,0 +1,62 @@
+@startuml taskqueue_5_3
+!pragma layout smetana
+skinparam defaultFontName "Noto Sans"
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ArrowThickness 1.2
+
+skinparam state {
+  BackgroundColor #E3F2FD
+  BorderColor #2E5C8A
+  FontSize 12
+  FontStyle bold
+}
+
+skinparam queue {
+  BackgroundColor #FFF9E6
+  BorderColor #D4A017
+  FontSize 11
+}
+
+skinparam database {
+  BackgroundColor #D4EDDA
+  BorderColor #2E5C8A
+  FontSize 11
+}
+
+skinparam note {
+  BackgroundColor #FFE4C4
+  BorderColor #D4A017
+  FontSize 10
+}
+
+title Vòng đời tác vụ trong hàng đợi bền vững
+
+state "inqueued\n(trong hàng đợi)" as inqueued
+state "processing\n(đang xử lý)" as processing
+state "succeeded\n(hoàn thành)" as succeeded
+state "failed\n(thất bại)" as failed
+state "cancelled\n(đã hủy)" as cancelled
+
+[*] --> inqueued : Tạo tác vụ (StartLessonTask)
+inqueued --> processing : Worker nhận (ClaimNextInqueuedTask)
+processing --> succeeded : Hoàn thành 3 bước
+processing --> failed : Lỗi ở một bước
+processing --> cancelled : Giảng viên hủy
+processing --> inqueued : Scanner thu hồi\n(quá hạn nhịp tim)
+succeeded --> [*]
+failed --> [*]
+cancelled --> [*]
+
+note right of processing
+  -- 3 bước pipeline --
+  1. Phiên âm (Whisper)
+  2. Phân đoạn (Gemini)
+  3. Sinh hoạt động (Gemini)
+  -- Checkpoint mỗi bước --
+  -- Worker UUID ghi vào --
+  bản ghi để bảo vệ ownership
+end note
+
+@enduml

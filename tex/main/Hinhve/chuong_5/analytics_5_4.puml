@@ -1,0 +1,66 @@
+@startuml analytics_5_4
+!pragma layout smetana
+skinparam defaultFontName "Noto Sans"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ArrowThickness 1.2
+
+skinparam rectangle {
+  BackgroundColor #F5F9FF
+  BorderColor #2E5C8A
+  FontSize 11
+  FontStyle bold
+  RoundCorner 8
+}
+
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D4A017
+  FontSize 10
+}
+
+skinparam database {
+  BackgroundColor #D4EDDA
+  BorderColor #2E5C8A
+  FontSize 11
+}
+
+skinparam cloud {
+  BackgroundColor #E3F2FD
+  BorderColor #2E5C8A
+  FontSize 11
+}
+
+title Mô hình dữ liệu phân tích kết quả học tập
+
+rectangle "**Video bài giảng**\n(Trục 1: Thời gian)\n0:00 - 15:00" as video
+
+rectangle "**Phân đoạn nội dung**\n(Trục 2: Chủ đề)\nKhái niệm, Bậc phổ biến, ..." as chunks
+
+note "Mỗi kết quả hoạt động\ngắn với cả hai trục:\n• Thời gian video\n• Phân đoạn nội dung" as note1
+
+rectangle "**Tiến độ xem**\nBitmap (FDB)\n1 bit / giây" as watch
+
+rectangle "**Kết quả từng hoạt động**\nĐiểm, phản hồi\nthời gian làm bài" as results
+
+rectangle "**Bản đồ nhiệt (heatmap)**\nTỷ lệ đúng\ntheo phân đoạn" as heatmap
+
+rectangle "**Danh sách cần chú ý**\nHọc viên có\nchỉ báo thấp" as alert
+
+database "PostgreSQL\n(bảng lesson_attempts,\nlesson_attempt_responses)" as pg
+
+cloud "FoundationDB\n(bitmap\nwatch coverage)" as fdb
+
+video -down-> watch
+watch --> fdb
+chunks -down-> results
+video -down-> results
+results --> pg
+results --> heatmap
+watch --> alert
+results --> alert
+
+results .. note1
+
+@enduml

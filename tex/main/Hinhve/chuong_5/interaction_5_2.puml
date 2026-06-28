@@ -1,0 +1,98 @@
+@startuml interaction_5_2
+!pragma layout smetana
+skinparam defaultFontName "Noto Sans"
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam ArrowColor #2E5C8A
+skinparam ArrowThickness 1.3
+skinparam nodesep 12
+skinparam ranksep 30
+
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #2E5C8A
+  FontSize 14
+  FontStyle bold
+}
+skinparam interface {
+  BackgroundColor #FFF9E6
+  BorderColor #D4A017
+  FontSize 14
+}
+
+title Mô hình hoạt động tương tác: lõi chung và các cấu hình chuyên biệt
+
+package "Tầng dữ liệu cốt lõi (Core)" {
+  class "LessonInteraction" as core {
+    +id: uuid
+    +lesson_id: uuid
+    +chunk_id: uuid
+    +kind: text
+    +start_seconds: real
+    +order_index: integer
+    +prompt: text
+    +explanation: text
+    +config: jsonb
+    +max_score: real
+    +generated_by: text
+  }
+  interface "InteractionConfig" as iconfig {
+    +Cấu hình riêng của từng loại bài
+  }
+  core .right.> iconfig : "config (jsonb)"
+}
+
+package "Cấu hình chi tiết các loại tương tác" as pkg_config {
+  class "McqConfig\n(Trắc nghiệm)" as cmcq
+  class "FillBlankConfig\n(Điền khuyết)" as cfill
+  class "ListeningConfig\n(Nghe hiểu)" as clisten
+  class "ReadingConfig\n(Đọc hiểu)" as cread
+  class "WritingConfig\n(Viết)" as cwrite
+  cmcq -[hidden]right- cfill
+  cfill -[hidden]right- clisten
+  clisten -[hidden]right- cread
+  cread -[hidden]right- cwrite
+}
+cmcq -up-|> iconfig
+cfill -up-|> iconfig
+clisten -up-|> iconfig
+cread -up-|> iconfig
+cwrite -up-|> iconfig
+
+package "Tầng máy chủ: Chấm điểm theo loại" as pkg_grade {
+  interface "Handler\n(chiến lược chấm theo loại)" as igrade {
+    +Grade(config, response) : Score
+    +GradeWithContext(...) : Score
+  }
+  note right of igrade
+    Đăng ký theo loại trong một registry:
+    trắc nghiệm, nghe hiểu chấm bằng luật;
+    điền khuyết chấm luật rồi mới gọi AI;
+    đọc, viết gọi AI để chấm
+  end note
+}
+
+package "Tầng giao diện: Sổ đăng ký Renderer" as pkg_render {
+  class "InteractionRegistry" as reg {
+    +register(kind, renderer)
+    +getRenderer(kind)
+  }
+  class "McqRenderer" as rmcq
+  class "FillBlankRenderer" as rfill
+  class "ListeningRenderer" as rlisten
+  class "ReadingRenderer" as rread
+  class "WritingRenderer" as rwrite
+  rmcq -[hidden]right- rfill
+  rfill -[hidden]right- rlisten
+  rlisten -[hidden]right- rread
+  rread -[hidden]right- rwrite
+  reg -down-> rmcq
+  reg -down-> rfill
+  reg -down-> rlisten
+  reg -down-> rread
+  reg -down-> rwrite
+}
+
+pkg_config -[hidden]down- pkg_grade
+pkg_grade -[hidden]down- pkg_render
+@enduml

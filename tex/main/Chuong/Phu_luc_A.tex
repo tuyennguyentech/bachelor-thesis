@@ -1,131 +1,278 @@
 \documentclass[../DoAn.tex]{subfiles}
 \begin{document}
-\section*{Quy định chung}
-Dưới đây là một số quy định và hướng dẫn viết đồ án tốt nghiệp mà bắt buộc sinh viên phải đọc kỹ và tuân thủ nghiêm ngặt.
 
-Sinh viên cần đảm bảo tính thống nhất toàn báo cáo (font chữ, căn dòng hai bên, hình ảnh, bảng, margin trang, đánh số trang, v.v.). Để làm được như vậy, sinh viên chỉ cần sử dụng các định dạng theo đúng template ĐATN này. Khi paste nội dung văn bản từ tài liệu khác của mình, sinh viên cần chọn kiểu Copy là “Text Only” để định dạng văn bản của template không bị phá vỡ/vi phạm.
+\section{Đặc tả chi tiết các bảng dữ liệu hệ thống}
+\label{chapter:db_schema}
 
-Tuyệt đối cấm sinh viên đạo văn. Sinh viên cần ghi rõ nguồn cho tất cả những gì không tự mình viết/vẽ lên, bao gồm các câu trích dẫn, các hình ảnh, bảng biểu, v.v. Khi bị phát hiện, sinh viên sẽ không được phép bảo vệ ĐATN.
+Để đảm bảo tính súc tích và tuân thủ giới hạn độ dài của báo cáo, Mục 4.2.3 chỉ trình bày sơ đồ thực thể liên kết (E-R) tổng quát và đặc tả ba bảng dữ liệu cốt lõi nhất. Phần phụ lục này cung cấp đặc tả chi tiết cho toàn bộ mười một bảng quan hệ PostgreSQL còn lại, cấu trúc khóa-giá trị của FoundationDB và quy ước lưu trữ đối tượng nhị phân của SeaweedFS được áp dụng trong hệ thống Dyadia thực tế. Các bảng này tuân thủ các quy ước thiết kế và kiểu dữ liệu chuẩn của hệ thống.
 
-Tất cả các hình vẽ, bảng biểu, công thức, và tài liệu tham khảo trong ĐATN nhất thiết phải được SV giải thích và tham chiếu tới ít nhất một lần. Không chấp nhận các trường hợp sinh viên đưa ra hình ảnh, bảng biểu tùy hứng và không có lời mô tả/giải thích nào.
-
-Sinh viên tuyệt đối không trình bày ĐATN theo kiểu viết ý hoặc gạch đầu dòng. ĐATN không phải là một slide thuyết trình; khi người đọc không hiểu sẽ không có ai giải thích hộ. Sinh viên cần viết thành các đoạn văn và phân tích, diễn giải đầy đủ, rõ ràng. Câu văn cần đúng ngữ pháp, đầy đủ chủ ngữ, vị ngữ và các thành phần câu.
-Khi thực sự cần liệt kê, sinh viên nên liệt kê theo phong cách khoa học với các ký tự La Mã. Ví dụ, nhiều sinh viên luôn cảm thấy hối hận vì (i) chưa cố gắng hết mình, (ii) chưa sắp xếp thời gian học/chơi một cách hợp lý, (iii) chưa tìm được người yêu để chia sẻ quãng đời sinh viên vất vả, và (iv) viết ĐATN một cách cẩu thả.
-
-Trong một số trường hợp nhất thiết phải dùng các bullet để liệt kê, sinh viên cần thống nhất Style cho toàn bộ các bullet các cấp mà mình sử dụng đến trong báo cáo. Nếu dùng bullet cấp 1 là hình tròn đen, toàn bộ báo cáo cần thống nhất cách dùng như vậy; ví dụ như sau:
-
-\begin{itemize}
-\item Đây là mục 1 – Thực sự không còn cách nào khác tôi mới dùng đến việc bullet trong báo cáo.
-\item Đây là mục 2 – Nghĩ lại thì tôi có thể không cần dùng bullet cũng được. Nên tôi sẽ xóa bullet và tổ chức lại hai mục này trong báo cáo của mình cho khoa học hơn. Tôi muốn thầy cô và người đọc cảm nhận được tâm huyết của tôi trong từng trang báo cáo ĐATN.
-\end{itemize}
-
-
-\section{Ngành học}
-Sinh viên lưu ý viết đúng ngành/chuyên ngành trên bìa và trên gáy theo đúng quy định của Trường. Ngành học hay chuyên ngành học phụ thuộc vào ngành học mà sinh viên đăng ký. Sinh viên có thể đăng nhập trên trang quản lý học tập của mình để xem lại chính xác ngành học của mình. 
-
-Một số ví dụ sinh viên có thể tham khảo dưới đây, trong trường hợp có chuyên ngành thì sinh viên không cần ghi chuyên ngành:
-
-\begin{outline}
- \1 Đối với kỹ sư chính quy:
-   \2 Từ K61 trở về trước: Ngành Kỹ thuật phần mềm
-   \2 Từ K62 trở về sau: Ngành Khoa học máy tính
- \1 Đối với cử nhân:
-   \2 Ngành Công nghệ thông tin
- \1 Đối với chương trình EliteTech:
-   \2 Chương trình Việt Nhật/KSTN: Ngành Công nghệ thông tin
-   \2 Chương trình ICT Global: Ngành Information Technology
-   \2 Chương trình DS\&AI: Ngành Khoa học dữ liệu
-\end{outline}
-
-\section{Đánh dấu (bullet) và đánh số (numering)}
-Việc sử dụng danh sách trong LaTeX khá đơn giản và không yêu cầu sinh viên phải thêm bất kỳ gói bổ sung nào. LaTeX cung cấp hai môi trường liệt kê đó là:
-\begin{itemize}
-\item Đánh dấu (bullet) là kiểu liệt kê không có thứ tự. Để sử dụng kiểu liệt kê đánh dấu, chúng ta khai báo như sau\\ 
-\verb$\begin{itemize}$\\
- \verb$\item$ Nội dung thứ nhất được viết ở đây.\\
-\verb$\item$ Nội dung thứ hai được viết ở đây.\\
- \verb$\item$ ...\\
-\verb$\end{itemize}$
-\item Đánh số (numering) là kiểu liệt kê có thứ tự. Để sử dụng kiểu liệt kê đánh số, chúng ta khai báo như sau\\
-\verb$\begin{enumerate}$\\
- \verb$\item$ Nội dung thứ nhất được viết ở đây.\\
-\verb$\item$ Nội dung thứ hai được viết ở đây.\\
- \verb$\item$ ...\\
-\verb$\end{enumerate}$
-\end{itemize}
-Chú ý các nội dung trình bày trong cả hai môi trường liệt kê theo sau lệnh \verb$\item$. Ngoài ra LaTeX còn cung cấp một số kiểu liệt kê khác, sinh viên có thể tham khảo tại \url{https://www.overleaf.com/learn/latex/Lists}
-\section{Cách thêm bảng}
-\begin{table}[h!]
+\begin{table}[H]
 \centering
-\begin{tabular}{||c c c c||} 
- \hline
- Col1 & Col2 & Col2 & Col3 \\ [0.5ex] 
- \hline\hline
- 1 & 6 & 87837 & 787 \\ 
- 2 & 7 & 78 & 5415 \\
- 3 & 545 & 778 & 7507 \\
- 4 & 545 & 18744 & 7560 \\
- 5 & 88 & 788 & 6344 \\ [1ex] 
- \hline
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh tổ chức (khóa chính) \\ \hline
+2 & created\_by & uuid & Người tạo tổ chức (khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+3 & name & text & Tên hiển thị của tổ chức \\ \hline
+4 & slug & text & Chuỗi định danh duy nhất dùng cho đường dẫn URL \\ \hline
+5 & status & organization\_status & Trạng thái hoạt động của tổ chức \\ \hline
+6 & created\_at & timestamp & Thời điểm tạo tổ chức \\ \hline
+7 & updated\_at & timestamp & Thời điểm cập nhật thông tin tổ chức \\ \hline
 \end{tabular}
-\caption{Table to test captions and labels.}
-\label{table:1}
+\caption{Đặc tả các cột của bảng \texttt{organizations}}
+\label{tbl:organizations}
 \end{table}
-Bảng \ref{table:1} là ví dụ về cách tạo bảng. Tất cả các bảng biểu phải được đề cập đến trong phần nội dung và phải được phân tích và bình luận.  Chú ý: Tạo bảng trong Latex khá phức tạp và mất thời gian, vì vậy sinh viên có thể sử dụng các công cụ hỗ trợ tạo bảng (Ví dụ: \url{https://www.tablesgenerator.com/}).
-Sinh viên có thể tìm hiểu sâu hơn về cách chèn ảnh trong Latex tại link \url{https://www.overleaf.com/learn/latex/Tables}.
 
-\section{Chèn hình ảnh}
-\begin{figure}
+\begin{table}[H]
 \centering
-\includegraphics[width=0.75\linewidth]{Hinhve/IoT.png}
-\caption{Internet vạn vật}
-\label{fig:iot}
-\end{figure}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & organization\_id & uuid & Định danh tổ chức (khóa chính, khóa ngoại liên kết bảng \texttt{organizations}) \\ \hline
+2 & user\_id & uuid & Định danh người dùng (khóa chính, khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+3 & role & organization\_role & Vai trò của người dùng trong tổ chức (quản trị, giảng viên, học viên) \\ \hline
+4 & status & member\_status & Trạng thái thành viên trong tổ chức (đã mời, đang hoạt động) \\ \hline
+5 & created\_at & timestamp & Thời điểm người dùng gia nhập tổ chức \\ \hline
+6 & updated\_at & timestamp & Thời điểm cập nhật trạng thái thành viên \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{organization\_members}}
+\label{tbl:organization_members}
+\end{table}
 
-Hình \ref{fig:iot} là ví dụ về cách chèn ảnh. Lưu ý chú thích của hình vẽ được đặt ngay dưới hình vẽ. Sinh viên có thể tìm hiểu sâu hơn về cách chèn ảnh trong Latex tại \url{https://www.overleaf.com/learn/latex/Inserting_Images}.
-
-Chú ý, tất cả các hình vẽ phải được đề cập đến trong phần nội dung và phải được phân tích và bình luận. 
-
-\section{Tài liệu tham khảo}
-\paragraph{Cách liệt kê}\mbox{}
-
-Áp dụng cách liệt kê theo quy định của IEEE. Ví dụ của việc trích dẫn như sau \cite{scott2013sdn}. Cụ thể, sinh viên sử dụng lệnh \verb!\cite{}! như sau \cite{ashton2009internet}. Chỉ những tài liệu được trích dẫn thì mới xuất hiện trong phần Tài liệu tham khảo. Tài liệu tham khảo cần có nguồn gốc rõ ràng và phải từ nguồn đáng tin cậy. Hạn chế trích dẫn tài liệu tham khảo từ các website, từ wikipedia.
-\paragraph{Các loại tài liệu tham khảo}\mbox{}
-
-Các nguồn tài liệu tham khảo chính là sách, bài báo trong các tạp chí, bài báo trong các hội nghị khoa học và các tài liệu tham khảo khác trên internet.
-
-\section{Cách viết phương trình và công thức toán học}
-Các gói amsmath, amssymb, amsfonts hỗ trợ viết phương trình/công thức toán học đã được bổ sung sẵn ở phần đầu của file main.tex. Một ví dụ về tạo phương trình \eqref{pt31} như sau 
-\begin{equation}\label{pt31}
-    F(x) = \int^a_b \frac{1}{3}x^3
-\end{equation}
-Phương trình \ref{pt31} là ví dụ về phương trình tích phân. Một phương trình khác không được đánh số thứ tự (gán nhãn)
-\begin{equation*}\label{pt32}
-    x[t_n] = \frac{1}{\sqrt{N}} \sum_{k=0}^{N-1}X[f_k]e^{j 2\pi n k/N}
-\end{equation*}
-Phương trình này thể hiện phép biến đổi Fourier rời rạc ngược (IDFT).
-\section{Qui cách đóng quyển}
-Phần bìa trước chế bản theo qui định; bìa trước và bìa sau là giấy liền khổ. Sử dụng keo nhiệt để dán gáy khi đóng quyển thay vì sử dụng băng dính và dập ghim như mô tả ở Hình~\ref{fig:Bia}
-\begin{figure}
+\begin{table}[H]
 \centering
-\includegraphics[width=0.5\linewidth]{Hinhve/Bia.PNG}
-\caption{Qui cách đóng quyển đồ án}
-\label{fig:Bia}
-\end{figure} 
-Phần gáy ĐATN cần ghi các thông tin tóm tắt sau:
-Kỳ làm ĐATN - Ngành đào tạo - Họ và tên sinh viên - Mã số sinh viên. Ví dụ:
-\begin{quote}
-2022.1 - KỸ THUẬT MÁY TÍNH - NGUYỄN VĂN A - 20221234
-\end{quote}
-Qui cách ghi chữ phần gáy như hình dưới đây:
-\begin{figure}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh khóa học (khóa chính) \\ \hline
+2 & organization\_id & uuid & Tổ chức sở hữu khóa học (khóa ngoại liên kết bảng \texttt{organizations}) \\ \hline
+3 & owner\_id & uuid & Giảng viên chủ sở hữu khóa học (khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+4 & title & text & Tên khóa học \\ \hline
+5 & description & text & Mô tả chi tiết nội dung khóa học \\ \hline
+6 & status & course\_status & Trạng thái khóa học (bản nháp, đã xuất bản, đã khóa) \\ \hline
+7 & created\_at & timestamp & Thời điểm tạo khóa học \\ \hline
+8 & updated\_at & timestamp & Thời điểm cập nhật thông tin khóa học \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{courses}}
+\label{tbl:courses}
+\end{table}
+
+\begin{table}[H]
 \centering
-\includegraphics[width=0.5\linewidth]{Hinhve/GayBia.PNG}
-\caption{Qui cách đóng quyển đồ án}
-\label{fig:Bia}
-\end{figure} 
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & course\_id & uuid & Định danh khóa học (khóa chính, khóa ngoại liên kết bảng \texttt{courses}) \\ \hline
+2 & user\_id & uuid & Định danh người dùng (khóa chính, khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+3 & role & course\_role & Vai trò trong khóa học (giảng viên trợ giảng, học viên) \\ \hline
+4 & created\_at & timestamp & Thời điểm tham gia khóa học \\ \hline
+5 & updated\_at & timestamp & Thời điểm cập nhật vai trò \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{course\_members}}
+\label{tbl:course_members}
+\end{table}
 
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & course\_id & uuid & Định danh khóa học (khóa chính, khóa ngoại liên kết bảng \texttt{courses}) \\ \hline
+2 & user\_id & uuid & Học sinh gửi yêu cầu tham gia (khóa chính, khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+3 & status & join\_request\_status & Trạng thái yêu cầu (đang chờ duyệt, đã đồng ý, từ chối) \\ \hline
+4 & created\_at & timestamp & Thời điểm gửi yêu cầu \\ \hline
+5 & updated\_at & timestamp & Thời điểm phê duyệt hoặc từ chối yêu cầu \\ \hline
+6 & requested\_role & course\_role & Vai trò đăng ký tham gia khóa học (giảng viên, học viên) \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{course\_join\_requests}}
+\label{tbl:course_join_requests}
+\end{table}
 
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh học phần (khóa chính) \\ \hline
+2 & course\_id & uuid & Khóa học chứa học phần (khóa ngoại liên kết bảng \texttt{courses}) \\ \hline
+3 & title & text & Tiêu đề chương học \\ \hline
+4 & order\_index & integer & Thứ tự sắp xếp của chương học trong khóa học \\ \hline
+5 & created\_at & timestamp & Thời điểm tạo học phần \\ \hline
+6 & updated\_at & timestamp & Thời điểm cập nhật tên học phần \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{course\_modules}}
+\label{tbl:course_modules}
+\end{table}
 
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh phân đoạn (khóa chính) \\ \hline
+2 & lesson\_id & uuid & Bài giảng tương ứng (khóa ngoại liên kết bảng \texttt{lessons}) \\ \hline
+3 & order\_index & integer & Thứ tự của phân đoạn trong bài học \\ \hline
+4 & start\_seconds & float & Thời điểm bắt đầu của phân đoạn trong video (giây) \\ \hline
+5 & end\_seconds & float & Thời điểm kết thúc của phân đoạn trong video (giây) \\ \hline
+6 & summary & text & Văn bản tóm tắt ý chính của phân đoạn \\ \hline
+7 & question\_count\_config & integer & Cấu hình số lượng câu hỏi cần sinh tự động cho phân đoạn này \\ \hline
+8 & coherence\_score & real & Điểm số liền mạch/mạch lạc của phân đoạn (AI đánh giá) \\ \hline
+9 & interaction\_config & jsonb & Cấu hình chi tiết sinh câu hỏi riêng cho phân đoạn \\ \hline
+10 & created\_at & timestamp & Thời điểm tạo phân đoạn \\ \hline
+11 & updated\_at & timestamp & Thời điểm chỉnh sửa phân đoạn \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{lesson\_transcript\_chunks}}
+\label{tbl:lesson_transcript_chunks}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh lượt làm bài (khóa chính) \\ \hline
+2 & user\_id & uuid & Học viên thực hiện làm bài (khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+3 & lesson\_id & uuid & Bài giảng tương ứng (khóa ngoại liên kết bảng \texttt{lessons}) \\ \hline
+4 & total\_score & real & Điểm số thực tế học viên đạt được \\ \hline
+5 & max\_score & real & Điểm số tối đa của toàn bộ bài học tương tác \\ \hline
+6 & status & text & Trạng thái làm bài (đang làm bài, đã nộp bài) \\ \hline
+7 & submitted\_at & timestamptz & Thời điểm nộp bài \\ \hline
+8 & attempt\_count & integer & Thứ tự lượt làm bài của học viên đối với bài học \\ \hline
+9 & started\_at & timestamptz & Thời điểm bắt đầu làm bài giảng \\ \hline
+10 & video\_watch\_fraction & real & Tỷ lệ thời lượng video mà học viên thực sự đã xem \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{lesson\_attempts}}
+\label{tbl:lesson_attempts}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & attempt\_id & uuid & Lượt làm bài tương ứng (khóa chính, khóa ngoại liên kết bảng \texttt{lesson\_attempts}) \\ \hline
+2 & interaction\_id & uuid & Định danh câu hỏi tương tác (khóa chính, khóa ngoại liên kết bảng \texttt{lesson\_interactions}) \\ \hline
+3 & response & jsonb & Dữ liệu câu trả lời của học viên (lưu động theo loại câu hỏi) \\ \hline
+4 & score & real & Điểm số đạt được cho câu trả lời này \\ \hline
+5 & max\_score & real & Điểm tối đa của câu hỏi này \\ \hline
+6 & feedback & text & Nhận xét phản hồi tự động từ hệ thống hoặc AI cho câu trả lời \\ \hline
+7 & time\_to\_answer\_ms & integer & Thời gian phản hồi/trả lời câu hỏi (mili-giây) \\ \hline
+8 & replay\_count & integer & Số lần học viên tua/xem lại đoạn video chứa câu hỏi \\ \hline
+9 & metrics & jsonb & Các chỉ số đo lường chi tiết hành vi làm bài của học viên \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{lesson\_attempt\_responses}}
+\label{tbl:lesson_attempt_responses}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh tác vụ (khóa chính) \\ \hline
+2 & lesson\_id & uuid & Bài giảng gắn liền với tác vụ (khóa ngoại liên kết bảng \texttt{lessons}) \\ \hline
+3 & chunk\_id & uuid & Phân đoạn tương ứng được xử lý (nếu có) \\ \hline
+4 & task\_type & text & Loại tác vụ (ví dụ: trích xuất audio, phiên âm, sinh câu hỏi) \\ \hline
+5 & status & task\_status & Trạng thái tác vụ (đang chờ, đang xử lý, thành công, thất bại, đã hủy) \\ \hline
+6 & worker\_id & uuid & Định danh của tiến trình nền nhận thực hiện tác vụ \\ \hline
+7 & heartbeat & timestamptz & Thời gian gửi tín hiệu hoạt động cuối cùng của worker \\ \hline
+8 & error\_msg & text & Nội dung thông báo lỗi chi tiết nếu tác vụ thất bại \\ \hline
+9 & input\_payload & bytea & Dữ liệu nhị phân đầu vào cấu hình cho tác vụ \\ \hline
+10 & output\_payload & bytea & Kết quả nhị phân đầu ra sau khi xử lý thành công \\ \hline
+11 & queue\_seq & bigint & Số thứ tự hàng đợi để ưu tiên xử lý trước sau \\ \hline
+12 & created\_at & timestamptz & Thời điểm tạo tác vụ \\ \hline
+13 & updated\_at & timestamptz & Thời điểm cập nhật trạng thái tác vụ gần nhất \\ \hline
+14 & started\_at & timestamptz & Thời điểm bắt đầu thực thi tác vụ \\ \hline
+15 & finished\_at & timestamptz & Thời điểm kết thúc hoặc thất bại tác vụ \\ \hline
+16 & created\_by & uuid & Người khởi tạo tác vụ (khóa ngoại liên kết bảng \texttt{users}) \\ \hline
+17 & progress\_step & text & Tên bước tiến trình đang thực thi hiện tại \\ \hline
+18 & progress\_current & integer & Chỉ số tiến độ hiện tại \\ \hline
+19 & progress\_total & integer & Tổng số bước tiến độ dự kiến \\ \hline
+20 & message & text & Thông điệp tiến trình bổ sung hiển thị cho người dùng \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{tasks}}
+\label{tbl:tasks}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|l|p{6.2cm}|}
+\hline
+\textbf{STT} & \textbf{Tên cột} & \textbf{Kiểu dữ liệu} & \textbf{Mô tả} \\ \hline
+1 & id & uuid & Định danh trạng thái phân tích (khóa chính) \\ \hline
+2 & lesson\_id & uuid & Bài giảng tương ứng (khóa ngoại liên kết bảng \texttt{lessons}) \\ \hline
+3 & status & lesson\_analysis\_status & Trạng thái phân tích (pending, processing, done, error, transcript\_extracted, chunks\_ready) \\ \hline
+4 & error\_msg & text & Chi tiết thông báo lỗi nếu phân tích thất bại \\ \hline
+5 & created\_at & timestamp & Thời điểm khởi tạo phân tích \\ \hline
+6 & updated\_at & timestamp & Thời điểm cập nhật trạng thái gần nhất \\ \hline
+\end{tabular}
+\caption{Đặc tả các cột của bảng \texttt{lesson\_analyses}}
+\label{tbl:lesson_analyses}
+\end{table}
+
+\subsection{Thiết kế cơ sở dữ liệu khóa-giá trị FoundationDB}
+Hệ thống sử dụng FoundationDB (kho lưu trữ khóa-giá trị NoSQL) để lưu trữ bản chép lời video, thông tin phân đoạn nội dung và lược đồ theo dõi tiến trình xem video (watch coverage) theo thời gian thực. Cấu trúc các khóa và không gian tên (namespaces) được đặc tả chi tiết ở Bảng~\ref{tbl:fdb_schema}.
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|>{\raggedright\arraybackslash}p{4.2cm}|>{\raggedright\arraybackslash}p{5.5cm}|}
+\hline
+\textbf{STT} & \textbf{Không gian tên} & \textbf{Cấu trúc khóa (Key)} & \textbf{Mô tả dữ liệu giá trị (Value)} \\ \hline
+1 & lesson & \texttt{("lesson",\allowbreak "m",\allowbreak lesson\_id,\allowbreak "transcript")} & Số nguyên 4-byte lưu số lượng khối dữ liệu. \\ \hline
+2 & lesson & \texttt{("lesson",\allowbreak "c",\allowbreak lesson\_id,\allowbreak "transcript",\allowbreak idx)} & Khối nhị phân chứa nội dung bản chép lời (\texttt{FdbTranscript} Protobuf). \\ \hline
+3 & lesson & \texttt{("lesson",\allowbreak "m",\allowbreak lesson\_id,\allowbreak "segments")} & Số nguyên 4-byte lưu số lượng khối phân đoạn. \\ \hline
+4 & lesson & \texttt{("lesson",\allowbreak "c",\allowbreak lesson\_id,\allowbreak "segments",\allowbreak idx)} & Khối nhị phân chứa danh sách phân đoạn (\texttt{FdbSegmentsBlob} Protobuf). \\ \hline
+5 & chunk & \texttt{("chunk",\allowbreak "m",\allowbreak chunk\_id,\allowbreak "transcript")} & Số nguyên 4-byte lưu số lượng khối phân đoạn. \\ \hline
+6 & chunk & \texttt{("chunk",\allowbreak "c",\allowbreak chunk\_id,\allowbreak "transcript",\allowbreak idx)} & Khối nhị phân chứa bản chép lời phân đoạn (\texttt{FdbTranscript} Protobuf). \\ \hline
+7 & watch\_cov & \texttt{("watch\_cov",\allowbreak "r",\allowbreak user\_id,\allowbreak lesson\_id)} & Mảng byte đại diện cho bitmap giây xem video. \\ \hline
+8 & watch\_cov\_ts & \texttt{("watch\_cov\_ts",\allowbreak "r",\allowbreak user\_id,\allowbreak lesson\_id)} & Số nguyên 8-byte lưu Unix timestamp của lượt xem đầu tiên. \\ \hline
+\end{tabular}
+\caption{Đặc tả cấu trúc khóa và giá trị trong FoundationDB}
+\label{tbl:fdb_schema}
+\end{table}
+
+\subsection{Thiết kế kho lưu trữ đối tượng SeaweedFS}
+Hệ thống sử dụng SeaweedFS (S3 compatible object storage) để lưu trữ các tệp tin nhị phân dung lượng lớn bao gồm video bài giảng và các tệp âm thanh ghi âm/TTS. Quy ước các đường dẫn đối tượng được đặc tả chi tiết ở Bảng~\ref{tbl:s3_schema}.
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|>{\raggedright\arraybackslash}p{4.8cm}|l|>{\raggedright\arraybackslash}p{5.2cm}|}
+\hline
+\textbf{STT} & \textbf{Đường dẫn đối tượng (Key)} & \textbf{Định dạng} & \textbf{Mô tả} \\ \hline
+1 & \texttt{lessons/\allowbreak <lesson\_id>/\allowbreak video.mp4} & mp4 & Tệp video bài giảng gốc do giảng viên tải lên. \\ \hline
+2 & \texttt{lessons/\allowbreak <lesson\_id>/\allowbreak ai-audio/\allowbreak <uuid>.wav} & wav & Tệp âm thanh tương tác sinh tự động bằng công nghệ TTS (Piper). \\ \hline
+3 & \texttt{lessons/\allowbreak <lesson\_id>/\allowbreak ai-audio-preview/\allowbreak <uuid>.wav} & wav & Tệp âm thanh nghe thử bài nghe do giảng viên sinh ra trong khâu biên tập. \\ \hline
+4 & \texttt{lessons/\allowbreak <lesson\_id>/\allowbreak student-recordings/\allowbreak <filename>} & wav, webm & Tệp ghi âm câu trả lời phát âm thực tế của học viên để chấm điểm. \\ \hline
+5 & \texttt{seed/\allowbreak <org-slug>/\allowbreak <path>} & mp4, wav, png & Tệp dữ liệu mẫu ban đầu của hệ thống. \\ \hline
+\end{tabular}
+\caption{Quy ước đường dẫn đối tượng trong Bucket SeaweedFS}
+\label{tbl:s3_schema}
+\end{table}
 
 \end{document}

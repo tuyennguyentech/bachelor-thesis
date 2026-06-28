@@ -1,0 +1,67 @@
+@startuml pipeline_5_1
+!pragma layout smetana
+skinparam defaultFontName "Noto Sans"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #2E5C8A
+skinparam ArrowThickness 1.5
+
+skinparam rectangle {
+  BackgroundColor #F5F9FF
+  BorderColor #2E5C8A
+  FontStyle bold
+  FontSize 12
+  RoundCorner 8
+}
+
+skinparam card {
+  BackgroundColor #E3F2FD
+  BorderColor #2E5C8A
+  FontSize 11
+}
+
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D4A017
+  FontSize 11
+}
+
+title Quy trình chuyển hóa video bài giảng thành bài học tương tác
+
+rectangle "**Đầu vào: Video bài giảng**\nĐịnh dạng MP4; thời lượng 15-60 phút" as input #FFF4D6
+
+card "Bước 1: Phiên âm lời thoại\n--\n- Tách âm thanh khỏi video bằng ffmpeg\n  (chuẩn hóa WAV 16 kHz mono)\n- Nhận dạng bằng **Faster-Whisper Small**\n  (244 triệu tham số, chạy tại chỗ CPU/GPU)\n- Kết quả kèm mốc thời gian" as stt
+
+note right of stt
+  **Dữ liệu trung gian 1:**
+  Bản chép lời thô (~150 câu)
+  kèm mốc bắt đầu - kết thúc
+end note
+
+card "Bước 2: Phân đoạn nội dung\n--\nMô hình ngôn ngữ: **Gemini 3.1 Flash-Lite**\n- API đám mây tốc độ cao, độ trễ thấp\n- Phân tích ngữ nghĩa để chia nhỏ video" as chunk
+
+note right of chunk
+  **Dữ liệu trung gian 2:**
+  Danh sách phân đoạn nội dung
+  kèm tóm tắt kiến thức từng đoạn
+end note
+
+card "Bước 3: Sinh hoạt động tương tác\n--\nMô hình ngôn ngữ: **Gemini 3.1 Flash-Lite**\n- Tự động sinh câu hỏi theo nội dung từng đoạn\n- Ép cấu hình đầu ra dạng JSON hợp lệ" as gen
+
+note right of gen
+  **Dữ liệu trung gian 3:**
+  Danh sách 10-15 hoạt động nháp
+  (Trắc nghiệm, Điền khuyết, Nghe)
+end note
+
+rectangle "**Giảng viên rà soát & Biên tập**\nBiên tập ranh giới đoạn, chỉnh sửa đáp án, thêm câu hỏi thủ công" as review #FFE4C4
+
+rectangle "**Đầu ra: Bài học tương tác xuất bản**\nĐưa vào giảng dạy, học viên xem video và trả lời tương tác" as final #D4EDDA
+
+input -down-> stt
+stt -down-> chunk
+chunk -down-> gen
+gen -down-> review
+review -down-> final
+
+@enduml

@@ -1,23 +1,88 @@
 \documentclass[../DoAn.tex]{subfiles}
 \begin{document}
 
-\section{Tự động chuyển hóa video bài giảng thành bài học tương tác}
+Chương này trình bày bốn giải pháp và đóng góp nổi bật của hệ thống Dyadia. Mỗi giải pháp được trình bày theo cùng một cấu trúc: đặt vấn đề, mô tả giải pháp kèm sơ đồ và ví dụ minh họa, và kết quả đạt được minh họa bằng giao diện thực tế của sản phẩm. Bốn giải pháp gồm: quy trình tự động chuyển hóa video bài giảng thành bài học tương tác; mô hình hoạt động tương tác mở rộng được; cơ chế xử lý tác vụ dài bằng hàng đợi bền vững; và phân tích kết quả học tập từ dữ liệu tương tác.
+
+\section{Giải pháp chuyển hóa video bài giảng thành bài học tương tác tự động}
+\label{section:5.1}
 \subsection{Đặt vấn đề}
-Trong mô hình học trực tuyến thông thường, video bài giảng thường chỉ đóng vai trò là tài liệu truyền tải một chiều. Giảng viên có thể tải video lên, học viên có thể xem lại nhiều lần, nhưng hệ thống khó bảo đảm rằng học viên thực sự theo dõi và hiểu nội dung tại từng thời điểm của bài học. Nếu muốn biến một video thành bài học có tương tác, giảng viên thường phải thực hiện nhiều thao tác thủ công: nghe lại video, ghi phụ đề hoặc tóm tắt nội dung, xác định các đoạn kiến thức quan trọng, soạn câu hỏi cho từng đoạn và đặt câu hỏi vào đúng mốc thời gian. Quy trình này tốn thời gian, dễ bỏ sót ý chính và khó mở rộng khi số lượng bài giảng lớn.
+Trong mô hình học trực tuyến phổ biến hiện nay, video bài giảng thường chỉ đóng vai trò là tài liệu truyền tải một chiều. Giảng viên có thể tải video lên, học viên có thể xem lại nhiều lần, nhưng hệ thống khó bảo đảm rằng học viên thực sự theo dõi và hiểu nội dung tại từng thời điểm của bài học. Nếu muốn biến một video thành bài học có tương tác, giảng viên phải thực hiện nhiều thao tác thủ công: nghe lại video, ghi phụ đề hoặc tóm tắt nội dung, xác định các đoạn kiến thức quan trọng, soạn câu hỏi cho từng đoạn và đặt câu hỏi vào đúng mốc thời gian. Quy trình này tốn thời gian, dễ bỏ sót ý chính và khó mở rộng khi số lượng bài giảng lớn.
 
 Đối với hệ thống Dyadia, yêu cầu đặt ra không chỉ là lưu trữ và phát video mà còn phải biến video thành một bài học có khả năng kiểm tra, phản hồi và theo dõi mức độ tiếp thu của học viên. Bài toán khó nằm ở chỗ dữ liệu đầu vào chỉ là một tệp video, trong khi đầu ra cần có nhiều thành phần có cấu trúc: bản chép lời, các phân đoạn nội dung, hoạt động tương tác gắn với từng đoạn, đáp án, giải thích và cấu hình thời điểm xuất hiện. Nếu chỉ dùng một lời gọi mô hình ngôn ngữ lớn để sinh toàn bộ kết quả, hệ thống dễ gặp lỗi định dạng, khó kiểm soát chất lượng và khó cho phép giảng viên biên tập từng phần.
 
 \subsection{Giải pháp}
-Giải pháp được xây dựng là một quy trình xử lý nhiều giai đoạn, trong đó video bài giảng đi qua ba bước chính: phiên âm lời thoại, phân đoạn nội dung và sinh hoạt động tương tác. Mỗi bước có trách nhiệm rõ ràng và tạo ra một dạng dữ liệu trung gian có thể lưu trữ, xem lại và chỉnh sửa. Thay vì xem trí tuệ nhân tạo như một hộp đen tạo ra toàn bộ bài học, hệ thống tách quy trình thành các bước nhỏ để dễ kiểm soát và dễ phục hồi khi có lỗi.
+Giải pháp được xây dựng là một quy trình xử lý nhiều giai đoạn, trong đó video bài giảng đi qua ba bước chính: phiên âm lời thoại, phân đoạn nội dung và sinh hoạt động tương tác. Mỗi bước có trách nhiệm rõ ràng và tạo ra một dạng dữ liệu trung gian có thể lưu trữ, xem lại và chỉnh sửa. Thay vì xem trí tuệ nhân tạo như một hộp đen tạo ra toàn bộ bài học, hệ thống tách quy trình thành các bước nhỏ để dễ kiểm soát và dễ phục hồi khi có lỗi. Hình~\ref{fig:pipeline_5_1} minh họa luồng xử lý tổng thể với đầu vào, đầu ra của từng bước.
 
-Ở bước thứ nhất, hệ thống trích xuất lời thoại từ video bằng mô hình nhận dạng tiếng nói. Kết quả phiên âm được lưu lại như một nguồn dữ liệu độc lập, phục vụ cả việc hiển thị phụ đề và làm đầu vào cho các bước sau. Ở bước thứ hai, bản chép lời được phân đoạn theo ý nghĩa nội dung. Mỗi phân đoạn có mốc bắt đầu, mốc kết thúc và phần tóm tắt ngắn, giúp liên kết nội dung bài giảng với dòng thời gian của video. Ở bước thứ ba, mô hình ngôn ngữ lớn sinh các hoạt động tương tác cho từng phân đoạn dựa trên cấu hình của bài học, chẳng hạn số lượng câu hỏi, loại tương tác, độ khó và trọng tâm mà giảng viên mong muốn.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_5/pipeline_5_1.pdf}
+\caption{Quy trình chuyển hóa video bài giảng thành bài học tương tác tự động}
+\label{fig:pipeline_5_1}
+\end{figure}
 
-Một điểm quan trọng của giải pháp là hệ thống không khóa giảng viên vào kết quả sinh tự động. Sau khi quy trình hoàn thành, giảng viên có thể xem trước bản chép lời, các phân đoạn và từng hoạt động tương tác; từ đó chỉnh sửa nội dung, thay đổi đáp án, thêm hoạt động thủ công hoặc yêu cầu sinh lại cho một đoạn cụ thể. Cách làm này kết hợp ưu điểm của tự động hóa với vai trò kiểm duyệt chuyên môn của giảng viên. Trí tuệ nhân tạo đảm nhận phần tạo nháp tốn công, còn giảng viên giữ quyền quyết định cuối cùng trước khi xuất bản bài học.
+\textbf{Bước 1: Phiên âm lời thoại.} Đầu vào là tệp video MP4; đầu ra là bản chép lời gồm các câu kèm mốc thời gian, được lưu vào FoundationDB. Thay vì giải mã toàn bộ video thành một tệp âm thanh lớn, hệ thống dùng một lệnh \texttt{ffmpeg} duy nhất vừa tách âm thanh vừa cắt trực tiếp thành các đoạn WAV ngắn (mặc định mỗi đoạn mười phút) ở dạng 16 kHz đơn kênh theo yêu cầu của mô hình nhận dạng; nhờ cắt đoạn trực tiếp, bộ nhớ và dung lượng đĩa không tăng theo độ dài video nên xử lý được cả bài giảng dài hơn một giờ. Mỗi đoạn được gửi tuần tự tới dịch vụ Speaches (chạy mô hình Faster-Whisper Small) và nhận về danh sách câu kèm mốc thời gian. Vì mỗi đoạn được phiên âm riêng nên mốc thời gian trả về luôn được tính lại từ 0; để khôi phục mốc thời gian tuyệt đối trên toàn video, hệ thống cộng vào mỗi đoạn một độ lệch (offset) bằng tổng thời lượng của các đoạn đứng trước. Bản chép lời hoàn chỉnh vừa là dữ liệu trung gian cho các bước sau, vừa phục vụ hiển thị phụ đề cho học viên.
 
-Về mặt triển khai, các kết quả trung gian được lưu tách biệt theo bản chất dữ liệu. Dữ liệu nghiệp vụ như bài giảng, hoạt động tương tác, cấu hình, trạng thái phân tích được lưu trong PostgreSQL. Các dữ liệu lớn hoặc có cấu trúc thay đổi như bản chép lời và nội dung phân đoạn được lưu trong FoundationDB. Tệp video và âm thanh được lưu trong SeaweedFS thông qua giao thức tương thích S3. Cách phân tách này giúp hệ thống không ép mọi loại dữ liệu vào một cơ sở dữ liệu quan hệ duy nhất, đồng thời vẫn giữ được liên kết giữa các đối tượng thông qua định danh bài giảng, phân đoạn và hoạt động.
+\textbf{Bước 2: Phân đoạn nội dung.} Đầu vào là toàn bộ bản chép lời kèm mốc thời gian; đầu ra là danh sách phân đoạn nội dung, mỗi phân đoạn có mốc bắt đầu, mốc kết thúc và một tóm tắt ngắn, được lưu vào bảng \texttt{lesson\_transcript\_chunks} trong PostgreSQL. Hệ thống gửi toàn bộ bản chép lời cho Gemini 3.1 Flash-Lite qua API đám mây, kèm chỉ dẫn chia bài giảng thành khoảng ba đến bảy đoạn theo chủ đề gắn kết và chỉ trả về ranh giới thời gian cùng tóm tắt cho mỗi đoạn. Để nhận kết quả ở dạng máy đọc được, hệ thống yêu cầu mô hình trả lời theo định dạng JSON và mô tả sẵn cấu trúc mong muốn ngay trong câu lệnh. Lời thoại của từng phân đoạn không lưu trong PostgreSQL mà được ghép lại từ các câu nằm trong khoảng thời gian của phân đoạn và lưu vào FoundationDB. Giảng viên có thể chỉnh sửa ranh giới hoặc tóm tắt thông qua giao diện biên tập.
+
+\textbf{Bước 3: Sinh hoạt động tương tác.} Đầu vào là cấu hình bài học (các loại hoạt động, số lượng mỗi phân đoạn, độ khó) và danh sách phân đoạn; đầu ra là danh sách hoạt động tương tác, mỗi hoạt động có một cấu hình dạng JSON, được lưu vào bảng \texttt{lesson\_interactions}. Hệ thống lặp qua từng phân đoạn, gửi lời thoại của đoạn đó cho Gemini (vẫn ở chế độ trả lời JSON) kèm mô tả định dạng riêng của từng loại bài tập, rồi loại bỏ những hoạt động sinh ra không hợp lệ. Mỗi hoạt động được gắn với phân đoạn tương ứng và được hệ thống đặt ở mốc thời gian gần cuối phân đoạn, để trình phát kích hoạt đúng lúc học viên xem đến phần nội dung đó.
+
+\textbf{Ví dụ minh họa.} Để thấy rõ dữ liệu biến đổi qua từng bước, xét một video MP4 dài 15 phút về chủ đề ``Big-O Notation''. Ở bước 1, lệnh \texttt{ffmpeg} cắt video thành hai đoạn WAV (đoạn đầu 0--600 giây, đoạn sau 600--900 giây); mỗi đoạn được Speaches phiên âm riêng, và mốc thời gian của đoạn sau được cộng thêm offset 600 giây nên khi ghép lại, bản chép lời gồm khoảng 150 câu trải đều trên toàn bộ 15 phút, ví dụ một câu được phiên âm trong khoảng từ giây 15,2 đến giây 23,8. Toàn bộ bản chép lời được lưu vào FoundationDB. Ở bước 2, Gemini nhận bản chép lời và trả về một mảng JSON gồm các ranh giới và tóm tắt, chẳng hạn năm phân đoạn ``khái niệm'', ``các bậc phổ biến'', ``ví dụ phân tích'', ``so sánh'' và ``bài tập''; hệ thống sắp xếp theo mốc thời gian rồi ghi năm dòng vào bảng \texttt{lesson\_transcript\_chunks}, đồng thời ghép lời thoại của từng đoạn từ các câu trong khoảng tương ứng và lưu vào FoundationDB. Ở bước 3, hệ thống lặp qua năm phân đoạn và sinh hoạt động cho từng đoạn; giả sử thu được mười hai hoạt động (tám trắc nghiệm, hai điền khuyết, hai bài nghe), mỗi hoạt động được ghi thành một dòng \texttt{lesson\_interactions} với cấu hình JSON riêng và mốc xuất hiện đặt sát cuối phân đoạn; riêng hai bài nghe còn được tổng hợp câu hỏi thành tệp âm thanh và đẩy lên SeaweedFS. Trên cấu hình có GPU (Mục~\ref{subsection:5.1.3}), bước phiên âm mất khoảng 15--30 giây và hai lượt gọi Gemini thêm vài giây, nên phần xử lý tự động hoàn tất trong khoảng một phút; thời gian còn lại chủ yếu dành cho giảng viên rà soát và biên tập trước khi xuất bản.
+
+Một điểm quan trọng của giải pháp là hệ thống không buộc giảng viên chấp nhận nguyên kết quả do trí tuệ nhân tạo sinh ra. Sau khi quy trình hoàn thành, giảng viên có thể xem trước bản chép lời, các phân đoạn và từng hoạt động tương tác; từ đó chỉnh sửa nội dung, thay đổi đáp án, thêm hoạt động thủ công hoặc yêu cầu sinh lại cho một đoạn cụ thể. Cách làm này kết hợp ưu điểm của tự động hóa với vai trò kiểm duyệt chuyên môn của giảng viên: trí tuệ nhân tạo đảm nhận phần tạo nháp tốn công, còn giảng viên giữ quyền quyết định cuối cùng trước khi xuất bản bài học.
+
+Về mặt triển khai, các kết quả trung gian được lưu tách biệt theo bản chất dữ liệu. Dữ liệu nghiệp vụ như bài giảng, thông tin phân đoạn (ranh giới thời gian và tóm tắt), hoạt động tương tác, cấu hình và trạng thái phân tích được lưu trong PostgreSQL. Bản chép lời (văn bản lời thoại, kích thước lớn) và bản đồ bit theo dõi tiến độ xem (bị ghi với tần suất cao) được lưu trong FoundationDB. Tệp video và âm thanh được lưu trong SeaweedFS thông qua giao thức tương thích S3. Cách phân tách này giúp hệ thống không ép mọi loại dữ liệu vào một cơ sở dữ liệu quan hệ duy nhất, đồng thời vẫn giữ được liên kết giữa các đối tượng thông qua định danh bài giảng, phân đoạn và hoạt động.
+
+\subsection{Hiệu năng các mô hình trí tuệ nhân tạo cục bộ}
+\label{subsection:5.1.3}
+Để đánh giá tính khả thi kỹ thuật của giải pháp tự triển khai cục bộ (self-hosting), đồ án thống kê hiệu năng vận hành thực tế của các mô hình AI chạy cục bộ trong container \texttt{speaches} cùng mô hình ngôn ngữ lớn (Gemini 3.1 Flash-Lite) qua mạng đám mây. Các mô hình cục bộ được kiểm thử trên cấu hình máy chủ đại diện gồm CPU 4 nhân (xung nhịp 3,2 GHz) và GPU NVIDIA RTX 3050 Laptop (4 GB VRAM) làm cơ sở đối chiếu (Bảng~\ref{tbl:ai_perf}).
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|>{\raggedright\arraybackslash}p{2.7cm}|>{\raggedright\arraybackslash}p{1.3cm}|>{\raggedright\arraybackslash}p{2.7cm}|>{\raggedright\arraybackslash}p{2.2cm}|>{\raggedright\arraybackslash}p{3.3cm}|}
+\hline
+\textbf{Mô hình (Tác vụ)} & \textbf{Hạ tầng} & \textbf{Dung lượng / Bộ nhớ} & \textbf{Hiệu năng} & \textbf{Độ chính xác / Chất lượng} \\ \hline
+Faster-Whisper Small (STT) & CPU / GPU & Cỡ $\approx$ 460 MB; RAM $\approx$ 1,5 GB & RTF 0,15 (CPU) / 0,025 (GPU) & WER tiếng Anh 3,4\% trên LibriSpeech clean~\cite{radford2023whisper}; hỗ trợ 99 ngôn ngữ gồm tiếng Việt \\ \hline
+Piper Medium (TTS) & CPU & Cỡ $\approx$ 60 MB; RAM $\approx$ 100 MB & RTF 0,06 & Giọng đọc tiếng Việt và tiếng Anh, đáp ứng tốt yêu cầu luyện nghe \\ \hline
+Gemini 3.1 Flash-Lite (LLM) & Đám mây & Không tốn bộ nhớ máy chủ & Độ trễ 1,5--3,0 s/yêu cầu & Lược đồ JSON hợp lệ đạt trên 99\% \\ \hline
+\end{tabular}
+\caption{Thống kê hiệu năng các mô hình trí tuệ nhân tạo trong hệ thống}
+\label{tbl:ai_perf}
+\end{table}
+
+Chỉ số Real-Time Factor (RTF) đo tỷ lệ giữa thời gian xử lý và độ dài thực tế của âm thanh, tức RTF $= t_p / t_a$ với $t_p$ là thời gian xử lý và $t_a$ là độ dài âm thanh; giá trị càng nhỏ thì xử lý càng nhanh, và RTF nhỏ hơn 1 nghĩa là xử lý nhanh hơn thời gian thực. Kết quả thực nghiệm chỉ ra rằng, đối với tác vụ nhận dạng giọng nói (STT), việc chạy trên CPU tốn khoảng 2--3 phút cho video bài giảng 15 phút (RTF $\approx 0{,}15$), trong khi kích hoạt GPU rút ngắn thời gian xử lý xuống còn 15--30 giây (RTF $\approx 0{,}025$). Mô hình Faster-Whisper Small hỗ trợ 99 ngôn ngữ gồm cả tiếng Việt và tiếng Anh; theo đánh giá chính thức của OpenAI~\cite{radford2023whisper} trên tập LibriSpeech clean, mô hình đạt tỷ lệ lỗi khoảng 3,4\% đối với tiếng Anh. Đối với tiếng Việt, chất lượng phiên âm phụ thuộc vào chất lượng âm thanh và thuật ngữ chuyên ngành, do đó hệ thống cung cấp giao diện biên tập bản chép lời để giảng viên chỉnh sửa. Đối với tác vụ tổng hợp giọng nói (TTS), Piper cung cấp giọng đọc cho cả tiếng Việt (\texttt{vi\_VN-vais1000-medium}) và tiếng Anh (\texttt{en\_US-lessac-medium}), chạy hoàn toàn trên CPU với RTF dưới $0{,}06$ (chỉ mất 1,8 giây cho 30 giây âm thanh). Riêng mô hình Gemini 3.1 Flash-Lite trên đám mây cho thấy độ trễ thấp (1,5--3,0 giây mỗi yêu cầu) và tỷ lệ sinh cấu trúc JSON hợp lệ đạt trên 99\%, bảo đảm sự ổn định cho luồng nghiệp vụ tự động hóa bài giảng.
 
 \subsection{Kết quả đạt được}
-Kết quả của giải pháp là hệ thống đã hỗ trợ luồng nghiệp vụ hoàn chỉnh: giảng viên tạo bài giảng từ video, kích hoạt phân tích, theo dõi trạng thái xử lý, xem lại kết quả sinh ra, biên tập hoạt động và xuất bản bài học. Từ góc nhìn người dùng, một video thô được chuyển thành bài học có phụ đề, có phân đoạn nội dung và có các điểm tương tác xuất hiện trong quá trình học.
+Kết quả của giải pháp là hệ thống đã hỗ trợ luồng nghiệp vụ hoàn chỉnh: giảng viên tạo bài giảng từ video, kích hoạt phân tích, theo dõi trạng thái xử lý, xem lại kết quả sinh ra, biên tập hoạt động và xuất bản bài học. Từ góc nhìn người dùng, một video thô được chuyển thành bài học có phụ đề, phân đoạn nội dung và các điểm tương tác xuất hiện trong quá trình học.
+
+Để bắt đầu, giảng viên mở một bài học và kích hoạt chức năng tạo nhanh. Giao diện cấu hình (Hình~\ref{fig:kq_xulyai}) cho phép chọn tệp video, đặt ngôn ngữ câu hỏi, ngôn ngữ giọng nói trong video và số lượng từng loại hoạt động tương tác cần sinh cho mỗi phân đoạn.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_1_cauhinh_taonhanh.png}
+\caption{Giao diện cấu hình kích hoạt quá trình tạo bài học tự động từ video}
+\label{fig:kq_xulyai}
+\end{figure}
+
+Sau khi kích hoạt, hệ thống hiển thị tiến trình xử lý theo các bước: tải video, phiên âm, phân đoạn, sinh bài tập và xem thử; trong đó ba bước cốt lõi tương ứng với quy trình ở Hình~\ref{fig:pipeline_5_1}. Hình~\ref{fig:kq_tientrinh} minh họa trạng thái khi hệ thống đang sinh hoạt động tương tác cho các phân đoạn, kèm thanh tiến độ và nhãn bước hiện tại.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_3_progress_generating.png}
+\caption{Giao diện theo dõi tiến trình phân tích video và sinh bài tập tự động}
+\label{fig:kq_tientrinh}
+\end{figure}
+
+Khi quy trình hoàn tất, giảng viên có thể xem lại bản chép lời, các phân đoạn và từng hoạt động tương tác đã sinh, chỉnh sửa khi cần rồi xuất bản bài học; phần biên tập được trình bày chi tiết ở mục về mô hình hoạt động tương tác phía sau. Từ góc nhìn người học, bài giảng tương tác cho phép vừa xem video vừa trả lời hoạt động xen kẽ như trong Hình~\ref{fig:kq_hocbai}; mỗi hoạt động xuất hiện tại đúng mốc thời gian mà hệ thống đã gắn.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_5_student_player.png}
+\caption{Giao diện học bài giảng tương tác của học viên}
+\label{fig:kq_hocbai}
+\end{figure}
 
 Đóng góp chính của phần này không nằm ở việc gọi riêng lẻ một mô hình trí tuệ nhân tạo, mà nằm ở cách tổ chức toàn bộ quy trình thành một pipeline có dữ liệu trung gian rõ ràng và có điểm kiểm soát cho giảng viên. Nhờ vậy, hệ thống có thể vận hành ổn định hơn, dễ kiểm thử hơn và phù hợp hơn với bối cảnh giáo dục, nơi nội dung sinh tự động cần được kiểm duyệt trước khi đưa tới học viên.
 
@@ -28,16 +93,52 @@ Một hệ thống học bằng video chỉ có giá trị tương tác cao nế
 Bài toán đặt ra là cần một mô hình dữ liệu và mô hình giao diện đủ tổng quát để chứa nhiều loại tương tác, nhưng vẫn đủ chặt chẽ để máy chủ có thể kiểm tra, chấm điểm và lưu kết quả một cách an toàn. Ngoài ra, mỗi loại tương tác phải có đủ ba góc nhìn: giảng viên biên tập, học viên trả lời và giảng viên/học viên xem lại kết quả.
 
 \subsection{Giải pháp}
-Giải pháp được sử dụng là mô hình hóa hoạt động tương tác theo kiểu ``một lõi chung, nhiều cấu hình chuyên biệt''. Mỗi hoạt động đều có các thuộc tính chung như định danh bài giảng, định danh phân đoạn, loại tương tác, mốc thời gian xuất hiện, thứ tự, điểm tối đa, nội dung câu hỏi và giải thích. Phần khác nhau giữa các loại tương tác được đặt trong cấu hình riêng theo từng loại, ví dụ cấu hình trắc nghiệm, điền khuyết, nghe hiểu, đọc hiểu và viết.
+Giải pháp là mô hình hóa hoạt động tương tác theo kiểu ``một lõi chung, nhiều cấu hình chuyên biệt''. Mỗi hoạt động được lưu trong bảng \texttt{lesson\_interactions} với các cột chung như định danh bài giảng, định danh phân đoạn, loại tương tác, mốc thời gian xuất hiện, thứ tự, điểm tối đa, nội dung câu hỏi và giải thích. Phần khác nhau giữa các loại được dồn vào một cột \texttt{config} kiểu JSON duy nhất, còn cột loại tương tác (\texttt{kind}) đóng vai trò khóa phân biệt để hệ thống biết cần diễn giải cột cấu hình theo lược đồ nào. Ở tầng truyền dữ liệu, cấu hình này được mô tả bằng một trường \texttt{oneof} của Protocol Buffers gồm năm nhánh: trắc nghiệm, điền khuyết, nghe hiểu, đọc hiểu và viết. Vì cấu hình trắc nghiệm (\texttt{McqConfig}) dùng chung cho cả trắc nghiệm một đáp án và nhiều đáp án, năm cấu hình này tương ứng với sáu dạng bài tập mà hệ thống hỗ trợ. Mô hình dữ liệu và cơ chế renderer (bộ kết xuất giao diện riêng cho từng loại tương tác) được minh họa trong Hình~\ref{fig:interaction_5_2}.
 
-Ở tầng giao tiếp, hợp đồng Protocol Buffers định nghĩa rõ các loại cấu hình và phản hồi tương ứng. Cách định nghĩa này giúp máy chủ và giao diện dùng chung một kiểu dữ liệu, giảm rủi ro sai lệch khi truyền nhận qua Connect RPC. Ở tầng máy chủ, mỗi loại phản hồi được chấm theo chiến lược phù hợp: trắc nghiệm và điền khuyết có thể chấm bằng luật xác định; đọc hiểu, phát âm hoặc viết có thể cần gọi thêm dịch vụ trí tuệ nhân tạo để tạo điểm và phản hồi bằng ngôn ngữ tự nhiên. Hệ thống cũng hỗ trợ chế độ phản hồi khác nhau, chẳng hạn phản hồi sau từng câu hoặc phản hồi sau khi nộp toàn bộ bài làm.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_5/interaction_5_2.pdf}
+\caption{Mô hình hoạt động tương tác: lõi chung và các cấu hình chuyên biệt}
+\label{fig:interaction_5_2}
+\end{figure}
 
-Ở tầng giao diện, hệ thống sử dụng cơ chế sổ đăng ký renderer cho các loại tương tác. Mỗi loại tương tác cung cấp bộ thành phần riêng cho ba màn hình: màn hình làm bài của học viên, màn hình biên tập của giảng viên và dòng xem lại kết quả. Khi cần thêm một loại tương tác mới, lập trình viên không phải sửa toàn bộ trình phát bài học, mà chỉ cần bổ sung cấu hình dữ liệu, logic chấm điểm và renderer tương ứng rồi đăng ký vào sổ đăng ký chung. Thiết kế này giúp phần trình phát video và luồng nộp bài không phụ thuộc trực tiếp vào từng loại bài tập cụ thể.
+Ở tầng máy chủ, việc chấm điểm được tổ chức quanh một giao diện chung tên \texttt{Handler}: mỗi loại tương tác cài đặt một \texttt{Handler} riêng và tự đăng ký vào một bảng tra cứu theo loại. Khi học viên nộp bài, máy chủ đọc cột loại của từng hoạt động, tra ra \texttt{Handler} tương ứng rồi gọi hàm chấm. Các loại chấm được bằng luật xác định cho kết quả tức thì: trắc nghiệm một và nhiều đáp án được chấm bằng cách so khớp lựa chọn của học viên với đáp án đúng, còn nghe hiểu thực chất là một trắc nghiệm mà câu hỏi ở dạng âm thanh. Các loại cần hiểu ngôn ngữ tự nhiên thì cài đặt thêm một giao diện mở rộng để gọi dịch vụ trí tuệ nhân tạo: bài viết được Gemini chấm theo tiêu chí, bài đọc thành tiếng được phiên âm rồi chấm phát âm và nội dung, còn điền khuyết chấm theo luật trước và chỉ gọi trí tuệ nhân tạo để chấm ngữ nghĩa khi câu trả lời không khớp đáp án mẫu.
+
+Về phản hồi cho học viên, hệ thống hỗ trợ ba chế độ: ẩn hoàn toàn, hiện sau từng câu, và hiện sau khi nộp toàn bài. Ở chế độ ẩn đáp án, máy chủ loại bỏ đáp án đúng và lời giải thích khỏi dữ liệu gửi xuống trình duyệt chứ không chỉ ẩn trên giao diện, nên học viên không thể xem trộm đáp án trong mã trang.
+
+Ở tầng giao diện, hệ thống dùng một sổ đăng ký (registry) ánh xạ mỗi loại tương tác tới một đối tượng renderer gồm ba thành phần ứng với ba ngữ cảnh hiển thị: màn làm bài của học viên, màn biên tập của giảng viên và dòng xem lại kết quả trong lịch sử làm bài. Trình phát bài học chỉ tra renderer theo loại rồi kết xuất mà không cần biết có những loại nào tồn tại. Nhờ vậy, khi thêm một loại tương tác mới, lập trình viên chỉ cần bổ sung một nhánh cấu hình trong hợp đồng Protocol Buffers, một \texttt{Handler} chấm điểm ở máy chủ và một renderer ở giao diện rồi đăng ký, chứ không phải sửa trình phát video hay luồng nộp bài. Thiết kế này giúp phần trình phát và luồng nộp bài không phụ thuộc trực tiếp vào từng loại bài tập cụ thể.
+
+\textbf{Ví dụ minh họa.} Xét một hoạt động điền khuyết trong bài ``Big-O Notation''. Bản ghi \texttt{lesson\_interactions} của nó có cột \texttt{kind} bằng \texttt{fill\_blank} và cột \texttt{config} chứa JSON gồm câu có chỗ trống cùng danh sách đáp án chấp nhận cho mỗi chỗ trống, ví dụ chỗ trống thứ nhất nhận ``sắp xếp nổi bọt'' hoặc ``bubble sort'', chỗ thứ hai nhận ``$O(n^2)$''. Khi học viên nộp, trình duyệt gửi câu trả lời qua đúng nhánh điền khuyết của trường \texttt{oneof} phản hồi. Máy chủ đọc cột \texttt{kind}, tra ra \texttt{Handler} của điền khuyết rồi chấm: chỗ trống nào khớp đáp án mẫu được tính đúng ngay, chỗ không khớp được gửi cho Gemini chấm ngữ nghĩa và chấp nhận nếu mức tương đồng đủ cao. Điểm và phản hồi được lưu vào bảng \texttt{lesson\_attempt\_responses}. Cùng bản ghi đó, khi học viên làm bài thì renderer hiển thị bằng thành phần làm bài, khi giảng viên mở trang biên tập thì dùng thành phần biên tập, và khi xem lại lịch sử thì dùng thành phần xem lại; cả ba đều tra cùng một loại từ sổ đăng ký, nên một loại bài mới được thêm vào sẽ tự hiển thị đúng ở cả ba ngữ cảnh mà không phải sửa các màn hình này.
 
 Một điểm đáng chú ý là hệ thống không chỉ hỗ trợ các câu hỏi sinh tự động. Giảng viên có thể tạo thủ công hoặc chỉnh sửa hoạt động đã sinh. Nhờ dùng cùng một mô hình dữ liệu cho hoạt động sinh bởi AI và hoạt động do giảng viên tạo, hệ thống tránh phải duy trì hai đường xử lý riêng biệt. Thuộc tính nguồn tạo giúp phân biệt hoạt động tự động và thủ công khi cần thống kê hoặc rà soát.
 
 \subsection{Kết quả đạt được}
-Hệ thống đã hỗ trợ nhiều dạng tương tác gồm trắc nghiệm một đáp án, trắc nghiệm nhiều đáp án, điền khuyết, nghe hiểu, đọc hiểu và viết. Các dạng này cùng xuất hiện trong một bài học, cùng được đặt trên dòng thời gian video và cùng được lưu kết quả trong một luồng nộp bài thống nhất. Giảng viên có thể biên tập từng dạng bài trong giao diện quản lý bài giảng; học viên có thể trả lời ngay khi video tạm dừng tại mốc tương tác; kết quả được chấm điểm, phản hồi và lưu lại để phục vụ phân tích.
+Hệ thống đã hỗ trợ nhiều dạng tương tác gồm trắc nghiệm một đáp án, trắc nghiệm nhiều đáp án, điền khuyết, nghe hiểu, đọc hiểu và viết. Các dạng này cùng xuất hiện trong một bài học, cùng được đặt trên dòng thời gian video và cùng được lưu kết quả trong một luồng nộp bài thống nhất. Trong giao diện quản lý bài giảng, toàn bộ hoạt động được nhóm theo phân đoạn, mỗi hoạt động kèm nhãn loại tương tác, giúp giảng viên nắm được cơ cấu bài tập của cả bài học (Hình~\ref{fig:kq_interaction}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_7_editor_list.png}
+\caption{Giao diện quản lý bài giảng: tiến trình xử lý và danh sách hoạt động tương tác theo phân đoạn}
+\label{fig:kq_interaction}
+\end{figure}
+
+Khi tạo mới hoặc chỉnh sửa một hoạt động, giảng viên chọn loại tương tác rồi nhập nội dung tương ứng. Nhờ cơ chế sổ đăng ký renderer theo loại, mỗi loại có biểu mẫu biên tập riêng nhưng dùng chung khung thao tác, nhờ đó việc bổ sung loại mới không ảnh hưởng tới các loại đã có (Hình~\ref{fig:kq_bientap}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_10_bientap_chonloai.png}
+\caption{Giao diện biên tập hoạt động tương tác với sáu loại bài tập}
+\label{fig:kq_bientap}
+\end{figure}
+
+Về phía học viên, hoạt động được hiển thị ngay khi video tạm dừng tại mốc tương tác; học viên trả lời và nhận phản hồi theo chế độ đã cấu hình, sau đó kết quả được chấm điểm và lưu lại để phục vụ phân tích (Hình~\ref{fig:kq_lambai}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_6_student_quiz.png}
+\caption{Giao diện học viên trả lời hoạt động tương tác}
+\label{fig:kq_lambai}
+\end{figure}
 
 Đóng góp của giải pháp là tạo ra một mô hình tương tác mở rộng được thay vì chỉ cài đặt một loại câu hỏi cố định. Điều này làm cho hệ thống phù hợp hơn với nhiều loại nội dung học tập, đồng thời giảm chi phí phát triển khi cần bổ sung dạng bài mới trong tương lai.
 
@@ -48,16 +149,32 @@ Quy trình phân tích video là một tác vụ dài, phụ thuộc vào nhiề
 Do đó, hệ thống cần một cơ chế xử lý nền có khả năng lưu trạng thái bền vững, cho phép nhiều worker xử lý song song, chống tình trạng hai worker cùng ghi kết quả cho một tác vụ, đồng thời có khả năng phục hồi khi worker bị dừng giữa chừng. Đây là yêu cầu quan trọng vì pipeline AI không chỉ tốn tài nguyên mà còn tạo ra dữ liệu cần nhất quán với bài giảng và các hoạt động tương tác.
 
 \subsection{Giải pháp}
-Giải pháp được xây dựng là một hàng đợi tác vụ bền vững dựa trên PostgreSQL. Bảng tác vụ là nguồn dữ liệu chính về trạng thái xử lý, bao gồm loại tác vụ, dữ liệu đầu vào, trạng thái, tiến độ, thông điệp hiển thị, worker đang sở hữu và dữ liệu checkpoint. Khi giảng viên kích hoạt phân tích video, hệ thống không chạy pipeline ngay trong yêu cầu đó mà tạo một bản ghi tác vụ ở trạng thái chờ xử lý. Worker nền nhận tác vụ, chuyển trạng thái sang đang xử lý và cập nhật tiến độ sau mỗi giai đoạn.
+Giải pháp được xây dựng là một hàng đợi tác vụ bền vững dựa trên PostgreSQL. Một bảng tác vụ đóng vai trò nguồn sự thật duy nhất về trạng thái xử lý, bao gồm loại tác vụ, dữ liệu đầu vào, trạng thái, số thứ tự trong hàng đợi, tiến độ, thông điệp hiển thị, worker đang sở hữu và nhịp tim (heartbeat). Khi giảng viên kích hoạt phân tích video, máy chủ không chạy pipeline ngay trong chu kỳ yêu cầu--phản hồi HTTP mà chỉ chèn một bản ghi tác vụ ở trạng thái \texttt{inqueued} rồi trả về ngay, nhờ đó giao diện không bị treo theo thời gian xử lý. Worker nền dò hàng đợi theo chu kỳ và chọn tác vụ cũ nhất (theo số thứ tự hàng đợi, vào trước ra trước), chuyển trạng thái sang đang xử lý rồi cập nhật tiến độ sau mỗi giai đoạn. Để giảm độ trễ, mỗi lần chèn tác vụ PostgreSQL còn phát một thông báo \texttt{NOTIFY} đánh thức worker ngay, thay vì để worker chờ đến nhịp dò kế tiếp. Vòng đời tác vụ được minh họa trong Hình~\ref{fig:taskqueue_5_3}.
 
-Lớp hàng đợi được thiết kế độc lập với nghiệp vụ cụ thể. Nó không biết tác vụ ``phiên âm'' hay ``sinh bài tập'' có ý nghĩa gì; nó chỉ quản lý vòng đời tác vụ. Mỗi loại tác vụ cài đặt một giao diện executor riêng và được đăng ký vào hệ thống. Với pipeline phân tích video, executor điều phối ba bước: phiên âm, phân đoạn và sinh hoạt động tương tác. Sau khi hoàn thành một bước lớn, executor ghi checkpoint để biết bước nào đã xong. Nếu worker bị dừng và tác vụ được nhận lại, hệ thống có thể bỏ qua bước đã hoàn thành thay vì chạy lại toàn bộ từ đầu.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_5/taskqueue_5_3.pdf}
+\caption{Vòng đời tác vụ trong hàng đợi bền vững}
+\label{fig:taskqueue_5_3}
+\end{figure}
+
+Lớp hàng đợi được thiết kế độc lập với nghiệp vụ cụ thể. Nó không biết tác vụ ``phiên âm'' hay ``sinh bài tập'' có ý nghĩa gì; nó chỉ quản lý vòng đời tác vụ. Mỗi loại tác vụ cài đặt một giao diện executor riêng và được đăng ký vào hệ thống. Với pipeline phân tích video, executor điều phối ba bước: phiên âm, phân đoạn và sinh hoạt động tương tác. Sau khi hoàn thành một bước lớn, executor ghi checkpoint --- chính là kết quả tích lũy được lưu vào trường output của bản ghi tác vụ --- để đánh dấu bước nào đã xong. Nếu worker bị dừng và tác vụ được nhận lại, hệ thống có thể bỏ qua bước đã hoàn thành thay vì chạy lại toàn bộ từ đầu.
 
 Để tránh lỗi khi nhiều worker cùng tham gia, mỗi worker có một định danh riêng. Khi worker nhận tác vụ, định danh này được ghi vào bản ghi tác vụ. Các thao tác cập nhật kết thúc tác vụ chỉ hợp lệ nếu bản ghi vẫn thuộc về worker đó và vẫn ở trạng thái đang xử lý. Nhờ vậy, nếu một worker cũ bị treo rồi quay lại sau khi tác vụ đã được worker khác nhận, worker cũ không thể ghi đè kết quả cuối. Cơ chế này phù hợp với mô hình phân phối ít nhất một lần: một tác vụ có thể được nhận lại, nhưng việc ghi trạng thái cuối được bảo vệ bằng điều kiện sở hữu.
+
+\textbf{Ví dụ minh họa.} Với video bài giảng ``Big-O Notation'' dài 15 phút ở trên, hệ thống tạo một bản ghi tác vụ thuộc loại \texttt{pipeline\_run} ở trạng thái \texttt{inqueued}. Khi đó, worker nền đang rảnh sẽ nhận tác vụ bằng cách thực hiện truy vấn \texttt{ClaimNextInqueuedTask} sử dụng cơ chế \texttt{FOR UPDATE SKIP LOCKED} để khóa dòng độc quyền một cách an toàn mà không gây tranh chấp với các worker khác chạy song song. Worker ghi nhận quyền sở hữu bằng định danh \texttt{worker\_id = UUID-W1}, chuyển trạng thái tác vụ sang \texttt{processing}, bắt đầu chạy bước 1 (phiên âm bằng Whisper) rồi ghi nhận checkpoint hoàn thành bước 1. Nếu worker này bị dừng đột ngột (crash) ở bước 2, bộ quét \texttt{Scanner} sau khi phát hiện quá hạn nhịp tim (heartbeat) sẽ tự động thu hồi tác vụ bằng cách đưa trạng thái trở lại \texttt{inqueued} và giải phóng trường sở hữu. Khi một worker khác nhận lại tác vụ (ví dụ worker \texttt{UUID-W2}), nó sẽ kiểm tra dữ liệu checkpoint để tiếp tục xử lý bước 2 mà không phải phiên âm lại từ đầu.
 
 Hàng đợi cũng hỗ trợ cập nhật tiến độ theo các nhãn cấp cao như phiên âm, phân đoạn và sinh bài tập. Giao diện có thể đọc các thông tin này để hiển thị tiến trình cho giảng viên thay vì chỉ hiển thị một trạng thái chung chung. Khi có lỗi, trạng thái lỗi và thông điệp lỗi được lưu lại để người dùng biết tác vụ dừng ở bước nào và có thể chạy lại sau khi điều chỉnh.
 
 \subsection{Kết quả đạt được}
-Nhờ cơ chế hàng đợi bền vững, yêu cầu tạo bài học từ video được phản hồi nhanh, còn phần xử lý nặng chạy nền một cách có kiểm soát. Hệ thống có thể theo dõi tiến độ từng tác vụ, phục hồi từ checkpoint khi tác vụ bị gián đoạn, và tránh ghi đè kết quả bởi worker không còn quyền sở hữu. Điều này giúp pipeline AI phù hợp hơn với môi trường triển khai thực tế, nơi container có thể khởi động lại, dịch vụ ngoài có thể chậm hoặc lỗi, và nhiều bài giảng có thể được phân tích trong cùng một thời điểm.
+Nhờ cơ chế hàng đợi bền vững, yêu cầu tạo bài học từ video được phản hồi nhanh, còn phần xử lý nặng chạy nền một cách có kiểm soát. Hệ thống có thể theo dõi tiến độ từng tác vụ, phục hồi từ checkpoint khi tác vụ bị gián đoạn, và tránh ghi đè kết quả bởi worker không còn quyền sở hữu. Điều này giúp pipeline AI phù hợp hơn với môi trường triển khai thực tế, nơi container có thể khởi động lại, dịch vụ ngoài có thể chậm hoặc lỗi, và nhiều bài giảng có thể được phân tích trong cùng một thời điểm. Giao diện giám sát tác vụ được minh họa trong Hình~\ref{fig:kq_taskqueue}. Trang quản trị tổng hợp số tác vụ theo trạng thái (đang hoạt động, thành công, thất bại) ở các thẻ thống kê phía trên, và liệt kê chi tiết từng tác vụ kèm loại, trạng thái, tiến độ và thời gian chạy ở bảng bên dưới, giúp người quản trị theo dõi toàn hệ thống và phát hiện sớm tác vụ gặp sự cố.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/5_13_admin_task_list.png}
+\caption{Giao diện giám sát danh sách tác vụ nền trên trang quản trị}
+\label{fig:kq_taskqueue}
+\end{figure}
 
 Đóng góp của phần này là thiết kế được một cơ chế xử lý nền tổng quát, không gắn cứng với riêng pipeline video. Cơ chế executor theo loại tác vụ cho phép hệ thống tiếp tục bổ sung các tác vụ dài khác trong tương lai, ví dụ sinh lại âm thanh, đồng bộ lại dữ liệu phân tích hoặc xử lý thống kê lớn.
 
@@ -68,16 +185,84 @@ Một hạn chế phổ biến của các hệ thống phát video bài giảng 
 Với Dyadia, bài toán không chỉ là chấm điểm từng câu trả lời, mà còn là biến dữ liệu tương tác thành thông tin có ích cho giảng viên. Hệ thống cần lưu được tiến độ xem video, kết quả từng hoạt động, điểm số, phản hồi và thời điểm làm bài; từ đó tổng hợp thành các chỉ báo như tỷ lệ hoàn thành, điểm trung bình, tỷ lệ trả lời đúng theo phân đoạn và danh sách học viên cần chú ý.
 
 \subsection{Giải pháp}
-Giải pháp của hệ thống là gắn dữ liệu học tập với hai trục chính: trục thời gian của video và trục phân đoạn nội dung. Mỗi hoạt động tương tác có mốc xuất hiện trong video và có thể liên kết với một phân đoạn bản chép lời. Khi học viên trả lời, hệ thống lưu câu trả lời, điểm số và phản hồi tương ứng. Nhờ vậy, mỗi kết quả không chỉ là một điểm số riêng lẻ mà còn có ngữ cảnh: học viên sai ở hoạt động nào, hoạt động đó thuộc đoạn nội dung nào và xuất hiện tại thời điểm nào trong video.
+Giải pháp của hệ thống là gắn dữ liệu học tập với hai trục chính: trục thời gian của video và trục phân đoạn nội dung. Mỗi hoạt động tương tác giữ một mốc thời gian xuất hiện trong video và một khóa ngoại trỏ tới phân đoạn bản chép lời, nên khi cần gom kết quả theo phân đoạn hoặc theo mốc thời gian, hệ thống chỉ việc truy theo các liên kết này. Khi học viên trả lời, hệ thống lưu câu trả lời, điểm số và phản hồi tương ứng. Nhờ vậy, mỗi kết quả không chỉ là một điểm số riêng lẻ mà còn có ngữ cảnh: học viên sai ở hoạt động nào, hoạt động đó thuộc đoạn nội dung nào và xuất hiện tại thời điểm nào trong video. Mô hình dữ liệu phân tích được minh họa trong Hình~\ref{fig:analytics_5_4}.
 
-Đối với tiến độ xem video, hệ thống sử dụng FoundationDB để lưu bitmap theo từng cặp học viên--bài giảng. Mỗi bit biểu diễn một giây video đã được xem. Cách biểu diễn này tiết kiệm dung lượng hơn nhiều so với việc ghi từng khoảng xem thành nhiều bản ghi quan hệ, đồng thời cho phép tính nhanh tỷ lệ video đã xem bằng thao tác đếm bit. Hệ thống còn giới hạn tốc độ tăng của vùng đã xem dựa trên thời gian thực để hạn chế trường hợp trình duyệt báo giả rằng học viên đã xem toàn bộ video trong một thời gian quá ngắn.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{Hinhve/chuong_5/analytics_5_4.pdf}
+\caption{Mô hình dữ liệu phân tích kết quả học tập}
+\label{fig:analytics_5_4}
+\end{figure}
 
-Ở phía giảng viên, các dữ liệu này được tổng hợp thành giao diện theo dõi kết quả học tập. Bản đồ nhiệt hiển thị tỷ lệ trả lời đúng theo từng phân đoạn, giúp giảng viên nhận ra phần kiến thức cả lớp gặp khó khăn. Danh sách học viên cần chú ý dựa trên các chỉ báo như tiến độ thấp, điểm trung bình thấp hoặc mức tương tác hạn chế. Ngoài ra, hệ thống còn hiển thị các thống kê như số học viên hoạt động, tiến độ trung bình, điểm trung bình và biểu đồ phân bố kết quả, giúp giảng viên có cái nhìn tổng quan trước khi xem chi tiết từng học viên.
+Đối với tiến độ xem video, hệ thống lưu trong FoundationDB một bản đồ bit (bitmap) theo từng cặp học viên--bài giảng, trong đó bit thứ $i$ cho biết giây thứ $i$ của video đã được xem hay chưa; cách biểu diễn này tiết kiệm dung lượng hơn nhiều so với việc ghi từng khoảng xem thành các bản ghi quan hệ. Khi trình duyệt báo đã xem một khoảng, máy chủ bật các bit tương ứng, nên xem lại cùng một đoạn không bị tính trùng. Tỷ lệ đã xem là số bit bằng 1 chia cho tổng số giây của video:
+\[ p_v = \frac{1}{N}\sum_{i=0}^{N-1} b_i, \]
+với $N$ là thời lượng video (tính theo giây) và $b_i \in \{0,1\}$. Để chống khai khống, tổng số giây được đánh dấu không được tăng nhanh hơn thời gian thực đã trôi qua kể từ lần cập nhật đầu tiên. Khi học viên nộp bài, $p_v$ được tính từ bitmap rồi lưu vào bản ghi lượt làm bài trong PostgreSQL để phục vụ phân tích.
+
+Từ dữ liệu này, hệ thống tính hai chỉ báo chính cho giảng viên theo các công thức sau. Chỉ báo thứ nhất là \textit{tỷ lệ trả lời đúng theo phân đoạn}, dùng để vẽ bản đồ nhiệt. Với mỗi phân đoạn $c$, gọi $R_c$ là tập câu trả lời của cả lớp cho những hoạt động thuộc phân đoạn đó; tỷ lệ đúng của phân đoạn bằng tổng điểm đạt được chia cho tổng điểm tối đa:
+\[ a_c = \frac{\sum_{r \in R_c} s_r}{\sum_{r \in R_c} m_r}, \]
+với $s_r$ và $m_r$ lần lượt là điểm đạt được và điểm tối đa của câu trả lời $r$. Cách lấy theo tổng, thay vì trung bình cộng tỷ lệ đúng của từng câu, khiến câu hỏi có điểm tối đa lớn hơn đóng góp nhiều hơn vào tỷ lệ chung.
+
+Chỉ báo thứ hai là \textit{điểm tương tác} của mỗi lượt làm bài, dùng để phát hiện học viên cần chú ý. Gọi $p_v$ là tỷ lệ video đã xem (tính từ bitmap như trên) và $p_s$ là tỷ lệ điểm đạt được của lượt làm bài; điểm tương tác là trung bình có trọng số bằng nhau của hai đại lượng, quy về thang 0--100:
+\[ E = 50\,p_v + 50\,p_s. \]
+Tỷ lệ trả lời câu hỏi không được đưa vào công thức, vì học viên phải trả lời mới nộp được bài nên đại lượng này gần như luôn bằng 1 và không phản ánh mức tương tác thực. Một học viên bị đánh dấu cần chú ý khi có từ hai bài học liên tiếp trong khóa cùng có điểm tương tác $E$ dưới ngưỡng (mặc định 40); việc xét chuỗi bài liên tiếp thay vì một bài đơn lẻ giúp tránh báo động sai do một lần làm bài kém nhất thời.
+
+\textbf{Ví dụ minh họa.} Xét một lớp 30 học viên cùng làm bài ``Big-O Notation'' gồm 12 hoạt động trên năm phân đoạn. Mỗi học viên ứng với đúng một dòng \texttt{lesson\_attempts} (làm lại chỉ cập nhật dòng cũ), tổng cộng 30 dòng; mỗi câu trả lời ứng với một dòng \texttt{lesson\_attempt\_responses}, tối đa $30 \times 12 = 360$ dòng. Áp dụng các công thức trên: nếu ở phân đoạn thứ ba cả lớp đạt tổng 48 trên 60 điểm tối đa thì tỷ lệ đúng của phân đoạn là $a_3 = 48/60 = 0{,}8$, ứng với ô màu xanh trên bản đồ nhiệt. Còn với một học viên xem được 40\% video và đạt 30\% điểm ở một bài, điểm tương tác là $E = 50 \times 0{,}4 + 50 \times 0{,}3 = 35$, thấp hơn ngưỡng 40; nếu bài kế tiếp của học viên đó cũng có $E$ dưới ngưỡng thì học viên sẽ bị đánh dấu cần chú ý. Các chỉ báo này được tổng hợp lên giao diện theo dõi kết quả, trình bày ở phần tiếp theo.
 
 \subsection{Kết quả đạt được}
-Kết quả đạt được là hệ thống không chỉ dừng ở việc phát video và chấm bài, mà đã hình thành được vòng phản hồi học tập. Học viên nhận được phản hồi sau khi trả lời hoạt động tương tác; giảng viên nhận được dữ liệu tổng hợp để điều chỉnh cách hỗ trợ lớp học. Các phân đoạn có tỷ lệ đúng thấp được làm nổi bật, giúp việc can thiệp có trọng tâm hơn so với việc chỉ nhìn vào điểm trung bình cuối cùng.
+Kết quả đạt được là hệ thống không chỉ dừng ở việc phát video và chấm bài, mà đã hình thành một vòng phản hồi học tập: học viên nhận phản hồi sau mỗi hoạt động, còn giảng viên nhận được dữ liệu tổng hợp ở hai cấp độ là toàn khóa học và từng bài học.
+
+Ở cấp khóa học (Hình~\ref{fig:kq_khoahoc}), giao diện tổng hợp các chỉ số của cả lớp như số học viên hoạt động, tiến độ trung bình và điểm trung bình, đồng thời liệt kê tiến độ và điểm của từng học viên trên toàn bộ các bài và gắn cờ những học viên cần chú ý. Ngoài bảng danh sách, giao diện còn có tab phân bố điểm và biểu đồ tương tác--điểm để giảng viên nhìn nhanh mức độ phân hóa của lớp.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/kq_khoahoc.png}
+\caption{Giao diện thống kê kết quả học tập ở cấp khóa học}
+\label{fig:kq_khoahoc}
+\end{figure}
+
+Ngoài bảng danh sách, trang kết quả cấp khóa còn cung cấp hai biểu đồ trực quan. Biểu đồ phân bố điểm (Hình~\ref{fig:kq_phanbo}) chia học viên theo năm khoảng điểm, cho thấy ngay mức độ phân hóa của lớp. Biểu đồ tương tác--điểm (Hình~\ref{fig:kq_scatter}) đặt mỗi học viên lên một mặt phẳng hai chiều với trục hoành là điểm tương tác và trục tung là điểm số; vùng góc dưới--trái được tô màu để làm nổi bật nhóm học viên vừa ít tương tác vừa đạt điểm thấp.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{Hinhve/chuong_5/kq_phanbo.png}
+\caption{Biểu đồ phân bố điểm của lớp theo năm khoảng điểm}
+\label{fig:kq_phanbo}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{Hinhve/chuong_5/kq_scatter.png}
+\caption{Biểu đồ tương tác--điểm: mỗi điểm là một học viên, vùng tô màu góc dưới--trái là nhóm cần chú ý}
+\label{fig:kq_scatter}
+\end{figure}
+
+Ở cấp bài học (Hình~\ref{fig:kq_analytics}), giao diện đi sâu vào một bài cụ thể: với mỗi học viên, hệ thống hiển thị số lần nộp, điểm đạt được, thời gian làm từng câu, tỉ lệ xem video và điểm tương tác, kèm danh sách cần chú ý của riêng bài đó.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/kq_analytics.png}
+\caption{Giao diện thống kê kết quả của một bài học cụ thể}
+\label{fig:kq_analytics}
+\end{figure}
+
+Điểm nổi bật của phần phân tích là bản đồ nhiệt theo phân đoạn (Hình~\ref{fig:kq_heatmap}). Thay vì chỉ nhìn vào điểm trung bình cuối cùng, giảng viên thấy được tỷ lệ trả lời đúng của cả lớp ở từng phân đoạn nội dung. Mỗi ô được tô theo thang ba mức: xanh khi tỷ lệ đúng từ 80\% trở lên, vàng khi từ 50\% đến 79\% và đỏ khi dưới 50\%. Ngoài ra, những ô đã có lượt trả lời nhưng tỷ lệ đúng dưới 60\% còn được đánh dấu thêm bằng viền cảnh báo, nên cả những phân đoạn ở mức trung bình (màu vàng) nhưng vẫn dưới ngưỡng an toàn cũng được làm nổi bật, giúp việc can thiệp có trọng tâm vào đúng phần kiến thức cả lớp gặp khó khăn.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/kq_heatmap.png}
+\caption{Bản đồ nhiệt thể hiện tỷ lệ trả lời đúng theo từng phân đoạn nội dung}
+\label{fig:kq_heatmap}
+\end{figure}
+
+Bên cạnh bản đồ nhiệt, mỗi bài học còn có bảng phân tích theo từng câu hỏi (Hình~\ref{fig:kq_questions}). Với mỗi câu, hệ thống hiển thị tỷ lệ trả lời đúng của cả lớp cùng phân bố các lựa chọn, và nêu bật câu khó nhất; nhờ đó giảng viên biết chính xác câu nào và phương án sai nào đang gây nhầm lẫn để điều chỉnh nội dung.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{Hinhve/chuong_5/kq_questions.png}
+\caption{Phân tích theo từng câu hỏi: tỷ lệ trả lời đúng và phân bố lựa chọn của cả lớp}
+\label{fig:kq_questions}
+\end{figure}
 
 Đóng góp của giải pháp là kết hợp dữ liệu xem video với dữ liệu làm bài theo cùng một mô hình bài học tương tác. Nhờ đó, hệ thống tạo được cơ sở dữ liệu học tập có ý nghĩa sư phạm hơn: mỗi điểm số gắn với nội dung cụ thể, mỗi tiến độ xem có bằng chứng theo thời gian và mỗi thống kê đều có thể truy ngược về hoạt động hoặc phân đoạn tương ứng.
-
 
 \end{document}

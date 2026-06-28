@@ -95,6 +95,8 @@ Trên cơ sở tập tính năng đã xác định ở Phần~\ref{section:2.1},
 
 \textbf{Quản trị viên}: Người dùng đã đăng nhập với vai trò quản trị toàn hệ thống; quản lý người dùng, tổ chức, phân quyền và giám sát các tác vụ phân tích video.
 
+\textbf{Gemini AI}: Bên thứ ba cung cấp dịch vụ trí tuệ nhân tạo tạo sinh thông qua API tham gia vào việc phân tích video, sinh hoạt động tương tác và chấm điểm tự động.
+
 \textbf{b) Mô tả các use case chính}
 
 Use case \textbf{Tham gia khóa học}: Người học gửi yêu cầu tham gia một khóa học và chờ giảng viên duyệt; sau khi được chấp nhận, người học truy cập được các bài giảng của khóa học đó.
@@ -111,7 +113,7 @@ Use case \textbf{Phân tích video sinh nội dung tương tác}: Giảng viên 
 
 Use case \textbf{Biên tập bản chép lời}: Giảng viên chỉnh sửa bản chép lời mà hệ thống trích xuất tự động, gồm sửa nội dung lời thoại, gộp hoặc tách phân đoạn và điều chỉnh ranh giới các phân đoạn nội dung.
 
-Use case \textbf{Biên tập hoạt động tương tác}: Giảng viên xem trước, chỉnh sửa, thêm mới hoặc xóa từng hoạt động tương tác mà hệ thống đã sinh trước khi đưa bài giảng tới người học. Khi chưa hài lòng với kết quả tự động, giảng viên có thể dùng phần mở rộng (\(\ll\)extend\(\gg\)) sinh lại hoạt động bằng trí tuệ nhân tạo.
+Use case \textbf{Biên tập hoạt động tương tác}: Giảng viên xem trước, chỉnh sửa, thêm mới hoặc xóa từng hoạt động tương tác mà hệ thống đã sinh trước khi đưa bài giảng tới người học.
 
 Use case \textbf{Quản lý thành viên và duyệt yêu cầu tham gia}: Giảng viên xem danh sách thành viên khóa học, trực tiếp thêm hoặc loại bỏ học viên, và duyệt (chấp nhận hoặc từ chối) các yêu cầu tham gia đang chờ.
 
@@ -131,7 +133,7 @@ Use case \emph{Tham gia khóa học} của người học được phân rã nh�
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.55\textwidth]{Hinhve/usecasephanra/usecasephanra_thamgiakhoahoc.png}
+\includegraphics[width=1\textwidth]{Hinhve/usecasephanra/usecasephanra_thamgiakhoahoc.png}
 \caption{Biểu đồ use case phân rã Tham gia khóa học}
 \label{fig:uc_thamgia}
 \end{figure}
@@ -144,7 +146,7 @@ Use case \emph{Học bài giảng tương tác} của người học được ph
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.55\textwidth]{Hinhve/usecasephanra/usecasephanra_hocbaigiangtuongtac.png}
+\includegraphics[width=0.7\textwidth]{Hinhve/usecasephanra/usecasephanra_hocbaigiangtuongtac.png}
 \caption{Biểu đồ use case phân rã Học bài giảng tương tác}
 \label{fig:uc_hocbai}
 \end{figure}
@@ -209,12 +211,12 @@ Use case \emph{Biên tập hoạt động tương tác} của giảng viên đư
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.5\textwidth]{Hinhve/usecasephanra/usecasephanra_bientaphoatdongtuongtac.png}
+\includegraphics[width=0.7\textwidth]{Hinhve/usecasephanra/usecasephanra_bientaphoatdongtuongtac.png}
 \caption{Biểu đồ use case phân rã Biên tập hoạt động tương tác}
 \label{fig:uc_bientap}
 \end{figure}
 
-Sau khi hệ thống sinh nội dung tự động, giảng viên \emph{Xem trước hoạt động} để kiểm tra kết quả. Giảng viên có thể \emph{Thêm hoạt động thủ công} tại mốc thời gian mong muốn, \emph{Chỉnh sửa hoạt động} đã có hoặc \emph{Xóa hoạt động} không phù hợp. Khi chưa hài lòng, \emph{Sinh lại hoạt động bằng AI} tạo lại hoạt động cho một đoạn nội dung.
+Sau khi hệ thống sinh nội dung tự động, giảng viên \emph{Xem trước hoạt động} để kiểm tra kết quả. Giảng viên có thể \emph{Thêm hoạt động thủ công} tại mốc thời gian mong muốn, \emph{Chỉnh sửa hoạt động} đã có hoặc \emph{Xóa hoạt động} không phù hợp. Khi chưa hài lòng, \emph{Sinh lại hoạt động tương tác bằng AI} tạo lại hoạt động cho một đoạn nội dung.
 
 \subsection{Biểu đồ use case phân rã Quản lý thành viên và duyệt yêu cầu tham gia}
 \label{subsection:uc_thanhvien}
@@ -297,32 +299,35 @@ Quy trình bắt đầu khi giảng viên \emph{tạo bài giảng và tải vid
 \label{section:2.3}
 
 \subsection{Đặc tả use case Tham gia khóa học}
+
 \begin{table}[H]
 \centering
 \small
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
 \hline
-Tên use case & Tham gia khóa học \\ \hline
-Tác nhân & Người học (tác nhân phụ: Giảng viên) \\ \hline
-Mục đích & Cho phép người học gửi yêu cầu và được duyệt tham gia một khóa học để truy cập các bài giảng. \\ \hline
-Tiền điều kiện & Người học đã đăng nhập và là thành viên của tổ chức chứa khóa học; khóa học đã được xuất bản và hiển thị trong danh sách. \\ \hline
+Tên use case & Xem kết quả và phản hồi \\ \hline
+Tác nhân & Người học \\ \hline
+Mục đích & Cho phép người học xem lại điểm, câu trả lời, phản hồi chi tiết và theo dõi tiến độ hoàn thành của bản thân trong khóa học. \\ \hline
+Tiền điều kiện & Người học đã làm ít nhất một hoạt động tương tác hoặc đã nộp bài cho bài giảng. \\ \hline
 Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
-1 & Người học & Tìm kiếm và mở thông tin một khóa học đã xuất bản. \\[2pt]
-2 & Người học & Gửi yêu cầu tham gia khóa học. \\[2pt]
-3 & Hệ thống & Tạo yêu cầu ở trạng thái chờ duyệt và hiển thị cho giảng viên. \\[2pt]
-4 & Giảng viên & Chấp nhận yêu cầu tham gia. \\[2pt]
-5 & Hệ thống & Thêm người học làm thành viên khóa học và cập nhật trạng thái yêu cầu thành đã chấp nhận. \\[2pt]
+1 & Người học & Mở bài giảng hoặc trang kết quả học tập cá nhân. \\[2pt]
+2 & Hệ thống & Tải các lần làm bài, điểm số, tiến độ xem video và phản hồi đã lưu. \\[2pt]
+3 & Người học & Chọn xem bảng theo dõi tiến độ học tập tổng quát của toàn khóa học. \\[2pt]
+4 & Người học & Chọn một lần làm bài cụ thể của bài giảng để xem chi tiết. \\[2pt]
+5 & Hệ thống & Hiển thị từng câu trả lời, điểm đạt được và nhận xét tương ứng của lần làm bài đó. \\[2pt]
+6 & Người học & Dựa trên phản hồi để xem lại đoạn video bài giảng hoặc thực hiện lượt làm bài tiếp theo nếu còn hạn. \\[2pt]
 \end{tabular} \\ \hline
 Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
-4a & Giảng viên & Từ chối yêu cầu; hệ thống cập nhật trạng thái bị từ chối và không thêm người học vào khóa học. \\[2pt]
+2a & Hệ thống & Nếu chưa có dữ liệu làm bài, hệ thống hiển thị giao diện trống và hướng dẫn người học bắt đầu bài học. \\[2pt]
+5a & Hệ thống & Nếu cấu hình phản hồi của bài giảng chưa cho phép xem đáp án, hệ thống chỉ hiển thị điểm và nhận xét phù hợp. \\[2pt]
 \end{tabular} \\ \hline
-Hậu điều kiện & Người học trở thành thành viên khóa học và truy cập được các bài giảng trong đó. \\ \hline
+Hậu điều kiện & Người học nắm được kết quả học tập cá nhân và tiến độ hoàn thành khóa học để tiếp tục cải thiện. \\ \hline
 \end{tabular}
-\caption{Đặc tả use case Tham gia khóa học}
-\label{table:uc_thamgia}
+\caption{Đặc tả use case Tham gia khoá học}
+\label{table:pl_uc_xemketqua}
 \end{table}
 
 \subsection{Đặc tả use case Học bài giảng tương tác}
@@ -333,7 +338,7 @@ Hậu điều kiện & Người học trở thành thành viên khóa học và 
 \begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
 \hline
 Tên use case & Học bài giảng tương tác \\ \hline
-Tác nhân & Người học \\ \hline
+Tác nhân & Người học, Gemini AI \\ \hline
 Mục đích & Người học vừa xem video bài giảng vừa trả lời các hoạt động tương tác xen kẽ và được chấm điểm, phản hồi tự động. \\ \hline
 Tiền điều kiện & Người học là thành viên khóa học; bài giảng có video và hoạt động tương tác; chưa vượt quá số lần làm bài cho phép. \\ \hline
 Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
@@ -341,7 +346,7 @@ Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>
 1 & Người học & Mở bài giảng và bắt đầu xem video. \\[2pt]
 2 & Hệ thống & Phát video; tại mỗi mốc thời gian có hoạt động thì tạm dừng và hiển thị hoạt động tương tác. \\[2pt]
 3 & Người học & Trả lời hoạt động được hiển thị. \\[2pt]
-4 & Hệ thống & Chấm điểm câu trả lời và hiển thị phản hồi tức thời. \\[2pt]
+4 & Hệ thống, Gemini AI & Chấm điểm câu trả lời và hiển thị phản hồi tức thời. \\[2pt]
 5 & Người học & Tiếp tục xem và trả lời cho đến hết, sau đó nộp bài. \\[2pt]
 6 & Hệ thống & Lưu kết quả trả lời, điểm số và tiến độ xem; cập nhật tiến độ học tập của người học sau khi nộp bài. \\[2pt]
 \end{tabular} \\ \hline
@@ -364,7 +369,7 @@ Hậu điều kiện & Kết quả bài làm và tiến độ học của ngư�
 \begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
 \hline
 Tên use case & Phân tích video sinh nội dung tương tác \\ \hline
-Tác nhân & Giảng viên \\ \hline
+Tác nhân & Giảng viên, Gemini AI \\ \hline
 Mục đích & Tự động trích xuất nội dung video và sinh các hoạt động tương tác bằng trí tuệ nhân tạo. \\ \hline
 Tiền điều kiện & Bài giảng đã có video được tải lên hệ thống. \\ \hline
 Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
@@ -372,14 +377,14 @@ Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>
 1 & Giảng viên & Khởi tạo tác vụ phân tích cho bài giảng. \\[2pt]
 2 & Hệ thống & Tạo tác vụ, đưa vào hàng đợi và xử lý ở chế độ nền. \\[2pt]
 3 & Hệ thống & Trích xuất lời thoại từ video bằng công nghệ nhận dạng tiếng nói. \\[2pt]
-4 & Hệ thống & Phân đoạn nội dung và dùng mô hình ngôn ngữ lớn sinh hoạt động tương tác cho từng đoạn. \\[2pt]
+4 & Gemini AI & Phân đoạn nội dung và dùng mô hình ngôn ngữ lớn sinh hoạt động tương tác cho từng đoạn. \\[2pt]
 5 & Hệ thống & Cập nhật trạng thái tác vụ thành hoàn thành và lưu các hoạt động đã sinh. \\[2pt]
 6 & Giảng viên & Theo dõi tiến độ và xem kết quả khi tác vụ hoàn thành. \\[2pt]
 \end{tabular} \\ \hline
 Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
 4a & Hệ thống & Nếu xử lý gặp lỗi thì cập nhật trạng thái thất bại kèm thông tin lỗi; giảng viên có thể chạy lại tác vụ. \\[2pt]
-*a & Giảng viên & Trong khi tác vụ đang chạy, hủy tác vụ; hệ thống dừng và cập nhật trạng thái đã hủy. \\[2pt]
+6a & Giảng viên & Trong khi tác vụ đang chạy, hủy tác vụ; hệ thống dừng và cập nhật trạng thái đã hủy. \\[2pt]
 \end{tabular} \\ \hline
 Hậu điều kiện & Bài giảng có tập hoạt động tương tác do trí tuệ nhân tạo sinh, sẵn sàng để biên tập. \\ \hline
 \end{tabular}
@@ -395,23 +400,23 @@ Hậu điều kiện & Bài giảng có tập hoạt động tương tác do tr�
 \begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
 \hline
 Tên use case & Biên tập hoạt động tương tác \\ \hline
-Tác nhân & Giảng viên \\ \hline
-Mục đích & Giảng viên kiểm duyệt và tinh chỉnh các hoạt động tương tác trước khi đưa tới người học. \\ \hline
-Tiền điều kiện & Bài giảng đã có hoạt động tương tác (do AI sinh hoặc thêm thủ công). \\ \hline
+Tác nhân & Giảng viên, Gemini AI \\ \hline
+Mục đích & Cho phép giảng viên xem trước, chỉnh sửa, thêm mới, xóa hoặc tái tạo các hoạt động tương tác của bài giảng. \\ \hline
+Tiền điều kiện & Bài giảng đã có danh sách hoạt động tương tác được tạo lập. \\ \hline
 Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
-1 & Giảng viên & Mở danh sách hoạt động tương tác của bài giảng. \\[2pt]
-2 & Hệ thống & Hiển thị danh sách các hoạt động theo thứ tự sắp đặt trong bài giảng. \\[2pt]
-3 & Giảng viên & Chỉnh sửa nội dung một hoạt động. \\[2pt]
-4 & Hệ thống & Lưu thay đổi. \\[2pt]
+1 & Giảng viên & Mở màn hình biên tập hoạt động tương tác của bài giảng. \\[2pt]
+2 & Hệ thống & Tải và hiển thị danh sách các hoạt động tương tác trên dòng thời gian video. \\[2pt]
+3 & Giảng viên & Xem trước nội dung hiển thị của các câu hỏi tương tác để kiểm tra thực tế. \\[2pt]
+4 & Giảng viên & Thực hiện các thay đổi mong muốn (thêm mới hoạt động thủ công, sửa nội dung chi tiết hoặc xóa hoạt động không phù hợp). \\[2pt]
+5 & Hệ thống & Xác thực dữ liệu và lưu trữ các thay đổi. \\[2pt]
 \end{tabular} \\ \hline
 Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
-3a & Giảng viên & Thêm một hoạt động thủ công tại mốc thời gian mong muốn. \\[2pt]
-3b & Giảng viên & Xóa một hoạt động không phù hợp. \\[2pt]
-3c & Giảng viên & Yêu cầu sinh lại hoạt động bằng AI; hệ thống sinh lại và thay thế hoạt động đó. \\[2pt]
+4a & Giảng viên & Yêu cầu hệ thống sinh lại hoạt động tương tác cho một phân đoạn. \\[2pt]
+4b & Gemini AI & Tái phân tích văn cảnh đoạn hội thoại và sinh câu hỏi mới trả về hệ thống lưu trữ. \\[2pt]
 \end{tabular} \\ \hline
-Hậu điều kiện & Tập hoạt động tương tác được cập nhật theo chỉnh sửa của giảng viên. \\ \hline
+Hậu điều kiện & Các hoạt động tương tác của bài giảng được tinh chỉnh hoàn tất và sẵn sàng xuất bản. \\ \hline
 \end{tabular}
 \caption{Đặc tả use case Biên tập hoạt động tương tác}
 \label{table:uc_bientap}

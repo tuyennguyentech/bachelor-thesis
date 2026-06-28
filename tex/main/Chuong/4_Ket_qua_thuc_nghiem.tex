@@ -41,7 +41,7 @@ Gói \texttt{api} thuộc tầng giao tiếp, chịu trách nhiệm đăng ký c
 
 Gói \texttt{svc} thuộc tầng nghiệp vụ, chứa logic của từng miền chức năng như người dùng, tổ chức, khóa học, bài giảng, tương tác học tập, lưu trữ và phân tích bằng trí tuệ nhân tạo; mỗi miền được đặt trong một gói con riêng.
 
-Gói \texttt{db} và \texttt{kv} thuộc tầng truy cập dữ liệu, lần lượt đọc và ghi PostgreSQL (thông qua các truy vấn sinh tự động trong gói \texttt{sqlc}) và FoundationDB.
+Gói \texttt{db} và \texttt{kv} thuộc tầng truy cập dữ liệu, lần lượt đọc và ghi PostgreSQL (thông qua các truy vấn sinh tự động trong gói \texttt{sqlc}~\cite{sqlc}) và FoundationDB.
 
 Gói \texttt{authz} và \texttt{secure} đảm nhận bảo mật: \texttt{authz} kiểm tra quyền truy cập ngay tại tầng giao tiếp, còn \texttt{secure} cung cấp mã hóa mật khẩu và phát hành, kiểm tra chuỗi JWT.
 
@@ -269,7 +269,7 @@ Về thiết kế vật lý, phần lớn các quan hệ một--nhiều được
 8 & feedback\_mode & text & Chế độ hiển thị phản hồi \\ \hline
 9 & default\_interaction\_config & jsonb & Cấu hình sinh bài tập mặc định \\ \hline
 10 & language & varchar(8) & Ngôn ngữ nội dung sinh ra \\ \hline
-11 & audio\_language & varchar(8) & Ngôn ngữ giọng nói trong video \\ \hline
+11 & audio\_language & text & Ngôn ngữ giọng nói trong video \\ \hline
 12 & max\_attempts & integer & Số lần làm bài tối đa \\ \hline
 13 & created\_at & timestamp & Thời điểm tạo \\ \hline
 14 & updated\_at & timestamp & Thời điểm cập nhật \\ \hline
@@ -301,7 +301,7 @@ Về thiết kế vật lý, phần lớn các quan hệ một--nhiều được
 \label{tbl:interactions}
 \end{table}
 
-\textbf{c) Dữ liệu phi quan hệ.} Bên cạnh PostgreSQL, hệ thống dùng thêm hai kho lưu trữ chuyên biệt. \textbf{FoundationDB} là kho khóa--giá trị lưu hai loại dữ liệu: bản chép lời cùng các đoạn nội dung có kích thước lớn (được tách thành nhiều mảnh do giới hạn kích thước giá trị của FoundationDB), và bản đồ bit (bitmap) theo dõi tiến độ xem video cho từng cặp người dùng--bài giảng, trong đó mỗi bit ứng với một giây video đã xem. Việc tách các dữ liệu kích thước lớn hoặc bị ghi với tần suất cao này khỏi cơ sở dữ liệu quan hệ giúp giảm tải cho PostgreSQL. \textbf{SeaweedFS} là kho lưu trữ đối tượng tương thích giao thức S3, lưu các tệp nhị phân gồm video bài giảng tải lên, tệp âm thanh sinh bởi tổng hợp tiếng nói (cho dạng bài nghe) và bản ghi âm câu trả lời của học viên. Mỗi tệp được định danh bằng một khóa đối tượng dạng \texttt{lessons/<id>/<tên tệp>}; khóa này được lưu trong cơ sở dữ liệu quan hệ (ví dụ cột \texttt{video\_storage\_key} của bảng \texttt{lessons}) để liên kết tệp với bản ghi tương ứng.
+\textbf{c) Dữ liệu phi quan hệ.} Bên cạnh PostgreSQL, hệ thống dùng thêm hai kho lưu trữ chuyên biệt. \textbf{FoundationDB} là kho khóa--giá trị lưu hai loại dữ liệu: bản chép lời (văn bản lời thoại của toàn bài và của từng phân đoạn, kích thước lớn nên được tách thành nhiều mảnh do giới hạn kích thước giá trị của FoundationDB), và bản đồ bit (bitmap) theo dõi tiến độ xem video cho từng cặp người dùng--bài giảng, trong đó mỗi bit ứng với một giây video đã xem. Việc tách các dữ liệu kích thước lớn hoặc bị ghi với tần suất cao này khỏi cơ sở dữ liệu quan hệ giúp giảm tải cho PostgreSQL. \textbf{SeaweedFS} là kho lưu trữ đối tượng tương thích giao thức S3, lưu các tệp nhị phân gồm video bài giảng tải lên, tệp âm thanh sinh bởi tổng hợp tiếng nói (cho dạng bài nghe) và bản ghi âm câu trả lời của học viên. Mỗi tệp được định danh bằng một khóa đối tượng dạng \texttt{lessons/<id>/<tên tệp>}; khóa này được lưu trong cơ sở dữ liệu quan hệ (ví dụ cột \texttt{video\_storage\_key} của bảng \texttt{lessons}) để liên kết tệp với bản ghi tương ứng.
 
 \section{Xây dựng ứng dụng}
 \subsection{Thư viện và công cụ sử dụng}
@@ -383,7 +383,7 @@ Về thiết kế vật lý, phần lớn các quan hệ một--nhiều được
 \end{table}
 
 \subsection{Kết quả đạt được}
-Sản phẩm của đồ án là một hệ thống hoàn chỉnh gồm nhiều thành phần được triển khai cùng nhau bằng \texttt{podman compose}. Hai thành phần tự xây dựng là máy chủ ứng dụng (richter, viết bằng Go) và giao diện web (heino, viết bằng Next.js) --- đã được chuẩn bị để đóng gói thành ảnh container khi triển khai chính thức; đi kèm là phần định nghĩa hợp đồng giao tiếp bằng Protocol Buffers và lược đồ cơ sở dữ liệu bằng SQL. Các thành phần hạ tầng và dịch vụ trí tuệ nhân tạo (PostgreSQL, FoundationDB, SeaweedFS, Speaches, Caddy) sử dụng các ảnh container có sẵn.
+Sản phẩm của đồ án là một hệ thống hoàn chỉnh gồm nhiều thành phần được triển khai cùng nhau bằng \texttt{podman compose}. Hai thành phần tự xây dựng là máy chủ ứng dụng (richter, viết bằng Go) và giao diện web (heino, viết bằng TypeScript trên nền Next.js) --- đã được đóng gói thành ảnh container và triển khai cùng hệ thống; đi kèm là phần định nghĩa hợp đồng giao tiếp bằng Protocol Buffers và lược đồ cơ sở dữ liệu bằng SQL. Các thành phần hạ tầng và dịch vụ trí tuệ nhân tạo (PostgreSQL, FoundationDB, SeaweedFS, Speaches, Caddy) sử dụng các ảnh container có sẵn.
 
 Máy chủ ứng dụng đảm nhận toàn bộ logic nghiệp vụ, phân quyền và điều phối các tác vụ phân tích bằng trí tuệ nhân tạo ở chế độ nền; giao diện web cung cấp trải nghiệm cho cả giảng viên (tạo khóa học, sinh bài giảng từ video, theo dõi tiến độ) và học viên (xem video, làm các bài tập tương tác). Để sử dụng ứng dụng, người dùng chỉ cần thiết bị có kết nối internet, dùng trình duyệt web truy cập hệ thống qua địa chỉ tên miền (domain).
 
@@ -450,7 +450,7 @@ Phần này minh họa những chức năng cốt lõi và đặc trưng nhất 
 \label{fig:sp_baitap}
 \end{figure}
 
-\textbf{Bản đồ nhiệt phân tích bài học.} Với mỗi bài học, giảng viên có thể xem bản đồ nhiệt thể hiện mức độ nắm bài của cả lớp theo từng phân đoạn (Hình~\ref{fig:sp_heatmap}). Mỗi ô tương ứng một mốc câu hỏi trong bài và được tô màu theo tỷ lệ trả lời đúng: xanh khi đạt từ 80\% trở lên, vàng khi từ 50\% đến 79\% và đỏ khi dưới 50\%, nhờ đó các phân đoạn mà học viên gặp khó khăn được làm nổi bật ngay lập tức. Phía trên bản đồ, hệ thống tự động chỉ ra câu hỏi khó nhất và danh sách học viên có mức tương tác thấp cần được chú ý; giảng viên có thể bấm vào một ô để xem danh sách học viên đã làm phân đoạn đó, xếp theo điểm từ thấp lên cao.
+\textbf{Bản đồ nhiệt phân tích bài học.} Với mỗi bài học, giảng viên có thể xem bản đồ nhiệt thể hiện mức độ nắm bài của cả lớp theo từng phân đoạn (Hình~\ref{fig:sp_heatmap}). Mỗi ô tương ứng một phân đoạn nội dung trong bài và được tô màu theo tỷ lệ trả lời đúng: xanh khi đạt từ 80\% trở lên, vàng khi từ 50\% đến 79\% và đỏ khi dưới 50\%, nhờ đó các phân đoạn mà học viên gặp khó khăn được làm nổi bật ngay lập tức. Phía trên bản đồ, hệ thống tự động chỉ ra câu hỏi khó nhất và danh sách học viên có mức tương tác thấp cần được chú ý; giảng viên có thể bấm vào một ô để xem danh sách học viên đã làm phân đoạn đó, xếp theo điểm từ thấp lên cao.
 
 \begin{figure}[H]
 \centering
@@ -539,7 +539,7 @@ Bảng~\ref{tbl:services} liệt kê các thành phần được triển khai c�
 2 & Giao diện web (heino) & Next.js & 3000 & Kết xuất trang phía máy chủ và phục vụ giao diện người dùng \\ \hline
 3 & Máy chủ ứng dụng (richter) & Go & 8080 & Xử lý nghiệp vụ qua Connect RPC, điều phối tác vụ nền và kết nối tới các kho dữ liệu \\ \hline
 4 & CSDL quan hệ & PostgreSQL 18 & 5432 & Lưu dữ liệu nghiệp vụ chính và hàng đợi tác vụ bền vững \\ \hline
-5 & CSDL khóa--giá trị & FoundationDB 7.3 & 4500 & Lưu bản chép lời, phân đoạn nội dung và tiến độ xem video \\ \hline
+5 & CSDL khóa--giá trị & FoundationDB 7.3 & 4500 & Lưu bản chép lời (văn bản lời thoại) và tiến độ xem video \\ \hline
 6 & Kho đối tượng & SeaweedFS 3.88 & 9000 & Lưu video bài giảng, âm thanh sinh ra và cung cấp giao thức tương thích S3 \\ \hline
 7 & Dịch vụ giọng nói & Speaches (CPU) & 8000 & Cung cấp nhận dạng tiếng nói bằng Whisper và tổng hợp tiếng nói bằng Piper \\ \hline
 \end{tabular}
