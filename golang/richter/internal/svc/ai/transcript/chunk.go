@@ -31,7 +31,7 @@ type ChunkRunner func(ctx context.Context, transcript string, segmentsJSON []byt
 
 // RunChunk is the worker entry point for LESSON_TASK_KIND_CHUNK_TRANSCRIPT.
 // It validates the prerequisite transcript exists, asks Gemini for chunk
-// boundaries, persists the chunks (and their per-segment coherence), then
+// boundaries, persists the chunks, then
 // rewrites the chunk-level FDB transcripts in a single shot.
 func (s *Service) RunChunk(
 	ctx context.Context,
@@ -95,8 +95,6 @@ func (s *Service) RunChunk(
 		}
 
 		for i, ch := range chunks {
-			chunkSegs := segment.ChunkSegments(allSegs, ch.StartSeconds, ch.EndSeconds)
-			coherence := segment.ComputeChunkCoherence(chunkSegs)
 			dbChunk, err := q.InsertLessonTranscriptChunk(ctx, gen.InsertLessonTranscriptChunkParams{
 				LessonID:            lessonID,
 				OrderIndex:          int32(i),
@@ -104,7 +102,6 @@ func (s *Service) RunChunk(
 				EndSeconds:          float64(ch.EndSeconds),
 				Summary:             ch.Summary,
 				QuestionCountConfig: 1,
-				CoherenceScore:      coherence,
 			})
 			if err != nil {
 				return fmt.Errorf("insert chunk %d: %w", i, err)

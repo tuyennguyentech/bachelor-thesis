@@ -995,49 +995,6 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     await expect(page.locator('[data-testid="chunk-error"]')).not.toBeVisible();
   });
 
-  // Regression test for the Vietnamese-coherence bug: before the fix, the
-  // CoherenceBadge always read 0% (or under 30%) for VN audio because the regex
-  // didn't match Latin Extended Additional diacritics. This test runs after the
-  // real AI pipeline and asserts that at least one chunk shows
-  // a non-zero coherence percentage.
-  test("after pipeline: CoherenceBadge renders a valid % for every chunk", async ({ teacherPage: page }) => {
-    if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
-    // Chunk editor with coherence badges is in ?tab=processing
-    await page.goto(`${lessonUrl}?tab=processing`, { waitUntil: "domcontentloaded" });
-
-    await page.getByTestId("workflow-step-chunks").click();
-    for (const button of await page.getByLabel("Mở rộng").all()) {
-      if (await button.isVisible().catch(() => false)) {
-        await button.click();
-      }
-    }
-
-    const badges = page.getByTestId("coherence-badge");
-    await expect(badges.first()).toBeVisible({ timeout: 10_000 });
-
-    const count = await badges.count();
-    expect(count).toBeGreaterThan(0);
-
-    let maxScore = 0;
-    for (let i = 0; i < count; i++) {
-      const raw = await badges.nth(i).getAttribute("data-score");
-      expect(raw, `badge ${i} missing data-score`).not.toBeNull();
-      const score = parseInt(raw!, 10);
-      expect(Number.isFinite(score), `badge ${i} score must be a number`).toBe(true);
-      expect(score).toBeGreaterThanOrEqual(0);
-      expect(score).toBeLessThanOrEqual(100);
-      // Rendered text matches the attribute → no rounding mismatch.
-      await expect(badges.nth(i)).toHaveText(`${score}%`);
-      if (score > maxScore) maxScore = score;
-    }
-
-    // Bug fix verification: pre-fix every chunk read 0% because the regex
-    // dropped most VN tokens. Any non-zero value confirms the new formula
-    // (Unicode \p{L} tokenization + stopwords + lexical-chain + overlap)
-    // is reaching real content.
-    expect(maxScore, "all chunks read 0% — coherence regression").toBeGreaterThan(0);
-  });
-
   test("after video replacement: transcript state and VideoPlayer clear", async ({ teacherPage: page }) => {
     if (!lessonUrl) throw new Error("Pipeline setup failed — lessonUrl not set by test 1");
     test.setTimeout(60_000);

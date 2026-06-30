@@ -302,7 +302,7 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 	// The dev seeder produces analyzed lessons by running the REAL transcript
 	// pipeline (transcript.Service.RunExtract + RunChunk) with the AI boundaries
 	// (STT + chunking) backed by golden fixtures built from the curated JSON. This
-	// yields the same FDB(transcript+segments) + Postgres(chunks) + coherence a real
+	// yields the same FDB(transcript+segments) + Postgres(chunks) a real
 	// Whisper/Gemini run would — no dual-store divergence, deterministic, no network.
 
 	// A coherent analysis requires a transcript. Curated chunks/questions with no
@@ -348,7 +348,7 @@ func (s *SeederSvc) seedLessonAnalysis(ctx context.Context, lessonID pgtype.UUID
 
 	// Run the real transcribe + chunk stages with golden fixtures. RunExtract writes
 	// transcript+segments to FDB and clears stale downstream data; RunChunk inserts
-	// chunks (with real coherence scores) and writes per-chunk FDB transcripts.
+	// chunks and writes per-chunk FDB transcripts.
 	ts := s.newSeedTranscriptService(a.Transcript, totalDur, chunkJSON)
 	if err := ts.RunExtract(ctx, lessonID, "seed", "vi", noopProgress); err != nil {
 		return fmt.Errorf("RunExtract lesson %s: %w", lessonID.String(), err)

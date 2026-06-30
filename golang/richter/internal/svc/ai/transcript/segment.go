@@ -19,7 +19,7 @@ import (
 //
 //   - rebuild the lesson's flattened transcript text so the chunk pipeline
 //     sees the new wording on the next run, and
-//   - rebuild each affected chunk's FDB transcript + coherence score so
+//   - rebuild each affected chunk's FDB transcript so
 //     downstream Gemini generations don't see stale wording.
 func (s *Service) UpdateSegment(
 	ctx context.Context,
@@ -61,25 +61,17 @@ func (s *Service) UpdateSegment(
 		s.Log.WarnContext(ctx, "ai: failed to rebuild transcript after segment edit", "err", err)
 	}
 
-	// Rebuild each chunk's FDB transcript + coherence score.
+	// Rebuild each chunk's FDB transcript so it reflects the edited segments.
 	if chunks, cerr := db.WithConnection(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonTranscriptChunk, error) {
 		return q.ListLessonTranscriptChunks(ctx, gen.ListLessonTranscriptChunksParams{LessonID: lessonID, Limit: s.LessonOpsLimit(), Offset: 0})
 	}); cerr == nil {
 		for _, c := range chunks {
-			segsInChunk := segment.ChunkSegments(segs, float32(c.StartSeconds), float32(c.EndSeconds))
 			chunkText := segment.BuildChunkTranscript(segs, float32(c.StartSeconds), float32(c.EndSeconds))
 			if chunkText != "" {
 				if err := segment.SaveChunkTranscript(s.KV, c.ID.String(), chunkText); err != nil {
 					s.Log.WarnContext(ctx, "ai: failed to rebuild chunk transcript after segment edit",
 						"chunk_id", c.ID.String(), "err", err)
 				}
-			}
-			newCoherence := segment.ComputeChunkCoherence(segsInChunk)
-			if err := db.WithConnectionExec(s.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
-				return q.UpdateChunkCoherence(ctx, gen.UpdateChunkCoherenceParams{ID: c.ID, CoherenceScore: newCoherence})
-			}); err != nil {
-				s.Log.WarnContext(ctx, "ai: failed to update chunk coherence after segment edit",
-					"chunk_id", c.ID.String(), "err", err)
 			}
 		}
 	}

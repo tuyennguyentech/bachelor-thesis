@@ -13,7 +13,7 @@ import (
 // This file wires the dev seeder into the REAL transcript pipeline
 // (transcript.Service) with the AI boundaries replaced by golden fixtures built
 // from the curated seed JSON. RunExtract + RunChunk then run the exact same
-// persistence + coherence logic a real Whisper/Gemini run would, so seeded
+// persistence logic a real Whisper/Gemini run would, so seeded
 // lessons are consistent-by-construction (no FDB/Postgres divergence) without any
 // network calls or non-determinism.
 
@@ -91,7 +91,7 @@ func noopProgress(richterv1.AnalysisProgressStep, string) error { return nil }
 
 // newSeedTranscriptService builds a real transcript.Service whose AI boundaries
 // (STT + chunking) are backed by golden fixtures, so RunExtract/RunChunk run the
-// real persistence + coherence logic against curated content. The auth Deps are
+// real persistence logic against curated content. The auth Deps are
 // left nil — RunExtract/RunChunk never touch them — and the list-limit closures
 // are generous fixed values (seed data is small).
 func (s *SeederSvc) newSeedTranscriptService(transcriptText string, totalDur float64, chunkJSON string) *transcript.Service {

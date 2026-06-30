@@ -122,9 +122,6 @@ func (s *Service) Merge(
 		return gen.LessonTranscriptChunk{}, connect.NewError(connect.CodeInternal, fmt.Errorf("write merged transcript to FDB: %w", err))
 	}
 
-	allSegs := s.loadSegments(keepChunk.LessonID.String())
-	mergedCoherence := segment.ComputeChunkCoherence(segment.ChunkSegments(allSegs, float32(mergedStart), float32(mergedEnd)))
-
 	var mergedChunk gen.LessonTranscriptChunk
 	if err := db.WithCommitTxExec(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) error {
 		if err := q.DeleteLessonInteractionsByChunk(ctx, discardID); err != nil {
@@ -134,11 +131,10 @@ func (s *Service) Merge(
 			return fmt.Errorf("delete discard chunk: %w", err)
 		}
 		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
-			ID:             keepID,
-			StartSeconds:   mergedStart,
-			EndSeconds:     mergedEnd,
-			Summary:        keepChunk.Summary,
-			CoherenceScore: mergedCoherence,
+			ID:           keepID,
+			StartSeconds: mergedStart,
+			EndSeconds:   mergedEnd,
+			Summary:      keepChunk.Summary,
 		})
 		if err != nil {
 			return fmt.Errorf("update keep chunk boundaries: %w", err)
@@ -218,8 +214,6 @@ func (s *Service) Split(
 	allSegs := s.loadSegments(chunk.LessonID.String())
 	firstTranscript := segment.BuildChunkTranscript(allSegs, float32(chunk.StartSeconds), splitAt)
 	secondTranscript := segment.BuildChunkTranscript(allSegs, splitAt, float32(chunk.EndSeconds))
-	firstCoherence := segment.ComputeChunkCoherence(segment.ChunkSegments(allSegs, float32(chunk.StartSeconds), splitAt))
-	secondCoherence := segment.ComputeChunkCoherence(segment.ChunkSegments(allSegs, splitAt, float32(chunk.EndSeconds)))
 
 	type splitTxResult struct {
 		first       gen.LessonTranscriptChunk
@@ -230,7 +224,6 @@ func (s *Service) Split(
 		updated, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
 			ID: chunk.ID, StartSeconds: chunk.StartSeconds,
 			EndSeconds: float64(splitAt), Summary: chunk.Summary,
-			CoherenceScore: firstCoherence,
 		})
 		if err != nil {
 			return splitTxResult{}, svc.ConnectDBError(err)
@@ -250,7 +243,6 @@ func (s *Service) Split(
 			LessonID: chunk.LessonID, OrderIndex: maxOrder + 1,
 			StartSeconds: float64(splitAt), EndSeconds: chunk.EndSeconds,
 			Summary: chunk.Summary, QuestionCountConfig: chunk.QuestionCountConfig,
-			CoherenceScore: secondCoherence,
 		})
 		if err != nil {
 			return splitTxResult{}, svc.ConnectDBError(err)
@@ -340,8 +332,6 @@ func (s *Service) AdjustBoundary(
 	allSegs := s.loadSegments(prevChunk.LessonID.String())
 	prevTranscript := segment.BuildChunkTranscript(allSegs, float32(prevChunk.StartSeconds), newBoundary)
 	nextTranscript := segment.BuildChunkTranscript(allSegs, newBoundary, float32(nextChunk.EndSeconds))
-	prevCoherence := segment.ComputeChunkCoherence(segment.ChunkSegments(allSegs, float32(prevChunk.StartSeconds), newBoundary))
-	nextCoherence := segment.ComputeChunkCoherence(segment.ChunkSegments(allSegs, newBoundary, float32(nextChunk.EndSeconds)))
 
 	result, err := db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) (BoundaryResult, error) {
 		currentPrev, err := q.GetLessonTranscriptChunk(ctx, prevID)
@@ -358,14 +348,12 @@ func (s *Service) AdjustBoundary(
 		}
 		updPrev, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
 			ID: prevID, StartSeconds: currentPrev.StartSeconds, EndSeconds: float64(newBoundary), Summary: currentPrev.Summary,
-			CoherenceScore: prevCoherence,
 		})
 		if err != nil {
 			return BoundaryResult{}, svc.ConnectDBError(err)
 		}
 		updNext, err := q.UpdateChunkMetadata(ctx, gen.UpdateChunkMetadataParams{
 			ID: nextID, StartSeconds: float64(newBoundary), EndSeconds: currentNext.EndSeconds, Summary: currentNext.Summary,
-			CoherenceScore: nextCoherence,
 		})
 		if err != nil {
 			return BoundaryResult{}, svc.ConnectDBError(err)

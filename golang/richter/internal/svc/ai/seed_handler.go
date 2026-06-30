@@ -137,7 +137,6 @@ func (s *AISvc) seedAnalyzedLesson(
 				EndSeconds:          c.EndSeconds,
 				Summary:             c.Summary,
 				QuestionCountConfig: 2,
-				CoherenceScore:      1.0,
 			})
 		})
 		if err != nil {

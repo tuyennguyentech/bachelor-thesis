@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { TranscriptChunk, TranscriptSegment } from "buf/gen/richter/v1/ai_pb";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   Loader2Icon,
   MergeIcon,
   PlayIcon,
@@ -17,25 +20,6 @@ export function getChunkSegments(chunk: TranscriptChunk, allSegments: Transcript
   return allSegments.filter(s =>
     s.startSeconds >= chunk.startSeconds &&
     s.startSeconds < chunk.endSeconds
-  );
-}
-
-function CoherenceBadge({ score }: { score: number }) {
-  const pct = Math.round(score * 100);
-  const color = pct >= 35
-    ? "text-green-700 dark:text-green-400 border-green-300 dark:border-green-800"
-    : pct >= 20
-      ? "text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-800"
-      : "text-red-700 dark:text-red-400 border-red-300 dark:border-red-800";
-  return (
-    <span
-      data-testid="coherence-badge"
-      data-score={pct}
-      className={`text-xs border rounded px-1.5 py-px font-mono ${color}`}
-      title="Mức độ gắn kết nội dung (tỉ lệ từ trong mỗi câu thuộc về vốn từ chủ đề chung của đoạn)"
-    >
-      {pct}%
-    </span>
   );
 }
 
@@ -62,6 +46,10 @@ export function ChunkEditor({
   isMerging, isDeleting, isSplitting, isMoving, disabled,
 }: ChunkEditorProps) {
   const busy = disabled || isMerging || isDeleting || isSplitting || isMoving;
+  // Segments start COLLAPSED so the chunk list reads as a compact overview;
+  // the teacher expands a chunk to inspect/edit its sentences.
+  const [expanded, setExpanded] = useState(false);
+  const hasSegments = chunkSegments.length > 0;
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/20 overflow-hidden">
       <div
@@ -71,6 +59,18 @@ export function ChunkEditor({
           window.dispatchEvent(ev);
         }}
       >
+        {hasSegments && (
+          <button
+            type="button"
+            data-testid="chunk-toggle"
+            aria-expanded={expanded}
+            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+            title={expanded ? "Thu gọn các câu" : "Mở các câu của đoạn"}
+            onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+          >
+            {expanded ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
+          </button>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <PlayIcon className="size-3 text-primary shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" />
@@ -78,7 +78,9 @@ export function ChunkEditor({
           </div>
           <p className="text-xs text-muted-foreground">{formatTime(chunk.startSeconds)} - {formatTime(chunk.endSeconds)}</p>
         </div>
-        {chunkSegments.length > 0 && <CoherenceBadge score={chunk.coherenceScore} />}
+        {hasSegments && (
+          <span className="text-xs text-muted-foreground tabular-nums shrink-0">{chunkSegments.length} câu</span>
+        )}
         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           {prevChunkId && (
             <Button variant="ghost" size="sm" className="gap-1 px-2 text-xs h-6"
@@ -102,7 +104,7 @@ export function ChunkEditor({
           </Button>
         </div>
       </div>
-      {chunkSegments.length > 0 && (
+      {hasSegments && expanded && (
         <div className="flex flex-col divide-y divide-border/50 px-1 pb-1">
           {chunkSegments.map((seg, i) => {
             const isFirstSeg = i === 0;
