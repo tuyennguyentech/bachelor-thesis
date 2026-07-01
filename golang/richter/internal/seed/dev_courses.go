@@ -3,17 +3,24 @@ package seed
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	jwtv1 "example.com/buf/gen/richter/jwt/v1"
 	richterv1 "example.com/buf/gen/richter/v1"
 	"example.com/richter/internal"
+	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
+	"example.com/richter/internal/svc"
 	"example.com/richter/internal/svc/ai"
 	"example.com/richter/internal/svc/ai/segment"
+	"example.com/richter/internal/svc/coursemodules"
+	coursesvc "example.com/richter/internal/svc/courses"
+	"example.com/richter/internal/svc/lessons"
 	"example.com/sql/gen"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,7 +29,47 @@ import (
 	"github.com/samber/do/v2"
 )
 
+// mlVideoDir is where the ML playlist videos are expected for the real analysis
+// pipeline (mlCourseTitle / mlOrgSlug are declared in dev_attempts.go).
+const mlVideoDir = "seed-assets/videos/ml"
+
+// errSeedVideoUnavailable marks a real-analysis failure caused by the local
+// source video being absent/unreadable — an EXTERNAL data dependency (e.g. the ML
+// playlist hasn't been downloaded). The caller treats it as a soft failure and
+// falls back to the committed golden fixtures; it never aborts the seed. Genuine
+// pipeline failures (Whisper/Gemini/DB) are NOT wrapped with this and stay fatal.
+var errSeedVideoUnavailable = errors.New("seed: source video unavailable")
+
+var courseStatusProto = map[string]richterv1.CourseStatus{
+	"draft":     richterv1.CourseStatus_COURSE_STATUS_DRAFT,
+	"published": richterv1.CourseStatus_COURSE_STATUS_PUBLISHED,
+	"archived":  richterv1.CourseStatus_COURSE_STATUS_ARCHIVED,
+}
+
 func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec) error {
+	// Courses/modules/lessons are created THROUGH the service layer (synthesized
+	// auth), not raw sqlc: the course OWNER creates the course (CreateCourse uses the
+	// caller's claims as owner + auto-enrols them as course TEACHER), modules/lessons
+	// follow as the owner, and publishing runs as the org owner (needs org owner/admin).
+	coursesSvc, err := do.Invoke[*coursesvc.CoursesSvc](internal.Injector)
+	if err != nil {
+		return fmt.Errorf("invoke CoursesSvc: %w", err)
+	}
+	modulesSvc, err := do.Invoke[*coursemodules.CourseModulesSvc](internal.Injector)
+	if err != nil {
+		return fmt.Errorf("invoke CourseModulesSvc: %w", err)
+	}
+	lessonsSvc, err := do.Invoke[*lessons.LessonsSvc](internal.Injector)
+	if err != nil {
+		return fmt.Errorf("invoke LessonsSvc: %w", err)
+	}
+	// External-data dependency check (warn, never fail): the ML course's real
+	// Whisper+Gemini pipeline needs the playlist videos downloaded into
+	// seed-assets/videos/ml (scripts/seed/download-ml-videos.py). Warn up front if
+	// they're missing so it's clear the seed is using golden fixtures instead of
+	// running the real pipeline.
+	s.warnIfMLVideosMissing(ctx, courses)
+
 	type orgCache struct {
 		org    gen.Organization
 		titles map[string]struct{}
@@ -67,54 +114,74 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 			return fmt.Errorf("lookup owner %s for course %q: %w", c.OwnerEmail, c.Title, err)
 		}
 
-		course, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
-			return q.CreateCourse(ctx, gen.CreateCourseParams{
-				OrganizationID: oc.org.ID,
-				OwnerID:        owner.ID,
-				Title:          c.Title,
-				Description:    devDescToPgText(c.Description),
-			})
+		// Create the course AS THE OWNER (CreateCourse uses the caller's claims as
+		// the owner + auto-enrols them as course TEACHER). The owner must be an org
+		// owner/admin/teacher; reused for modules/lessons below.
+		ownerCtx := authz.ContextWithClaims(ctx, &jwtv1.JWTClaims{
+			Sub:    uuidStr(owner.ID),
+			Role:   richterv1.UserRole_USER_ROLE_NORMAL,
+			Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+		})
+		createResp, err := coursesSvc.CreateCourse(ownerCtx, &richterv1.CreateCourseRequest{
+			OrganizationId: uuidStr(oc.org.ID),
+			OwnerId:        uuidStr(owner.ID),
+			Title:          c.Title,
+			Description:    c.Description,
 		})
 		if err != nil {
 			return fmt.Errorf("create course %q in org %s: %w", c.Title, c.OrgSlug, err)
 		}
+		courseID, err := svc.ParseUUID(createResp.GetCourse().GetId())
+		if err != nil {
+			return fmt.Errorf("parse course id for %q: %w", c.Title, err)
+		}
+		course := gen.Course{ID: courseID}
 
-		if status := gen.CourseStatus(c.Status); status != gen.CourseStatusDraft {
-			course, err = db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Course, error) {
-				return q.UpdateCourseStatus(ctx, gen.UpdateCourseStatusParams{
-					ID:     course.ID,
-					Status: status,
-				})
+		// Publishing requires org OWNER/ADMIN — act as the org owner.
+		if courseStatusProto[c.Status] == richterv1.CourseStatus_COURSE_STATUS_PUBLISHED {
+			orgOwnerCtx := authz.ContextWithClaims(ctx, &jwtv1.JWTClaims{
+				Sub:    uuidStr(oc.org.CreatedBy),
+				Role:   richterv1.UserRole_USER_ROLE_NORMAL,
+				Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
 			})
-			if err != nil {
-				return fmt.Errorf("update status for course %q: %w", c.Title, err)
+			if _, err := coursesSvc.UpdateCourseStatus(orgOwnerCtx, &richterv1.UpdateCourseStatusRequest{
+				Id:     uuidStr(courseID),
+				Status: richterv1.CourseStatus_COURSE_STATUS_PUBLISHED,
+			}); err != nil {
+				return fmt.Errorf("publish course %q: %w", c.Title, err)
 			}
 		}
 
 		for i, m := range c.Modules {
-			module, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseModule, error) {
-				return q.CreateCourseModule(ctx, gen.CreateCourseModuleParams{
-					CourseID:   course.ID,
-					Title:      m.Title,
-					OrderIndex: int32(i),
-				})
+			modResp, err := modulesSvc.CreateCourseModule(ownerCtx, &richterv1.CreateCourseModuleRequest{
+				CourseId:   uuidStr(course.ID),
+				Title:      m.Title,
+				OrderIndex: int32(i),
 			})
 			if err != nil {
 				return fmt.Errorf("create module %d %q for course %q: %w", i, m.Title, c.Title, err)
 			}
+			moduleID, err := svc.ParseUUID(modResp.GetModule().GetId())
+			if err != nil {
+				return fmt.Errorf("parse module id %q: %w", m.Title, err)
+			}
+			module := gen.CourseModule{ID: moduleID}
 
 			for j, l := range m.Lessons {
-				lesson, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
-					return q.CreateLesson(ctx, gen.CreateLessonParams{
-						ModuleID:    module.ID,
-						Title:       l.Title,
-						Description: devDescToPgText(l.Description),
-						OrderIndex:  int32(j),
-					})
+				lesResp, err := lessonsSvc.CreateLesson(ownerCtx, &richterv1.CreateLessonRequest{
+					ModuleId:    uuidStr(module.ID),
+					Title:       l.Title,
+					Description: l.Description,
+					OrderIndex:  int32(j),
 				})
 				if err != nil {
 					return fmt.Errorf("create lesson %d %q in module %q: %w", j, l.Title, m.Title, err)
 				}
+				lessonID, err := svc.ParseUUID(lesResp.GetLesson().GetId())
+				if err != nil {
+					return fmt.Errorf("parse lesson id %q: %w", l.Title, err)
+				}
+				lesson := gen.Lesson{ID: lessonID}
 
 				if l.VideoKey != "" {
 					_, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Lesson, error) {
@@ -131,9 +198,8 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 
 				if l.Analysis != nil {
 					runReal := false
-					if c.Title == "Tự học Machine Learning" && l.VideoKey != "" && s.pg.Config().ConnConfig.Database != "dyadia_test" {
-						localVideoPath := "seed-assets/videos/ml/" + filepath.Base(l.VideoKey)
-						if _, err := os.Stat(localVideoPath); err == nil {
+					if c.Title == mlCourseTitle && l.VideoKey != "" && s.pg.Config().ConnConfig.Database != "dyadia_test" {
+						if _, err := os.Stat(filepath.Join(mlVideoDir, filepath.Base(l.VideoKey))); err == nil {
 							runReal = true
 						}
 					}
@@ -141,7 +207,18 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 					if runReal {
 						s.log.InfoContext(ctx, "seed: running real video analysis pipeline", "lesson", l.Title)
 						if err := s.seedLessonRealAnalysis(ctx, lesson.ID, owner.ID, l); err != nil {
-							return fmt.Errorf("seed real analysis for lesson %q: %w", l.Title, err)
+							if !errors.Is(err, errSeedVideoUnavailable) {
+								// Genuine pipeline failure (Whisper/Gemini/DB) is a SEED
+								// error — stop so it's fixed, don't silently skip.
+								return fmt.Errorf("seed real analysis for lesson %q: %w", l.Title, err)
+							}
+							// EXTERNAL-DEP case only: the source video is missing/unreadable
+							// → warn and fall back to golden fixtures (don't fail the seed).
+							s.log.WarnContext(ctx, "seed: ML video unavailable at analysis time, falling back to golden fixtures",
+								"lesson", l.Title, "err", err)
+							if err := s.seedLessonAnalysis(ctx, lesson.ID, owner.ID, l.Analysis); err != nil {
+								return fmt.Errorf("seed fixtures fallback for lesson %q: %w", l.Title, err)
+							}
 						}
 					} else {
 						if err := s.seedLessonAnalysis(ctx, lesson.ID, owner.ID, l.Analysis); err != nil {
@@ -156,6 +233,38 @@ func (s *SeederSvc) seedDevCourses(ctx context.Context, courses []devCourseSpec)
 			"modules", len(c.Modules))
 	}
 	return nil
+}
+
+// warnIfMLVideosMissing logs ONE warning per ML course when the local playlist
+// videos required for the real Whisper+Gemini pipeline are absent or only partly
+// present. It never errors — the seed transparently falls back to the committed
+// golden fixtures (the missing-data path is a warning, not a failure).
+func (s *SeederSvc) warnIfMLVideosMissing(ctx context.Context, courses []devCourseSpec) {
+	if s.pg.Config().ConnConfig.Database == "dyadia_test" {
+		return // test DB always uses golden fixtures by design — no videos needed.
+	}
+	for _, c := range courses {
+		if c.Title != mlCourseTitle {
+			continue
+		}
+		var want, have int
+		for _, m := range c.Modules {
+			for _, l := range m.Lessons {
+				if l.VideoKey == "" || l.Analysis == nil {
+					continue
+				}
+				want++
+				if _, err := os.Stat(filepath.Join(mlVideoDir, filepath.Base(l.VideoKey))); err == nil {
+					have++
+				}
+			}
+		}
+		if want > 0 && have < want {
+			s.log.WarnContext(ctx,
+				"seed: ML course videos not fully downloaded — real Whisper+Gemini analysis will be SKIPPED for the missing lessons and golden fixtures used instead; run scripts/seed/download-ml-videos.py to enable real analysis",
+				"dir", mlVideoDir, "present", have, "expected", want)
+		}
+	}
 }
 
 // seedDevLessonVideoKeys patches video_storage_key on existing lessons that have
@@ -464,10 +573,12 @@ func (s *SeederSvc) seedLessonRealAnalysis(ctx context.Context, lessonID pgtype.
 
 	// 2. Pre-upload video if not already present in S3 bucket.
 	if _, err := s.s3client.StatObject(ctx, s.s3cfg.Bucket, l.VideoKey, minio.StatObjectOptions{}); err != nil {
-		localVideoPath := "seed-assets/videos/ml/" + filepath.Base(l.VideoKey)
+		localVideoPath := filepath.Join(mlVideoDir, filepath.Base(l.VideoKey))
 		s.log.InfoContext(ctx, "seed: uploading video to S3 before real analysis", "key", l.VideoKey, "file", localVideoPath)
 		if err := s.uploadFromFile(ctx, l.VideoKey, localVideoPath); err != nil {
-			return fmt.Errorf("pre-upload video %q: %w", localVideoPath, err)
+			// Wrap as errSeedVideoUnavailable so the caller falls back to golden
+			// fixtures (external data missing) rather than aborting the seed.
+			return fmt.Errorf("%w: pre-upload %q: %v", errSeedVideoUnavailable, localVideoPath, err)
 		}
 		s.log.InfoContext(ctx, "seed: video uploaded successfully", "key", l.VideoKey)
 	}

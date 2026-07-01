@@ -15,7 +15,6 @@ import (
 	"example.com/richter/internal/kv"
 	"example.com/richter/log"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/samber/do/v2"
@@ -86,10 +85,6 @@ func isDuplicate(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func devDescToPgText(s string) pgtype.Text {
-	return pgtype.Text{String: s, Valid: s != ""}
-}
-
 func readDevJSON(path string, v any) error {
 	raw, err := devDataFS.ReadFile(path)
 	if err != nil {
@@ -113,6 +108,13 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 	data, err := parseDevData()
 	if err != nil {
 		return fmt.Errorf("parse dev seed data: %w", err)
+	}
+	// Ensure the storage bucket exists up front. The courses step can upload
+	// lesson videos (the real-analysis path for the ML demo course) before the
+	// dedicated videos step runs, so on a freshly-wiped storage the bucket would
+	// otherwise not exist yet and the first upload fails ("bucket does not exist").
+	if err := s.ensureBucket(ctx); err != nil {
+		return fmt.Errorf("ensure storage bucket: %w", err)
 	}
 	type step struct {
 		name string

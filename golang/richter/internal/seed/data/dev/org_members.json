@@ -1,158 +1,962 @@
 [
-  { "org_slug": "dyadia-demo", "user_email": "bob@dyadia.local",   "role": "admin",   "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "frank@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "son@dyadia.local",   "role": "teacher", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "dave@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "eve@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "grace@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "henry@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "iris@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "liam@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "noah@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "olivia@dyadia.local","role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "trang@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "vy@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "dyadia-demo", "user_email": "peter@dyadia.local", "role": "student", "status": "invited"   },
-  { "org_slug": "dyadia-demo", "user_email": "quinn@dyadia.local", "role": "student", "status": "invited"   },
-  { "org_slug": "dyadia-demo", "user_email": "rose@dyadia.local",  "role": "student", "status": "invited"   },
-  { "org_slug": "dyadia-demo", "user_email": "sam@dyadia.local",   "role": "student", "status": "invited"   },
-  { "org_slug": "dyadia-demo", "user_email": "uma@dyadia.local",   "role": "student", "status": "suspended" },
-  { "org_slug": "dyadia-demo", "user_email": "victor@dyadia.local","role": "student", "status": "suspended" },
-
-  { "org_slug": "hust-cs", "user_email": "alice@dyadia.local", "role": "admin",   "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "carol@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "frank@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "khanh@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "bob@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "dave@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "eve@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "grace@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "iris@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "jack@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "kate@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "liam@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "mia@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "noah@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "dat@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "ngan@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "olivia@dyadia.local","role": "student", "status": "invited"   },
-  { "org_slug": "hust-cs", "user_email": "tina@dyadia.local",  "role": "student", "status": "invited"   },
-  { "org_slug": "hust-cs", "user_email": "quinn@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "hust-cs", "user_email": "peter@dyadia.local", "role": "student", "status": "suspended" },
-
-  { "org_slug": "open-learn", "user_email": "dave@dyadia.local",   "role": "admin",   "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "henry@dyadia.local",  "role": "teacher", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "son@dyadia.local",    "role": "teacher", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "bob@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "eve@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "frank@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "grace@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "iris@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "jack@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "kate@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "mia@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "noah@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "bao@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "chi@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "vinh@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "peter@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "open-learn", "user_email": "quinn@dyadia.local",  "role": "student", "status": "invited" },
-  { "org_slug": "open-learn", "user_email": "rose@dyadia.local",   "role": "student", "status": "invited" },
-
-  { "org_slug": "ai-research", "user_email": "bob@dyadia.local",   "role": "admin",   "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "alice@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "dave@dyadia.local",  "role": "teacher", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "khanh@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "eve@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "frank@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "henry@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "iris@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "jack@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "kate@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "liam@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "mia@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "chi@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "ai-research", "user_email": "noah@dyadia.local",  "role": "student", "status": "invited"   },
-  { "org_slug": "ai-research", "user_email": "olivia@dyadia.local","role": "student", "status": "invited"   },
-  { "org_slug": "ai-research", "user_email": "peter@dyadia.local", "role": "student", "status": "suspended" },
-
-  { "org_slug": "web-dev-bootcamp", "user_email": "grace@dyadia.local",  "role": "admin",   "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "dave@dyadia.local",   "role": "teacher", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "henry@dyadia.local",  "role": "teacher", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "alice@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "bob@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "iris@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "jack@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "kate@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "liam@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "mia@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "noah@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "olivia@dyadia.local", "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "peter@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "trang@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "dat@dyadia.local",    "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "quinn@dyadia.local",  "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "rose@dyadia.local",   "role": "student", "status": "active"  },
-  { "org_slug": "web-dev-bootcamp", "user_email": "tina@dyadia.local",   "role": "student", "status": "invited" },
-
-  { "org_slug": "math-club", "user_email": "henry@dyadia.local", "role": "admin",   "status": "active"    },
-  { "org_slug": "math-club", "user_email": "alice@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "bob@dyadia.local",   "role": "teacher", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "huong@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "dave@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "eve@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "frank@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "grace@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "iris@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "jack@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "kate@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "liam@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "mia@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "noah@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "olivia@dyadia.local","role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "quinn@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "vy@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "ngan@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "math-club", "user_email": "rose@dyadia.local",  "role": "student", "status": "invited"   },
-  { "org_slug": "math-club", "user_email": "sam@dyadia.local",   "role": "student", "status": "invited"   },
-  { "org_slug": "math-club", "user_email": "peter@dyadia.local", "role": "student", "status": "suspended" },
-
-  { "org_slug": "langlab", "user_email": "minh@dyadia.local",   "role": "admin",   "status": "active"    },
-  { "org_slug": "langlab", "user_email": "thu@dyadia.local",    "role": "teacher", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "duc@dyadia.local",    "role": "teacher", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "an@dyadia.local",     "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "hang@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "long@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "phuong@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "nam@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "yen@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "tung@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "mai@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "huong@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "chi@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "olivia@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "peter@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "langlab", "user_email": "quinn@dyadia.local",  "role": "student", "status": "invited"   },
-  { "org_slug": "langlab", "user_email": "rose@dyadia.local",   "role": "student", "status": "invited"   },
-  { "org_slug": "langlab", "user_email": "sam@dyadia.local",    "role": "student", "status": "suspended" },
-
-  { "org_slug": "startup-hub", "user_email": "minh@dyadia.local",   "role": "admin",   "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "duc@dyadia.local",    "role": "teacher", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "phuong@dyadia.local", "role": "teacher", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "khanh@dyadia.local",  "role": "teacher", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "an@dyadia.local",     "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "hang@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "nam@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "tung@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "mai@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "long@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "yen@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "bao@dyadia.local",    "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "vinh@dyadia.local",   "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "olivia@dyadia.local", "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "peter@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "quinn@dyadia.local",  "role": "student", "status": "active"    },
-  { "org_slug": "startup-hub", "user_email": "rose@dyadia.local",   "role": "student", "status": "invited"   },
-  { "org_slug": "startup-hub", "user_email": "tina@dyadia.local",   "role": "student", "status": "invited"   },
-  { "org_slug": "startup-hub", "user_email": "victor@dyadia.local", "role": "student", "status": "suspended" }
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "bob@dyadia.local",
+    "role": "admin",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "frank@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "son@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "dave@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "eve@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "grace@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "henry@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "iris@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "liam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "noah@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "trang@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "vy@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "rose@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "sam@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "uma@dyadia.local",
+    "role": "student",
+    "status": "suspended"
+  },
+  {
+    "org_slug": "dyadia-demo",
+    "user_email": "victor@dyadia.local",
+    "role": "student",
+    "status": "suspended"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "alice@dyadia.local",
+    "role": "admin",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "carol@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "frank@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "khanh@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "bob@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "dave@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "eve@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "grace@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "iris@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "jack@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "kate@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "liam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "mia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "noah@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "dat@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "ngan@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "tina@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "linh@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "minh@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "thu@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "duc@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "an@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "hang@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "long@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "phuong@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "nam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "tung@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "mai@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "son@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "huong@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "vy@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "hust-cs",
+    "user_email": "trang@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "henry@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "son@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "bob@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "eve@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "frank@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "grace@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "iris@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "jack@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "kate@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "mia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "noah@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "bao@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "chi@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "vinh@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "rose@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "alice@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "dave@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "khanh@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "eve@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "frank@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "henry@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "iris@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "jack@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "kate@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "liam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "mia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "chi@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "noah@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "ai-research",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "suspended"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "dave@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "henry@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "alice@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "bob@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "iris@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "jack@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "kate@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "liam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "mia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "noah@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "trang@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "dat@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "rose@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "web-dev-bootcamp",
+    "user_email": "tina@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "alice@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "bob@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "huong@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "dave@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "eve@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "frank@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "grace@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "iris@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "jack@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "kate@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "liam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "mia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "noah@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "vy@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "ngan@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "rose@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "sam@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "math-club",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "suspended"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "minh@dyadia.local",
+    "role": "admin",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "thu@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "duc@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "an@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "hang@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "long@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "phuong@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "nam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "yen@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "tung@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "mai@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "huong@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "chi@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "rose@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "langlab",
+    "user_email": "sam@dyadia.local",
+    "role": "student",
+    "status": "suspended"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "duc@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "phuong@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "khanh@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "an@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "hang@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "nam@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "tung@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "mai@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "long@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "yen@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "bao@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "vinh@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "olivia@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "peter@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "quinn@dyadia.local",
+    "role": "student",
+    "status": "active"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "rose@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "tina@dyadia.local",
+    "role": "student",
+    "status": "invited"
+  },
+  {
+    "org_slug": "startup-hub",
+    "user_email": "victor@dyadia.local",
+    "role": "student",
+    "status": "suspended"
+  },
+  {
+    "org_slug": "open-learn",
+    "user_email": "alice@dyadia.local",
+    "role": "teacher",
+    "status": "active"
+  }
 ]

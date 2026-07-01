@@ -10,7 +10,7 @@
         "title": "Chương 1: Khái niệm cơ bản về Học máy",
         "lessons": [
           {
-            "title": "Bài 1.1: Các khái niệm cơ bản",
+            "title": "Các khái niệm cơ bản",
             "description": "Giới thiệu các khái niệm cơ bản trong học máy (Machine Learning).",
             "video_key": "seed/hust-cs/ml/01-1-1-cac-khai-niem-co-ban.mp4",
             "duration_secs": 1352,
@@ -57,7 +57,7 @@
             }
           },
           {
-            "title": "Bài 1.2: Bài toán học",
+            "title": "Bài toán học",
             "description": "Định nghĩa bài toán học máy và các thành phần cốt lõi.",
             "video_key": "seed/hust-cs/ml/02-1-2-bai-toan-hoc.mp4",
             "duration_secs": 1563,
@@ -104,7 +104,7 @@
             }
           },
           {
-            "title": "Bài 1.3: Overfitting và Khả năng tổng quát hóa",
+            "title": "Overfitting và Khả năng tổng quát hóa",
             "description": "Khái niệm overfitting, underfitting và khả năng tổng quát hóa mô hình.",
             "video_key": "seed/hust-cs/ml/03-1-3-overfitting-va-kha-nang-tong-quat-hoa.mp4",
             "duration_secs": 1119,
@@ -156,7 +156,7 @@
         "title": "Chương 2: Tiền xử lý dữ liệu học máy",
         "lessons": [
           {
-            "title": "Bài 2.1: Tiền xử lý dữ liệu (Phần 1)",
+            "title": "Tiền xử lý dữ liệu (Phần 1)",
             "description": "Giới thiệu các kỹ thuật xử lý dữ liệu thô, loại bỏ nhiễu.",
             "video_key": "seed/hust-cs/ml/04-2-1-tien-xu-ly-du-lieu.mp4",
             "duration_secs": 982,
@@ -203,7 +203,7 @@
             }
           },
           {
-            "title": "Bài 2.2: Tiền xử lý dữ liệu (Phần 2)",
+            "title": "Tiền xử lý dữ liệu (Phần 2)",
             "description": "Chuẩn hóa dữ liệu, mã hóa biến phân loại và xử lý dữ liệu khuyết.",
             "video_key": "seed/hust-cs/ml/05-2-2-tien-xu-ly-du-lieu.mp4",
             "duration_secs": 1080,
@@ -250,7 +250,7 @@
             }
           },
           {
-            "title": "Bài 2.3: Tiền xử lý dữ liệu (Phần 3)",
+            "title": "Tiền xử lý dữ liệu (Phần 3)",
             "description": "Trích xuất và lựa chọn đặc trưng.",
             "video_key": "seed/hust-cs/ml/06-2-3-tien-xu-ly-du-lieu.mp4",
             "duration_secs": 957,
@@ -302,7 +302,7 @@
         "title": "Chương 3: Các mô hình hồi quy tuyến tính",
         "lessons": [
           {
-            "title": "Bài 3.1: Hồi quy tuyến tính",
+            "title": "Hồi quy tuyến tính",
             "description": "Mô hình hồi quy tuyến tính một biến và nhiều biến.",
             "video_key": "seed/hust-cs/ml/07-3-1-hoi-quy-tuyen-tinh.mp4",
             "duration_secs": 1225,
@@ -349,7 +349,7 @@
             }
           },
           {
-            "title": "Bài 3.2: Phương pháp bình phương tối thiểu",
+            "title": "Phương pháp bình phương tối thiểu",
             "description": "Ước lượng tham số hồi quy bằng phương pháp bình phương tối thiểu.",
             "video_key": "seed/hust-cs/ml/08-3-2-binh-phuong-toi-thieu.mp4",
             "duration_secs": 780,
@@ -396,7 +396,7 @@
             }
           },
           {
-            "title": "Bài 3.3: Hồi quy Ridge",
+            "title": "Hồi quy Ridge",
             "description": "Kỹ thuật regularization L2 (Ridge regression) để tránh overfitting.",
             "video_key": "seed/hust-cs/ml/09-3-3-hoi-quy-ridge.mp4",
             "duration_secs": 1056,
@@ -443,7 +443,7 @@
             }
           },
           {
-            "title": "Bài 3.4: Hồi quy LASSO",
+            "title": "Hồi quy LASSO",
             "description": "Kỹ thuật regularization L1 (LASSO regression) và lựa chọn đặc trưng.",
             "video_key": "seed/hust-cs/ml/10-3-4-hoi-quy-lasso.mp4",
             "duration_secs": 797,
@@ -495,7 +495,7 @@
         "title": "Chương 4: Phân cụm dữ liệu",
         "lessons": [
           {
-            "title": "Bài 4.1: Phân cụm với K-means",
+            "title": "Phân cụm với K-means",
             "description": "Thuật toán học không giám sát phân cụm K-means.",
             "video_key": "seed/hust-cs/ml/11-4-phan-cum-voi-k-means.mp4",
             "duration_secs": 5660,
@@ -547,7 +547,7 @@
         "title": "Chương 5: Học dựa trên khoảng cách",
         "lessons": [
           {
-            "title": "Bài 5.1: Học dựa trên láng giềng (k-NN)",
+            "title": "Học dựa trên láng giềng (k-NN)",
             "description": "Thuật toán phân loại và hồi quy dựa trên láng giềng gần nhất k-NN.",
             "video_key": "seed/hust-cs/ml/12-6-hoc-dua-tren-lang-gieng.mp4",
             "duration_secs": 5211,
@@ -599,7 +599,7 @@
         "title": "Chương 6: Cây quyết định và Rừng ngẫu nhiên",
         "lessons": [
           {
-            "title": "Bài 6.1: Cây quyết định",
+            "title": "Cây quyết định",
             "description": "Xây dựng cây quyết định dựa trên độ đo entropy và thông tin thu được (information gain).",
             "video_key": "seed/hust-cs/ml/13-7-1-cay-quyet-dinh.mp4",
             "duration_secs": 5144,
@@ -646,7 +646,7 @@
             }
           },
           {
-            "title": "Bài 6.2: Rừng ngẫu nhiên",
+            "title": "Rừng ngẫu nhiên",
             "description": "Mô hình học máy kết hợp (ensemble learning) rừng ngẫu nhiên (Random Forest).",
             "video_key": "seed/hust-cs/ml/14-7-2-rung-ngau-nhien.mp4",
             "duration_secs": 5072,
@@ -698,7 +698,7 @@
         "title": "Chương 7: Phân loại với SVM",
         "lessons": [
           {
-            "title": "Bài 7.1: Phân loại bằng SVM (Phần 1)",
+            "title": "Phân loại bằng SVM (Phần 1)",
             "description": "Thuật toán tối ưu biên lớn Support Vector Machine (SVM).",
             "video_key": "seed/hust-cs/ml/15-8-1-phan-loai-bang-svm.mp4",
             "duration_secs": 4717,
@@ -745,7 +745,7 @@
             }
           },
           {
-            "title": "Bài 7.2: Phân loại bằng SVM (Phần 2)",
+            "title": "Phân loại bằng SVM (Phần 2)",
             "description": "SVM phi tuyến và phương pháp sử dụng nhân (kernel trick).",
             "video_key": "seed/hust-cs/ml/16-8-2-phan-loai-bang-svm.mp4",
             "duration_secs": 5203,
@@ -797,7 +797,7 @@
         "title": "Chương 8: Đánh giá hiệu quả mô hình",
         "lessons": [
           {
-            "title": "Bài 8.1: Đánh giá hiệu quả của mô hình (Phần 1)",
+            "title": "Đánh giá hiệu quả của mô hình (Phần 1)",
             "description": "Các độ đo đánh giá mô hình phân loại: Accuracy, Precision, Recall, F1-score.",
             "video_key": "seed/hust-cs/ml/17-9-1-danh-gia-hieu-qua-cua-mot-mo-hinh-hoc-may.mp4",
             "duration_secs": 5213,
@@ -844,7 +844,7 @@
             }
           },
           {
-            "title": "Bài 8.2: Đánh giá hiệu quả của mô hình (Phần 2)",
+            "title": "Đánh giá hiệu quả của mô hình (Phần 2)",
             "description": "Đánh giá mô hình hồi quy và phương pháp kiểm chéo (cross-validation).",
             "video_key": "seed/hust-cs/ml/18-9-2-danh-gia-hieu-qua-cua-mot-mo-hinh-hoc-may.mp4",
             "duration_secs": 3214,
@@ -896,7 +896,7 @@
         "title": "Chương 9: Mạng nơ-ron nhân tạo",
         "lessons": [
           {
-            "title": "Bài 9.1: Mạng nơ-ron nhân tạo (Phần 1)",
+            "title": "Mạng nơ-ron nhân tạo (Phần 1)",
             "description": "Cấu tạo của một nơ-ron nhân tạo (Perceptron) và mạng truyền thẳng.",
             "video_key": "seed/hust-cs/ml/19-10-1-mang-noron-nhan-tao.mp4",
             "duration_secs": 5345,
@@ -943,7 +943,7 @@
             }
           },
           {
-            "title": "Bài 9.2: Mạng nơ-ron nhân tạo (Phần 2)",
+            "title": "Mạng nơ-ron nhân tạo (Phần 2)",
             "description": "Thuật toán lan truyền ngược (Backpropagation) cập nhật trọng số.",
             "video_key": "seed/hust-cs/ml/20-10-2-mang-noron-nhan-tao.mp4",
             "duration_secs": 4906,
@@ -995,7 +995,7 @@
         "title": "Chương 10: Mô hình học máy xác suất",
         "lessons": [
           {
-            "title": "Bài 10.1: Mô hình xác suất",
+            "title": "Mô hình xác suất",
             "description": "Giới thiệu phương pháp phân loại dựa trên lý thuyết xác suất Bayes.",
             "video_key": "seed/hust-cs/ml/21-11-1-mo-hinh-xac-suat.mp4",
             "duration_secs": 2052,
@@ -1042,7 +1042,7 @@
             }
           },
           {
-            "title": "Bài 10.2: Models and Generation Processes",
+            "title": "Models and Generation Processes",
             "description": "Mô hình sinh (Generative models) và quá trình sinh dữ liệu.",
             "video_key": "seed/hust-cs/ml/22-11-2-models-and-generation-processes.mp4",
             "duration_secs": 1711,
@@ -1089,7 +1089,7 @@
             }
           },
           {
-            "title": "Bài 10.3: Training and Inference",
+            "title": "Training and Inference",
             "description": "Huấn luyện tham số và suy diễn xác suất trong mô hình học máy.",
             "video_key": "seed/hust-cs/ml/23-11-3-training-and-inference.mp4",
             "duration_secs": 973,
@@ -1136,7 +1136,7 @@
             }
           },
           {
-            "title": "Bài 10.4: Phân loại bằng Naive Bayes",
+            "title": "Phân loại bằng Naive Bayes",
             "description": "Phân loại văn bản và dữ liệu bằng thuật toán Naive Bayes.",
             "video_key": "seed/hust-cs/ml/24-11-4-naive-bayes-cho-phan-loai.mp4",
             "duration_secs": 1599,
