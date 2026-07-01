@@ -1,0 +1,46 @@
+# compose.dev.yml — RUN richter/heino from the pre-built images (pulled from the
+# registry). No build here — build/push with compose.build.yml first, or just pull.
+#
+#   podman compose -f compose.yml -f compose.gpu.yml -f compose.dev.yml up -d
+#
+# CONFIG IS NOT HARDCODED. Each app gets its config from the SAME centralized files
+# used to run locally — shared in, never duplicated:
+#   richter → mounts richter.base.toml + richter.local.toml (-c) + fdb.cluster;
+#             RICHTER_* / FDB_* come from .env (env_file, inherited from compose.yml).
+#   heino   → typescript/heino/.env (Next auto-loads it for NEXT_PUBLIC_* at build
+#             and RICHTER_BASE_URL / JWT_SECRET at runtime).
+name: dyadia
+
+services:
+  richter:
+    image: ${DYADIA_RICHTER_IMAGE}
+    command: ["-c", "/etc/richter/richter.base.toml,/etc/richter/richter.local.toml"]
+    volumes:
+      - ./golang/richter/richter.base.toml:/etc/richter/richter.base.toml:ro,Z
+      - ./golang/richter/richter.local.toml:/etc/richter/richter.local.toml:ro,Z
+      # richter.base.toml has [fdb] cluster_file = "fdb.cluster" (relative to the
+      # working dir = / in the image) → mount the cluster file at that path.
+      - ./fdb.cluster:/fdb.cluster:ro,Z
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fdb-coordinator:
+        condition: service_started
+      storage:
+        condition: service_started
+      speaches:
+        condition: service_healthy
+    restart: unless-stopped
+
+  heino:
+    image: ${DYADIA_HEINO_IMAGE}
+    # Standalone Next server (distroless entrypoint = node). The base placeholder's
+    # `sleep infinity` would otherwise win, so set the command explicitly.
+    command: ["typescript/heino/server.js"]
+    # Runtime config (RICHTER_BASE_URL / JWT_SECRET) from the centralized heino .env;
+    # NEXT_PUBLIC_* was already baked at build time.
+    env_file:
+      - ./typescript/heino/.env
+    depends_on:
+      - richter
+    restart: unless-stopped

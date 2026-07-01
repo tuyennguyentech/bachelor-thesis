@@ -1,4 +1,14 @@
-:80 {
+{
+	# Local dev serves plaintext HTTP and internal-CA HTTPS side by side. Disable the
+	# automatic HTTP→HTTPS redirect: it would target the default :443 (not the
+	# published :8443) and would hijack the plaintext :80 site for Host=localhost.
+	# Certs come from Caddy's own internal CA — there is no public domain in local dev.
+	auto_https disable_redirects
+}
+
+# Shared routing, imported by both the HTTP and HTTPS site blocks below so the two
+# listeners behave identically.
+(routes) {
 	handle_path /api/storage/* {
 		# Allow cross-origin PUT/GET for presigned S3 URLs from browser
 		header Access-Control-Allow-Origin "*"
@@ -38,4 +48,19 @@
 	}
 
 	reverse_proxy heino:3000
+}
+
+# HTTP — published on host :8080 (container :80). Hostless address matches every host
+# (localhost, caddy, …), so internal service DNS (http://caddy) and Playwright E2E
+# keep working unchanged.
+:80 {
+	import routes
+}
+
+# HTTPS — published on host :8443 (container :443). Caddy's internal CA issues a
+# localhost certificate; browsers show a one-time self-signed warning in local dev
+# (run `caddy trust` / import the root from .volumes/caddy-data to silence it).
+https://localhost {
+	tls internal
+	import routes
 }

@@ -1,0 +1,33 @@
+# compose.build.yml — BUILD the richter/heino images, then push to the registry.
+# Overlays the compose.yml placeholders with build instructions only.
+#
+#   podman compose -f compose.yml -f compose.build.yml build
+#   podman compose -f compose.yml -f compose.build.yml push
+#
+# Everything parameterized comes from .env (image refs + tool versions) so build →
+# push → pull → run all agree. NO runtime config here — config is supplied at run
+# time from the centralized files (see compose.dev.yml).
+name: dyadia
+
+services:
+  richter:
+    build:
+      context: .
+      dockerfile: golang/richter/Dockerfile
+      args:
+        GO_VERSION: ${DYADIA_GO_VERSION}
+        FDB_VERSION: ${FDB_VERSION}
+        BUF_VERSION: ${DYADIA_BUF_VERSION}
+        SQLC_VERSION: ${DYADIA_SQLC_VERSION}
+    image: ${DYADIA_RICHTER_IMAGE}
+
+  heino:
+    build:
+      context: .
+      dockerfile: typescript/heino/Dockerfile
+      args:
+        GO_VERSION: ${DYADIA_GO_VERSION}
+        NODE_VERSION: ${DYADIA_NODE_VERSION}
+        BUF_VERSION: ${DYADIA_BUF_VERSION}
+        PNPM_VERSION: ${DYADIA_PNPM_VERSION}
+    image: ${DYADIA_HEINO_IMAGE}

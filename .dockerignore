@@ -1,0 +1,19 @@
+# Keep image build contexts tiny + simulate a FRESH checkout: gen/, node_modules/,
+# .next/ are gitignored and MUST be excluded so the Dockerfiles regenerate them
+# (buf generate / sqlc generate / pnpm install) rather than shipping host copies.
+# .volumes alone is ~15 GB.
+.volumes/
+seed-assets/
+**/node_modules/
+.git/
+golang/buf/gen/
+typescript/buf/gen/
+golang/sql/gen/
+**/.next/
+**/__pycache__/
+tex/
+*.pdf
+*.zip
+code.zip
+typescript/heino/test-results/
+typescript/heino/playwright-report/

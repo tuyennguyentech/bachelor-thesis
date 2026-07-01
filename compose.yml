@@ -10,6 +10,12 @@ services:
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
+    # Portable data: bind-mount into the working tree (.volumes/) instead of an
+    # anonymous volume, so the whole dataset travels with the repo. :U makes
+    # podman chown the bind to the container user on each mount (portable across
+    # machines with different rootless uid maps); :Z relabels for SELinux.
+    volumes:
+      - ./.volumes/fdb-coordinator:/var/fdb/data:U,Z
 
   fdb-server-1:
     depends_on:
@@ -20,6 +26,8 @@ services:
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
+    volumes:
+      - ./.volumes/fdb-server-1:/var/fdb/data:U,Z
 
   fdb-server-2:
     depends_on:
@@ -30,6 +38,15 @@ services:
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
+    volumes:
+      - ./.volumes/fdb-server-2:/var/fdb/data:U,Z
+
+  # NOTE: a freshly-created FoundationDB cluster is UNCONFIGURED (reads/writes time
+  # out with error 1031) until `configure new single ssd` runs once. This is NOT
+  # done by a sidecar — it is a manual, one-time step run at root by the operator:
+  #   sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec "configure new single ssd"
+  # A copied-in `.volumes/fdb-*` data dir is already configured, so this is only
+  # needed on a brand-new (empty) data dir.
 
   postgres:
     image: postgres:18.3-alpine3.23
@@ -41,19 +58,33 @@ services:
       - 5432:5432
     volumes:
       - ./scripts/init/postgresql:/docker-entrypoint-initdb.d:Z
+      # Postgres data dir (was an anonymous volume at /var/lib/postgresql). The
+      # entrypoint runs as root and re-chowns PGDATA to the postgres user, so :U
+      # (chown bind to container root) keeps it portable across machines.
+      - ./.volumes/postgres:/var/lib/postgresql:U,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dyadia -d dyadia"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   caddy:
     image: caddy:2.11.2-alpine
     cap_add:
       - NET_ADMIN
+    # Publish on unprivileged host ports → Caddy still listens on :80/:443 inside the
+    # container. Avoids the rootless low-port bind on the host, so the stack is
+    # portable to another machine with no `sysctl ip_unprivileged_port_start` step.
+    # HTTP  → http://localhost:8080   (container :80)
+    # HTTPS → https://localhost:8443  (container :443, Caddy internal-CA cert)
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "8080:80"
+      - "8443:443"
     volumes:
       - ./conf/caddy:/etc/caddy:Z
-      - caddy_data:/data
-      - caddy_config:/config
+      - ./.volumes/caddy-data:/data:U,Z
+      - ./.volumes/caddy-config:/config:U,Z
 
   storage:
     image: chrislusf/seaweedfs:3.88
@@ -61,7 +92,7 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - storage_data:/data
+      - ./.volumes/seaweedfs:/data:U,Z
       - ./conf/seaweedfs:/config:Z
 
   debug:
@@ -88,7 +119,13 @@ services:
       # STT model preloaded into memory at boot. Single source: RICHTER_STT_MODEL in .env.
       PRELOAD_MODELS: '["${RICHTER_STT_MODEL:-Systran/faster-whisper-small}"]'
     volumes:
-      - hf_hub_cache:/home/ubuntu/.cache/huggingface/hub
+      # HuggingFace model cache (Whisper + Piper), bind-mounted under .volumes like
+      # all other persistent data. The speaches image declares `USER ubuntu`
+      # (uid 1000), so :U chowns the bind to 1000 — writable by the runtime user
+      # (verified). Keeping it in .volumes means the downloaded models travel with
+      # the portable dataset (no re-download on a copied-in stack); on a brand-new
+      # empty dir, speaches-init pulls them on first `up`.
+      - ./.volumes/hf-cache:/home/ubuntu/.cache/huggingface/hub:U,Z
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://0.0.0.0:8000/health"]
@@ -120,6 +157,23 @@ services:
     entrypoint: ["sh", "/init/preload-tts.sh"]
     restart: "no"
 
+  # One-shot init: bring the dev DB schema up to date with goose (idempotent —
+  # skips already-applied migrations, so it is a no-op when a populated data dir is
+  # copied in for a portable run). Built from a tiny goose+migrations image; the
+  # build context is the repo root, kept small by .dockerignore.
+  migrate:
+    build:
+      context: .
+      dockerfile: scripts/init/migrate/Dockerfile
+      args:
+        GO_VERSION: ${DYADIA_GO_VERSION}
+        GOOSE_VERSION: ${DYADIA_GOOSE_VERSION}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["postgres://dyadia:dyadia@postgres:5432/dyadia", "up"]
+    restart: "no"
+
   # richter/heino run as HOST processes via container-shell.sh (which sources .env),
   # so these are network-namespace placeholders. env_file is declared so the env
   # also applies if/when they run as real containers (prod), keeping one source of truth.
@@ -135,8 +189,6 @@ services:
     env_file:
       - .env
 
-volumes:
-  caddy_data:
-  caddy_config:
-  storage_data:
-  hf_hub_cache:
+# All persistent DATA (postgres, fdb, seaweedfs, caddy, speaches model cache) is
+# bind-mounted under ./.volumes/ so the seeded dataset travels with the repo.
+# There are no named volumes.
