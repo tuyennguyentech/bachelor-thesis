@@ -99,7 +99,12 @@ func readDevJSON(path string, v any) error {
 // SeedAdmin runs the production-only admin seeder (idempotent).
 func (s *SeederSvc) SeedAdmin(ctx context.Context) error {
 	s.log.InfoContext(ctx, "seed: running seeder", "name", "admin")
-	return s.seedAdmin(ctx)
+	if err := s.seedAdmin(ctx); err != nil {
+		// Genuine error → log at ERROR then STOP (external deps warn+continue upstream).
+		s.log.ErrorContext(ctx, "seed: admin seeder failed, aborting", "err", err)
+		return err
+	}
+	return nil
 }
 
 // SeedDev runs the full dev-data pipeline. Steps are run sequentially; any
@@ -116,6 +121,14 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 	if err := s.ensureBucket(ctx); err != nil {
 		return fmt.Errorf("ensure storage bucket: %w", err)
 	}
+	// Map each video's storage key → its local source file so the course seeder can
+	// probe the REAL uploaded video duration and fit the (golden-fixture) chunk /
+	// interaction timestamps to it — the fixtures are authored for the original
+	// lecture length, but demo lessons map onto shorter demo clips.
+	videosByKey := make(map[string]string, len(data.Videos))
+	for _, v := range data.Videos {
+		videosByKey[v.S3Key] = v.LocalPath
+	}
 	type step struct {
 		name string
 		run  func(context.Context) error
@@ -124,7 +137,7 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 		{"dev.users", func(ctx context.Context) error { return s.seedDevUsers(ctx, data.Users) }},
 		{"dev.organizations", func(ctx context.Context) error { return s.seedDevOrganizations(ctx, data.Organizations) }},
 		{"dev.org_members", func(ctx context.Context) error { return s.seedDevOrgMembers(ctx, data.OrgMembers) }},
-		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses) }},
+		{"dev.courses", func(ctx context.Context) error { return s.seedDevCourses(ctx, data.Courses, videosByKey) }},
 		{"dev.course_members", func(ctx context.Context) error { return s.seedDevCourseMembers(ctx, data.CourseMembers) }},
 		{"dev.lesson_video_keys", func(ctx context.Context) error { return s.seedDevLessonVideoKeys(ctx, data.Courses) }},
 		{"dev.attempts", func(ctx context.Context) error { return s.seedDevAttempts(ctx, data.Attempts) }},
@@ -134,6 +147,10 @@ func (s *SeederSvc) SeedDev(ctx context.Context) error {
 	for _, st := range steps {
 		s.log.InfoContext(ctx, "seed: running seeder", "name", st.name)
 		if err := st.run(ctx); err != nil {
+			// A genuine error aborts the whole run: log it at ERROR (so the failing step
+			// is unmistakable) then STOP. External-dep degradations (missing ML videos,
+			// unreadable source) are warned + continued inside the steps, never here.
+			s.log.ErrorContext(ctx, "seed: step failed, aborting", "step", st.name, "err", err)
 			return fmt.Errorf("seeder %q: %w", st.name, err)
 		}
 	}

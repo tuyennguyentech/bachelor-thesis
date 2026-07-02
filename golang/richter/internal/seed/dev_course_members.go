@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	jwtv1 "example.com/buf/gen/richter/jwt/v1"
@@ -13,6 +14,7 @@ import (
 	"example.com/sql/gen"
 
 	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
@@ -58,8 +60,23 @@ func (s *SeederSvc) seedDevCourseMembers(ctx context.Context, members []devCours
 			return fmt.Errorf("lookup user %s: %w", m.UserEmail, err)
 		}
 
-		// Act as the org owner (a course manager): RequireCourseManager passes via
-		// the org-owner check, so the synthesized JWT role can stay NORMAL.
+		// Declarative desired-state: probe the (course,user) enrolment. If it already
+		// exists AT the spec's role, there's nothing to do (idempotent — no write). A
+		// real lookup failure (not "no rows") is a genuine error → STOP.
+		existingCM, lookupErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.CourseMember, error) {
+			return q.GetCourseMember(ctx, gen.GetCourseMemberParams{CourseID: courseID, UserID: user.ID})
+		})
+		if lookupErr == nil && coursemembers.CourseRoleToProto(existingCM.Role) == role {
+			continue
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return fmt.Errorf("lookup course member %s in %q: %w", m.UserEmail, m.CourseTitle, lookupErr)
+		}
+
+		// Absent → enrol; present with a drifted role → converge. AddCourseMember is a
+		// true upsert (ON CONFLICT (course_id,user_id) DO UPDATE SET role), so this one
+		// call covers both. Act as the org owner (a course manager): RequireCourseManager
+		// passes via the org-owner check, so the synthesized JWT role can stay NORMAL.
 		actx := authz.ContextWithClaims(ctx, &jwtv1.JWTClaims{
 			Sub:    uuidStr(org.CreatedBy),
 			Role:   richterv1.UserRole_USER_ROLE_NORMAL,
@@ -71,20 +88,18 @@ func (s *SeederSvc) seedDevCourseMembers(ctx context.Context, members []devCours
 			Role:     role,
 		})
 		if err == nil {
-			s.log.InfoContext(ctx, "seed: dev course member created", "course", m.CourseTitle, "user", m.UserEmail, "role", m.Role)
+			s.log.InfoContext(ctx, "seed: dev course member converged", "course", m.CourseTitle, "user", m.UserEmail, "role", m.Role)
 			continue
 		}
-		switch connect.CodeOf(err) {
-		case connect.CodeAlreadyExists:
-			s.log.InfoContext(ctx, "seed: dev course member already exists, skipping", "course", m.CourseTitle, "user", m.UserEmail)
-		case connect.CodeFailedPrecondition:
-			// Service-enforced invariant: target must be an ACTIVE org member.
-			// Skip (don't fail) — same outcome as the old manual guard.
+		// Service-enforced invariant: target must be an ACTIVE org member. This is a
+		// deliberate data condition (the invariant is exercised), not a seed failure →
+		// warn + continue, same outcome as the old manual guard.
+		if connect.CodeOf(err) == connect.CodeFailedPrecondition {
 			s.log.WarnContext(ctx, "seed: course member skipped — not an active org member",
 				"course", m.CourseTitle, "user", m.UserEmail, "org", m.OrgSlug, "err", err)
-		default:
-			return fmt.Errorf("add course member %s to %s: %w", m.UserEmail, m.CourseTitle, err)
+			continue
 		}
+		return fmt.Errorf("add course member %s to %s: %w", m.UserEmail, m.CourseTitle, err)
 	}
 	return nil
 }

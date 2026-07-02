@@ -102,9 +102,30 @@ var seedGenMLSpecCmd = cobra.Command{
 	},
 }
 
+// seedRescaleFixturesCmd re-fits the golden-fixture demo lessons (NON-ML) to their
+// real mapped-video durations IN PLACE, repairing a DB seeded before that fit
+// existed — without a destructive full reseed (the ML course + FoundationDB are left
+// untouched, so no root FDB re-configure and no GPU rerun).
+var seedRescaleFixturesCmd = cobra.Command{
+	Use:   "rescale-fixtures",
+	Short: "Re-fit demo (non-ML) fixture lessons to their real video duration, in place",
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return preRunE(&richterCtx, internal.Injector)
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		seeder, err := do.Invoke[*seed.SeederSvc](internal.Injector)
+		if err != nil {
+			return fmt.Errorf("SeederSvc cannot be invoked: %w", err)
+		}
+		return seeder.RescaleFixtures(richterCtx)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(&seedCmd)
 	seedCmd.Flags().BoolVar(&seedDev, "dev", false, "seed dev data (users, orgs, courses)")
+
+	seedCmd.AddCommand(&seedRescaleFixturesCmd)
 
 	seedCmd.AddCommand(&seedGenExercisesCmd)
 	f := seedGenExercisesCmd.Flags()

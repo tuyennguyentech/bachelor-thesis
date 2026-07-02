@@ -83,7 +83,13 @@ type GenMLSpecParams struct {
 // GenMLSpec scans the downloaded ML playlist videos and (re)writes the committed
 // tu-hoc-ml.json course spec + appends any new entries to videos.json idempotently.
 // It writes source files (not the embedded FS), so run it from the repo root.
-func (s *SeederSvc) GenMLSpec(ctx context.Context, p GenMLSpecParams) error {
+func (s *SeederSvc) GenMLSpec(ctx context.Context, p GenMLSpecParams) (err error) {
+	// Log-and-stop: any genuine error aborts and is logged at ERROR on every return path.
+	defer func() {
+		if err != nil {
+			s.log.ErrorContext(ctx, "seed: gen-ml-spec failed, aborting", "err", err)
+		}
+	}()
 	if p.VideoDir == "" {
 		p.VideoDir = mlVideoDir
 	}

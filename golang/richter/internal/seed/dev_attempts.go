@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	jwtv1 "example.com/buf/gen/richter/jwt/v1"
 	richterv1 "example.com/buf/gen/richter/v1"
@@ -102,6 +105,10 @@ type lessonInfo struct {
 // quiz_attempts.json and (2) generated dense, diverse attempts for the ML demo
 // course. Idempotent: SubmitAttempt upserts one attempt per (user, lesson).
 func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSpec) error {
+	if err := s.seedExplicitAttempts(ctx, attempts); err != nil {
+		return err
+	}
+
 	interactionsSvc, err := do.Invoke[*interactions.InteractionsSvc](internal.Injector)
 	if err != nil {
 		return fmt.Errorf("invoke InteractionsSvc: %w", err)
@@ -109,12 +116,6 @@ func (s *SeederSvc) seedDevAttempts(ctx context.Context, attempts []devAttemptSp
 	aiSvc, err := do.Invoke[*ai.AISvc](internal.Injector)
 	if err != nil {
 		return fmt.Errorf("invoke AISvc: %w", err)
-	}
-
-	for _, a := range attempts {
-		if err := s.seedExplicitAttempt(ctx, interactionsSvc, aiSvc, a); err != nil {
-			s.log.WarnContext(ctx, "seed: explicit attempt skipped", "user", a.UserEmail, "lesson", a.LessonTitle, "err", err)
-		}
 	}
 
 	// Dense ML demo attempts only on the dev DB — the test DB keeps a small
@@ -196,6 +197,28 @@ func parseMCQ(config []byte) (correct, nopts int, ok bool) {
 	return cfg.CorrectAnswer, len(cfg.Options), true
 }
 
+// seedExplicitAttempts submits every quiz_attempts.json spec via the real flow.
+// A genuine error (bad email, list/submit failure, real DB error) STOPS the seed;
+// a target lesson simply absent from this DB is skipped. Used by the full dev seed
+// AND by RescaleFixtures to restore attempt responses that cascade-deleted when a
+// rescaled lesson's interactions were re-created.
+func (s *SeederSvc) seedExplicitAttempts(ctx context.Context, attempts []devAttemptSpec) error {
+	interactionsSvc, err := do.Invoke[*interactions.InteractionsSvc](internal.Injector)
+	if err != nil {
+		return fmt.Errorf("invoke InteractionsSvc: %w", err)
+	}
+	aiSvc, err := do.Invoke[*ai.AISvc](internal.Injector)
+	if err != nil {
+		return fmt.Errorf("invoke AISvc: %w", err)
+	}
+	for _, a := range attempts {
+		if err := s.seedExplicitAttempt(ctx, interactionsSvc, aiSvc, a); err != nil {
+			return fmt.Errorf("seed explicit attempt (user %q, lesson %q): %w", a.UserEmail, a.LessonTitle, err)
+		}
+	}
+	return nil
+}
+
 // seedExplicitAttempt submits one quiz_attempts.json spec via the real flow,
 // mapping the positional answers array onto the lesson's MCQ interactions.
 func (s *SeederSvc) seedExplicitAttempt(ctx context.Context, interactionsSvc *interactions.InteractionsSvc, aiSvc *ai.AISvc, a devAttemptSpec) error {
@@ -249,7 +272,10 @@ func (s *SeederSvc) resolveLesson(ctx context.Context, orgSlug, courseTitle, mod
 		return q.GetOrganizationBySlug(ctx, orgSlug)
 	})
 	if err != nil {
-		return gen.Lesson{}, false, nil
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.Lesson{}, false, nil // org genuinely absent — skip (not an error)
+		}
+		return gen.Lesson{}, false, fmt.Errorf("lookup org %q: %w", orgSlug, err) // real DB error → STOP
 	}
 	courseID, ok, err := s.courseIDByTitle(ctx, org.ID, courseTitle)
 	if err != nil || !ok {

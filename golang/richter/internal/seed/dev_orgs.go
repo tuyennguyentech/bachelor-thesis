@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	jwtv1 "example.com/buf/gen/richter/jwt/v1"
@@ -13,7 +14,7 @@ import (
 	"example.com/richter/internal/svc/orgmembers"
 	"example.com/sql/gen"
 
-	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/do/v2"
 )
@@ -41,6 +42,33 @@ func (s *SeederSvc) seedDevOrganizations(ctx context.Context, orgs []devOrgSpec)
 		return fmt.Errorf("invoke OrganizationsSvc: %w", err)
 	}
 	for _, o := range orgs {
+		// Declarative desired-state: probe by unique slug. If present, CONVERGE the
+		// mutable metadata (name) to the spec; if absent, INSERT. A real lookup failure
+		// (not "no rows") is a genuine error → STOP.
+		existingOrg, lookupErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.Organization, error) {
+			return q.GetOrganizationBySlug(ctx, o.Slug)
+		})
+		if lookupErr == nil {
+			if existingOrg.Name != o.Name {
+				// Update through the service AS THE ORG OWNER (the creator, an auto-added
+				// OWNER member) — UpdateOrganization requires org OWNER/ADMIN.
+				ownerCtx := authz.ContextWithClaims(ctx, &jwtv1.JWTClaims{
+					Sub:    uuidStr(existingOrg.CreatedBy),
+					Role:   richterv1.UserRole_USER_ROLE_NORMAL,
+					Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
+				})
+				if _, err := orgSvc.UpdateOrganization(ownerCtx, &richterv1.UpdateOrganizationRequest{
+					Id: uuidStr(existingOrg.ID), Name: o.Name, Slug: o.Slug,
+				}); err != nil {
+					return fmt.Errorf("converge org %s name: %w", o.Slug, err)
+				}
+				s.log.InfoContext(ctx, "seed: dev org name converged", "slug", o.Slug)
+			}
+			continue
+		}
+		if !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return fmt.Errorf("lookup org %s: %w", o.Slug, lookupErr)
+		}
 		creator, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.User, error) {
 			return q.GetUserByEmail(ctx, o.CreatorEmail)
 		})
@@ -52,20 +80,14 @@ func (s *SeederSvc) seedDevOrganizations(ctx context.Context, orgs []devOrgSpec)
 			Role:   richterv1.UserRole_USER_ROLE_NORMAL,
 			Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
 		})
-		_, err = orgSvc.CreateOrganization(actx, &richterv1.CreateOrganizationRequest{
+		if _, err := orgSvc.CreateOrganization(actx, &richterv1.CreateOrganizationRequest{
 			CreatedBy: uuidStr(creator.ID),
 			Name:      o.Name,
 			Slug:      o.Slug,
-		})
-		if err == nil {
-			s.log.InfoContext(ctx, "seed: dev org created", "slug", o.Slug)
-			continue
+		}); err != nil {
+			return fmt.Errorf("create org %s: %w", o.Slug, err)
 		}
-		if connect.CodeOf(err) == connect.CodeAlreadyExists {
-			s.log.InfoContext(ctx, "seed: dev org already exists, skipping", "slug", o.Slug)
-			continue
-		}
-		return fmt.Errorf("create org %s: %w", o.Slug, err)
+		s.log.InfoContext(ctx, "seed: dev org created", "slug", o.Slug)
 	}
 	return nil
 }
@@ -99,26 +121,48 @@ func (s *SeederSvc) seedDevOrgMembers(ctx context.Context, members []devOrgMembe
 		if err != nil {
 			return fmt.Errorf("lookup user %s: %w", m.UserEmail, err)
 		}
+		// Act as the org owner (the creator) — Add/Update member both require OWNER/ADMIN.
 		actx := authz.ContextWithClaims(ctx, &jwtv1.JWTClaims{
 			Sub:    uuidStr(org.CreatedBy),
 			Role:   richterv1.UserRole_USER_ROLE_NORMAL,
 			Status: richterv1.UserStatus_USER_STATUS_ACTIVE,
 		})
-		_, err = omSvc.AddOrganizationMember(actx, &richterv1.AddOrganizationMemberRequest{
+		// Declarative desired-state: probe the (org,user) membership. If present,
+		// CONVERGE role + status to the spec (update only what drifts); if absent, ADD.
+		existingMember, lookupErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) (gen.OrganizationMember, error) {
+			return q.GetOrganizationMember(ctx, gen.GetOrganizationMemberParams{OrganizationID: org.ID, UserID: user.ID})
+		})
+		if lookupErr == nil {
+			if orgmembers.OrganizationRoleToProto(existingMember.Role) != role {
+				if _, err := omSvc.UpdateOrganizationMemberRole(actx, &richterv1.UpdateOrganizationMemberRoleRequest{
+					OrganizationId: uuidStr(org.ID), UserId: uuidStr(user.ID), Role: role,
+				}); err != nil {
+					return fmt.Errorf("converge org member role %s in %s: %w", m.UserEmail, m.OrgSlug, err)
+				}
+				s.log.InfoContext(ctx, "seed: dev org member role converged", "org", m.OrgSlug, "user", m.UserEmail, "role", m.Role)
+			}
+			if orgmembers.MemberStatusToProto(existingMember.Status) != status {
+				if _, err := omSvc.UpdateOrganizationMemberStatus(actx, &richterv1.UpdateOrganizationMemberStatusRequest{
+					OrganizationId: uuidStr(org.ID), UserId: uuidStr(user.ID), Status: status,
+				}); err != nil {
+					return fmt.Errorf("converge org member status %s in %s: %w", m.UserEmail, m.OrgSlug, err)
+				}
+				s.log.InfoContext(ctx, "seed: dev org member status converged", "org", m.OrgSlug, "user", m.UserEmail, "status", m.Status)
+			}
+			continue
+		}
+		if !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return fmt.Errorf("lookup org member %s in %s: %w", m.UserEmail, m.OrgSlug, lookupErr)
+		}
+		if _, err := omSvc.AddOrganizationMember(actx, &richterv1.AddOrganizationMemberRequest{
 			OrganizationId: uuidStr(org.ID),
 			UserId:         uuidStr(user.ID),
 			Role:           role,
 			Status:         status,
-		})
-		if err == nil {
-			s.log.InfoContext(ctx, "seed: dev org member created", "org", m.OrgSlug, "user", m.UserEmail)
-			continue
+		}); err != nil {
+			return fmt.Errorf("add org member %s to %s: %w", m.UserEmail, m.OrgSlug, err)
 		}
-		if connect.CodeOf(err) == connect.CodeAlreadyExists {
-			s.log.InfoContext(ctx, "seed: dev org member already exists, skipping", "org", m.OrgSlug, "user", m.UserEmail)
-			continue
-		}
-		return fmt.Errorf("add org member %s to %s: %w", m.UserEmail, m.OrgSlug, err)
+		s.log.InfoContext(ctx, "seed: dev org member created", "org", m.OrgSlug, "user", m.UserEmail)
 	}
 	return nil
 }

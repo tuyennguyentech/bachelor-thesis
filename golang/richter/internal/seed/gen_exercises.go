@@ -45,7 +45,13 @@ type GenExercisesParams struct {
 // GenExercises (re)generates exercises for a single lesson via the real
 // generation service. Idempotent unless Force is set: the generation service
 // skips chunks that already have interactions when ForceRegenerate is false.
-func (s *SeederSvc) GenExercises(ctx context.Context, p GenExercisesParams) error {
+func (s *SeederSvc) GenExercises(ctx context.Context, p GenExercisesParams) (err error) {
+	// Log-and-stop: any genuine error aborts and is logged at ERROR on every return path.
+	defer func() {
+		if err != nil {
+			s.log.ErrorContext(ctx, "seed: gen-exercises failed, aborting", "err", err)
+		}
+	}()
 	if len(p.Kinds) == 0 {
 		return fmt.Errorf("no interaction kinds given")
 	}
@@ -82,6 +88,21 @@ func (s *SeederSvc) GenExercises(ctx context.Context, p GenExercisesParams) erro
 		return nil
 	}); err != nil {
 		return fmt.Errorf("generation failed for lesson %q: %w", title, err)
+	}
+	// Generation().Run returns nil even when the model produced nothing for every chunk
+	// (it only emits a STEP_ERROR progress message). A lesson left with zero interactions
+	// after a generation run is a genuine failure → log at ERROR and stop, not report
+	// success. A force=false idempotent skip leaves pre-existing interactions in place, so
+	// the count is >0 there — this only fires on a truly empty result.
+	produced, err := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
+		return q.ListLessonInteractions(ctx, gen.ListLessonInteractionsParams{LessonID: lessonID, Limit: 1, Offset: 0})
+	})
+	if err != nil {
+		return fmt.Errorf("verify generated interactions for lesson %q: %w", title, err)
+	}
+	if len(produced) == 0 {
+		s.log.ErrorContext(ctx, "seed: generation produced zero interactions, aborting", "lesson_id", lessonID.String(), "title", title)
+		return fmt.Errorf("generation produced zero interactions for lesson %q", title)
 	}
 	s.log.InfoContext(ctx, "seed: exercises generated", "lesson_id", lessonID.String(), "title", title)
 	return nil

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -34,10 +36,20 @@ func (s *SeederSvc) seedDevVideos(ctx context.Context, videos []devVideoSpec) er
 			s.log.InfoContext(ctx, "seed: video already in storage, skipping", "key", v.S3Key)
 			continue
 		}
+		// A MISSING local source is only tolerated for ML playlist videos (an EXTERNAL
+		// dependency the operator downloads separately) → warn + continue + fixtures.
+		// Committed demo clips missing, or a genuine storage failure, are real errors → STOP.
+		if _, statErr := os.Stat(v.LocalPath); statErr != nil {
+			if strings.Contains(filepath.ToSlash(v.LocalPath), "/ml/") {
+				s.log.WarnContext(ctx, "seed: ML playlist video not downloaded, skipping upload (golden fixtures used)",
+					"key", v.S3Key, "file", v.LocalPath)
+				continue
+			}
+			return fmt.Errorf("seed: committed video source missing %q: %w", v.LocalPath, statErr)
+		}
 		s.log.InfoContext(ctx, "seed: uploading video", "key", v.S3Key, "file", v.LocalPath)
 		if err := s.uploadFromFile(ctx, v.S3Key, v.LocalPath); err != nil {
-			s.log.WarnContext(ctx, "seed: video upload failed, continuing", "key", v.S3Key, "err", err)
-			continue
+			return fmt.Errorf("seed: upload video %q: %w", v.S3Key, err)
 		}
 		s.log.InfoContext(ctx, "seed: video uploaded", "key", v.S3Key)
 	}
