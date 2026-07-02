@@ -7,8 +7,11 @@
 #   runtime: distroless/nodejs (no pnpm, no devDeps) → `node server.js`. ~150 MB.
 #
 # Version pins come from compose build args (single source: .env). Config is NEVER
-# baked: NEXT_PUBLIC_* is read from typescript/heino/.env at build; runtime config
-# (RICHTER_BASE_URL / JWT_SECRET) is passed via env_file at run (compose.dev.yml).
+# baked or injected here: NEXT_PUBLIC_* is inlined at build from the COMMITTED public
+# typescript/heino/.env, and the secret .env.local is excluded from the build context
+# and not needed to build. Runtime config is injected via env_file at run
+# (compose.dev.yml). The build depends only on committed inputs → reproducible on a
+# fresh clone / git worktree / CI.
 
 ARG GO_VERSION=1.26
 ARG NODE_VERSION=24
@@ -37,7 +40,11 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY typescript/ ./typescript/
 COPY --from=bufgen /src/typescript/buf/gen/ ./typescript/buf/gen/
 RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile
-# `next build` auto-loads typescript/heino/.env for NEXT_PUBLIC_* (file must exist).
+# `next build` reads the COMMITTED, public typescript/heino/.env from the build context
+# (NEXT_PUBLIC_* inlined into the client bundle + the non-secret RICHTER_BASE_URL). The
+# secret .env.local is excluded from the build context (.dockerignore) and is NOT needed
+# to build — server secrets are read at runtime — so the build depends only on committed,
+# public inputs and is reproducible on a fresh clone / git worktree / CI.
 RUN pnpm -F heino build
 
 # ── runtime (distroless/nodejs runs `node` as entrypoint) ──────────────────────

@@ -3,8 +3,8 @@
 # and run the full dev seed from scratch.
 #
 # DESTRUCTIVE & REPRODUCIBLE: stops the stack, wipes ./volumes data dirs, brings
-# the stack back up — the `migrate` init container runs goose migrations
-# automatically. FoundationDB configuration is NOT automated: a fresh FDB data dir
+# the stack back up, then runs goose migrations explicitly (migrations are a
+# developer step, not a sidecar). FoundationDB configuration is NOT automated: a fresh FDB data dir
 # must be configured ONCE at root by the operator (see the prompt below); this
 # script waits for that before seeding. Finally it runs `seed --dev`.
 #
@@ -46,8 +46,8 @@ for d in "${VOL_SUBDIRS[@]}"; do
   mkdir -p "$ROOT/volumes/$d"
 done
 
-echo "=== [3/4] Bring stack up (GPU=$GPU); migrate init container runs goose ==="
-"${COMPOSE[@]}" up -d --build
+echo "=== [3/4] Bring stack up (GPU=$GPU) ==="
+"${COMPOSE[@]}" up -d
 echo -n "  postgres "; until podman exec dyadia-postgres-1 pg_isready -U dyadia -q 2>/dev/null; do echo -n .; sleep 2; done; echo "ready"
 
 # FoundationDB: a freshly-wiped data dir is UNCONFIGURED. This must be done at root
@@ -62,12 +62,14 @@ else
   echo "ready"
 fi
 
-mgcode=$(podman wait dyadia-migrate-1 2>/dev/null || echo "?"); echo "  migrate (goose up)        exit=$mgcode"
-if [ "$mgcode" != "0" ]; then
-  echo "ERROR: the migrate init container failed" >&2
-  podman logs dyadia-migrate-1 2>&1 | tail -8
+# Migrations are a developer step (no sidecar): run goose explicitly against the dev
+# DB now that Postgres is up. Idempotent — skips already-applied migrations.
+echo -n "  goose migrate (dev DB) ... "
+if ! "$SHELL_SH" richter -- ./scripts/setup/environment.dev/goose.sh dev up; then
+  echo "ERROR: goose migration failed" >&2
   exit 1
 fi
+echo "done"
 echo -n "  speaches "; until [ "$(podman inspect -f '{{.State.Health.Status}}' dyadia-speaches-1 2>/dev/null)" = "healthy" ]; do echo -n .; sleep 3; done; echo "healthy"
 echo -n "  speaches model preload "; podman wait dyadia-speaches-init-1 >/dev/null 2>&1 || true; echo "done"
 

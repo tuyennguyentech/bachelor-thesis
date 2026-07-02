@@ -7,8 +7,9 @@
 # used to run locally — shared in, never duplicated:
 #   richter → mounts richter.base.toml + richter.local.toml (-c) + fdb.cluster;
 #             RICHTER_* / FDB_* come from .env (env_file, inherited from compose.yml).
-#   heino   → typescript/heino/.env (Next auto-loads it for NEXT_PUBLIC_* at build
-#             and RICHTER_BASE_URL / JWT_SECRET at runtime).
+#   heino   → NEXT_PUBLIC_* was inlined at build from the committed public
+#             typescript/heino/.env; at runtime RICHTER_BASE_URL (public .env) +
+#             JWT_SECRET (secret .env.local) are injected via env_file below.
 name: dyadia
 
 services:
@@ -37,10 +38,12 @@ services:
     # Standalone Next server (distroless entrypoint = node). The base placeholder's
     # `sleep infinity` would otherwise win, so set the command explicitly.
     command: ["typescript/heino/server.js"]
-    # Runtime config (RICHTER_BASE_URL / JWT_SECRET) from the centralized heino .env;
-    # NEXT_PUBLIC_* was already baked at build time.
+    # Runtime config injected as container env (the image bakes none): public defaults
+    # from the committed .env + secrets from the gitignored .env.local. NEXT_PUBLIC_*
+    # was already inlined at build time.
     env_file:
       - ./typescript/heino/.env
+      - ./typescript/heino/.env.local
     depends_on:
       - richter
     restart: unless-stopped

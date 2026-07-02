@@ -23,8 +23,9 @@ re-processed: the data travels in `volumes/` and the apps run as containers.
   if you want GPU for new transcriptions — **not needed** to serve seeded data.
 - The **`volumes/` data folder** (the pre-seeded dataset — handed over
   separately; it is gitignored). Either copy it into the repo, or symlink it.
-- The **gitignored config files** (handed over with the data — the only config not
-  in git): `golang/richter/richter.local.toml` and `typescript/heino/.env`.
+- The **gitignored secret files** (handed over with the data — the config not in
+  git): `golang/richter/richter.local.toml` and `typescript/heino/.env.local`
+  (JWT_SECRET). heino's public config is committed in `typescript/heino/.env`.
 - Ports **8080** (HTTP) and **8443** (HTTPS) free — Caddy is published on these
   unprivileged host ports, so there is no `sysctl`/low-port setup needed, even
   rootless.
@@ -36,10 +37,10 @@ re-processed: the data travels in `volumes/` and the apps run as containers.
 #    checkout via git worktree" below; the gitignored files don't follow a worktree).
 git clone <repo> dyadia && cd dyadia
 
-# 2. Drop in the gitignored config files (NOTHING is hardcoded in compose — the
-#    apps read these centralized files, exactly as when running locally):
+# 2. Drop in the gitignored SECRET files (public config is already committed; NOTHING
+#    is hardcoded in compose — the apps read these centralized files):
 cp /path/to/richter.local.toml golang/richter/richter.local.toml
-cp /path/to/heino.env          typescript/heino/.env
+cp /path/to/heino.env.local    typescript/heino/.env.local   # heino's JWT_SECRET
 
 # 3. Provide the pre-seeded data — symlink OR copy the volumes folder:
 ln -s /path/to/volumes volumes        # symlink (share data in place), or:
@@ -58,7 +59,8 @@ The images are published at **`quay.io/tuyennguyentech/bachelor-thesis/richter:0
 and **`.../heino:0.0.2`** — the defaults in `.env` (`DYADIA_RICHTER_IMAGE` /
 `DYADIA_HEINO_IMAGE`). `compose.dev.yml` runs them and **mounts the config in** —
 `richter` gets `richter.base.toml` + `richter.local.toml` (`-c`) + `fdb.cluster`;
-`heino` runs the Next standalone server and reads `typescript/heino/.env`. No
+`heino` runs the Next standalone server and reads `typescript/heino/.env` (public) +
+`.env.local` (secret) via env_file. No
 config is injected in the compose files; everything comes from the centralized
 files above. (Pulling needs the quay repo to be public, or `podman login quay.io`.)
 
@@ -83,7 +85,9 @@ seeded account:
 > configured — nothing to do. Only a **brand-new, empty** FDB data dir needs a
 > one-time configure, run at root:
 > `sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec "configure new single ssd"`.
-> Postgres migrations run automatically (the `migrate` init container).
+> The copied-in Postgres data dir is **already migrated** — nothing to do. Migrations
+> are a developer step (goose), not a sidecar; only a brand-new empty DB needs
+> `container-shell.sh richter -- goose.sh dev up`.
 
 ### Stopping
 
@@ -101,21 +105,27 @@ full data-portability details (transfer size, ownership, etc.).
 
 ### New checkout via git worktree
 
-`git worktree` checks out only *tracked* files, so the three gitignored inputs —
-`richter.local.toml`, `heino/.env`, and `volumes/` — do **not** come with it (the
-tracked `.env` and `fdb.cluster` do). Create the worktree, then link the shared
-files from your main checkout into it:
+`git worktree` checks out only *tracked* files, so the gitignored inputs —
+`richter.local.toml`, `heino/.env.local` (secrets), and `volumes/` — do **not** come
+with it (the tracked `.env`, `fdb.cluster`, and the public `heino/.env` do). Create
+the worktree, then link the shared files from your main checkout into it:
 
 ```sh
 git worktree add ../dyadia-wt <branch> && cd ../dyadia-wt
-ln -s ../dyadia/golang/richter/richter.local.toml golang/richter/richter.local.toml
-ln -s ../dyadia/typescript/heino/.env             typescript/heino/.env
-ln -s ../dyadia/volumes                            volumes   # share one dataset
+# Use `ln -sr` (relative-from-link-location): a plain relative `ln -s` target resolves
+# from the LINK's own directory, not your cwd, so a nested link like
+# typescript/heino/.env.local → ../dyadia/... would dangle. `-sr` computes the right path.
+ln -sr ../dyadia/golang/richter/richter.local.toml golang/richter/richter.local.toml
+ln -sr ../dyadia/typescript/heino/.env.local       typescript/heino/.env.local
+ln -sr ../dyadia/volumes                            volumes   # share one dataset
 ```
 
 Then run the stack as above. Symlinking `volumes` shares a single dataset — run
-only **one** stack at a time against it (two compose projects on the same data
-dir corrupt it); copy `volumes` instead if the worktrees must run concurrently.
+only **one** stack at a time against it (both checkouts use the same compose
+project name `dyadia`, so a second `up -d` collides on the same containers/data);
+copy `volumes` instead if the worktrees must run concurrently. To remove a link
+later, `rm` the **link name with no trailing slash** (`rm volumes`, never
+`rm -r volumes/` — the slash follows the link into the shared dataset and deletes it).
 
 ### Build & push the images (maintainers)
 
@@ -128,17 +138,18 @@ podman compose -f compose.yml -f compose.build.yml build      # build both image
 podman compose -f compose.yml -f compose.build.yml push       # push to the registry
 ```
 
-The Dockerfiles (`golang/richter/Dockerfile`, `typescript/heino/Dockerfile`) are
-multi-stage and run **code generation themselves** (`buf generate` + `sqlc
-generate`), so a fresh checkout with no generated code builds cleanly. Both ship
-as small production images:
+All image build definitions live under **`container/`**, grouped by language
+(`container/golang/richter.Dockerfile`, `container/typescript/heino.Dockerfile`); the
+build context stays the repo root. The Dockerfiles are multi-stage and run **code
+generation themselves** (`buf generate` + `sqlc generate`), so a fresh checkout with no
+generated code builds cleanly. Both ship as small production images:
 
 - **richter** (~88 MB): latest Go (CGO + FoundationDB C client) → stripped binary
   on **distroless/cc**.
 - **heino** (~190 MB): `next build` with `output: "standalone"` → **distroless/nodejs**
   running `node server.js` (no pnpm/devDeps at runtime — the official, smallest way
-  to ship Next.js). To build it, `typescript/heino/.env` must be present (its
-  `NEXT_PUBLIC_*` is inlined at build time).
+  to ship Next.js). The committed public `typescript/heino/.env` supplies
+  `NEXT_PUBLIC_*` (inlined at build); secrets are never in the build.
 
 Build-tool versions (Go/Node/buf/sqlc/pnpm/FDB) are single-sourced in `.env` and
 passed to the Dockerfiles as build args.

@@ -41,12 +41,13 @@ They need three things:
 1. **The repo** (tracked config travels with it: `.env`, `fdb.cluster`,
    `richter.base.toml`, `conf/`).
 2. **The `volumes/` folder** (the pre-seeded data — copy it alongside the repo).
-3. **The two gitignored config files** (they may hold secrets, so they are not in
-   git — hand them over with the data):
+3. **The gitignored secret files** (they hold secrets, so they are not in git —
+   hand them over with the data):
    - `golang/richter/richter.local.toml` — richter's DB/S3/Gemini settings +
      browser-facing storage `public_endpoint`.
-   - `typescript/heino/.env` — heino's `JWT_SECRET` (must equal `[jwt].secret` in
-     `richter.base.toml`), `RICHTER_BASE_URL`, and `NEXT_PUBLIC_*`.
+   - `typescript/heino/.env.local` — heino's `JWT_SECRET` (must equal `[jwt].secret`
+     in `richter.base.toml`). heino's public config (`RICHTER_BASE_URL`,
+     `NEXT_PUBLIC_*`) is committed in `typescript/heino/.env`.
 
 **Recommended run — pre-built images (no toolchain needed).** This is the fast path
 for someone who just wants to run the seeded product; it pulls the public images
@@ -74,10 +75,12 @@ podman compose up -d              # infra only (richter/heino stay placeholders)
 ```
 
 Either way: because the FoundationDB data is copied in `volumes/fdb-*`, the cluster
-comes up already configured — nothing to do. The **`migrate`** init container runs
-the goose migrations automatically on `compose up`. On a brand-new (empty) FDB data
-dir, FoundationDB starts UNCONFIGURED and must be configured **once, at root**, by
-the operator (this is intentionally not automated by a sidecar):
+comes up already configured — nothing to do, and the copied-in Postgres data dir is
+already migrated. On a brand-new (empty) Postgres dir, run the goose migrations
+explicitly — a developer step, not a sidecar (`container-shell.sh richter --
+goose.sh dev up`). On a brand-new (empty) FDB data dir, FoundationDB starts
+UNCONFIGURED and must be configured **once, at root**, by the operator (this is
+intentionally not automated by a sidecar):
 
 ```sh
 sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec "configure new single ssd"
@@ -152,7 +155,7 @@ to the database/S3/FDB.
 | `richter seed --dev` | Full dev seed: users, orgs, courses, lessons, real/fixture analysis, attempts (via the real submit flow) | Yes — the single app-seeding entry point |
 | `richter seed gen-exercises --lesson-id … [--kinds …] [--force]` | (Re)generate exercises for one lesson in-process via the real generation service (was `gen-exercises.py`) | Yes — via richter |
 | `richter seed gen-ml-spec` | (Re)generate the committed `tu-hoc-ml.json` + `videos.json` from the downloaded playlist videos (was `generate-ml-seed-data.py`) | No — writes source JSON only |
-| `scripts/setup/environment.dev/seed-reset.sh` | Full clean rebuild on `volumes/` + `seed --dev` (goose via the `migrate` init container; waits for the operator to configure a fresh FDB at root) | Orchestration |
+| `scripts/setup/environment.dev/seed-reset.sh` | Full clean rebuild on `volumes/` + `seed --dev` (runs goose migrations directly; waits for the operator to configure a fresh FDB at root) | Orchestration |
 | `scripts/seed/download-ml-videos.py` | Download the ML playlist into `seed-assets/videos/ml/` (yt-dlp; idempotent). Pure acquisition — Go can't run yt-dlp | No — downloads files |
 | `scripts/seed/download-assets.sh` | Download the small test/demo videos (idempotent) | No — downloads files |
 

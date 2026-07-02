@@ -13,7 +13,7 @@ services:
   richter:
     build:
       context: .
-      dockerfile: golang/richter/Dockerfile
+      dockerfile: container/golang/richter.Dockerfile
       args:
         GO_VERSION: ${DYADIA_GO_VERSION}
         FDB_VERSION: ${FDB_VERSION}
@@ -24,7 +24,7 @@ services:
   heino:
     build:
       context: .
-      dockerfile: typescript/heino/Dockerfile
+      dockerfile: container/typescript/heino.Dockerfile
       args:
         GO_VERSION: ${DYADIA_GO_VERSION}
         NODE_VERSION: ${DYADIA_NODE_VERSION}

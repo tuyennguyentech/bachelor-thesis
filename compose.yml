@@ -157,22 +157,12 @@ services:
     entrypoint: ["sh", "/init/preload-tts.sh"]
     restart: "no"
 
-  # One-shot init: bring the dev DB schema up to date with goose (idempotent —
-  # skips already-applied migrations, so it is a no-op when a populated data dir is
-  # copied in for a portable run). Built from a tiny goose+migrations image; the
-  # build context is the repo root, kept small by .dockerignore.
-  migrate:
-    build:
-      context: .
-      dockerfile: scripts/init/migrate/Dockerfile
-      args:
-        GO_VERSION: ${DYADIA_GO_VERSION}
-        GOOSE_VERSION: ${DYADIA_GOOSE_VERSION}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: ["postgres://dyadia:dyadia@postgres:5432/dyadia", "up"]
-    restart: "no"
+  # NOTE: database migrations are a DEVELOPER task, run explicitly with goose — NOT
+  # automated by a sidecar. On a fresh/empty Postgres data dir, bring the schema up
+  # before seeding/using the app:
+  #   ./scripts/setup/environment.dev/container-shell.sh richter -- \
+  #     ./scripts/setup/environment.dev/goose.sh dev up
+  # A copied-in portable data dir is already migrated, so nothing is needed there.
 
   # richter/heino run as HOST processes via container-shell.sh (which sources .env),
   # so these are network-namespace placeholders. env_file is declared so the env

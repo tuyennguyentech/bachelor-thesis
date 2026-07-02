@@ -3,6 +3,12 @@
 # (buf generate / sqlc generate / pnpm install) rather than shipping host copies.
 # volumes alone is ~15 GB.
 volumes/
+
+# heino SECRETS only (.env.local etc.). The public typescript/heino/.env is COMMITTED
+# and MUST stay in the build context — `next build` inlines NEXT_PUBLIC_* from it.
+# Excluding only the secret keeps the image build both reproducible AND secret-free:
+# it depends solely on committed, public inputs, no matter what local files exist.
+typescript/heino/.env*.local
 seed-assets/
 **/node_modules/
 .git/

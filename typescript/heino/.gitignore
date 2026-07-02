@@ -32,9 +32,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files: `.env` holds committed PUBLIC defaults; `.env*.local` hold SECRETS and
+# stay ignored (Next.js convention). `.env.example` documents the secret file.
 .env*
 !.env.example
+!.env
 
 # vercel
 .vercel

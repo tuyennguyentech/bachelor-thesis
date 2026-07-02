@@ -10,8 +10,20 @@ import { isTransientError } from "@/lib/connect-error";
 
 const richterBaseUrl = process.env.RICHTER_BASE_URL;
 if (!richterBaseUrl) throw new Error("RICHTER_BASE_URL must be provided");
-if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not configured");
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
+
+// JWT_SECRET is a runtime secret (not needed to build the app). Read + validated
+// lazily on first use, so importing this module — e.g. while `next build` collects
+// page data with no secret present — does not throw. It is provided at runtime via
+// env_file (compose.dev.yml) / .env.local (local dev). Fails fast on first auth use
+// if still missing at runtime.
+let jwtSecretKey: Uint8Array | undefined;
+function jwtSecret(): Uint8Array {
+  if (jwtSecretKey) return jwtSecretKey;
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET is not configured");
+  jwtSecretKey = new TextEncoder().encode(secret);
+  return jwtSecretKey;
+}
 
 export const COOKIE_ACCESS = "dyadia_access";
 export const COOKIE_REFRESH = "dyadia_refresh";
@@ -44,7 +56,7 @@ const refreshTransport = createConnectTransport({
 
 export async function verifyAccessJwt(token: string): Promise<JWTClaims | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, {
+    const { payload } = await jwtVerify(token, jwtSecret(), {
       algorithms: ["HS256"],
       issuer: "dyadia",
       audience: "dyadia-client",
