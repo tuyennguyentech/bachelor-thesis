@@ -17,6 +17,51 @@
  */
 
 import { test, expect, createAnalyzedLesson, InteractionKind, type Page } from "../fixtures";
+import type { Locator } from "@playwright/test";
+
+async function activePerChunkGenCount(page: Page, token: string, lessonId: string): Promise<number> {
+  const res = await page.request.post("/api/richter/richter.v1.AIService/ListLessonTasks", {
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    data: { lessonId, activeOnly: true, limit: 50, offset: 0 },
+  });
+  if (!res.ok()) return -1;
+  const body = (await res.json()) as { tasks?: Array<{ kind?: string | number; chunkId?: string; chunk_id?: string }> };
+  return (body.tasks ?? []).filter((t) => (t.kind === 3 || String(t.kind).includes("GENERATE_INTERACTIONS")) && !!(t.chunkId ?? t.chunk_id)).length;
+}
+
+/** Access token of the currently logged-in page (for direct RPC assertions). */
+async function pageToken(page: Page): Promise<string> {
+  const token = (await page.context().cookies()).find((c) => c.name === "dyadia_access")?.value;
+  expect(token, "dyadia_access cookie present").toBeTruthy();
+  return token!;
+}
+
+/** Count interactions currently attached to a specific chunk, via the RPC (source of truth). */
+async function chunkInteractionCount(page: Page, token: string, lessonId: string, chunkId: string): Promise<number> {
+  const res = await page.request.post(
+    "/api/richter/richter.v1.InteractionService/ListLessonInteractions",
+    {
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      data: { lessonId, limit: 500, offset: 0 },
+    },
+  );
+  if (!res.ok()) return -1;
+  const body = (await res.json()) as { interactions?: Array<{ chunkId?: string; chunk_id?: string }> };
+  return (body.interactions ?? []).filter((i) => (i.chunkId ?? i.chunk_id) === chunkId).length;
+}
+
+/**
+ * Start a per-chunk AI generation from the chunk's inline "AI" affordance: click the
+ * per-chunk AI button (auto-expands + opens the form), bump single-choice by 1, submit.
+ * `section` is the chunk's scoped root (getByTestId(`chunk-${id}`)).
+ */
+async function startChunkGenerate(section: Locator): Promise<void> {
+  // The per-chunk "AI" button must be clickable. If a bug disables it (e.g. because
+  // another chunk is generating), this click fails fast rather than hanging.
+  await section.getByTestId("chunk-ai-btn").click({ timeout: 8_000 });
+  await section.getByRole("button", { name: "Tăng Trắc nghiệm 1 đáp án" }).click({ timeout: 10_000 });
+  await section.getByRole("button", { name: /Tạo \d+ câu hỏi/ }).click({ timeout: 10_000 });
+}
 
 const KIND_LABELS = [
   "Trắc nghiệm 1 đáp án",
@@ -173,5 +218,151 @@ test.describe("Lesson tabs — clickable after a task completes", () => {
     await page.getByRole("tab", { name: /Bài giảng/ }).click();
     await expect(page).toHaveURL(/tab=content/, { timeout: 15_000 });
     await expect(page.getByText("Studio bài giảng")).toBeVisible({ timeout: 15_000 });
+  });
+});
+
+// ── Concurrent per-chunk generation (regression: 0c8fcd7) ────────────────────
+//
+// The per-chunk "Tạo bài tập AI" buttons must run CONCURRENTLY across chunks. A
+// regression made TabExercises `disabled={props.isBusy}`, and isBusy counts
+// `activeTasks.length > 0`, so starting ONE per-chunk generation disabled EVERY
+// chunk's AI button — you couldn't fire a second chunk while the first ran.
+
+test.describe("AI exercise generation — concurrent per-chunk", () => {
+  // The mock engine finishes a generation in ~1.5s, faster than a page reload + the
+  // client task-poll cadence, so driving two REAL generations can't reliably freeze the
+  // UI in the "another chunk is generating" state. Instead we DETERMINISTICALLY inject
+  // that state: intercept the task-list RPC and always report one active per-chunk
+  // GENERATE task. That makes the client's `activeTasks` non-empty (isBusy = true) with
+  // zero timing dependence — the exact condition under which the regression disabled
+  // EVERY chunk's "AI" button. The fix excludes in-flight per-chunk generations from the
+  // per-chunk gate, so a different chunk's button stays enabled.
+  test("a chunk's AI button stays enabled while another chunk is generating", async ({ teacherPage: page }) => {
+    test.setTimeout(120_000);
+    const { lessonUrl, lessonId, chunks } = await createAnalyzedLesson(undefined, 2);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    const base = lessonUrl.split("?")[0];
+
+    await page.route("**/richter.v1.AIService/ListLessonTasks", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          tasks: [{
+            id: "00000000-0000-0000-0000-0000000000aa",
+            lessonId,
+            chunkId: chunks[1].id, // an in-flight PER-CHUNK generation on the OTHER chunk
+            kind: "LESSON_TASK_KIND_GENERATE_INTERACTIONS",
+            status: "LESSON_TASK_STATUS_RUNNING",
+          }],
+        }),
+      });
+    });
+
+    // Navigate to the exercises step. (Not openExercisesStep(): with an active task the
+    // empty-state CTA it waits for isn't shown.)
+    try {
+      await page.goto(`${base}?tab=processing`, { waitUntil: "domcontentloaded" });
+    } catch (err) {
+      if (!String(err).includes("NS_BINDING_ABORTED")) throw err;
+    }
+    await expect(page.getByTestId("video-workflow-stepper")).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("workflow-step-exercises").click({ force: true });
+
+    const section0 = page.getByTestId(`chunk-${chunks[0].id}`);
+    await expect(section0).toBeVisible({ timeout: 15_000 });
+
+    // Wait past one client task-poll (baseIntervalMs 2.5s) so the injected active task
+    // is fully reflected: activeTasks is non-empty AND the task tracker has run over it.
+    // Both regression paths only bite AFTER this — (a) isBusy = activeTasks>0 disabling
+    // the per-chunk gate, and (b) the tracker flipping the lesson-level genState to
+    // "running" for a per-chunk task (→ isGenerating → chunkGenerateBusy). Asserting
+    // before this window is why an earlier version of this test false-passed.
+    await page.waitForTimeout(4000);
+
+    // REGRESSION GUARD: chunk 0's AI button must be ENABLED even though chunk 1's
+    // per-chunk generation is active. The bug (isBusy OR per-chunk genState) disabled it.
+    await expect(section0.getByTestId("chunk-ai-btn")).toBeEnabled({ timeout: 3_000 });
+  });
+
+  // End-to-end complement to the deterministic route-injected test above: drives a
+  // REAL per-chunk generation and checks a DIFFERENT chunk's AI button while it is in
+  // flight. It only asserts once the client task-poll (baseIntervalMs 2.5s) has
+  // reflected the running task; if the mock finishes before that window (the default
+  // ~1.5s latency), it SKIPS — set RICHTER_MOCK_LATENCY_MS high (e.g. 8000) on the
+  // richter under test to exercise it. The deterministic guard is the route test above.
+  test("a REAL chunk generation does not disable a different chunk's AI button", async ({ teacherPage: page }) => {
+    test.setTimeout(180_000);
+    const { lessonUrl, lessonId, chunks } = await createAnalyzedLesson(undefined, 3);
+    const base = lessonUrl.split("?")[0];
+    await openExercisesStep(page, base);
+    const token = await pageToken(page);
+    const section0 = page.getByTestId(`chunk-${chunks[0].id}`);
+    const section1 = page.getByTestId(`chunk-${chunks[1].id}`);
+
+    // Start a REAL generation on chunk 0.
+    await startChunkGenerate(section0);
+    await expect(section0.getByTestId("chunk-ai-btn")).toBeDisabled({ timeout: 10_000 });
+
+    // Observe an active per-chunk task, then wait > one client poll (2.5s) so the
+    // client's activeTasks (and thus isBusy) reflects it — this is when the regression
+    // disabled other chunks' buttons.
+    let sawActive = false;
+    for (let i = 0; i < 12; i++) {
+      if ((await activePerChunkGenCount(page, token, lessonId)) > 0) { sawActive = true; break; }
+      await page.waitForTimeout(300);
+    }
+    test.skip(!sawActive, "generation finished too fast to observe (set RICHTER_MOCK_LATENCY_MS high)");
+    await page.waitForTimeout(3000);
+    test.skip((await activePerChunkGenCount(page, token, lessonId)) === 0, "generation finished before the enabled-check");
+
+    // REGRESSION GUARD (real flow): chunk 1's AI button ENABLED while chunk 0 generates.
+    await expect(section1.getByTestId("chunk-ai-btn")).toBeEnabled({ timeout: 3_000 });
+  });
+});
+
+// ── Generate does not lose existing questions (regression: 8afe1cf) ──────────
+//
+// The per-chunk save was delete-before-insert AND the FE forced regenerate, so every
+// "Tạo bài tập AI" click silently WIPED the chunk's existing questions. It must now
+// APPEND (the form promises "bài hiện có sẽ được giữ lại; câu mới thêm vào cuối").
+
+test.describe("AI exercise generation — non-destructive (append)", () => {
+  test("generating again on a chunk keeps the existing questions", async ({ teacherPage: page }) => {
+    test.setTimeout(180_000);
+    const { lessonUrl, lessonId, chunks } = await createAnalyzedLesson(undefined, 2);
+    await openExercisesStep(page, lessonUrl.split("?")[0]);
+    const token = await pageToken(page);
+    const chunkId = chunks[0].id;
+    const section = page.getByTestId(`chunk-${chunkId}`);
+
+    // First generation.
+    await startChunkGenerate(section);
+    await expect(async () => {
+      expect(await chunkInteractionCount(page, token, lessonId, chunkId)).toBeGreaterThan(0);
+    }).toPass({ timeout: 120_000 });
+    const firstCount = await chunkInteractionCount(page, token, lessonId, chunkId);
+
+    // Wait until the first run is fully done, then RELOAD the exercises step: a
+    // completed run leaves the inline generate form in a "done" state, so reloading
+    // restores a fresh generate form for the chunk (which now already has questions).
+    await expect(section.getByTestId("chunk-ai-btn")).toBeEnabled({ timeout: 90_000 });
+    try {
+      await page.goto(`${lessonUrl.split("?")[0]}?tab=processing`, { waitUntil: "domcontentloaded" });
+    } catch (err) {
+      if (!String(err).includes("NS_BINDING_ABORTED")) throw err;
+    }
+    await expect(page.getByTestId("video-workflow-stepper")).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("workflow-step-exercises").click({ force: true });
+    const section2 = page.getByTestId(`chunk-${chunkId}`);
+    await expect(section2).toBeVisible({ timeout: 15_000 });
+
+    // Second generation on the SAME chunk — existing questions must be KEPT (appended).
+    await startChunkGenerate(section2);
+    await expect(async () => {
+      // Append → the count GROWS beyond the first batch. The wipe regression would have
+      // reset it to just the newly-generated questions (≤ firstCount).
+      expect(await chunkInteractionCount(page, token, lessonId, chunkId)).toBeGreaterThan(firstCount);
+    }).toPass({ timeout: 120_000 });
   });
 });

@@ -154,6 +154,9 @@ export interface AnalysisWorkflowShellProps {
   isChunkSyncing: boolean;
   isGenerating: boolean;
   isBusy: boolean;
+  // Narrower than isBusy: excludes OTHER in-flight per-chunk generations, so the
+  // per-chunk "Tạo bài tập AI" buttons stay enabled to allow concurrent generation.
+  chunkGenerateBusy: boolean;
 
   // Pipeline statuses
   step3Status: import("./analysis-workflow-ui").PipelineStepStatus;
@@ -552,6 +555,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
             defaultInteractionConfig={props.initialDefaultInteractionConfig}
             token={props.token}
             disabled={props.isBusy}
+            chunkGenerateBusy={props.chunkGenerateBusy}
             genState={props.genState}
             genWarnings={props.genWarnings}
             questionsGenerated={props.questionsGenerated}

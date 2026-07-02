@@ -50,6 +50,9 @@ interface Props {
   initialInteractions: LessonInteraction[];
   token: string;
   disabled: boolean;
+  // Like disabled, but excludes OTHER in-flight per-chunk generations so per-chunk
+  // "Tạo bài tập AI" can run concurrently across chunks.
+  chunkGenerateBusy: boolean;
   genState: GenPhase;
   genWarnings: string[];
   questionsGenerated?: boolean;
@@ -66,7 +69,7 @@ interface Props {
 }
 
 export function TabExercises({
-  lessonId, chunks, initialInteractions, token, disabled,
+  lessonId, chunks, initialInteractions, token, disabled, chunkGenerateBusy,
   genState, genWarnings,
   feedbackMode, savingFeedback, onFeedbackModeChange,
   openLessonGenerateRequest = 0,
@@ -292,7 +295,12 @@ export function TabExercises({
           generateInteractions: create(GenerateInteractionsRequestSchema, {
             lessonId,
             chunkId,
-            forceRegenerate: true,
+            // Non-destructive: do NOT force. Forcing made the backend delete-before-insert,
+            // silently WIPING the chunk's existing questions on every "Tạo bài tập AI"
+            // click. With force=false the backend APPENDS the new questions after the
+            // existing ones (matching this form's promise "bài hiện có sẽ được giữ lại;
+            // câu mới thêm vào cuối"). To REPLACE, delete the chunk's exercises first.
+            forceRegenerate: false,
           }),
         });
         const taskId = startRes.task?.id;
@@ -499,7 +507,7 @@ export function TabExercises({
         expandedChunks={expandedChunks}
         filteredChunks={filteredChunks}
         interactions={interactions}
-        isAddingDisabled={disabled || isGenerating || isDeleting}
+        isAddingDisabled={chunkGenerateBusy || isDeleting}
         // Manual "Thêm" runs alongside an AI generation — it is an independent
         // synchronous RPC the backend permits concurrently. Only an in-flight
         // delete (which would wipe the row we just added) genuinely races it.

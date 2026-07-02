@@ -361,16 +361,16 @@ test.describe("Lesson task panel", () => {
 
   test("A. shows three parallel generate_interactions tasks for distinct chunks", async ({ teacherPage: page, baseURL }) => {
     test.setTimeout(300_000);
-    const token = await getTeacherToken(baseURL);
-    const ai = createAIClient(token, baseURL);
     // This test asserts on GENERATE_INTERACTIONS tasks, NOT on transcription/
     // chunking, so the extract+chunk pipeline is seeded via the test endpoint
     // (no real Whisper/Gemini). We need 3 distinct (lessonId, chunkId) pairs, so
     // create one fresh analyzed lesson with 3 seeded chunks and use its chunk ids.
-    // createAnalyzedLesson provisions a fresh unique teacher+course and adds carol
-    // (the teacherPage user) as a course teacher, so the `ai` client can act on it.
     const seeded = await createAnalyzedLesson(baseURL, 3);
     createdLessonIds.push(seeded.lessonId);
+    // Act as the FRESH per-test teacher that owns this lesson (NOT the shared carol):
+    // the per-user active-task cap (max_active_per_user=3) is then isolated, so other
+    // specs running in parallel (workers=4) can't fill carol's cap and flake this.
+    const ai = createAIClient(seeded.token, baseURL);
     // Shape three "lesson" entries from the single analyzed lesson's distinct
     // chunks so the rest of the test (3 distinct generate tasks) is unchanged.
     const lessons = seeded.chunks.slice(0, 3).map((chunk) => ({
@@ -378,10 +378,8 @@ test.describe("Lesson task panel", () => {
       lessonUrl: seeded.lessonUrl,
       chunks: [chunk],
     }));
-    // Cancel active tasks across all lessons created by tests that ran
-    // before this one (158, 190, 227, 288) to avoid hitting the per-user
-    // cap (max_active_per_user = 3) before we can start 3 parallel tasks.
-    await cancelAllCreatedLessonTasks(ai);
+    // Fresh teacher starts with 0 active tasks; clear its own lesson defensively.
+    await cancelActiveLessonTasks(ai, seeded.lessonId);
     const tasks: LessonTask[] = [];
 
     try {
@@ -451,25 +449,23 @@ test.describe("Lesson task panel", () => {
 
   test("D. UI surfaces per-user active task cap on the fourth task", async ({ baseURL }) => {
     test.setTimeout(300_000);
-    const token = await getTeacherToken(baseURL);
-    const ai = createAIClient(token, baseURL);
     // This test asserts on the per-user active-task CAP, NOT on transcription, so
     // seed the extract+chunk pipeline via the test endpoint (no Whisper/Gemini).
     // We need 3 distinct (lessonId, chunkId) pairs to start 3 parallel generate
     // tasks; one analyzed lesson with 3 seeded chunks gives 3 distinct triples.
     const seeded = await createAnalyzedLesson(baseURL, 3);
     createdLessonIds.push(seeded.lessonId);
+    // Act as the FRESH per-test teacher that owns this lesson (NOT shared carol) so the
+    // per-user cap under test is isolated — otherwise parallel specs' tasks under carol
+    // make the 3rd start hit the cap early and this flakes.
+    const ai = createAIClient(seeded.token, baseURL);
     const capLessons = seeded.chunks.slice(0, 3).map((chunk) => ({
       lessonId: seeded.lessonId,
       lessonUrl: seeded.lessonUrl,
       chunks: [chunk],
     }));
-    // Cancel ALL active tasks for carol from previous tests in this file AND the new capLessons,
-    // to ensure we start with a clean slate (0 active tasks) before testing the cap.
-    await cancelAllCreatedLessonTasks(ai);
-    for (const lesson of capLessons) {
-      await cancelActiveLessonTasks(ai, lesson.lessonId);
-    }
+    // Fresh teacher starts with 0 active tasks; clear its own lesson for a clean slate.
+    await cancelActiveLessonTasks(ai, seeded.lessonId);
 
     // Start one task per lesson — distinct (lessonId, kind, chunkId) triples
     // bypass the active_target uniqueness constraint.

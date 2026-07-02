@@ -68,7 +68,10 @@ export function ChunkSection({
   };
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden bg-background shadow-sm hover:shadow-md transition-shadow">
+    <div
+      data-testid={`chunk-${chunk.id}`}
+      className="rounded-xl border border-border overflow-hidden bg-background shadow-sm hover:shadow-md transition-shadow"
+    >
       {/* Title bar */}
       <div
         data-testid="chunk-title-bar"
@@ -102,6 +105,7 @@ export function ChunkSection({
             className="h-8 gap-1.5 rounded-lg px-2.5"
             disabled={disabled || chunkGen?.phase === "running"}
             onClick={openGenerate}
+            data-testid="chunk-ai-btn"
           >
             <SparklesIcon className="size-3.5" />
             AI

@@ -166,6 +166,7 @@ export function AnalyzeButton({
         isChunkSyncing={s.isSyncingChunk}
         isGenerating={s.isGenerating}
         isBusy={s.isBusy}
+        chunkGenerateBusy={s.chunkGenerateBusy}
         step3Status={s.step3Status}
         step5Status={s.step5Status}
         onStartExtract={s.startExtract}

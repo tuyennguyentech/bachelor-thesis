@@ -121,7 +121,13 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
           if (currentStep != null) {
             setChunkTimings((prev) => updateStepTimings(prev, currentStep, taskStartMs));
           }
-        } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
+        } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS && !task.chunkId) {
+          // Only a WHOLE-LESSON generation (empty chunk_id) drives the lesson-level
+          // genState (the "Đang tạo bài tập" banner + the isGenerating busy flag). A
+          // PER-CHUNK generation is chunk-scoped — it's tracked by chunkGenState in
+          // tab-exercises — so it must NOT flip the global genState, otherwise every
+          // other chunk's "AI" button gets disabled and you can't generate for several
+          // chunks at once.
           setGenState({
             phase: "running",
             message: task.message || "Đang tạo bài tập...",
@@ -212,7 +218,9 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
             await reloadChunks();
             dispatchStep({ type: "ADVANCE_AFTER_CHUNK" });
           })();
-        } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
+        } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS && !task.chunkId) {
+          // Whole-lesson generation only (per-chunk generations are handled by
+          // tab-exercises' own poller and must not drive the lesson-level genState).
           void (async () => {
             const r = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
             // Set the fresh data FIRST, then mark the run as done. The previous
@@ -249,7 +257,7 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
           setExtractState({ phase: "error", failedAt: null, message: msg });
         } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
           setChunkState({ phase: "error", failedAt: null, message: msg });
-        } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
+        } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS && !task.chunkId) {
           setGenState({ phase: "error", message: msg });
         } else if (task.kind === LessonTaskKind.RUN_PIPELINE) {
           // Surface a pipeline failure on the stage that was live when it died
@@ -316,7 +324,7 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
             setExtractState((prev) => prev.phase === "running" || prev.phase === "syncing" ? { phase: "stale", currentStep } : prev);
           } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
             setChunkState((prev) => prev.phase === "running" || prev.phase === "syncing" ? { phase: "stale", currentStep } : prev);
-          } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS) {
+          } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS && !task.chunkId) {
             setGenState((prev) => prev.phase === "running" ? { phase: "stale", message: "Tiến trình bị treo.", chunkIndex: prev.chunkIndex, totalChunks: prev.totalChunks } : prev);
           }
         }

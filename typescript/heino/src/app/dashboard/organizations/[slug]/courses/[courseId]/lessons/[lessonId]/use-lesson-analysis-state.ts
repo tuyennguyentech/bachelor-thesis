@@ -118,6 +118,7 @@ export interface UseLessonAnalysisState {
   isSyncingChunk: boolean;
   isMutating: boolean;
   isBusy: boolean;
+  chunkGenerateBusy: boolean;
   step3Status: PipelineStepStatus;
   step5Status: PipelineStepStatus;
 
@@ -472,6 +473,22 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     || isGenerating || isGeneratingStarting || isGeneratingStale
     || chunkMutations.isReloadingChunks || isMutating || activeTasks.length > 0;
 
+  // Per-chunk exercise generation runs CONCURRENTLY across chunks (the backend caps it
+  // at MaxActivePerUser). So the per-chunk "Tạo bài tập AI" gate must NOT treat OTHER
+  // in-flight per-chunk generations as "busy" — only genuinely conflicting work
+  // (transcript/chunk pipeline, a lesson-wide generate, chunk mutations, deletes). This
+  // is the fix for "không tạo bài tập đồng thời cho nhiều chunk được": a lesson-wide
+  // generate has an empty chunk_id, so it stays blocking; only real per-chunk gens are
+  // excluded. (ZERO_UUID guard: an absent chunk_id may serialize as the nil UUID.)
+  const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+  const activeBlockingTasks = activeTasks.filter(
+    (t) => !(t.kind === LessonTaskKind.GENERATE_INTERACTIONS && !!t.chunkId && t.chunkId !== ZERO_UUID),
+  );
+  const chunkGenerateBusy = isExtracting || isExtractingStarting || isExtractingStale
+    || isChunking || isChunkStarting || isChunkStale
+    || isGenerating || isGeneratingStarting || isGeneratingStale
+    || chunkMutations.isReloadingChunks || isMutating || activeBlockingTasks.length > 0;
+
   const step3Status: PipelineStepStatus = hasSegments ? "available" : "locked";
   const step5Status: PipelineStepStatus = hasChunks ? "available" : "locked";
 
@@ -493,7 +510,7 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
     bumpExerciseOpenRequest,
     hasSegments, hasChunks, hasTranscriptContent, questionsGenerated,
     isExtracting, isChunking, isGenerating, isSyncingExtract: isSyncing, isSyncingChunk: isChunkSyncing,
-    isMutating, isBusy,
+    isMutating, isBusy, chunkGenerateBusy,
     step3Status, step5Status,
     startExtract, handleChunk, handleGenerate,
     handleMergeWithPrev: chunkMutations.handleMergeWithPrev,
