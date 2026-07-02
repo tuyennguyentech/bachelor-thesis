@@ -64,7 +64,7 @@ Trả về JSON object: {"items": [...]}`,
 		customInstructions.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
-		generatedInteractionCheckpointSeconds(chunk),
+		CheckpointSecondsForChunk(chunk),
 		generator.GeminiSchema(),
 	)
 
@@ -97,7 +97,7 @@ Trả về JSON object: {"items": [...]}`,
 				s.log.WarnContext(ctx, "ai: skipping item that failed validation", "index", i, "err", err)
 				continue
 			}
-			startSecs := generatedInteractionCheckpointSeconds(chunk)
+			startSecs := CheckpointSecondsForChunk(chunk)
 			if ttsProv, ok := generator.(svcinteractions.TTSProvider); ok {
 				if text := ttsProv.AudioSourceText(configJSON); text != "" {
 					configJSON, err = s.embedAudio(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())
@@ -256,7 +256,7 @@ func (s *Service) GenerateItemsAIChoose(
 				s.log.WarnContext(ctx, "ai-choose: skipping item that failed validation", "index", i, "kind", kindHolder.Kind, "err", parseErr)
 				continue
 			}
-			startSecs := generatedInteractionCheckpointSeconds(chunk)
+			startSecs := CheckpointSecondsForChunk(chunk)
 			if ttsProv, ok := handler.(svcinteractions.TTSProvider); ok {
 				if text := ttsProv.AudioSourceText(configJSON); text != "" {
 					configJSON, parseErr = s.embedAudio(ctx, ttsProv, configJSON, text, lessonLanguage, chunk.LessonID.String())

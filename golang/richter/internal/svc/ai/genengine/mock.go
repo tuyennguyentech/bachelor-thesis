@@ -3,6 +3,8 @@ package genengine
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,7 +15,20 @@ import (
 // zero-latency mock collapses those transitions and breaks the workflow, so the
 // mock deliberately simulates a small, realistic latency. It is a var so unit
 // tests that only check response shape can set it to 0.
-var MockLatency = 1500 * time.Millisecond
+//
+// RICHTER_MOCK_LATENCY_MS overrides the default at startup — E2E tests that need a
+// generation to stay in-flight long enough to observe concurrent-UI state (e.g. the
+// per-chunk generate buttons) set it high.
+var MockLatency = mockLatencyFromEnv()
+
+func mockLatencyFromEnv() time.Duration {
+	if v := os.Getenv("RICHTER_MOCK_LATENCY_MS"); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 1500 * time.Millisecond
+}
 
 // mockEngine returns deterministic, schema-valid canned responses instead of
 // calling Gemini. It lets the test suite run the full chunking + item-generation

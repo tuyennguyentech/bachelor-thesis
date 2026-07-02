@@ -254,7 +254,7 @@ Trả về JSON object: {"items": [...]}`,
 		kindDescs.String(),
 		float32(chunk.StartSeconds), float32(chunk.EndSeconds),
 		transcript,
-		generatedInteractionCheckpointSeconds(chunk),
+		CheckpointSecondsForChunk(chunk),
 		allowedList,
 	)
 }
@@ -309,7 +309,12 @@ func friendlyGeminiError(err error) error {
 	return err
 }
 
-func generatedInteractionCheckpointSeconds(chunk gen.LessonTranscriptChunk) float32 {
+// CheckpointSecondsForChunk returns where a chunk's interaction checkpoint should
+// fire: a small margin BEFORE the chunk end (so the playback hit-test reaches it,
+// and — for the final chunk — before the video's last frame). Exported so the dev
+// seeder places golden-fixture interactions at the same chunk-end positions the real
+// generation pipeline uses.
+func CheckpointSecondsForChunk(chunk gen.LessonTranscriptChunk) float32 {
 	start := float32(chunk.StartSeconds)
 	end := float32(chunk.EndSeconds)
 	if end > 0 {
@@ -360,18 +365,26 @@ func (s *Service) insertInteractionsInTx(ctx context.Context, q *gen.Queries, le
 	return saved, nil
 }
 
-func (s *Service) saveInteractionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, items []generatedItem) ([]gen.LessonInteraction, error) {
+// saveInteractionsForChunk persists a freshly-generated batch for one chunk.
+//
+//   - force == false (a normal "Tạo bài tập AI"): APPEND the new items after the
+//     chunk's existing questions (insertInteractionsInTx continues the order_index),
+//     matching the UI's promise "bài hiện có sẽ được giữ lại; câu mới thêm vào cuối".
+//     Whole-lesson runs never reach here for a chunk that already has questions
+//     (skipped upstream via chunkHasInteractions), so a pipeline resume can't
+//     accumulate duplicates; a single-chunk run is an explicit user add.
+//   - force == true (explicit regenerate/replace): delete the chunk's existing
+//     interactions first, then insert — a clean replacement.
+//
+// Regression note: commit 8afe1cf made this ALWAYS delete-before-insert, so every
+// per-chunk generate silently wiped the chunk's existing questions. The delete is
+// now gated on force.
+func (s *Service) saveInteractionsForChunk(ctx context.Context, lessonID pgtype.UUID, chunkID pgtype.UUID, items []generatedItem, force bool) ([]gen.LessonInteraction, error) {
 	return db.WithCommitTx(s.pg, ctx, func(q *gen.Queries, _ pgx.Tx) ([]gen.LessonInteraction, error) {
-		// Idempotent per chunk: clear any prior interactions for THIS chunk before
-		// inserting the freshly generated set. Without this, any path that reaches
-		// the save step for a chunk that already has interactions (a force-regen, a
-		// resumed pipeline that re-ran a partially-generated chunk, a retry)
-		// APPENDS, accumulating duplicates — e.g. one chunk ending up with 3× its
-		// questions. Chunks we intend to keep untouched are skipped upstream
-		// (chunkHasInteractions) and never reach this function, so this delete only
-		// affects the chunk actually being (re)generated now.
-		if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
-			return nil, fmt.Errorf("clear existing interactions for chunk: %w", err)
+		if force {
+			if err := q.DeleteLessonInteractionsByChunk(ctx, chunkID); err != nil {
+				return nil, fmt.Errorf("clear existing interactions for chunk: %w", err)
+			}
 		}
 		return s.insertInteractionsInTx(ctx, q, lessonID, chunkID, items)
 	})

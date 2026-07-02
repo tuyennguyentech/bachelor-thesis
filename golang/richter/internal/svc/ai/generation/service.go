@@ -88,6 +88,11 @@ func (s *Service) Run(
 	}
 
 	total := int32(len(chunks))
+	// Whole-lesson generate (chunkId == "") only FILLS empty chunks — chunks that
+	// already have questions are skipped so a re-run/pipeline-resume never touches
+	// them (this is what prevents duplicate accumulation on resume). A single-chunk
+	// generate is an explicit user action and is never skipped here: it APPENDS to
+	// that chunk (see saveInteractionsForChunk) unless force-regenerate replaces.
 	chunkHasInteractions := map[string]bool{}
 	if !req.GetForceRegenerate() && req.GetChunkId() == "" {
 		existingInts, intErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
@@ -113,6 +118,8 @@ func (s *Service) Run(
 	// Item generation goes through the injected engine (s.engine) — real Gemini
 	// or the mock, selected by config. No client is created here.
 	savedThisRun := 0
+	failedChunks := 0
+	var lastGenErr error
 	for i, chunk := range chunks {
 		select {
 		case <-ctx.Done():
@@ -135,11 +142,34 @@ func (s *Service) Run(
 		}
 
 		plan := resolveGenerationPlan(chunk, lesson, reqKinds, req.GetCountPerChunk(), req.GetStrategy())
-		allItems := s.generateForChunk(ctx, chunk, chunkTranscript, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt(), plan)
+		allItems, genErr := s.generateForChunk(ctx, chunk, chunkTranscript, lesson.Language, req.GetDifficulty(), req.GetFocusPrompt(), plan)
+		if genErr != nil {
+			// A canceled task context (user pressed Hủy, worker shutdown, client
+			// disconnected) is a graceful ABORT, not a model failure — return like the
+			// top-of-loop ctx.Done() check so it isn't reported as a quota/API error.
+			if ctx.Err() != nil {
+				return nil
+			}
+			// The model call FAILED for this chunk (quota/429/malformed/network) — this
+			// is NOT the same as "produced 0 items". Record it so a run where every
+			// chunk fails is reported as a failure rather than a silent success. The
+			// existing questions for this chunk are left untouched (no save → no delete).
+			failedChunks++
+			lastGenErr = genErr
+			if sendErr := send(richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR, fmt.Sprintf("Đoạn %d/%d: gọi AI thất bại (%s) — giữ nguyên bài tập cũ, tiếp tục", i+1, total, friendlyGeminiError(genErr).Error()), int32(i), total); sendErr != nil {
+				return nil
+			}
+			continue
+		}
 		if len(allItems) == 0 {
 			continue
 		}
-		if saved, saveErr := s.saveInteractionsForChunk(ctx, lessonID, chunk.ID, allItems); saveErr != nil {
+		if saved, saveErr := s.saveInteractionsForChunk(ctx, lessonID, chunk.ID, allItems, req.GetForceRegenerate()); saveErr != nil {
+			// Canceled task context (Hủy / shutdown / disconnect) → graceful abort, not
+			// a save failure.
+			if ctx.Err() != nil {
+				return nil
+			}
 			s.log.ErrorContext(ctx, "ai: failed to save interactions for chunk",
 				"chunk_id", chunk.ID.String(), "err", saveErr)
 			if sendErr := send(richterv1.GenerateInteractionsStep_GENERATE_INTERACTIONS_STEP_ERROR, fmt.Sprintf("Lỗi lưu bài tập đoạn %d/%d: %s — bỏ qua, tiếp tục", i+1, total, saveErr.Error()), int32(i), total); sendErr != nil {
@@ -154,6 +184,17 @@ func (s *Service) Run(
 	}
 
 	if savedThisRun == 0 {
+		// A real AI failure must NEVER be reported as success. If at least one chunk
+		// FAILED the model call and nothing was saved this run, fail the task with the
+		// real reason — even when the lesson already has old interactions (the previous
+		// behaviour silently returned DONE here, so a total Gemini/quota outage looked
+		// like "nothing happened but succeeded"). This is the fix for the "chạy AI
+		// không tạo được gì mà vẫn báo xong" regression.
+		if failedChunks > 0 {
+			return connect.NewError(connect.CodeUnavailable, fmt.Errorf(
+				"sinh bài tập thất bại: %d/%d đoạn lỗi khi gọi AI (%s) — thường do hết hạn mức (quota) hoặc khóa API Gemini; kiểm tra rồi thử lại",
+				failedChunks, total, friendlyGeminiError(lastGenErr).Error()))
+		}
 		hasExistingInteractions := false
 		if req.GetChunkId() == "" {
 			existing, listErr := db.WithConnection(s.pg, ctx, func(q *gen.Queries, _ *pgxpool.Conn) ([]gen.LessonInteraction, error) {
@@ -200,6 +241,11 @@ func (s *Service) loadTargetChunks(ctx context.Context, lessonID pgtype.UUID, ch
 	return listed, nil
 }
 
+// generateForChunk returns the generated items for one chunk. The error is non-nil
+// ONLY when the model call itself failed and produced nothing (e.g. Gemini quota /
+// 429 / malformed JSON) — an empty slice with a nil error means the model legitimately
+// returned no usable items. Run relies on this distinction so a real AI failure is
+// surfaced to the user instead of being masked as "0 exercises, success".
 func (s *Service) generateForChunk(
 	ctx context.Context,
 	chunk gen.LessonTranscriptChunk,
@@ -208,17 +254,17 @@ func (s *Service) generateForChunk(
 	difficulty string,
 	focusPrompt string,
 	plan generationPlan,
-) []generatedItem {
+) ([]generatedItem, error) {
 	var allItems []generatedItem
 	if plan.useAIChoose {
 		items, genErr := s.GenerateItemsAIChoose(ctx, chunk, chunkTranscript, plan.aiKinds, plan.aiCount, lessonLanguage, difficulty, focusPrompt)
 		if genErr != nil {
 			s.log.WarnContext(ctx, "ai: AI_CHOOSE generation failed", "chunk_id", chunk.ID.String(), "err", genErr)
-		} else {
-			allItems = items
+			return nil, genErr
 		}
-		return allItems
+		return items, nil
 	}
+	var lastErr error
 	for _, kc := range plan.evenCounts {
 		handler := svcinteractions.Get(kc.kind)
 		if handler == nil {
@@ -242,11 +288,17 @@ func (s *Service) generateForChunk(
 			items, genErr := s.GenerateItems(ctx, chunkCopy, chunkTranscript, geminiGen, kindStr, lessonLanguage, difficulty, focusPrompt)
 			if genErr != nil {
 				s.log.WarnContext(ctx, "ai: failed to generate items for kind, continuing", "kind", kc.kind, "count", batchCount, "err", genErr)
+				lastErr = genErr
 			} else {
 				allItems = append(allItems, items...)
 			}
 			remaining -= batchCount
 		}
 	}
-	return allItems
+	// A partial success (some kinds produced items) is still useful — keep it. Only
+	// report failure when EVERY batch failed and nothing at all was produced.
+	if len(allItems) == 0 && lastErr != nil {
+		return nil, lastErr
+	}
+	return allItems, nil
 }

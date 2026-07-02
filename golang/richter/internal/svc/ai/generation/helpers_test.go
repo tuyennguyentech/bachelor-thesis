@@ -1,10 +1,17 @@
 package generation
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
 	richterv1 "example.com/buf/gen/richter/v1"
+	"example.com/richter/cfg"
+	"example.com/richter/internal/svc/ai/genengine"
+	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -28,6 +35,68 @@ func emptyChunk() gen.LessonTranscriptChunk {
 
 func emptyLesson() gen.Lesson {
 	return gen.Lesson{}
+}
+
+// ── generateForChunk: model-failure propagation (regression guard) ────────────
+//
+// Regression history: commit 478dec0 ("harden lesson exercise workflow") made a
+// TOTAL model failure invisible — generateForChunk swallowed the engine error and
+// returned an empty slice, and Run then reported STEP_DONE (success) whenever the
+// lesson already had interactions. The observable bug was "tạo bài tập AI không
+// chạy nhưng vẫn báo thành công" whenever the Gemini quota was exhausted (the mock
+// engine used in tests never fails, so nothing caught it). These tests lock in that
+// a model-call failure is PROPAGATED so Run can surface it instead of masking it.
+
+type stubEngine struct {
+	out string
+	err error
+}
+
+func (s stubEngine) Generate(_ context.Context, _ genengine.Request) (string, error) {
+	return s.out, s.err
+}
+
+func (s stubEngine) Name() string { return "stub" }
+
+func newTestService(eng genengine.Engine) *Service {
+	return New(Deps{
+		Log:               &log.LogSvc{Logger: *slog.New(slog.NewTextHandler(io.Discard, nil))},
+		AiCfg:             &cfg.AiCfg{GeminiMaxAttempts: 1}, // no retries → fail fast, no backoff sleep
+		Engine:            eng,
+		ChunksLimit:       func() int32 { return 100 },
+		InteractionsLimit: func() int32 { return 100 },
+	})
+}
+
+func singleChoicePlan() generationPlan {
+	return generationPlan{evenCounts: []kindCount{
+		{kind: richterv1.InteractionKind_INTERACTION_KIND_SINGLE_CHOICE, count: 1},
+	}}
+}
+
+func TestGenerateForChunk_ModelError_IsPropagated(t *testing.T) {
+	t.Parallel()
+	s := newTestService(stubEngine{err: errors.New("gemini: 429 quota exceeded")})
+	items, err := s.generateForChunk(context.Background(), emptyChunk(), "some transcript", "vi", "", "", singleChoicePlan())
+	if err == nil {
+		t.Fatalf("expected the model error to be propagated (so Run can report failure), got nil with %d items", len(items))
+	}
+	if items != nil {
+		t.Fatalf("expected no items on model failure, got %d", len(items))
+	}
+}
+
+func TestGenerateForChunk_Success_ReturnsItems(t *testing.T) {
+	t.Parallel()
+	valid := `{"items":[{"question_text":"1+1 bằng mấy?","options":["1","2","3","4"],"correct_answer":1,"explanation":"vì 1+1=2","start_seconds":5}]}`
+	s := newTestService(stubEngine{out: valid})
+	items, err := s.generateForChunk(context.Background(), emptyChunk(), "some transcript", "vi", "", "", singleChoicePlan())
+	if err != nil {
+		t.Fatalf("expected success on a valid model response, got error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected exactly 1 generated item, got %d", len(items))
+	}
 }
 
 // ── resolveGenerationPlan tests ───────────────────────────────────────────────
