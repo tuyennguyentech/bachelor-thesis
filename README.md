@@ -17,6 +17,8 @@ re-processed: the data travels in `volumes/` and the apps run as containers.
 
 ### Prerequisites
 
+- **OS: Linux or WSL2** — the stack is podman-native (rootless, with `:U,Z`
+  bind-mount relabel flags). It does not run on native Windows or macOS.
 - `podman` + `podman compose` (rootless is fine). See `docs/infra/podman-gpu.md`
   if you want GPU for new transcriptions — **not needed** to serve seeded data.
 - The **`volumes/` data folder** (the pre-seeded dataset — handed over
