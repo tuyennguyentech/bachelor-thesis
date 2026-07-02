@@ -7,7 +7,7 @@
 #   runtime: distroless/cc (glibc — required by the FoundationDB C client).
 #
 # Build context is the REPO ROOT (see compose.dev.yml). Only the inputs needed to
-# build are copied; .dockerignore keeps gen/, node_modules/, .volumes/ etc. out.
+# build are copied; .dockerignore keeps gen/, node_modules/, volumes/ etc. out.
 
 ARG GO_VERSION=1.26
 ARG FDB_VERSION=7.3.69

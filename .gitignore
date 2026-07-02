@@ -20,7 +20,7 @@ seed-assets/
 # Portable container data (postgres, fdb, seaweedfs, caddy, hf-cache) bind-mounted
 # by compose.yml. NOT committed — large; transfer the folder separately so the
 # project runs with pre-seeded data without re-running the pipeline.
-.volumes/
+volumes/
 
 # Python bytecode cache (seed scripts)
 __pycache__/

@@ -1,14 +1,14 @@
-# Portable local data (`.volumes/`)
+# Portable local data (`volumes/`)
 
-The local stack keeps **all persistent data in bind mounts under `./.volumes/`**
+The local stack keeps **all persistent data in bind mounts under `./volumes/`**
 instead of anonymous/named podman volumes, so the entire pre-seeded dataset
-travels with the repository folder. Hand the repo + `.volumes/` to someone else
+travels with the repository folder. Hand the repo + `volumes/` to someone else
 and they can run the project with the data already processed — no re-running the
 AI pipeline.
 
 ## What lives where
 
-| `.volumes/` subdir | Container path | Contents |
+| `volumes/` subdir | Container path | Contents |
 |---|---|---|
 | `postgres/` | postgres `/var/lib/postgresql` | all relational data (users, orgs, courses, lessons, chunks, interactions, attempts) |
 | `seaweedfs/` | storage `/data` | uploaded lesson videos + generated TTS audio (S3 bucket `dyadia`) |
@@ -20,19 +20,19 @@ Mounts use `:U,Z` so podman re-chowns the data to the container user on each
 machine (portable across different rootless UID maps) and relabels for SELinux.
 
 **There are no named volumes** — everything, including the speaches model cache,
-is a `.volumes/` bind mount. The speaches image declares `USER ubuntu` (uid 1000),
+is a `volumes/` bind mount. The speaches image declares `USER ubuntu` (uid 1000),
 so `:U` chowns the cache to 1000 and the runtime user can write it. Keeping the
-cache in `.volumes/` means the downloaded models travel with the dataset (no
+cache in `volumes/` means the downloaded models travel with the dataset (no
 re-download on a copied-in stack); on a brand-new empty dir, `speaches-init` pulls
 them on first `up` (needs internet once).
 
-`.volumes/` is gitignored (large) — copy the folder separately.
+`volumes/` is gitignored (large) — copy the folder separately.
 
 > **Transfer size.** SeaweedFS pre-allocates its volume `.dat` files (≈1 GB each),
-> so `.volumes/seaweedfs` shows ~15 GB on disk while the *actual* content is only
-> ~2 GB (`du --apparent-size .volumes` to see the real size). Copy with a
+> so `volumes/seaweedfs` shows ~15 GB on disk while the *actual* content is only
+> ~2 GB (`du --apparent-size volumes` to see the real size). Copy with a
 > sparse-aware tool so you move the content, not the pre-allocated zeros:
-> `rsync -aS .volumes/ dest/`, or `tar --sparse -czf volumes.tgz .volumes/`.
+> `rsync -aS volumes/ dest/`, or `tar --sparse -czf volumes.tgz volumes/`.
 
 ## Handing the project to someone else
 
@@ -40,7 +40,7 @@ They need three things:
 
 1. **The repo** (tracked config travels with it: `.env`, `fdb.cluster`,
    `richter.base.toml`, `conf/`).
-2. **The `.volumes/` folder** (the pre-seeded data — copy it alongside the repo).
+2. **The `volumes/` folder** (the pre-seeded data — copy it alongside the repo).
 3. **The two gitignored config files** (they may hold secrets, so they are not in
    git — hand them over with the data):
    - `golang/richter/richter.local.toml` — richter's DB/S3/Gemini settings +
@@ -73,7 +73,7 @@ podman compose up -d              # infra only (richter/heino stay placeholders)
 ./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino dev
 ```
 
-Either way: because the FoundationDB data is copied in `.volumes/fdb-*`, the cluster
+Either way: because the FoundationDB data is copied in `volumes/fdb-*`, the cluster
 comes up already configured — nothing to do. The **`migrate`** init container runs
 the goose migrations automatically on `compose up`. On a brand-new (empty) FDB data
 dir, FoundationDB starts UNCONFIGURED and must be configured **once, at root**, by
@@ -107,7 +107,7 @@ to it directly. Config: `conf/caddy/Caddyfile`.
   container, so container-to-container traffic and the Playwright E2E suite (which
   use `http://caddy`) are unchanged; only the host publish differs.
 - **The HTTPS cert is self-signed** (Caddy internal CA, persisted in
-  `.volumes/caddy-data`). Browsers show a one-time warning — accept it, or trust
+  `volumes/caddy-data`). Browsers show a one-time warning — accept it, or trust
   the root with `caddy trust`. There is no public domain in local dev.
 - **Storage over HTTPS works on the same machine.** Presigned storage URLs use
   `public_endpoint = http://localhost:8080/...` (in `richter.local.toml`). On
@@ -122,7 +122,7 @@ to it directly. Config: `conf/caddy/Caddyfile`.
 
 ## Rebuilding the data from scratch (reproducible)
 
-A full clean rebuild — drop everything, recreate on `.volumes/`, migrate, and run
+A full clean rebuild — drop everything, recreate on `volumes/`, migrate, and run
 the seed (real GPU Whisper + Gemini for the ML demo course) — is scripted:
 
 ```sh
@@ -152,7 +152,7 @@ to the database/S3/FDB.
 | `richter seed --dev` | Full dev seed: users, orgs, courses, lessons, real/fixture analysis, attempts (via the real submit flow) | Yes — the single app-seeding entry point |
 | `richter seed gen-exercises --lesson-id … [--kinds …] [--force]` | (Re)generate exercises for one lesson in-process via the real generation service (was `gen-exercises.py`) | Yes — via richter |
 | `richter seed gen-ml-spec` | (Re)generate the committed `tu-hoc-ml.json` + `videos.json` from the downloaded playlist videos (was `generate-ml-seed-data.py`) | No — writes source JSON only |
-| `scripts/setup/environment.dev/seed-reset.sh` | Full clean rebuild on `.volumes/` + `seed --dev` (goose via the `migrate` init container; waits for the operator to configure a fresh FDB at root) | Orchestration |
+| `scripts/setup/environment.dev/seed-reset.sh` | Full clean rebuild on `volumes/` + `seed --dev` (goose via the `migrate` init container; waits for the operator to configure a fresh FDB at root) | Orchestration |
 | `scripts/seed/download-ml-videos.py` | Download the ML playlist into `seed-assets/videos/ml/` (yt-dlp; idempotent). Pure acquisition — Go can't run yt-dlp | No — downloads files |
 | `scripts/seed/download-assets.sh` | Download the small test/demo videos (idempotent) | No — downloads files |
 

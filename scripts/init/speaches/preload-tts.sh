@@ -6,7 +6,7 @@
 #
 # The STT model is CRITICAL: Speaches' PRELOAD_MODELS only loads an
 # ALREADY-DOWNLOADED model into memory — it does NOT fetch it. After a model-cache
-# wipe (`.volumes/hf-cache`), the model is absent and /v1/audio/transcriptions returns
+# wipe (`volumes/hf-cache`), the model is absent and /v1/audio/transcriptions returns
 # 404 "Model '<name>' is not installed locally" with no auto-download. So we must
 # explicitly POST /v1/models/<name> here, exactly like the TTS models.
 #

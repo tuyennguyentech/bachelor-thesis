@@ -13,13 +13,13 @@ AI-assisted learning platform (Bachelor Thesis). Monorepo:
 This is the fast path for someone who just wants to **run Dyadia with the demo
 dataset already processed** (the "Tự học Machine Learning" course — 24 lessons,
 transcripts, AI-generated exercises, and ~558 student attempts). Nothing is
-re-processed: the data travels in `.volumes/` and the apps run as containers.
+re-processed: the data travels in `volumes/` and the apps run as containers.
 
 ### Prerequisites
 
 - `podman` + `podman compose` (rootless is fine). See `docs/infra/podman-gpu.md`
   if you want GPU for new transcriptions — **not needed** to serve seeded data.
-- The **`.volumes/` data folder** (the pre-seeded dataset — handed over
+- The **`volumes/` data folder** (the pre-seeded dataset — handed over
   separately; it is gitignored). Either copy it into the repo, or symlink it.
 - The **gitignored config files** (handed over with the data — the only config not
   in git): `golang/richter/richter.local.toml` and `typescript/heino/.env`.
@@ -30,7 +30,8 @@ re-processed: the data travels in `.volumes/` and the apps run as containers.
 ### Steps (run pre-built images)
 
 ```sh
-# 1. Get the repo (clone or copy).
+# 1. Get a working copy — clone or copy (for a git worktree instead, see "New
+#    checkout via git worktree" below; the gitignored files don't follow a worktree).
 git clone <repo> dyadia && cd dyadia
 
 # 2. Drop in the gitignored config files (NOTHING is hardcoded in compose — the
@@ -38,9 +39,9 @@ git clone <repo> dyadia && cd dyadia
 cp /path/to/richter.local.toml golang/richter/richter.local.toml
 cp /path/to/heino.env          typescript/heino/.env
 
-# 3. Provide the pre-seeded data — symlink OR copy the .volumes folder:
-ln -s /path/to/.volumes .volumes        # symlink (share data in place), or:
-# rsync -aS /path/to/.volumes/ .volumes/ # copy (sparse-aware; ~2 GB real content)
+# 3. Provide the pre-seeded data — symlink OR copy the volumes folder:
+ln -s /path/to/volumes volumes        # symlink (share data in place), or:
+# rsync -aS /path/to/volumes/ volumes/ # copy (sparse-aware; ~2 GB real content)
 
 # 4. Run — CPU is fine (serving seeded data needs no GPU). compose.dev.yml PULLS
 #    the images (it does not build them):
@@ -76,7 +77,7 @@ seeded account:
 > student) — e.g. log in as `alice` to see one account own one org, administer
 > another, teach in several, and learn as a student in yet another.
 
-> **FoundationDB note.** A copied/symlinked `.volumes/fdb-*` is already
+> **FoundationDB note.** A copied/symlinked `volumes/fdb-*` is already
 > configured — nothing to do. Only a **brand-new, empty** FDB data dir needs a
 > one-time configure, run at root:
 > `sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec "configure new single ssd"`.
@@ -88,9 +89,31 @@ seeded account:
 podman compose -f compose.yml -f compose.dev.yml down
 ```
 
-`.volumes/` is never deleted by `down`/`rm` (it is a bind mount / symlink). See
+`volumes/` is never deleted by `down`/`rm` (it is a bind mount / symlink). See
 [docs/infra/portable-local-data.md](docs/infra/portable-local-data.md) for the
 full data-portability details (transfer size, ownership, etc.).
+
+> **Upgrading from an older layout?** The data folder was renamed `.volumes/` →
+> `volumes/`. If you still have the old hidden folder, migrate it once **with the
+> stack stopped**: `podman compose -f compose.yml -f compose.dev.yml down && mv .volumes volumes`.
+
+### New checkout via git worktree
+
+`git worktree` checks out only *tracked* files, so the three gitignored inputs —
+`richter.local.toml`, `heino/.env`, and `volumes/` — do **not** come with it (the
+tracked `.env` and `fdb.cluster` do). Create the worktree, then link the shared
+files from your main checkout into it:
+
+```sh
+git worktree add ../dyadia-wt <branch> && cd ../dyadia-wt
+ln -s ../dyadia/golang/richter/richter.local.toml golang/richter/richter.local.toml
+ln -s ../dyadia/typescript/heino/.env             typescript/heino/.env
+ln -s ../dyadia/volumes                            volumes   # share one dataset
+```
+
+Then run the stack as above. Symlinking `volumes` shares a single dataset — run
+only **one** stack at a time against it (two compose projects on the same data
+dir corrupt it); copy `volumes` instead if the worktrees must run concurrently.
 
 ### Build & push the images (maintainers)
 
@@ -151,7 +174,7 @@ python3 scripts/seed/download-ml-videos.py     # ML playlist via yt-dlp (idempot
 #   then regenerate the committed ML course spec from the downloaded videos:
 richter seed gen-ml-spec                       # → tu-hoc-ml.json + videos.json
 
-# 2. Full clean rebuild on .volumes + seed (GPU Whisper + Gemini for the ML course):
+# 2. Full clean rebuild on volumes + seed (GPU Whisper + Gemini for the ML course):
 GPU=1 ./scripts/setup/environment.dev/seed-reset.sh    # GPU=0 for CPU-only
 
 # Or, to top up without a destructive reset (idempotent — skips analyzed lessons,

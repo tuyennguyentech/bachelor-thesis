@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# seed-reset.sh — Rebuild the local stack on the portable ./.volumes bind mounts
+# seed-reset.sh — Rebuild the local stack on the portable ./volumes bind mounts
 # and run the full dev seed from scratch.
 #
-# DESTRUCTIVE & REPRODUCIBLE: stops the stack, wipes ./.volumes data dirs, brings
+# DESTRUCTIVE & REPRODUCIBLE: stops the stack, wipes ./volumes data dirs, brings
 # the stack back up — the `migrate` init container runs goose migrations
 # automatically. FoundationDB configuration is NOT automated: a fresh FDB data dir
 # must be configured ONCE at root by the operator (see the prompt below); this
@@ -28,22 +28,22 @@ COMPOSE=(podman compose -f compose.yml)
 [ "$GPU" = "1" ] && COMPOSE+=(-f compose.gpu.yml)
 
 # Data dirs wiped on reset. NOTE: hf-cache is intentionally EXCLUDED — the speaches
-# model cache is a .volumes bind mount too, but keeping it avoids re-downloading
+# model cache is a volumes bind mount too, but keeping it avoids re-downloading
 # the Whisper/Piper models on every reset.
 VOL_SUBDIRS=(postgres fdb-coordinator fdb-server-1 fdb-server-2 seaweedfs caddy-data caddy-config)
 
-echo "=== [1/4] Stop stack (down; DATA lives in ./.volumes, wiped next) ==="
+echo "=== [1/4] Stop stack (down; DATA lives in ./volumes, wiped next) ==="
 # Plain `down` (no -v): there are no named volumes — all data is bind-mounted under
-# ./.volumes. The model cache (.volumes/hf-cache) is kept (not in VOL_SUBDIRS) so
+# ./volumes. The model cache (volumes/hf-cache) is kept (not in VOL_SUBDIRS) so
 # resets don't re-download models.
 "${COMPOSE[@]}" down --remove-orphans || true
 
-echo "=== [2/4] Wipe ./.volumes data dirs ==="
+echo "=== [2/4] Wipe ./volumes data dirs ==="
 # postgres/fdb data is owned by the container's mapped subuid (via :U), which the
 # host user cannot rm directly — delete inside the rootless user namespace.
 for d in "${VOL_SUBDIRS[@]}"; do
-  podman unshare rm -rf "$ROOT/.volumes/$d" 2>/dev/null || rm -rf "$ROOT/.volumes/$d"
-  mkdir -p "$ROOT/.volumes/$d"
+  podman unshare rm -rf "$ROOT/volumes/$d" 2>/dev/null || rm -rf "$ROOT/volumes/$d"
+  mkdir -p "$ROOT/volumes/$d"
 done
 
 echo "=== [3/4] Bring stack up (GPU=$GPU); migrate init container runs goose ==="

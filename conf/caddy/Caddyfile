@@ -59,7 +59,7 @@
 
 # HTTPS — published on host :8443 (container :443). Caddy's internal CA issues a
 # localhost certificate; browsers show a one-time self-signed warning in local dev
-# (run `caddy trust` / import the root from .volumes/caddy-data to silence it).
+# (run `caddy trust` / import the root from volumes/caddy-data to silence it).
 https://localhost {
 	tls internal
 	import routes

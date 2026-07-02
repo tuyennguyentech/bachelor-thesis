@@ -10,12 +10,12 @@ services:
       FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
-    # Portable data: bind-mount into the working tree (.volumes/) instead of an
+    # Portable data: bind-mount into the working tree (volumes/) instead of an
     # anonymous volume, so the whole dataset travels with the repo. :U makes
     # podman chown the bind to the container user on each mount (portable across
     # machines with different rootless uid maps); :Z relabels for SELinux.
     volumes:
-      - ./.volumes/fdb-coordinator:/var/fdb/data:U,Z
+      - ./volumes/fdb-coordinator:/var/fdb/data:U,Z
 
   fdb-server-1:
     depends_on:
@@ -27,7 +27,7 @@ services:
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
     volumes:
-      - ./.volumes/fdb-server-1:/var/fdb/data:U,Z
+      - ./volumes/fdb-server-1:/var/fdb/data:U,Z
 
   fdb-server-2:
     depends_on:
@@ -39,13 +39,13 @@ services:
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
     volumes:
-      - ./.volumes/fdb-server-2:/var/fdb/data:U,Z
+      - ./volumes/fdb-server-2:/var/fdb/data:U,Z
 
   # NOTE: a freshly-created FoundationDB cluster is UNCONFIGURED (reads/writes time
   # out with error 1031) until `configure new single ssd` runs once. This is NOT
   # done by a sidecar — it is a manual, one-time step run at root by the operator:
   #   sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec "configure new single ssd"
-  # A copied-in `.volumes/fdb-*` data dir is already configured, so this is only
+  # A copied-in `volumes/fdb-*` data dir is already configured, so this is only
   # needed on a brand-new (empty) data dir.
 
   postgres:
@@ -61,7 +61,7 @@ services:
       # Postgres data dir (was an anonymous volume at /var/lib/postgresql). The
       # entrypoint runs as root and re-chowns PGDATA to the postgres user, so :U
       # (chown bind to container root) keeps it portable across machines.
-      - ./.volumes/postgres:/var/lib/postgresql:U,Z
+      - ./volumes/postgres:/var/lib/postgresql:U,Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dyadia -d dyadia"]
       interval: 5s
@@ -83,8 +83,8 @@ services:
       - "8443:443"
     volumes:
       - ./conf/caddy:/etc/caddy:Z
-      - ./.volumes/caddy-data:/data:U,Z
-      - ./.volumes/caddy-config:/config:U,Z
+      - ./volumes/caddy-data:/data:U,Z
+      - ./volumes/caddy-config:/config:U,Z
 
   storage:
     image: chrislusf/seaweedfs:3.88
@@ -92,7 +92,7 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - ./.volumes/seaweedfs:/data:U,Z
+      - ./volumes/seaweedfs:/data:U,Z
       - ./conf/seaweedfs:/config:Z
 
   debug:
@@ -119,13 +119,13 @@ services:
       # STT model preloaded into memory at boot. Single source: RICHTER_STT_MODEL in .env.
       PRELOAD_MODELS: '["${RICHTER_STT_MODEL:-Systran/faster-whisper-small}"]'
     volumes:
-      # HuggingFace model cache (Whisper + Piper), bind-mounted under .volumes like
+      # HuggingFace model cache (Whisper + Piper), bind-mounted under volumes like
       # all other persistent data. The speaches image declares `USER ubuntu`
       # (uid 1000), so :U chowns the bind to 1000 — writable by the runtime user
-      # (verified). Keeping it in .volumes means the downloaded models travel with
+      # (verified). Keeping it in volumes means the downloaded models travel with
       # the portable dataset (no re-download on a copied-in stack); on a brand-new
       # empty dir, speaches-init pulls them on first `up`.
-      - ./.volumes/hf-cache:/home/ubuntu/.cache/huggingface/hub:U,Z
+      - ./volumes/hf-cache:/home/ubuntu/.cache/huggingface/hub:U,Z
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://0.0.0.0:8000/health"]
@@ -190,5 +190,5 @@ services:
       - .env
 
 # All persistent DATA (postgres, fdb, seaweedfs, caddy, speaches model cache) is
-# bind-mounted under ./.volumes/ so the seeded dataset travels with the repo.
+# bind-mounted under ./volumes/ so the seeded dataset travels with the repo.
 # There are no named volumes.
