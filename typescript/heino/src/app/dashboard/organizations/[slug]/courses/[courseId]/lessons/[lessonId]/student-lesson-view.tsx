@@ -318,18 +318,17 @@ export function StudentLessonView({
     [submitted, activeId, pendingCheckpoints, initialPosition],
   );
 
-  // Fire the final checkpoint(s) on video end. The last interaction's startSeconds
-  // can sit at/after duration (incl. legacy data with startSeconds >= duration), so
-  // the timeupdate hit-test never fires it. When the video ends, activate the
-  // earliest un-passed pending checkpoint whose startSeconds <= duration + epsilon
-  // instead of falling through to the results screen.
+  // Fire the final checkpoint(s) on video end. A checkpoint's startSeconds can sit
+  // at/after the real duration — the timeupdate hit-test never reaches it — so it
+  // must be surfaced here or it becomes UNREACHABLE and the learner can never finish.
+  // This happens with real-analysis chunk boundaries that slightly overshoot the
+  // audio (Whisper trailing segments) and with any legacy data. Since the video has
+  // been watched to the end, surface the earliest still-unanswered checkpoint
+  // regardless of its timestamp (no duration filter — that filter was the bug).
   const handleEnded = useCallback(() => {
     if (submitted || activeId) return;
     const video = videoRef.current;
-    const duration = video?.duration ?? 0;
-    const candidate = pendingCheckpoints.find(
-      (c) => !duration || c.startSeconds <= duration + CHECKPOINT_EPSILON_SECONDS,
-    );
+    const candidate = pendingCheckpoints[0];
     if (!candidate) return;
     if (video) video.pause();
     if (!questionShownAtRef.current.has(candidate.id)) {
@@ -383,12 +382,17 @@ export function StudentLessonView({
     };
   }, [activeId]);
 
-  // Seek guard (students only): rewind/review freely, and jump FORWARD up to (but
-  // not past) the next UNANSWERED checkpoint. Scrubbing beyond that checkpoint snaps
-  // back to it and surfaces it, so a learner can navigate the lesson freely but cannot
-  // skip a quiz they have not completed (Udemy-style navigation + checkpoint gating).
-  // Once every checkpoint is answered there is no gate and seeking is unrestricted.
-  // Teachers in preview seek without restriction.
+  // Seek guard: rewind/review freely, and jump FORWARD up to (but not past) the next
+  // UNANSWERED checkpoint. Scrubbing beyond that checkpoint snaps back to it and
+  // surfaces it, so a learner can navigate the lesson freely but cannot skip a quiz
+  // they have not completed (Udemy-style navigation + checkpoint gating). Once every
+  // checkpoint is answered there is no gate and seeking is unrestricted.
+  //
+  // This applies to teacher PREVIEW too ("xem thử dưới dạng học viên"): preview must
+  // mirror the student experience, so a forward-seek there is clamped identically.
+  // Without the clamp the video stayed at the seek target, and after answering the
+  // surfaced checkpoint `handleContinue` resumed playback FROM that target — jumping
+  // past the gate (and any later checkpoints in between). The bug the user reported.
   const nextGate = pendingCheckpoints[0];
   // Re-entry guard: writing video.currentTime inside a seeking/seeked handler
   // fires ANOTHER seeking/seeked event, which re-enters guardSeek. Under fast
@@ -397,7 +401,7 @@ export function StudentLessonView({
   // makes the handler ignore the seek event its own correction caused.
   const clampingRef = useRef(false);
   useEffect(() => {
-    if (isPreview || !nextGate) return;
+    if (!nextGate) return;
     const video = videoRef.current;
     if (!video) return;
     const guardSeek = () => {
@@ -428,7 +432,7 @@ export function StudentLessonView({
       video.removeEventListener("seeking", guardSeek);
       video.removeEventListener("seeked", guardSeek);
     };
-  }, [isPreview, playerKey, nextGate]);
+  }, [playerKey, nextGate]);
 
   // Surface a checkpoint that the resumed position has already passed. On return
   // to a lesson, the saved position can be AT/just before an unanswered gate
@@ -568,7 +572,10 @@ export function StudentLessonView({
       setActiveId(nextInCheckpoint.id);
     } else {
       setActiveId(null);
-      videoRef.current?.play().catch(() => {});
+      // Resume playback — but NOT if this checkpoint was surfaced on video end
+      // (a past-duration gate): play() on an ended video restarts it from 0.
+      const v = videoRef.current;
+      if (v && !v.ended) v.play().catch(() => {});
     }
   }
 

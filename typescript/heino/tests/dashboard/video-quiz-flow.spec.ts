@@ -35,6 +35,7 @@ import {
 import {
   OrganizationService,
 } from "buf/gen/richter/v1/organizations_pb";
+import { AIService } from "buf/gen/richter/v1/ai_pb";
 import {
   test,
   expect,
@@ -54,6 +55,34 @@ const TEST_VIDEO_WITH_AUDIO = path.join(__dirname, "../fixtures/edu-sample-en.mp
 
 function rpcBaseUrl(baseURL?: string) {
   return process.env.RICHTER_BASE_URL ?? `${baseURL ?? "http://caddy"}/api/richter`;
+}
+
+/** Fetch the ACTUAL checkpoint start-seconds (sorted, timed only) for a seeded lesson
+ *  via the API. Tests must not hardcode these: the seed fits the golden-fixture
+ *  timeline to the real (shorter) demo-video duration, so the timestamps are scaled
+ *  and would otherwise drift out from under any magic numbers. `lessonHref` is the
+ *  lesson page URL (its last path segment is the lesson id). */
+async function fetchCheckpointSeconds(lessonHref: string, baseURL?: string): Promise<number[]> {
+  const lessonId = lessonHref.split("?")[0].replace(/\/$/, "").split("/").pop() ?? "";
+  const rpcBase = rpcBaseUrl(baseURL);
+  const authRes = await createClient(
+    AuthService,
+    createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBase }),
+  ).login({ email: TEACHER_EMAIL, password: USER_PASSWORD });
+  const token = authRes.accessToken;
+  const authInterceptor: Interceptor = (next) => async (req) => {
+    req.header.set("Authorization", `Bearer ${token}`);
+    return next(req);
+  };
+  const aiClient = createClient(
+    AIService,
+    createConnectTransport({ httpVersion: "1.1", baseUrl: rpcBase, interceptors: [authInterceptor] }),
+  );
+  const res = await aiClient.getLessonAnalysis({ lessonId });
+  return (res.analysis?.interactions ?? [])
+    .map((i) => i.startSeconds)
+    .filter((s) => s > 0)
+    .sort((a, b) => a - b);
 }
 
 async function ensureRetakeState(page: Page) {
@@ -440,13 +469,12 @@ test.describe("AI analysis streaming progress", () => {
 
 // ── 5. Student quiz form ───────────────────────────────────────────────────
 
-// Big-O seeded lesson checkpoint times (startSeconds per seed data)
-const CHECKPOINT_SECONDS = [208, 416, 624, 831, 1039];
-
-/** Answer all checkpoints via the video trigger hook, then return. */
-async function answerAllCheckpoints(page: Page, optionIndexPerQ?: number[]) {
-  for (let i = 0; i < CHECKPOINT_SECONDS.length; i++) {
-    await triggerCheckpoint(page, CHECKPOINT_SECONDS[i] + 2);
+/** Answer every checkpoint (in order) via the video trigger hook. `cps` = the actual
+ *  checkpoint start-seconds (from fetchCheckpointSeconds) so this stays correct after
+ *  the fixture timeline is fitted to the real video duration. */
+async function answerAllCheckpoints(page: Page, cps: number[], optionIndexPerQ?: number[]) {
+  for (let i = 0; i < cps.length; i++) {
+    await triggerCheckpoint(page, cps[i] + 2);
     const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
     await expect(checkpoint).toBeVisible({ timeout: 5_000 });
     const optIdx = optionIndexPerQ?.[i] ?? 0;
@@ -481,13 +509,13 @@ test.describe("Student quiz form", () => {
   test("student can retake quiz: answer all checkpoints + submit → new score", async ({
     studentPage: page,
   }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const href = await goToSeededLesson(page, SEEDED_LESSON);
     await ensureRetakeState(page);
 
     // "Nộp bài" should not appear until all checkpoints answered
     await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
 
-    await answerAllCheckpoints(page);
+    await answerAllCheckpoints(page, await fetchCheckpointSeconds(href));
 
     const submitBtn = page.getByRole("button", { name: "Nộp bài" });
     await expect(submitBtn).toBeEnabled({ timeout: 3_000 });
@@ -500,15 +528,16 @@ test.describe("Student quiz form", () => {
   test("submit button not visible until all questions answered via checkpoints", async ({
     studentPage: page,
   }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const href = await goToSeededLesson(page, SEEDED_LESSON);
     await ensureRetakeState(page);
 
     // Initially "Nộp bài" not visible
     await expect(page.getByRole("button", { name: "Nộp bài" })).not.toBeVisible();
 
     // Answer all but the last checkpoint
-    for (let i = 0; i < CHECKPOINT_SECONDS.length - 1; i++) {
-      await triggerCheckpoint(page, CHECKPOINT_SECONDS[i] + 2);
+    const cps = await fetchCheckpointSeconds(href);
+    for (let i = 0; i < cps.length - 1; i++) {
+      await triggerCheckpoint(page, cps[i] + 2);
       const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
       await expect(checkpoint).toBeVisible({ timeout: 5_000 });
       await checkpoint.locator("button").first().click();
@@ -523,11 +552,11 @@ test.describe("Student quiz form", () => {
   test("after submit, correct answers revealed and Làm lại shown", async ({
     studentPage: page,
   }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const href = await goToSeededLesson(page, SEEDED_LESSON);
     await ensureRetakeState(page);
 
     // q1 correct_answer=1 per seed; others pick first option
-    await answerAllCheckpoints(page, [1, 0, 0, 0, 0]);
+    await answerAllCheckpoints(page, await fetchCheckpointSeconds(href), [1, 0, 0, 0, 0]);
 
     await page.getByRole("button", { name: "Nộp bài" }).click();
 
@@ -575,20 +604,24 @@ test.describe("Video quiz checkpoint", () => {
   test("checkpoint does not reappear for same question after dismiss", async ({
     studentPage: page,
   }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const href = await goToSeededLesson(page, SEEDED_LESSON);
     await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
-    // Trigger checkpoint
-    await triggerCheckpoint(page, 210);
+    // Trigger JUST the first checkpoint (a value between c1 and c2, so exactly one
+    // checkpoint is crossed — otherwise re-triggering would legitimately surface the
+    // NEXT gate and this test's premise wouldn't hold).
+    const cps = await fetchCheckpointSeconds(href);
+    const atFirst = cps[0] + 2;
+    await triggerCheckpoint(page, atFirst);
     const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
     await expect(checkpoint).toBeVisible({ timeout: 3_000 });
     await checkpoint.locator("button").first().click();
     await page.getByRole("button", { name: "Tiếp tục xem" }).click();
     await expect(checkpoint).not.toBeVisible();
 
-    // Trigger again at same time — checkpoint should NOT reappear (already in passedIds)
-    await triggerCheckpoint(page, 210);
+    // Trigger again at the same time — checkpoint should NOT reappear (already in passedIds)
+    await triggerCheckpoint(page, atFirst);
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).not.toBeVisible();
   });
 
@@ -684,26 +717,146 @@ test.describe("Video quiz checkpoint", () => {
   test("student can seek forward up to the next unanswered checkpoint", async ({
     studentPage: page,
   }) => {
-    await goToSeededLesson(page, SEEDED_LESSON);
+    const href = await goToSeededLesson(page, SEEDED_LESSON);
     await ensureRetakeState(page);
     await expect(page.locator("video").first()).toBeVisible();
 
-    // The first checkpoint is at 208s. Seeking to just before it is ALLOWED — the
-    // gate only blocks crossing an unanswered checkpoint, not seeking up to it.
-    await page.evaluate(() => {
+    // Seeking to just BEFORE the first checkpoint is ALLOWED — the gate only blocks
+    // crossing an unanswered checkpoint, not seeking up to it.
+    const cps = await fetchCheckpointSeconds(href);
+    const firstGate = cps[0];
+    const before = Math.max(2, firstGate - 30);
+    await page.evaluate((t) => {
       const v = document.querySelector("video") as HTMLVideoElement | null;
-      if (v) v.currentTime = 200;
-    });
+      if (v) v.currentTime = t;
+    }, before);
     await page.waitForTimeout(600);
 
     const time = await page.evaluate(
       () => (document.querySelector("video") as HTMLVideoElement | null)?.currentTime ?? 0,
     );
-    // Stays where we put it (~200), NOT snapped forward to the 208 gate.
-    expect(time).toBeGreaterThan(195);
-    expect(time).toBeLessThan(206);
+    // Stays where we put it, NOT snapped forward to the gate.
+    expect(time).toBeGreaterThan(before - 5);
+    expect(time).toBeLessThan(firstGate);
     // No checkpoint shown — we stopped short of it.
     await expect(page.locator('[data-testid="quiz-checkpoint"]')).not.toBeVisible();
+  });
+
+  // Regression (teacher preview): seeking FORWARD past one or more unanswered
+  // checkpoints must clamp to the nearest one — and after answering it, playback
+  // resumes FROM that checkpoint, NOT the seek target. Previously preview skipped the
+  // seek guard, so the video sat at the target and jumped there on continue, bypassing
+  // the gate (and any checkpoints in between). Preview must mirror the student.
+  test("teacher preview: forward-seek past checkpoints clamps to the nearest and resumes there", async ({
+    teacherPage: page,
+  }) => {
+    const lessonHref = await goToSeededLesson(page, SEEDED_LESSON);
+    const cps = await fetchCheckpointSeconds(lessonHref);
+    const [c1, c2] = cps; // first two (real, fitted) checkpoint times
+    await page.goto(`${lessonHref}?preview=1`);
+    await expect(page.locator("video").first()).toBeVisible();
+
+    // Leave the initial-load state so the seek guard engages (it ignores the mount
+    // seek). Nothing is before c1, so no checkpoint surfaces here.
+    await triggerCheckpoint(page, 5);
+    await expect(page.locator('[data-testid="quiz-checkpoint"]')).not.toBeVisible({ timeout: 1_500 });
+
+    // Seek WELL past BOTH the first (c1) and second (c2) checkpoints (still inside the video).
+    const target = c2 + (c2 - c1) + 20;
+    await page.evaluate((t) => {
+      const v = document.querySelector("video") as HTMLVideoElement | null;
+      if (v) v.currentTime = t;
+    }, target);
+
+    // The guard snaps the video back to the FIRST unanswered checkpoint (c1), not the
+    // target, and surfaces it.
+    const clampLimit = c1 + 40;
+    await page.waitForFunction(
+      (limit) => {
+        const v = document.querySelector("video") as HTMLVideoElement | null;
+        return !v || v.currentTime < limit;
+      },
+      clampLimit,
+      { timeout: 5_000 },
+    );
+    const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
+    await expect(checkpoint).toBeVisible({ timeout: 3_000 });
+    expect(
+      await page.evaluate(
+        () => (document.querySelector("video") as HTMLVideoElement | null)?.currentTime ?? 0,
+      ),
+    ).toBeLessThan(clampLimit);
+
+    // Answer the first checkpoint and continue.
+    await checkpoint.locator("button").first().click();
+    await page.getByRole("button", { name: "Tiếp tục xem" }).click();
+    await expect(checkpoint).not.toBeVisible({ timeout: 3_000 });
+
+    // After answering, playback resumes FROM c1 — it must NOT jump to the seek target
+    // (which would skip the c2 checkpoint). This is the bug.
+    await page.waitForTimeout(500);
+    expect(
+      await page.evaluate(
+        () => (document.querySelector("video") as HTMLVideoElement | null)?.currentTime ?? 0,
+      ),
+    ).toBeLessThan(c2);
+  });
+
+  // Regression: a checkpoint whose start_seconds sits PAST the real video duration
+  // (real-analysis chunk boundaries that overshoot the audio, or legacy data) must
+  // still surface on video END — otherwise the learner can never answer it and can
+  // never complete the lesson (allAnswered stays false, "Nộp bài" never enables).
+  test("checkpoint past the video duration still surfaces on video end", async ({
+    teacherPage: page,
+  }) => {
+    const { lessonUrl, lessonId, token } = await createAnalyzedLesson();
+    await createInteraction(token, lessonId, {
+      kind: InteractionKind.SINGLE_CHOICE,
+      startSeconds: 99999, // far past any test video
+      prompt: "Câu hỏi cuối (quá thời lượng video)",
+    });
+    // Preview mode renders the student player (StudentLessonView) with checkpoint gating.
+    await page.goto(`${lessonUrl}?preview=1`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator("video").first()).toBeVisible();
+    await page.waitForLoadState("networkidle").catch(() => {});
+    // Not reachable by playback → no checkpoint yet.
+    await expect(page.locator('[data-testid="quiz-checkpoint"]')).not.toBeVisible({ timeout: 1_500 });
+    // Simulate the video reaching its end. Re-dispatch until it takes, to avoid a
+    // race with the client hydrating the ended handler / interactions state.
+    const checkpoint = page.locator('[data-testid="quiz-checkpoint"]');
+    await expect(async () => {
+      await page.evaluate(() => document.querySelector("video")?.dispatchEvent(new Event("ended")));
+      await expect(checkpoint).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 12_000 });
+  });
+
+  // Runtime timing: the LAST chunk's checkpoint must fire from REAL playback reaching
+  // it (not just via the trigger hook) — the "miss chunk cuối" concern. Answer every
+  // earlier checkpoint, then play into the final chunk and assert its question surfaces.
+  test("last chunk's checkpoint fires during real playback (not missed)", async ({
+    studentPage: page,
+  }) => {
+    const href = await goToSeededLesson(page, SEEDED_LESSON);
+    await ensureRetakeState(page);
+    await expect(page.locator("video").first()).toBeVisible();
+    const cps = await fetchCheckpointSeconds(href);
+    const last = cps[cps.length - 1];
+    // Clear every checkpoint EXCEPT the last, so only the final gate remains.
+    for (let i = 0; i < cps.length - 1; i++) {
+      await triggerCheckpoint(page, cps[i] + 2);
+      const cp = page.locator('[data-testid="quiz-checkpoint"]');
+      await expect(cp).toBeVisible({ timeout: 5_000 });
+      await cp.locator("button").first().click();
+      await page.getByRole("button", { name: "Tiếp tục xem" }).click();
+      await expect(cp).not.toBeVisible({ timeout: 3_000 });
+    }
+    // Real playback into the final chunk: seek to just before the last checkpoint and play.
+    await page.evaluate((t) => {
+      const v = document.querySelector("video") as HTMLVideoElement | null;
+      if (v) { v.pause(); v.muted = true; v.currentTime = t; void v.play(); }
+    }, Math.max(1, last - 6));
+    // The final chunk's checkpoint surfaces as playback reaches it.
+    await expect(page.locator('[data-testid="quiz-checkpoint"]')).toBeVisible({ timeout: 15_000 });
   });
 });
 
