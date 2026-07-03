@@ -13,10 +13,11 @@
 # (compose.dev.yml). The build depends only on committed inputs → reproducible on a
 # fresh clone / git worktree / CI.
 
-ARG GO_VERSION=1.26
-ARG NODE_VERSION=24
-ARG BUF_VERSION=1.67.0
-ARG PNPM_VERSION=11.2.2
+# No defaults: the pins come solely from .env (DYADIA_*) via compose.build.yml build args.
+ARG GO_VERSION
+ARG NODE_VERSION
+ARG BUF_VERSION
+ARG PNPM_VERSION
 
 # ── TS protobuf codegen ────────────────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS bufgen

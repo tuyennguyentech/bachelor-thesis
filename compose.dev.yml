@@ -16,12 +16,19 @@ services:
   richter:
     image: ${DYADIA_RICHTER_IMAGE}
     command: ["-c", "/etc/richter/richter.base.toml,/etc/richter/richter.local.toml"]
+    # Read-only SHARED config → :z (shared SELinux label container_file_t:s0, no MCS
+    # category), NOT :Z. :Z stamps a per-container category on the host file, which
+    # breaks whenever the file is provisioned across machines/checkouts (e.g. a copied
+    # or symlinked config gets a stale/foreign category → "permission denied" in the
+    # container). :z relabels to the category-less shared label, readable by the
+    # container on any SELinux host — reproducible. (:Z stays on the exclusive DATA
+    # dirs in compose.yml, which one container rightly owns.)
     volumes:
-      - ./golang/richter/richter.base.toml:/etc/richter/richter.base.toml:ro,Z
-      - ./golang/richter/richter.local.toml:/etc/richter/richter.local.toml:ro,Z
+      - ./golang/richter/richter.base.toml:/etc/richter/richter.base.toml:ro,z
+      - ./golang/richter/richter.local.toml:/etc/richter/richter.local.toml:ro,z
       # richter.base.toml has [fdb] cluster_file = "fdb.cluster" (relative to the
       # working dir = / in the image) → mount the cluster file at that path.
-      - ./fdb.cluster:/fdb.cluster:ro,Z
+      - ./fdb.cluster:/fdb.cluster:ro,z
     depends_on:
       postgres:
         condition: service_healthy

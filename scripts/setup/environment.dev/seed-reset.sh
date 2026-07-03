@@ -4,9 +4,9 @@
 #
 # DESTRUCTIVE & REPRODUCIBLE: stops the stack, wipes ./volumes data dirs, brings
 # the stack back up, then runs goose migrations explicitly (migrations are a
-# developer step, not a sidecar). FoundationDB configuration is NOT automated: a fresh FDB data dir
-# must be configured ONCE at root by the operator (see the prompt below); this
-# script waits for that before seeding. Finally it runs `seed --dev`.
+# developer step, not a sidecar). FoundationDB is auto-configured by the fdb-init
+# sidecar in compose.yml (a fresh/empty FDB dir gets `configure new single ssd` once,
+# idempotently), so this script just waits for it. Finally it runs `seed --dev`.
 #
 # `seed --dev` is fully idempotent and seeds EVERYTHING: the real GPU
 # Whisper+Gemini pipeline for the "Tự học Machine Learning" demo course AND the
@@ -50,17 +50,12 @@ echo "=== [3/4] Bring stack up (GPU=$GPU) ==="
 "${COMPOSE[@]}" up -d
 echo -n "  postgres "; until podman exec dyadia-postgres-1 pg_isready -U dyadia -q 2>/dev/null; do echo -n .; sleep 2; done; echo "ready"
 
-# FoundationDB: a freshly-wiped data dir is UNCONFIGURED. This must be done at root
-# by the operator (rootless `podman exec` is not enough here) — wait for it.
-if podman exec dyadia-fdb-coordinator-1 fdbcli --exec "status minimal" 2>/dev/null | grep -qF "The database is available"; then
-  echo "  fdb: already configured"
-else
-  echo "  fdb: UNCONFIGURED. Run this ONCE at root in another shell:"
-  echo "       sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec \"configure new single ssd\""
-  echo -n "  waiting for FDB to become available "
-  until podman exec dyadia-fdb-coordinator-1 fdbcli --exec "status minimal" 2>/dev/null | grep -qF "The database is available"; do echo -n .; sleep 3; done
-  echo "ready"
-fi
+# FoundationDB: a freshly-wiped data dir is UNCONFIGURED, but the fdb-init sidecar
+# (compose.yml) runs `configure new single ssd` on it automatically. Just wait for
+# the cluster to report available (works whether it was fresh or already configured).
+echo -n "  fdb: waiting for fdb-init to configure the cluster "
+until podman exec dyadia-fdb-coordinator-1 fdbcli --exec "status minimal" 2>/dev/null | grep -qF "The database is available"; do echo -n .; sleep 3; done
+echo "ready"
 
 # Migrations are a developer step (no sidecar): run goose explicitly against the dev
 # DB now that Postgres is up. Idempotent — skips already-applied migrations.

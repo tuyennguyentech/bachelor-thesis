@@ -17,6 +17,7 @@ import (
 	"example.com/richter/internal/authz"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc"
+	"example.com/richter/log"
 	"example.com/sql/gen"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,6 +40,7 @@ type StorageSvc struct {
 	cfg           *cfg.S3Cfg
 	authz         *authz.AuthzSvc
 	pg            *db.PostgresSvc
+	log           *log.LogSvc
 	uploadLimiter UploadRateLimiter
 }
 
@@ -62,6 +64,11 @@ func NewStorageSvc(i do.Injector) (*StorageSvc, error) {
 		return nil, fmt.Errorf("StorageCfg cannot be invoked: %w", err)
 	}
 
+	lg, err := do.Invoke[*log.LogSvc](i)
+	if err != nil {
+		return nil, fmt.Errorf("LogSvc cannot be invoked: %w", err)
+	}
+
 	client, err := minio.New(s3cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(s3cfg.AccessKeyID, s3cfg.SecretAccessKey, ""),
 		Secure: s3cfg.UseSSL,
@@ -70,11 +77,28 @@ func NewStorageSvc(i do.Injector) (*StorageSvc, error) {
 		return nil, fmt.Errorf("minio client init: %w", err)
 	}
 
+	// Ensure the S3 bucket exists on startup so uploads work on a fresh, config-only
+	// bring-up WITHOUT needing a seed — driven purely by the S3 settings the app already
+	// reads. Idempotent (BucketExists check). Non-fatal: if storage is not reachable yet
+	// we log and continue (seed also ensures it, and this retries on the next boot),
+	// so a briefly-unavailable storage never blocks richter from booting.
+	ctx := context.Background()
+	if exists, berr := client.BucketExists(ctx, s3cfg.Bucket); berr != nil {
+		lg.WarnContext(ctx, "storage: could not check bucket on startup (will rely on seed / next boot)", "bucket", s3cfg.Bucket, "err", berr)
+	} else if !exists {
+		if merr := client.MakeBucket(ctx, s3cfg.Bucket, minio.MakeBucketOptions{}); merr != nil {
+			lg.WarnContext(ctx, "storage: could not create bucket on startup", "bucket", s3cfg.Bucket, "err", merr)
+		} else {
+			lg.InfoContext(ctx, "storage: bucket created on startup", "bucket", s3cfg.Bucket)
+		}
+	}
+
 	return &StorageSvc{
 		client:        client,
 		cfg:           s3cfg,
 		authz:         az,
 		pg:            pg,
+		log:           lg,
 		uploadLimiter: NewUploadRateLimiter(*storageCfg),
 	}, nil
 }

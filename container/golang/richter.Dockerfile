@@ -9,10 +9,23 @@
 # Build context is the REPO ROOT (see compose.dev.yml). Only the inputs needed to
 # build are copied; .dockerignore keeps gen/, node_modules/, volumes/ etc. out.
 
-ARG GO_VERSION=1.26
-ARG FDB_VERSION=7.3.69
-ARG BUF_VERSION=1.67.0
-ARG SQLC_VERSION=1.30.0
+# Version pins — SINGLE SOURCE is .env (DYADIA_*/FDB_VERSION), passed as build args by
+# compose.build.yml. No defaults here so nothing is hardcoded/duplicated; build via
+# `podman compose -f compose.yml -f compose.build.yml build`.
+ARG GO_VERSION
+ARG FDB_VERSION
+ARG BUF_VERSION
+ARG SQLC_VERSION
+ARG FFMPEG_VERSION
+
+# ffmpeg — richter shells out to it at RUNTIME to extract/segment a video's audio
+# (16 kHz mono PCM) before transcription (see internal/svc/ai/media_transcription.go).
+# distroless ships no package manager, so we pull a fully STATIC ffmpeg (zero shared-
+# lib deps → runs as-is on distroless) and copy just the binary into the final image.
+# FFmpeg publishes no official container image; mwader/static-ffmpeg is the de-facto
+# standard, version-pinned static build. Only `ffmpeg` is needed — richter avoids
+# `ffprobe` by design (chunk durations are derived arithmetically, not probed).
+FROM mwader/static-ffmpeg:${FFMPEG_VERSION} AS ffmpeg
 
 FROM golang:${GO_VERSION}-bookworm AS build
 ARG FDB_VERSION
@@ -58,7 +71,17 @@ FROM gcr.io/distroless/cc-debian12:nonroot AS richter
 COPY --from=build /usr/lib/libfdb_c.so /usr/lib/libfdb_c.so
 COPY --from=build /usr/lib/x86_64-linux-gnu/liblzma.so.5 /usr/lib/x86_64-linux-gnu/liblzma.so.5
 COPY --from=build /usr/lib/x86_64-linux-gnu/libz.so.1 /usr/lib/x86_64-linux-gnu/libz.so.1
+# Static ffmpeg (see the ffmpeg build stage above) → on PATH for the transcription step.
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=build /out/richter /usr/local/bin/richter
+# WORKDIR / — the distroless :nonroot base defaults WORKDIR to /home/nonroot, but
+# richter.base.toml sets [fdb] cluster_file = "fdb.cluster" (a RELATIVE path, so the
+# same config works from the repo root in the host dev loop). The FDB C client
+# resolves that relative path against the process CWD, so the CWD must be where the
+# cluster file is mounted (compose.dev.yml mounts it at /fdb.cluster). Without this,
+# OpenDatabase looks in /home/nonroot, fails, and every FDB op (e.g. persisting a
+# freshly transcribed lesson to FDB) errors 1515 "No cluster file found".
+WORKDIR /
 EXPOSE 8080
 ENTRYPOINT ["richter"]
 # Config is MOUNTED at runtime (compose.dev.yml) — never baked into the image.

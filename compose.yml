@@ -16,6 +16,16 @@ services:
     # machines with different rootless uid maps); :Z relabels for SELinux.
     volumes:
       - ./volumes/fdb-coordinator:/var/fdb/data:U,Z
+    # STATIC IP: in FDB_NETWORKING_MODE=container the process advertises `hostname -i`
+    # (its container IP) as its PUBLIC address, and that address is baked into the
+    # persisted coordination state (coordination-*.fdq). A dynamic IP therefore breaks
+    # the cluster on ANY restart with a new IP (k8s pod reschedule, another machine,
+    # `compose rm`+`up`) even with the data volume intact. Pinning the coordinator to a
+    # fixed IP keeps the persisted state valid → the cluster reforms from the copied/
+    # remounted volume with NO reconfigure. High-range IPs avoid the dynamic pool.
+    networks:
+      default:
+        ipv4_address: 10.89.1.200
 
   fdb-server-1:
     depends_on:
@@ -28,6 +38,9 @@ services:
     platform: "linux/amd64"
     volumes:
       - ./volumes/fdb-server-1:/var/fdb/data:U,Z
+    networks:
+      default:
+        ipv4_address: 10.89.1.201
 
   fdb-server-2:
     depends_on:
@@ -40,13 +53,31 @@ services:
     platform: "linux/amd64"
     volumes:
       - ./volumes/fdb-server-2:/var/fdb/data:U,Z
+    networks:
+      default:
+        ipv4_address: 10.89.1.202
 
-  # NOTE: a freshly-created FoundationDB cluster is UNCONFIGURED (reads/writes time
-  # out with error 1031) until `configure new single ssd` runs once. This is NOT
-  # done by a sidecar — it is a manual, one-time step run at root by the operator:
-  #   sudo podman exec dyadia-fdb-coordinator-1 fdbcli --exec "configure new single ssd"
-  # A copied-in `volumes/fdb-*` data dir is already configured, so this is only
-  # needed on a brand-new (empty) data dir.
+  # fdb-init: one-shot sidecar that makes a freshly-created FDB cluster CONFIGURED
+  # automatically (config-driven, no manual root step). A brand-new/empty FDB data dir
+  # is UNCONFIGURED — every transaction times out with error 1031 — until
+  # `configure new single ssd` runs once. This sidecar does that on `up`; it is
+  # IDEMPOTENT — if the cluster is already available (e.g. a copied-in configured data
+  # dir) it exits without changing anything, so it never wipes existing data.
+  # (Rootless `podman exec fdbcli configure` works fine — verified — so no root needed.)
+  fdb-init:
+    image: foundationdb/foundationdb:${FDB_VERSION}
+    depends_on:
+      - fdb-coordinator
+      - fdb-server-1
+      - fdb-server-2
+    environment:
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+    volumes:
+      - ./scripts/init/fdb:/init:ro,Z
+    entrypoint: ["/bin/bash", "/init/configure.sh"]
+    restart: "no"
 
   postgres:
     image: postgres:18.3-alpine3.23
@@ -178,6 +209,16 @@ services:
     command: ["sleep", "infinity"]
     env_file:
       - .env
+
+# Fixed subnet so the FDB processes can hold stable static IPs (10.89.1.200-202) —
+# required for FDB's persisted coordination state to survive restarts / remounts /
+# machine moves. Other services keep dynamic IPs (podman avoids the reserved statics).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.89.1.0/24
+          gateway: 10.89.1.1
 
 # All persistent DATA (postgres, fdb, seaweedfs, caddy, speaches model cache) is
 # bind-mounted under ./volumes/ so the seeded dataset travels with the repo.
