@@ -1,147 +1,126 @@
 # Dyadia
 
-AI-assisted learning platform (Bachelor Thesis). Monorepo:
+AI-assisted learning platform (Bachelor Thesis).
+Repo: <https://github.com/tuyennguyentech/bachelor-thesis>. Monorepo:
 
-- **`richter`** — Go backend (Connect RPC, PostgreSQL, FoundationDB, SeaweedFS S3, Gemini, Whisper/Piper via Speaches).
+- **`richter`** — Go backend (Connect RPC; PostgreSQL, FoundationDB, SeaweedFS S3; Gemini + Whisper/Piper via Speaches).
 - **`heino`** — Next.js 16 frontend.
-- **infra** — PostgreSQL, FoundationDB, SeaweedFS, Caddy (reverse proxy), Speaches (STT/TTS) — all via `podman compose`.
+- **infra** — PostgreSQL, FoundationDB, SeaweedFS, Caddy (reverse proxy), Speaches (STT/TTS), via `podman compose`.
 
-**Fully portable & config-driven:** every stateful dir is bind-mounted under `volumes/`,
-and all config lives in committed files + `.env`. Moving the app to another machine is
-just: copy `volumes/` + the two secret files → `podman compose up`. No manual DB steps.
+**Flow:** browser → Caddy → `heino` (SSR) & `richter` (Connect RPC) → PostgreSQL / FoundationDB / SeaweedFS;
+`richter` calls Gemini + Speaches for AI. All services run together on one machine.
 
-## Prerequisites (every scenario)
+**Portable & config-driven:** every stateful dir is bind-mounted under `volumes/`; all config lives
+in committed files (root `.env` + `typescript/heino/.env`). Moving machines = copy `volumes/` + two
+gitignored files → `podman compose up`. No manual DB steps.
 
-- **OS: Linux or WSL2** — the stack is podman-native (rootless, `:U,Z` bind-mount flags;
-  Docker does not support `:U`).
-- `podman` + `podman compose` (rootless is fine).
-- Ports **8080** (HTTP) and **8443** (HTTPS) free — Caddy publishes there, so no
-  `sysctl`/low-port setup is needed even rootless.
-- **GPU is optional** — only to transcribe *new* uploads faster (see
-  [docs/infra/podman-gpu.md](docs/infra/podman-gpu.md)); **not needed** to serve seeded data.
+## Prerequisites
 
----
+- **OS: Linux or WSL2** — podman-native (rootless, `:U,Z` bind-mount flags; Docker lacks `:U`).
+- `podman` + `podman compose` ([install guide](https://podman.io/docs/installation); rootless is fine).
+- Ports **8080** (HTTP) and **8443** (HTTPS) free — Caddy publishes there (no low-port `sysctl`, even rootless).
+- **GPU optional** — only to transcribe *new* uploads faster
+  ([docs/infra/podman-gpu.md](docs/infra/podman-gpu.md)); not needed to serve seeded data.
 
-## Scenario 1 — Run with the pre-seeded data (the fast path)
+Tool versions are pinned in the root `.env` / `compose.yml` (Go 1.26, Node 24, FoundationDB 7.3.69,
+Postgres 18.3, Caddy 2.11) and baked into the images — nothing to install by hand beyond podman.
 
-Run Dyadia with the demo dataset already processed (the "Tự học Machine Learning" course
-— 24 lessons, transcripts, AI-generated exercises, ~558 attempts). Nothing is re-processed:
-data travels in `volumes/`; the apps run as pulled images.
+## Run with the pre-seeded data
 
-**Handed over separately (all gitignored):** the `volumes/` dataset + two secret files —
-`golang/richter/richter.local.toml` and `typescript/heino/.env.local` (JWT_SECRET). The
-public config `typescript/heino/.env` is committed.
+The demo dataset is already processed (the "Tự học Machine Learning" course — 24 lessons,
+transcripts, AI exercises, ~558 attempts). Nothing is re-processed: data travels in `volumes/`,
+apps run as pulled images.
+
+**Handed over separately (gitignored):** the `volumes/` dataset + two files —
+`golang/richter/richter.local.toml` (the real secrets: DB password, S3 key, Gemini API key) and
+`typescript/heino/.env.local`. JWT signing uses a committed demo value in `richter.base.toml`, so
+`.env.local`'s `JWT_SECRET` just mirrors it. Public config (root `.env`, `typescript/heino/.env`) is committed.
 
 ```sh
-# 1. Get a working copy (clone; for a git worktree see Scenario 3)
-git clone <repo> dyadia && cd dyadia
+# 1. Get a working copy (clone; for a git worktree see below)
+git clone https://github.com/tuyennguyentech/bachelor-thesis.git dyadia && cd dyadia
 
-# 2. Drop in the two secret files (compose hardcodes nothing — apps read these files)
+# 2. Drop in the two gitignored files (compose hardcodes nothing — apps read these)
 cp /path/to/richter.local.toml golang/richter/richter.local.toml
 cp /path/to/heino.env.local    typescript/heino/.env.local
 
-# 3. Provide the data — extract the handover archive (Scenario 2) OR symlink it
+# 3. Provide the data — extract the handover archive OR symlink it
 tar -xzf volumes.tar.gz                 # → volumes/   (or: ln -s /path/to/volumes volumes)
 
-# 4. Run (pulls the images; add "-f compose.gpu.yml" only if you want GPU)
+# 4. Run (pulls the images; add "-f compose.gpu.yml" for GPU)
 podman compose -f compose.yml -f compose.dev.yml up -d
 ```
 
-Open **http://localhost:8080** (or **https://localhost:8443** — self-signed, accept once)
-and log in:
+Open **http://localhost:8080** (or **https://localhost:8443** — self-signed, accept once) and log in:
 
 | Account | Email | Password | Shows |
 |---|---|---|---|
 | Teacher (owns ML course) | `carol@dyadia.local` | `Password123!` | Teacher analytics — 24 lessons, ~558 attempts |
 | Student (in ML course) | `an@dyadia.local` | `Password123!` | Video + checkpoints + results |
-| Multi-org user | `alice@dyadia.local` | `Password123!` | Owner/admin/teacher/student across 6 orgs |
+| Multi-org user | `alice@dyadia.local` | `Password123!` | Owner/admin/teacher/student across orgs |
 | System admin | `admin@dyadia.local` | `changeme123` | Admin console: users, orgs, AI tasks |
 
-~40 users across 8 orgs; regular users share `Password123!` (admin: `changeme123`).
+46 users across 8 orgs; regular users share `Password123!` (admin: `changeme123`).
 
-**A copied-in `volumes/` is ready as-is** — the `fdb-init` sidecar auto-configures a
-FoundationDB dir on `up`, Postgres is already migrated, and richter ensures the SeaweedFS
-bucket on boot. **No manual DB step.** Config is mounted in, never baked: richter reads
-`richter.base.toml` + `richter.local.toml` + `fdb.cluster`; heino reads `.env` (public) +
-`.env.local` (secret). Images: `quay.io/tuyennguyentech/bachelor-thesis/{richter,heino}:0.0.2`
-(refs in `.env`; pulling needs the quay repo public or `podman login quay.io`).
+**No manual DB step:** a copied-in `volumes/` is ready as-is — the `fdb-init` sidecar auto-configures
+FoundationDB on `up`, Postgres is pre-migrated, and richter ensures the SeaweedFS bucket on boot.
+Config is mounted, never baked: richter reads `richter.base.toml` + `richter.local.toml` +
+`fdb.cluster`, plus `RICHTER_*` overrides from the root `.env`; heino reads `typescript/heino/.env`
+(public) + `.env.local` (secret). Image refs (`…/richter:0.0.2`, `…/heino:0.0.2`) live in the root
+`.env` (pulling needs the quay repo public or `podman login quay.io`).
 
-Stop with `podman compose -f compose.yml -f compose.dev.yml down` — this never deletes
-`volumes/` (it is a bind mount / symlink).
+**Operate** — always with the same `-f` files as the `up` command
+(`podman compose -f compose.yml -f compose.dev.yml …`):
+`… logs -f richter` (or any service) · `… restart <service>` · `… down` (never deletes `volumes/`).
 
-## Scenario 2 — Package `volumes/` for handover (zip for Drive)
+## Handover: package `volumes/`
 
-`volumes/` is gitignored and shipped separately. Build the archive **from the repo root,
-with the stack stopped** (consistent snapshot) and **inside the container user namespace**
-— the Postgres dir is owned by a container sub-uid your host user cannot otherwise read,
-so a plain `zip`/`tar` fails with "Permission denied":
+`volumes/` is gitignored and shipped separately. Archive it **from the repo root, stack stopped**,
+**inside the container user namespace** (the Postgres dir is owned by a container sub-uid the host
+can't otherwise read):
 
 ```sh
-podman compose -f compose.yml -f compose.dev.yml down       # consistent snapshot
-podman unshare tar -czf volumes.tar.gz --sparse volumes/    # readable + sparse-aware
+podman compose -f compose.yml -f compose.dev.yml down
+podman unshare tar -czf volumes.tar.gz --sparse volumes/
 ```
 
-- `podman unshare` runs `tar` in the rootless user namespace where the container sub-uids
-  map to root, so it reads **every** volume (Postgres, FDB, SeaweedFS).
-- `--sparse` + gzip keep it small: `volumes/` shows **~15 GB** on disk (SeaweedFS
-  **preallocates** its volume files) but real content is only **~1.7 GB** → the archive is
-  **~1–2 GB**, fine for one Drive upload.
+`podman unshare` maps container sub-uids to root so `tar` reads every volume; `--sparse` skips
+SeaweedFS's preallocated-but-empty space. Size scales with ingested media (mostly video, which
+gzips poorly) — check with `podman unshare du -sh --apparent-size volumes/`. Restore → step 3 above;
+ownership self-heals on `up` via the `:U` flag.
 
-Upload `volumes.tar.gz` to Drive. Restore on the other machine → Scenario 1 step 3.
-Ownership self-heals on `up`: the `:U` bind-mount flag chowns each volume to its container
-user, so extracting as your own user is fine (`:U` is podman-only).
+## Git worktree checkout
 
-## Scenario 3 — New checkout via git worktree
-
-`git worktree` checks out only *tracked* files, so the gitignored inputs
-(`richter.local.toml`, `heino/.env.local`, `volumes/`) do not follow it. Provision them —
-**copy** the small secret files, **symlink** the big dataset:
+`git worktree` checks out only tracked files, so **copy** the two secret files and **symlink** `volumes/`:
 
 ```sh
 git worktree add ../dyadia-wt <branch> && cd ../dyadia-wt
 cp ../dyadia/golang/richter/richter.local.toml golang/richter/richter.local.toml
 cp ../dyadia/typescript/heino/.env.local       typescript/heino/.env.local
-ln -sr ../dyadia/volumes volumes    # ln -sr: link relative to the link's own dir
+ln -sr ../dyadia/volumes volumes
 ```
 
-Then run as in Scenario 1. Notes:
+- **Copy `richter.local.toml`, don't symlink it** — SELinux `:z` relabel can't follow a symlink's target.
+- One stack at a time per shared `volumes` (compose project name `dyadia` is shared); remove the link
+  with `rm volumes` (**no trailing slash** — `rm -r volumes/` deletes the shared dataset).
 
-- **Copy the config, don't symlink it** — compose bind-mounts `richter.local.toml` (`:z`),
-  and SELinux cannot relabel a symlink's *target*, so a symlinked config stays read-denied
-  in the container. `volumes` symlinks fine (it's an intermediate path component; podman
-  relabels the real dirs inside).
-- Both checkouts share compose project name `dyadia`, so run **one** stack at a time
-  against a shared `volumes` (copy it instead to run concurrently).
-- Remove a link with `rm volumes` (**no trailing slash** — `rm -r volumes/` follows the
-  link and deletes the shared dataset).
-
-## Scenario 4 — Build & push the images (maintainers)
-
-Consumers just run pulled images. To build & publish, use `compose.build.yml` (build only):
+## Build & push images (maintainers)
 
 ```sh
-podman compose -f compose.yml -f compose.build.yml build      # build both
-podman compose -f compose.yml -f compose.build.yml push       # push to registry
+podman compose -f compose.yml -f compose.build.yml build
+podman compose -f compose.yml -f compose.build.yml push
 ```
 
-Build definitions live under **`container/`** (`container/golang/richter.Dockerfile`,
-`container/typescript/heino.Dockerfile`); build context is the repo root. The Dockerfiles
-are multi-stage, run codegen themselves (`buf generate` + `sqlc generate`), and **hardcode
-no versions** — every pin (Go/Node/buf/sqlc/pnpm/FDB/ffmpeg) is a build arg sourced from
-`.env` (`DYADIA_*` / `FDB_VERSION`). Result:
-
-- **richter** (~223 MB): Go (CGO + FoundationDB C client) + a static `ffmpeg` (for
-  transcription audio extraction) on **distroless/cc**.
-- **heino** (~191 MB): `next build` (`output: "standalone"`) on **distroless/nodejs**
-  running `node server.js`. Committed `typescript/heino/.env` supplies `NEXT_PUBLIC_*`
-  (inlined at build); secrets never enter the build.
-
----
+Dockerfiles are under `container/`; context is the repo root. Multi-stage, run codegen themselves
+(`buf generate` + `sqlc generate`), and pin every version via build args from the root `.env`
+(`DYADIA_*`, `FDB_VERSION`). Output: **richter** ~223 MB (distroless/cc, Go + FoundationDB C client
++ a static `ffmpeg`) and **heino** ~191 MB (distroless/nodejs, `next build` `output: "standalone"`).
+`NEXT_PUBLIC_*` are inlined from the committed `heino/.env`; secrets never enter the build.
 
 ## Develop (host-process loop)
 
-For active development, run the apps as **host processes** (fast rebuilds, no image build)
-joined to the container netns; base `compose.yml` keeps `richter`/`heino` as placeholders:
+Run the apps as host processes joined to the container netns (fast rebuilds); base `compose.yml`
+keeps `richter`/`heino` as placeholders:
 
 ```sh
 podman compose up -d                                   # infra only
@@ -150,28 +129,41 @@ podman compose up -d                                   # infra only
 ./scripts/setup/environment.dev/container-shell.sh heino -- pnpm -F heino dev
 ```
 
-`compose.dev.yml` is the opt-in overlay that swaps the placeholders for the built images
-(Scenario 1). See `CLAUDE.md` for the full dev workflow, codegen, and test commands.
+`compose.dev.yml` is the overlay that swaps the placeholders for the built images. See `CLAUDE.md`
+for the full dev/codegen/test workflow.
 
-## Rebuild the seed data from scratch
+## Reseed the data from scratch
 
-All seeding goes through the idempotent Go `richter seed` command (no Python touches the app):
+One command does everything — stops the stack, wipes `volumes/`, migrates, and seeds:
 
 ```sh
-# 1. (ML course only) Acquire gitignored source assets, then regenerate the ML spec:
-./scripts/seed/download-assets.sh              # small demo videos
-python3 scripts/seed/download-ml-videos.py     # ML playlist via yt-dlp
-richter seed gen-ml-spec                        # → tu-hoc-ml.json + videos.json
-
-# 2. Full clean rebuild on volumes + seed (real GPU Whisper + Gemini for the ML course):
-GPU=1 ./scripts/setup/environment.dev/seed-reset.sh    # GPU=0 for CPU-only
-
-# Or top up without a destructive reset (idempotent):
-richter seed --dev
+GPU=1 ./scripts/setup/environment.dev/seed-reset.sh    # GPU=0 = CPU-only (much slower Whisper)
 ```
 
-`seed-reset.sh` wipes the `volumes/` data dirs (keeping the model cache), brings the stack
-up, runs goose migrations, and seeds — `fdb-init` configures the fresh FDB automatically.
-If the ML videos are absent, `seed --dev` **warns and falls back to golden fixtures** — it
-never errors. See [docs/infra/portable-local-data.md](docs/infra/portable-local-data.md)
-for the full data-portability + seed details.
+Nothing else to run. It ends by seeding the admin + users/orgs/courses, the ML course through
+the real Whisper+Gemini pipeline, and dense student attempts through the real submit flow —
+idempotent, so re-running it is always safe. The model cache (`volumes/hf-cache`) is kept, so
+resets don't re-download Whisper/Piper.
+
+**Source videos** (gitignored, under `seed-assets/videos/`): if they are missing the seed just
+**warns and falls back to golden fixtures** — the reset still succeeds. To seed the real ML
+course, download them once beforehand:
+
+```sh
+./scripts/seed/download-assets.sh              # demo movies for the non-ML courses
+python3 scripts/seed/download-ml-videos.py     # ML playlist (needs yt-dlp)
+```
+
+Rarely needed:
+
+- **Top up in place** (stack already running, no wipe) — the same idempotent seed directly:
+  ```sh
+  ./scripts/setup/environment.dev/container-shell.sh richter -- \
+    go run ./golang/richter/ -c golang/richter/richter.base.toml,golang/richter/richter.local.toml seed --dev
+  ```
+- **`SKIP_SEED=1 …/seed-reset.sh`** — reset infra only, seed later with the command above.
+- **`… seed gen-ml-spec`** (same wrapper as above) — regenerates the committed ML course spec
+  (`tu-hoc-ml.json` + `videos.json`) from the downloaded videos. Only needed after **changing
+  the ML video set**; the spec is already committed, normal reseeds never run this.
+
+Full details: [docs/infra/portable-local-data.md](docs/infra/portable-local-data.md).
