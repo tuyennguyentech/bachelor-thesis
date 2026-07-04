@@ -36,6 +36,13 @@ var (
 		Use:   "richter",
 		Short: "Richter is backend service",
 		Long:  "Richter is backend service of Dyadia project",
+		// A RUNTIME failure (seed step failed, DB down, port in use) must print
+		// just the error — cobra's default of dumping the full usage/help block
+		// on ANY RunE error buries the real message (a failed `seed --dev` ended
+		// with the error truncated above 20 lines of help text). Root-level
+		// SilenceUsage covers every subcommand; genuine CLI-syntax mistakes
+		// still show usage via the FlagErrorFunc set in init().
+		SilenceUsage: true,
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			return preRunE(&richterCtx, internal.Injector)
 		},
@@ -71,6 +78,13 @@ func init() {
 		"set log level",
 	)
 
+	// Counterpart of SilenceUsage: for a genuine CLI-SYNTAX mistake (unknown
+	// flag / bad flag value) the usage block IS the helpful output — print it
+	// for the mistyped command, then return the error as usual.
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		cmd.Println(cmd.UsageString())
+		return err
+	})
 }
 
 func Execute() error {

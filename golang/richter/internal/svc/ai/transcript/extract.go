@@ -111,37 +111,76 @@ func (s *Service) RunExtract(
 // judge for repetition — genuine short clips shouldn't be flagged.
 const degenerateMinTokens = 30
 
+// Windowed loop detection parameters. A Whisper repetition loop repeats a short
+// phrase locally, so ANY fixed-size window inside the loop collapses to a
+// handful of distinct tokens — regardless of how long the whole transcript is.
+const (
+	// degenerateWindow is the window size in tokens. A k-word phrase looping
+	// fills a 120-token window with ~k distinct tokens (ratio k/120 ≈ 0.03).
+	degenerateWindow = 120
+	// degenerateWindowStride overlaps windows so a loop spanning a boundary
+	// still lands fully inside one of them.
+	degenerateWindowStride = 60
+	// degenerateWindowRatio: a window below this distinct-token ratio is a
+	// repetition loop. Natural speech windows sit around 0.5+.
+	degenerateWindowRatio = 0.15
+	// degenerateLoopFraction: the transcript is degenerate when loops cover at
+	// least this fraction of its windows. A brief local stumble (Whisper looping
+	// for a few hundred tokens inside an otherwise fine long lecture) stays
+	// usable; a transcript that is MOSTLY loop is garbage.
+	degenerateLoopFraction = 0.5
+)
+
 // IsDegenerateTranscript reports whether a transcript looks like a Whisper
 // repetition-loop hallucination (one short phrase emitted over and over, e.g.
-// "Kết hợp phép tính" ×hundreds) rather than real speech. It flags text whose
-// distinct-token ratio is very low, or where a single token dominates — both
-// signatures of a decode loop. Short transcripts are never flagged. This is a
-// cheap, language-agnostic guard (whitespace tokenization) run before the
-// transcript is persisted/chunked.
+// "Kết hợp phép tính" ×hundreds) rather than real speech. Cheap and
+// language-agnostic (whitespace tokenization); run before the transcript is
+// persisted/chunked.
+//
+// Detection is WINDOWED, not global: per Heaps' law the global distinct-token
+// ratio of natural speech FALLS as the text grows (a real 100-minute Vietnamese
+// lecture measured 14,322 tokens with only 1,236 distinct — ratio 0.086), so
+// the old global `ratio < 0.15` check misfired on every long video while the
+// same threshold applied per fixed-size window is length-invariant. The
+// transcript is rejected only when loop-like windows cover most of it; a brief
+// local loop inside otherwise-good content passes.
 func IsDegenerateTranscript(text string) bool {
 	fields := strings.Fields(text)
 	n := len(fields)
 	if n < degenerateMinTokens {
 		return false
 	}
+	low := make([]string, n)
 	counts := make(map[string]int, n)
 	maxCount := 0
-	for _, f := range fields {
+	for i, f := range fields {
 		k := strings.ToLower(f)
+		low[i] = k
 		counts[k]++
 		if counts[k] > maxCount {
 			maxCount = counts[k]
 		}
 	}
-	distinctRatio := float64(len(counts)) / float64(n)
-	// A loop of a k-word phrase repeated m times has distinctRatio ≈ k/(k*m) = 1/m,
-	// which collapses toward 0 as it loops; real speech stays well above 0.15.
-	if distinctRatio < 0.15 {
-		return true
-	}
-	// Or a single token swamps the transcript (degenerate single-word loop).
+	// A single token swamping the transcript is degenerate at any length.
 	if float64(maxCount)/float64(n) > 0.5 {
 		return true
 	}
-	return false
+	// Short texts (under two windows): the global ratio is still meaningful
+	// there (Heaps' law has not kicked in) — keep the original check.
+	if n < 2*degenerateWindow {
+		return float64(len(counts))/float64(n) < degenerateWindowRatio
+	}
+	// Long texts: fraction of windows that are repetition loops.
+	looping, total := 0, 0
+	for i := 0; i+degenerateWindow <= n; i += degenerateWindowStride {
+		set := make(map[string]struct{}, degenerateWindow)
+		for _, k := range low[i : i+degenerateWindow] {
+			set[k] = struct{}{}
+		}
+		if float64(len(set))/float64(degenerateWindow) < degenerateWindowRatio {
+			looping++
+		}
+		total++
+	}
+	return float64(looping)/float64(total) >= degenerateLoopFraction
 }

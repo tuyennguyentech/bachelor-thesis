@@ -28,7 +28,7 @@ Postgres 18.3, Caddy 2.11) and baked into the images — nothing to install by h
 ## Run with the pre-seeded data
 
 The demo dataset is already processed (the "Tự học Machine Learning" course — 24 lessons,
-transcripts, AI exercises, ~558 attempts). Nothing is re-processed: data travels in `volumes/`,
+transcripts, AI exercises, ~500 attempts). Nothing is re-processed: data travels in `volumes/`,
 apps run as pulled images.
 
 **Handed over separately (gitignored):** the `volumes/` dataset + two files —
@@ -55,7 +55,7 @@ Open **http://localhost:8080** (or **https://localhost:8443** — self-signed, a
 
 | Account | Email | Password | Shows |
 |---|---|---|---|
-| Teacher (owns ML course) | `carol@dyadia.local` | `Password123!` | Teacher analytics — 24 lessons, ~558 attempts |
+| Teacher (owns ML course) | `carol@dyadia.local` | `Password123!` | Teacher analytics — 24 lessons, ~500 attempts |
 | Student (in ML course) | `an@dyadia.local` | `Password123!` | Video + checkpoints + results |
 | Multi-org user | `alice@dyadia.local` | `Password123!` | Owner/admin/teacher/student across orgs |
 | System admin | `admin@dyadia.local` | `changeme123` | Admin console: users, orgs, AI tasks |

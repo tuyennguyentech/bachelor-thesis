@@ -69,6 +69,16 @@ if ! "$SHELL_SH" richter -- ./scripts/setup/environment.dev/goose.sh dev up; the
   exit 1
 fi
 echo "done"
+# The volume wipe above destroyed dyadia_test too (same Postgres instance) — the init
+# script recreates it EMPTY. Migrate it now so the integ/E2E suites don't mysteriously
+# fail with "admin login: internal error" on a table-less test DB. (Test-DB SEED stays
+# a separate explicit step — see CLAUDE.md — this only restores the schema.)
+echo -n "  goose migrate (test DB) ... "
+if ! "$SHELL_SH" richter -- ./scripts/setup/environment.dev/goose.sh test up; then
+  echo "ERROR: goose test-DB migration failed" >&2
+  exit 1
+fi
+echo "done"
 echo -n "  speaches "; until [ "$(podman inspect -f '{{.State.Health.Status}}' dyadia-speaches-1 2>/dev/null)" = "healthy" ]; do echo -n .; sleep 3; done; echo "healthy"
 echo -n "  speaches model preload "; podman wait dyadia-speaches-init-1 >/dev/null 2>&1 || true; echo "done"
 
