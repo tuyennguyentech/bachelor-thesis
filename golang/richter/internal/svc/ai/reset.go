@@ -100,6 +100,15 @@ func (s *AISvc) ResetLessonContent(
 		if err := q.DeleteLessonAnalysis(ctx, lessonID); err != nil {
 			return err
 		}
+		// Delete task history too. GetLessonAnalysis derives the analysis status
+		// from the LATEST task per kind (analysis_read.go), so a leftover SUCCEEDED
+		// transcribe/chunk/pipeline task makes a fully-wiped lesson keep reporting
+		// TRANSCRIPT_EXTRACTED/CHUNKS_READY/DONE — the stepper then shows "Đã có
+		// transcript" and lets chunking run even though no video/transcript exists.
+		// The video-replace path already does this (lessons/lesson_video.go).
+		if err := q.DeleteTasksForLesson(ctx, lessonID); err != nil {
+			return err
+		}
 		_, err := q.UpdateLessonVideo(ctx, gen.UpdateLessonVideoParams{
 			ID:              lessonID,
 			VideoStorageKey: pgtype.Text{},

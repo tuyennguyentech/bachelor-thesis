@@ -368,6 +368,21 @@ func (s *transcriptionService) sttTranscribe(ctx context.Context, audioPath stri
 			writeErr = fmt.Errorf("write timestamp_granularities: %w", err)
 			return
 		}
+		// Anti-repetition-loop guard for faster-whisper. Without VAD the small model
+		// falls into a degenerate loop on NON-SPEECH spans (intro music, silence,
+		// sound effects) and emits one phrase hundreds of times (e.g. "Kết hợp phép
+		// tính" ×N) — garbage even when the language hint is correct. vad_filter runs
+		// Voice Activity Detection and DROPS non-speech before the decoder sees it, so
+		// the loop cannot start. Verified against the DEPLOYED Speaches
+		// (/v1/audio/transcriptions OpenAPI): vad_filter is an accepted field and this
+		// alone turns the looped output into the real transcript. NOTE: that endpoint
+		// does NOT expose condition_on_previous_text (the other classic loop knob), so
+		// we cannot set it here; the IsDegenerateTranscript guard in
+		// transcript/extract.go is the backstop for any residual loop.
+		if err := w.WriteField("vad_filter", "true"); err != nil {
+			writeErr = fmt.Errorf("write vad_filter: %w", err)
+			return
+		}
 	}()
 
 	url := endpointWithScheme(s.sttCfg.Endpoint) + "/v1/audio/transcriptions"

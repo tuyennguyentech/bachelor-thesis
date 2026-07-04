@@ -97,6 +97,19 @@ func (s *transcriptSvcImpl) Run(ctx context.Context, lessonID pgtype.UUID, env *
 		return fmt.Errorf("lesson has no video uploaded")
 	}
 
+	// A (re-)transcribe rebuilds from scratch: RunExtract wipes the old chunks +
+	// interactions, so their task rows are now stale. Delete every OTHER task for
+	// this lesson — keeping ONLY the current one (this transcribe task, or the
+	// pipeline_run task when this runs as the pipeline's transcribe stage) — so
+	// GetLessonAnalysis stops deriving CHUNKS_READY/DONE from a leftover SUCCEEDED
+	// chunk/quiz_gen/pipeline_run task, which otherwise pins the stepper on the
+	// locked "Bài tập" step instead of "Phân đoạn". Best-effort cleanup.
+	if derr := db.WithConnectionExec(s.svc.Postgres, ctx, func(q *gen.Queries, _ *pgxpool.Conn) error {
+		return q.DeleteTasksForLessonExcept(ctx, gen.DeleteTasksForLessonExceptParams{LessonID: lessonID, ID: taskIDpg})
+	}); derr != nil {
+		s.svc.Log.WarnContext(ctx, "ai: failed to delete stale downstream tasks on re-transcribe", "err", derr)
+	}
+
 	return s.svc.RunExtract(ctx, lessonID, videoKey, audioLang, prog)
 }
 

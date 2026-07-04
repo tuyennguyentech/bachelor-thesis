@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/svc/ai/segment"
@@ -32,10 +33,44 @@ type seedChunkInput struct {
 	Summary      string  `json:"summary"`
 }
 
+// seedSegmentInput describes one lesson-level transcript segment — i.e. one row
+// of what GetLessonAnalysis returns as `transcript_segments` (the video tab's
+// InteractiveTranscript + the "Xử lý video" step render these, NOT the per-chunk
+// transcripts above).
+type seedSegmentInput struct {
+	Text         string  `json:"text"`
+	StartSeconds float64 `json:"start_seconds"`
+	EndSeconds   float64 `json:"end_seconds"`
+}
+
 // seedAnalyzedLessonRequest is the JSON body for the seed endpoint.
 type seedAnalyzedLessonRequest struct {
 	LessonID string           `json:"lesson_id"`
 	Chunks   []seedChunkInput `json:"chunks"`
+	// Segments, when present, are written to FDB as the lesson-level transcript
+	// segments (SaveSegments + SaveTranscript). Independent of Chunks.
+	Segments []seedSegmentInput `json:"segments"`
+	// PipelineRunStatus, when non-empty (e.g. "processing"), seeds a SINGLE
+	// pipeline_run task in that status INSTEAD of the synthetic succeeded
+	// transcribe/chunk tasks (and skips the chunks_ready floor). This reproduces
+	// the Quick-Create mid-pipeline state: segments already saved to FDB while the
+	// composite task is still PROCESSING and NO task has SUCCEEDED — the exact
+	// state that regressed the transcript display on both tabs.
+	PipelineRunStatus string `json:"pipeline_run_status"`
+	// PipelineRunStage sets that task's progress_step (e.g. "CHUNKING"/"GENERATING")
+	// so the client-side tracker's mid-run segment load is exercised too. Ignored
+	// when PipelineRunStatus is empty.
+	PipelineRunStage string `json:"pipeline_run_stage"`
+	// PipelineRunTaskType overrides the seeded task's task_type (default "pipeline_run").
+	// Set to "transcribe"/"chunk" to seed a STANDALONE in-progress task instead of a
+	// composite pipeline — used by FE tests that contrast the detailed per-sub-step
+	// strip (standalone) against the hidden strip (pipeline). Ignored when
+	// PipelineRunStatus is empty.
+	PipelineRunTaskType string `json:"pipeline_run_task_type"`
+	// PipelineRunError sets the seeded task's error_msg (meaningful with
+	// PipelineRunStatus="failed") so E2E tests can assert the real failure text is
+	// surfaced after a reload. Ignored when PipelineRunStatus is empty.
+	PipelineRunError string `json:"pipeline_run_error"`
 }
 
 // seedAnalyzedLessonResponse is the JSON response.
@@ -70,7 +105,7 @@ func (s *AISvc) TestSeedHandler() (string, http.Handler) {
 			return
 		}
 
-		chunkIDs, err := s.seedAnalyzedLesson(ctx, lessonID, req.Chunks)
+		chunkIDs, err := s.seedAnalyzedLesson(ctx, lessonID, req)
 		if err != nil {
 			s.log.ErrorContext(ctx, "seed-analyzed-lesson: failed", "err", err)
 			http.Error(w, "seed failed: "+err.Error(), http.StatusInternalServerError)
@@ -90,9 +125,14 @@ func (s *AISvc) TestSeedHandler() (string, http.Handler) {
 func (s *AISvc) seedAnalyzedLesson(
 	ctx context.Context,
 	lessonID pgtype.UUID,
-	chunks []seedChunkInput,
+	req seedAnalyzedLessonRequest,
 ) ([]string, error) {
-	if len(chunks) == 0 {
+	chunks := req.Chunks
+	// Mid-pipeline mode: seed a running pipeline_run task with NO succeeded task
+	// (see the request struct doc). In that mode we do NOT default-insert a chunk,
+	// so the state is faithfully "transcribed, not yet chunked".
+	midPipeline := req.PipelineRunStatus != ""
+	if len(chunks) == 0 && !midPipeline {
 		// Default: one generic chunk so the lesson appears analyzed.
 		chunks = []seedChunkInput{
 			{
@@ -126,6 +166,29 @@ func (s *AISvc) seedAnalyzedLesson(
 		return nil, err
 	}
 
+	// Write lesson-level transcript segments to FDB (the transcriptSegments the
+	// video tab + step render). These are what GetLessonAnalysis must return
+	// UNCONDITIONALLY — even while the pipeline_run below is still PROCESSING.
+	lessonIDStr := lessonID.String()
+	if len(req.Segments) > 0 {
+		segs := make([]segment.Segment, len(req.Segments))
+		texts := make([]string, len(req.Segments))
+		for i, sg := range req.Segments {
+			segs[i] = segment.Segment{
+				StartSeconds: float32(sg.StartSeconds),
+				EndSeconds:   float32(sg.EndSeconds),
+				Text:         sg.Text,
+			}
+			texts[i] = sg.Text
+		}
+		if err := segment.SaveSegments(s.kv, lessonIDStr, segs); err != nil {
+			return nil, err
+		}
+		if err := segment.SaveTranscript(s.kv, lessonIDStr, strings.Join(texts, " ")); err != nil {
+			return nil, err
+		}
+	}
+
 	// Insert chunks in PG and write transcripts to FDB.
 	chunkIDs := make([]string, 0, len(chunks))
 	for i, c := range chunks {
@@ -149,6 +212,45 @@ func (s *AISvc) seedAnalyzedLesson(
 			}
 		}
 		chunkIDs = append(chunkIDs, chunkIDStr)
+	}
+
+	// Mid-pipeline mode: a single PROCESSING pipeline_run task, no succeeded task
+	// and no chunks_ready floor — the derived status comes purely from this running
+	// task, matching a real Quick-Create pipeline that has transcribed but not yet
+	// finished. Returns early so the succeeded-task seeding below is skipped.
+	if midPipeline {
+		taskType := "pipeline_run"
+		if req.PipelineRunTaskType != "" {
+			taskType = req.PipelineRunTaskType
+		}
+		taskID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		if err := db.WithConnectionExec(s.pg, ctx, func(q *gen.Queries, conn *pgxpool.Conn) error {
+			if _, err := q.InsertSeededTask(ctx, gen.InsertSeededTaskParams{
+				ID:           taskID,
+				LessonID:     lessonID,
+				ChunkID:      pgtype.UUID{},
+				TaskType:     taskType,
+				Status:       gen.TaskStatus(req.PipelineRunStatus),
+				InputPayload: []byte{},
+				CreatedBy:    createdBy,
+			}); err != nil {
+				return err
+			}
+			if req.PipelineRunStage != "" {
+				if _, err := conn.Exec(ctx, "UPDATE tasks SET progress_step = $1 WHERE id = $2", req.PipelineRunStage, taskID); err != nil {
+					return err
+				}
+			}
+			if req.PipelineRunError != "" {
+				if _, err := conn.Exec(ctx, "UPDATE tasks SET error_msg = $1 WHERE id = $2", req.PipelineRunError, taskID); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		return chunkIDs, nil
 	}
 
 	// Upsert lesson_analyses to chunks_ready so GetLessonAnalysis returns a

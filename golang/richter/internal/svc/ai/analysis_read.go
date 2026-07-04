@@ -1,8 +1,10 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	richterv1 "example.com/buf/gen/richter/v1"
@@ -117,35 +119,42 @@ func (s *AISvc) GetLessonAnalysis(
 		analysis.Status = applyArtifactFloor(time.Now(), analysis.Status, latest, len(chunks) > 0, len(ints) > 0)
 	}
 
-	lessonIDStr := lessonID.String()
-	// Only load FDB transcript/segments when the transcribe step
-	// has actually succeeded. For legacy data (no tasks), check
-	// the analysis status directly.
-	//
-	// Also allow loading when chunk or quiz_gen succeeded — those
-	// downstream stages imply transcribe was completed at some
-	// point (e.g. seeded data may only have a quiz_gen task).
-	canLoadTranscript := false
-	if len(latest) > 0 {
-		for _, t := range latest {
-			if t.Status == string(taskqueue.StatusSucceeded) {
-				canLoadTranscript = true
-				break
-			}
-		}
-	} else {
-		// Legacy path: load FDB data when analysis status is
-		// transcript_extracted or later.
-		switch analysis.Status {
-		case gen.LessonAnalysisStatusTranscriptExtracted,
-			gen.LessonAnalysisStatusChunksReady,
-			gen.LessonAnalysisStatusDone:
-			canLoadTranscript = true
-		}
+	// Consistency projection: the response must never expose artifacts that
+	// contradict the derived status. When the latest transcript-producing task
+	// FAILED, the transcript was destroyed at the start of that run (RunExtract
+	// wipes transcript+segments+chunks+interactions up front), so any chunk /
+	// interaction rows still in the DB are stale garbage from a previous run —
+	// e.g. rows left behind by an older binary that only cleaned up on success
+	// (the reported bug: a locked "Phân đoạn" step still showing "4 đoạn" and a
+	// phantom failed-generation banner after a failed re-transcribe). Suppress
+	// them from the RESPONSE only — applyArtifactFloor above already consumed
+	// the RAW artifact truth, so status derivation is unaffected. NOTE: keyed on
+	// the failed STAGE, not on status==ERROR — a pipeline that failed at the
+	// GENERATING stage has perfectly valid chunks and must keep showing them.
+	// The len(latest)==0 arm covers the legacy no-tasks fallback: a pre-cutover
+	// lesson_analyses row stuck at ERROR has no valid transcript either, so its
+	// artifact rows are equally stale.
+	if transcriptInvalidated(latest) ||
+		(len(latest) == 0 && analysis.Status == gen.LessonAnalysisStatusError) {
+		chunks = nil
+		ints = nil
 	}
+
+	lessonIDStr := lessonID.String()
+	// Load the transcript + segments from FDB only when the derived status says a
+	// transcript genuinely exists for the CURRENT video. The set INCLUDES
+	// PROCESSING — a Quick-Create RUN_PIPELINE in flight whose transcribe stage has
+	// already saved segments (the case the old "only when a task SUCCEEDED" gate
+	// wrongly hid: the pipeline_run stays PROCESSING, so segments never showed —
+	// Image #3). It EXCLUDES PENDING (e.g. the video was just replaced and stale
+	// data still sits in FDB) and ERROR, so those never surface a stale transcript.
 	var transcript string
 	var segments []transcriptSegment
-	if canLoadTranscript {
+	switch analysis.Status {
+	case gen.LessonAnalysisStatusTranscriptExtracted,
+		gen.LessonAnalysisStatusChunksReady,
+		gen.LessonAnalysisStatusDone,
+		gen.LessonAnalysisStatusProcessing:
 		transcript = s.loadTranscriptFromFDB(lessonIDStr)
 		segments = s.loadSegmentsFromFDB(lessonIDStr)
 	}
@@ -204,13 +213,23 @@ func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.
 		}
 	}
 	switch {
+	// A failed (re-)transcribe invalidates the whole pipeline: its transcript is
+	// gone, so any chunks/interactions from a PREVIOUS run are stale. Checked FIRST
+	// — before chunkState==Succeeded — so a leftover succeeded chunk task cannot
+	// mask a failed re-transcribe (reported bug #15: "Phân đoạn: 4 đoạn" green under
+	// a red "Phiên âm thất bại" after reload). Uses the SAME recency-aware predicate
+	// as the artifact suppression in GetLessonAnalysis, so by construction:
+	// invalidated ⟹ status ERROR (never ChunksReady/DONE with a blanked payload),
+	// and a lesson recovered by a NEWER successful run derives its real status.
+	case transcriptInvalidated(latest):
+		out.Status = gen.LessonAnalysisStatusError
 	case chunkState == string(taskqueue.StatusSucceeded):
 		out.Status = gen.LessonAnalysisStatusChunksReady
 	case transcribeState == string(taskqueue.StatusSucceeded):
 		out.Status = gen.LessonAnalysisStatusTranscriptExtracted
 	case transcribeState == string(taskqueue.StatusProcessing) || chunkState == string(taskqueue.StatusProcessing):
 		out.Status = gen.LessonAnalysisStatusPending
-	case transcribeState == string(taskqueue.StatusFailed) || chunkState == string(taskqueue.StatusFailed):
+	case chunkState == string(taskqueue.StatusFailed):
 		out.Status = gen.LessonAnalysisStatusError
 	}
 	// Any successfully completed quiz_gen task means the lesson is
@@ -218,7 +237,7 @@ func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.
 	// A stale quiz_gen from a previous run must not mask a failed
 	// re-run of chunk or transcribe.
 	hasSucceededInteractions := false
-	hasFailedUpstream := transcribeState == string(taskqueue.StatusFailed) ||
+	hasFailedUpstream := transcriptInvalidated(latest) ||
 		chunkState == string(taskqueue.StatusFailed)
 	for _, t := range latest {
 		if t.TaskType == "quiz_gen" && t.Status == string(taskqueue.StatusSucceeded) {
@@ -260,7 +279,69 @@ func deriveAnalysisFromTasks(lessonID pgtype.UUID, latest []taskqueue.Task) gen.
 			out.Status = gen.LessonAnalysisStatusError
 		}
 	}
+
+	// Propagate the driving failed task's error message so the FE shows the real
+	// cause after a reload (e.g. "phiên âm bị lặp bất thường…") instead of its
+	// generic "Thao tác thất bại." fallback. Preference order mirrors the status
+	// derivation: the failed transcript-producing task, then a failed chunk, then
+	// a failed pipeline_run.
+	if out.Status == gen.LessonAnalysisStatusError {
+		for _, taskType := range []string{"transcribe", "chunk", "pipeline_run"} {
+			for _, t := range latest {
+				if t.TaskType == taskType && t.Status == string(taskqueue.StatusFailed) && t.ErrorMsg != "" {
+					out.ErrorMsg = pgtype.Text{String: t.ErrorMsg, Valid: true}
+					return out
+				}
+			}
+		}
+	}
 	return out
+}
+
+// transcriptInvalidated reports whether the lesson's transcript has been
+// destroyed by a failed (re-)transcribe, which transitively invalidates every
+// downstream artifact (chunks, interactions). Grounded in write-path semantics:
+// RunExtract deletes the FDB transcript/segments AND the PG chunks/interactions
+// UP FRONT, so once a transcribe run fails there is no valid transcript for any
+// surviving artifact rows to belong to (rows can survive from runs on older
+// binaries that cleaned up only on success).
+//
+// Only the NEWEST transcript-producing row (task_type transcribe or
+// pipeline_run, ordered by (created_at, id) — the same ordering
+// ListLatestTaskPerLesson uses) is consulted: `latest` is latest-PER-KIND, so an
+// old failed transcribe row can coexist with a NEWER succeeded pipeline_run
+// (whose composite run rebuilt the transcript without writing a transcribe row).
+// An order-blind "any failed transcribe" check would blank such a fully
+// recovered lesson forever.
+//
+// A failed CHUNK task never invalidates: the transcript is intact and RunChunk
+// replaces chunks atomically only on success, so existing chunks still describe
+// the current transcript. A failed pipeline_run counts only while it died in its
+// transcribe stage (progress_step empty or pre-CHUNKING) — once it reached
+// CHUNKING/GENERATING the transcribe stage had completed and the transcript is
+// valid. Known window (accepted): a freshly-enqueued retry row becomes the
+// newest and un-invalidates for the seconds until RunExtract's up-front wipe
+// runs; suppressing on inqueued would break the seeded processing fixtures.
+func transcriptInvalidated(latest []taskqueue.Task) bool {
+	var r *taskqueue.Task
+	for i := range latest {
+		t := &latest[i]
+		if t.TaskType != "transcribe" && t.TaskType != "pipeline_run" {
+			continue
+		}
+		if r == nil ||
+			t.CreatedAt.Time.After(r.CreatedAt.Time) ||
+			(t.CreatedAt.Time.Equal(r.CreatedAt.Time) && bytes.Compare(t.ID.Bytes[:], r.ID.Bytes[:]) > 0) {
+			r = t
+		}
+	}
+	if r == nil || r.Status != string(taskqueue.StatusFailed) {
+		return false
+	}
+	if r.TaskType == "transcribe" {
+		return true
+	}
+	return !strings.Contains(r.ProgressStep, "CHUNKING") && !strings.Contains(r.ProgressStep, "GENERATING")
 }
 
 // processingStaleAfter: a "processing" task whose heartbeat is older than this is
@@ -301,6 +382,21 @@ func applyArtifactFloor(now time.Time, status gen.LessonAnalysisStatus, latest [
 		(status == gen.LessonAnalysisStatusPending ||
 			status == gen.LessonAnalysisStatusTranscriptExtracted) {
 		return gen.LessonAnalysisStatusChunksReady
+	}
+	// Artifact CEILING (mirror of the floor above): once no task is failing / queued /
+	// freshly-processing, the ARTIFACTS are the source of truth, so the derived status
+	// must not exceed what they support. A leftover SUCCEEDED chunk/quiz_gen/pipeline_run
+	// task — e.g. after a re-transcribe or reset wiped the chunks + interactions — would
+	// otherwise keep reporting CHUNKS_READY/DONE with no chunks, pinning the stepper on
+	// the locked "Bài tập" step instead of the runnable "Phân đoạn" step. (Reaching this
+	// point implies a downstream stage once succeeded ⟹ the transcript exists, so
+	// capping at TRANSCRIPT_EXTRACTED when chunks are gone is correct.)
+	if !hasInteractions && status == gen.LessonAnalysisStatusDone {
+		status = gen.LessonAnalysisStatusChunksReady
+	}
+	if !hasChunks &&
+		(status == gen.LessonAnalysisStatusChunksReady || status == gen.LessonAnalysisStatusDone) {
+		status = gen.LessonAnalysisStatusTranscriptExtracted
 	}
 	return status
 }

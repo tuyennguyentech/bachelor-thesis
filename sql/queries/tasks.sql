@@ -67,6 +67,14 @@ ORDER BY lesson_id, task_type, created_at DESC, id DESC;
 -- to reset state between subtests that share a lesson id.
 DELETE FROM tasks WHERE lesson_id = $1;
 
+-- name: DeleteTasksForLessonExcept :exec
+-- A (re-)transcribe invalidates ALL downstream artifacts (chunks/interactions),
+-- so it must also drop the stale downstream task rows — otherwise a leftover
+-- SUCCEEDED chunk/quiz_gen/pipeline_run task keeps GetLessonAnalysis deriving
+-- CHUNKS_READY/DONE. Excludes the CURRENTLY-RUNNING task so it never deletes the
+-- task doing the transcribe (this is also the pipeline_run task during a pipeline).
+DELETE FROM tasks WHERE lesson_id = $1 AND id <> $2;
+
 -- name: ReapStaleProcessingBatch :many
 -- Scanner primitive: processing + heartbeat stale -> inqueued.
 WITH base AS (

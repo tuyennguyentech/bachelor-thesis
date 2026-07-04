@@ -20,6 +20,7 @@ import (
 	"example.com/richter/internal"
 	"example.com/richter/internal/db"
 	"example.com/richter/internal/kv"
+	"example.com/richter/internal/svc/ai/segment"
 	"example.com/richter/internal/taskqueue"
 	"example.com/sql/gen"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
@@ -255,6 +256,29 @@ func clearTestTasks(t *testing.T, lessonID string) {
 		return q.DeleteTasksForLesson(context.Background(), lid)
 	}); err != nil {
 		t.Fatalf("clear tasks: %v", err)
+	}
+}
+
+// clearTestArtifacts removes a lesson's chunks + interactions so status-mapping
+// cases (which now depend on artifact presence via applyArtifactFloor) don't leak
+// state into each other.
+func clearTestArtifacts(t *testing.T, lessonID string) {
+	t.Helper()
+	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get db: %v", err)
+	}
+	var lid pgtype.UUID
+	if err := lid.Scan(lessonID); err != nil {
+		t.Fatalf("parse lessonID: %v", err)
+	}
+	if err := db.WithConnectionExec(pool, context.Background(), func(q *gen.Queries, _ *pgxpool.Conn) error {
+		if err := q.DeleteLessonInteractionsByLesson(context.Background(), lid); err != nil {
+			return err
+		}
+		return q.DeleteLessonTranscriptChunks(context.Background(), lid)
+	}); err != nil {
+		t.Fatalf("clear artifacts: %v", err)
 	}
 }
 
@@ -838,6 +862,10 @@ func TestAIStatusMapping(t *testing.T) {
 			insertTask: func(t *testing.T, lid string) {
 				insertTestTask(t, lid, "transcribe", "succeeded")
 				insertTestTask(t, lid, "chunk", "succeeded")
+				// A succeeded chunk task ⟹ chunk rows exist. GetLessonAnalysis caps the
+				// status to what the artifacts support (applyArtifactFloor), so the chunk
+				// row must be present for the derived CHUNKS_READY to survive.
+				insertTestChunk(t, lid, 0, "chunk transcript")
 			},
 			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_CHUNKS_READY,
 			name:        "ChunksReady",
@@ -847,6 +875,9 @@ func TestAIStatusMapping(t *testing.T) {
 				insertTestTask(t, lid, "transcribe", "succeeded")
 				insertTestTask(t, lid, "chunk", "succeeded")
 				insertTestTask(t, lid, "quiz_gen", "succeeded")
+				// A succeeded quiz_gen ⟹ chunks + interactions exist (needed for DONE).
+				c := insertTestChunk(t, lid, 0, "chunk transcript")
+				insertTestInteractionsForChunk(t, lid, c.ID.String(), 1)
 			},
 			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE,
 			name:        "Done",
@@ -860,7 +891,12 @@ func TestAIStatusMapping(t *testing.T) {
 			// Quick Create uses a single composite pipeline_run task (no separate
 			// transcribe/chunk/quiz_gen rows). A succeeded run must derive to DONE,
 			// not PENDING — else the FE wipes the generated chunks on reload.
-			insertTask:  func(t *testing.T, lid string) { insertTestTask(t, lid, "pipeline_run", "succeeded") },
+			insertTask: func(t *testing.T, lid string) {
+				insertTestTask(t, lid, "pipeline_run", "succeeded")
+				// A succeeded pipeline ran transcribe→chunk→gen ⟹ chunks + interactions exist.
+				c := insertTestChunk(t, lid, 0, "chunk transcript")
+				insertTestInteractionsForChunk(t, lid, c.ID.String(), 1)
+			},
 			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE,
 			name:        "PipelineRunSucceeded",
 		},
@@ -869,11 +905,31 @@ func TestAIStatusMapping(t *testing.T) {
 			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_PROCESSING,
 			name:        "PipelineRunProcessing",
 		},
+		{
+			// Reported bug (#15): a previous run SUCCEEDED (transcribe + chunk + quiz_gen
+			// tasks succeeded, chunks + interactions persisted), then a RE-TRANSCRIBE
+			// FAILED. A failed upstream transcribe INVALIDATES everything downstream, so
+			// the status MUST be ERROR — not CHUNKS_READY/DONE from the stale succeeded
+			// tasks. Pre-fix, deriveAnalysisFromTasks checked chunkState==Succeeded BEFORE
+			// transcribeState==Failed, so the stale succeeded chunk masked the failure and
+			// the stepper showed "Phân đoạn: 4 đoạn" (green) under a red "Phiên âm thất bại".
+			insertTask: func(t *testing.T, lid string) {
+				insertTestTask(t, lid, "transcribe", "succeeded") // first run
+				insertTestTask(t, lid, "chunk", "succeeded")       // first run
+				insertTestTask(t, lid, "quiz_gen", "succeeded")    // first run
+				c := insertTestChunk(t, lid, 0, "stale chunk from previous run")
+				insertTestInteractionsForChunk(t, lid, c.ID.String(), 1)
+				insertTestTask(t, lid, "transcribe", "failed") // re-transcribe FAILS (latest)
+			},
+			protoStatus: richterv1.AnalysisStatus_ANALYSIS_STATUS_ERROR,
+			name:        "FailedRetranscribeInvalidatesStaleSuccess",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clearTestTasks(t, e.lessonID)
+			clearTestArtifacts(t, e.lessonID)
 			tc.insertTask(t, e.lessonID)
 			res, err := e.aiStudent.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
 			if err != nil {
@@ -886,6 +942,231 @@ func TestAIStatusMapping(t *testing.T) {
 				t.Errorf("status: want %v, got %v", tc.protoStatus, res.Analysis.Status)
 			}
 		})
+	}
+}
+
+// ── TestAIGetLessonAnalysisSuppressesInvalidatedArtifacts ────────────────────
+//
+// Reported bug (image #8): a lesson whose LATEST transcribe task FAILED still
+// carried stale chunk rows in the DB (left behind by an older binary that
+// cleaned up only on success). GetLessonAnalysis correctly derived status=ERROR
+// but returned the raw chunk rows anyway, so on reload the FE rendered a locked
+// "Phân đoạn" step reading "4 đoạn", an exercises body reading "0/4 phân đoạn",
+// and a phantom failed-generation banner (the FE attributes the failed stage
+// from artifact shape: ERROR + chunks>0 → "generation failed").
+//
+// The invariant: a failed transcribe destroys the transcript (RunExtract wipes
+// it up front), so chunks/interactions from any previous run are invalidated —
+// the RESPONSE must not expose them. But the rule is stage-precise: a
+// pipeline_run that failed at the GENERATING stage has perfectly VALID chunks
+// (its transcribe + chunk stages completed) and must keep returning them.
+func TestAIGetLessonAnalysisSuppressesInvalidatedArtifacts(t *testing.T) {
+	t.Parallel()
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	t.Run("FailedTranscribeSuppressesStaleChunksAndInteractions", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		// The user's exact broken state: stale artifacts + ONE failed transcribe task.
+		c := insertTestChunk(t, e.lessonID, 0, "stale chunk from previous run")
+		insertTestInteractionsForChunk(t, e.lessonID, c.ID.String(), 2)
+		insertTestTask(t, e.lessonID, "transcribe", "failed")
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if got := res.Analysis.Status; got != richterv1.AnalysisStatus_ANALYSIS_STATUS_ERROR {
+			t.Errorf("status: want ERROR, got %v", got)
+		}
+		if len(res.Chunks) != 0 {
+			t.Errorf("stale chunks must be suppressed when the latest transcribe failed; got %d chunks", len(res.Chunks))
+		}
+		if n := len(res.Analysis.Interactions); n != 0 {
+			t.Errorf("stale interactions must be suppressed when the latest transcribe failed; got %d", n)
+		}
+	})
+
+	t.Run("PipelineFailedAtGeneratingKeepsValidChunks", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		// A pipeline that died in its GENERATING stage: transcribe + chunk stages
+		// completed, so its chunks are valid and must NOT be suppressed.
+		insertTestChunk(t, e.lessonID, 0, "valid chunk from the completed chunk stage")
+		task := insertTestTask(t, e.lessonID, "pipeline_run", "failed")
+		setTestTaskProgressStep(t, task.ID, "PIPELINE_GENERATING")
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if len(res.Chunks) != 1 {
+			t.Errorf("chunks from a pipeline that failed at GENERATING are valid and must be returned; got %d", len(res.Chunks))
+		}
+	})
+
+	// `latest` is latest-PER-KIND, so an OLD failed row of one kind coexists with a
+	// NEWER succeeded row of the other kind forever. Invalidation must be judged on
+	// the NEWEST transcript-producing row only — an order-blind "any failed
+	// transcribe/pipeline row" check would permanently blank a fully recovered lesson.
+	t.Run("RecoveredLessonKeepsArtifacts", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		// An hour ago: a pipeline_run died in its transcribe stage.
+		failed := insertTestTask(t, e.lessonID, "pipeline_run", "failed")
+		setTestTaskCreatedAt(t, failed.ID, time.Now().Add(-time.Hour))
+		// Since then: a standalone re-run fully recovered the lesson.
+		insertTestTask(t, e.lessonID, "transcribe", "succeeded")
+		insertTestTask(t, e.lessonID, "chunk", "succeeded")
+		insertTestTask(t, e.lessonID, "quiz_gen", "succeeded")
+		c := insertTestChunk(t, e.lessonID, 0, "fresh chunk from the recovery run")
+		insertTestInteractionsForChunk(t, e.lessonID, c.ID.String(), 1)
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if got := res.Analysis.Status; got != richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE {
+			t.Errorf("recovered lesson: want DONE, got %v", got)
+		}
+		if len(res.Chunks) == 0 {
+			t.Error("recovered lesson: valid chunks must be returned, got 0")
+		}
+		if len(res.Analysis.Interactions) == 0 {
+			t.Error("recovered lesson: valid interactions must be returned, got 0")
+		}
+	})
+
+	t.Run("MirrorRecoveryKeepsArtifacts", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		// An hour ago: a standalone transcribe failed.
+		failed := insertTestTask(t, e.lessonID, "transcribe", "failed")
+		setTestTaskCreatedAt(t, failed.ID, time.Now().Add(-time.Hour))
+		// Since then: a Quick-Create pipeline_run rebuilt everything (the composite
+		// task writes NO separate transcribe row, so the old failed row stays the
+		// "latest transcribe" forever).
+		insertTestTask(t, e.lessonID, "pipeline_run", "succeeded")
+		c := insertTestChunk(t, e.lessonID, 0, "fresh chunk from the pipeline run")
+		insertTestInteractionsForChunk(t, e.lessonID, c.ID.String(), 1)
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if got := res.Analysis.Status; got != richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE {
+			t.Errorf("pipeline-recovered lesson: want DONE, got %v", got)
+		}
+		if len(res.Chunks) == 0 {
+			t.Error("pipeline-recovered lesson: valid chunks must be returned, got 0")
+		}
+	})
+
+	t.Run("StaleTrioNewestFailedPipelineSuppresses", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		// An hour ago: a full successful run (trio + artifacts).
+		for _, kind := range []string{"transcribe", "chunk", "quiz_gen"} {
+			old := insertTestTask(t, e.lessonID, kind, "succeeded")
+			setTestTaskCreatedAt(t, old.ID, time.Now().Add(-time.Hour))
+		}
+		c := insertTestChunk(t, e.lessonID, 0, "stale chunk from the old run")
+		insertTestInteractionsForChunk(t, e.lessonID, c.ID.String(), 1)
+		// Now: a Quick-Create re-run died in its transcribe stage (progress_step
+		// empty) — the transcript is gone, everything downstream is stale.
+		insertTestTask(t, e.lessonID, "pipeline_run", "failed")
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if got := res.Analysis.Status; got != richterv1.AnalysisStatus_ANALYSIS_STATUS_ERROR {
+			t.Errorf("newest failed pipeline@transcribe: want ERROR, got %v", got)
+		}
+		if len(res.Chunks) != 0 {
+			t.Errorf("stale chunks under the newest failed pipeline must be suppressed; got %d", len(res.Chunks))
+		}
+	})
+
+	t.Run("ErrorMsgPropagated", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		task := insertTestTask(t, e.lessonID, "transcribe", "failed")
+		const msg = "phiên âm bị lặp bất thường — âm thanh có thể quá ngắn"
+		setTestTaskErrorMsg(t, task.ID, msg)
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if got := res.Analysis.ErrorMsg; got != msg {
+			t.Errorf("the failed task's error must reach the response (FE shows it after reload); want %q, got %q", msg, got)
+		}
+	})
+
+	t.Run("LegacyErrorRowSuppresses", func(t *testing.T) {
+		clearTestTasks(t, e.lessonID)
+		clearTestArtifacts(t, e.lessonID)
+		// Pre-taskqueue-cutover lesson: NO task rows, legacy analysis row at ERROR,
+		// stale chunk rows still present.
+		insertTestAnalysis(t, e.lessonID, gen.LessonAnalysisStatusError)
+		insertTestChunk(t, e.lessonID, 0, "stale chunk from before the cutover")
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if len(res.Chunks) != 0 {
+			t.Errorf("legacy ERROR lesson: stale chunks must be suppressed; got %d", len(res.Chunks))
+		}
+	})
+}
+
+// setTestTaskCreatedAt back-dates a task row. Test task IDs are random v4 (not
+// time-ordered v7), so recency-sensitive tests must stamp created_at explicitly.
+func setTestTaskCreatedAt(t *testing.T, taskID pgtype.UUID, ts time.Time) {
+	t.Helper()
+	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get db: %v", err)
+	}
+	if err := db.WithConnectionExec(pool, context.Background(), func(_ *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(context.Background(), "UPDATE tasks SET created_at = $1 WHERE id = $2", ts, taskID)
+		return err
+	}); err != nil {
+		t.Fatalf("set created_at: %v", err)
+	}
+}
+
+// setTestTaskErrorMsg stamps a task's error_msg (seeded tasks default to empty).
+func setTestTaskErrorMsg(t *testing.T, taskID pgtype.UUID, msg string) {
+	t.Helper()
+	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get db: %v", err)
+	}
+	if err := db.WithConnectionExec(pool, context.Background(), func(_ *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(context.Background(), "UPDATE tasks SET error_msg = $1 WHERE id = $2", msg, taskID)
+		return err
+	}); err != nil {
+		t.Fatalf("set error_msg: %v", err)
+	}
+}
+
+// setTestTaskProgressStep stamps a task's progress_step (seeded tasks default to
+// empty; tests that exercise stage-sensitive logic need a concrete stage).
+func setTestTaskProgressStep(t *testing.T, taskID pgtype.UUID, step string) {
+	t.Helper()
+	pool, err := do.Invoke[*db.PostgresSvc](internal.Injector)
+	if err != nil {
+		t.Fatalf("get db: %v", err)
+	}
+	if err := db.WithConnectionExec(pool, context.Background(), func(_ *gen.Queries, conn *pgxpool.Conn) error {
+		_, err := conn.Exec(context.Background(), "UPDATE tasks SET progress_step = $1 WHERE id = $2", step, taskID)
+		return err
+	}); err != nil {
+		t.Fatalf("set progress_step: %v", err)
 	}
 }
 
@@ -1889,6 +2170,22 @@ func TestAIPipelineFullFlow(t *testing.T) {
 		t.Fatalf("set video key on lesson: %v", err)
 	}
 
+	// edu-sample.mp4 is an ENGLISH lecture. Declare the lesson's spoken audio
+	// language as "en" so Whisper transcribes it as English — exactly what a
+	// teacher uploading English video does in the UI. Without it the transcribe
+	// task falls back to the deployment default ([stt] language = "vi"), decoding
+	// the English audio as Vietnamese and producing a repetition-loop transcript
+	// ("...tất cả tất cả tất cả...") that trips the IsDegenerateTranscript guard.
+	if _, err := e.adminLessons.UpdateLesson(ctx, &richterv1.UpdateLessonRequest{
+		Id:            e.lessonID,
+		Title:         "Binary Search Lecture",
+		OrderIndex:    0,
+		Language:      "en",
+		AudioLanguage: "en",
+	}); err != nil {
+		t.Fatalf("set lesson audio language: %v", err)
+	}
+
 	// ── Pre-Phase 1: Seed stale chunks/interactions, verify extraction clears them ──
 
 	// Insert dummy chunks and interactions to simulate a previous pipeline run.
@@ -2471,24 +2768,17 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 		adminToken := getAdminToken(t, e.url)
 		aiAdmin := richterv1connect.NewAIServiceClient(httpClientWithToken(adminToken), e.url)
 
-		pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
-		tq := taskqueue.NewPostgresDB(pool)
-
-		parsedLessonID, _ := uuid.Parse(e.lessonID)
-		lessonIDpg := pgtype.UUID{Bytes: [16]byte(parsedLessonID), Valid: true}
-
-		parsedOwnerID, _ := uuid.Parse(e.ownerID)
-		ownerIDpg := pgtype.UUID{Bytes: [16]byte(parsedOwnerID), Valid: true}
-
-		taskIDRaw, _ := uuid.NewV7()
-		taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
-		_, err := tq.CreateTask(ctx, taskID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "transcribe", []byte("hello"))
-		if err != nil {
-			t.Fatalf("failed to create task: %v", err)
-		}
+		// Cancel a PROCESSING task (the real UI path — the "Hủy" button targets a
+		// running task). Seeding 'processing' is deterministic: workers only claim
+		// 'inqueued' rows, so nothing can race the cancel. The previous version
+		// enqueued a real inqueued task (AFTER INSERT pg_notify → a worker claims
+		// it within milliseconds and FAILS it on the garbage payload), so the
+		// cancel randomly lost the race under full-suite load (flaked as
+		// "expected CANCELED, got FAILED").
+		task := insertTestTask(t, e.lessonID, "transcribe", "processing")
 
 		res, err := aiAdmin.CancelLessonTask(ctx, &richterv1.CancelLessonTaskRequest{
-			TaskId: taskID.String(),
+			TaskId: task.ID.String(),
 		})
 		if err != nil {
 			t.Fatalf("CancelLessonTask failed: %v", err)
@@ -2499,24 +2789,12 @@ func TestInteractionConfigRoundTrip(t *testing.T) {
 	})
 
 	t.Run("CancelLessonTask/Teacher/Success", func(t *testing.T) {
-		pool := do.MustInvoke[*db.PostgresSvc](internal.Injector)
-		tq := taskqueue.NewPostgresDB(pool)
-
-		parsedLessonID, _ := uuid.Parse(e.lessonID)
-		lessonIDpg := pgtype.UUID{Bytes: [16]byte(parsedLessonID), Valid: true}
-
-		parsedOwnerID, _ := uuid.Parse(e.ownerID)
-		ownerIDpg := pgtype.UUID{Bytes: [16]byte(parsedOwnerID), Valid: true}
-
-		taskIDRaw, _ := uuid.NewV7()
-		taskID := pgtype.UUID{Bytes: [16]byte(taskIDRaw), Valid: true}
-		_, err := tq.CreateTask(ctx, taskID, lessonIDpg, pgtype.UUID{}, ownerIDpg, "transcribe", []byte("hello"))
-		if err != nil {
-			t.Fatalf("failed to create task: %v", err)
-		}
+		// Deterministic cancel of a PROCESSING task — see the Admin variant above
+		// for why enqueuing a real inqueued task raced the worker pool and flaked.
+		task := insertTestTask(t, e.lessonID, "transcribe", "processing")
 
 		res, err := e.aiTeacher.CancelLessonTask(ctx, &richterv1.CancelLessonTaskRequest{
-			TaskId: taskID.String(),
+			TaskId: task.ID.String(),
 		})
 		if err != nil {
 			t.Fatalf("CancelLessonTask failed: %v", err)
@@ -3051,6 +3329,89 @@ func TestLearnerMetrics(t *testing.T) {
 	})
 }
 
+// TestAIGetLessonAnalysisArtifactCeiling covers the "artifact ceiling" in the
+// task-derived status: a leftover SUCCEEDED pipeline_run/chunk task (e.g. after a
+// re-transcribe or reset wiped the chunks + interactions) must NOT keep reporting
+// DONE/CHUNKS_READY when no chunks/interactions exist — otherwise the FE stepper
+// lands on the locked "Bài tập" step instead of the runnable "Phân đoạn" step.
+func TestAIGetLessonAnalysisArtifactCeiling(t *testing.T) {
+	t.Parallel()
+	e := setupAIEnv(t)
+	ctx := context.Background()
+
+	t.Run("DoneCappedToTranscriptExtractedWhenNoChunks", func(t *testing.T) {
+		// A completed quick-create (pipeline_run SUCCEEDED → derives DONE) followed by
+		// a re-transcribe that wiped the chunks/interactions but LEFT the pipeline_run
+		// task row. No chunks, no interactions seeded.
+		insertTestTask(t, e.lessonID, "transcribe", "succeeded")
+		insertTestTask(t, e.lessonID, "pipeline_run", "succeeded")
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		// Before the ceiling: DONE (from the stale pipeline_run) → FE stepper = step 4
+		// (locked). After: capped at TRANSCRIPT_EXTRACTED → FE stepper = step 3.
+		if got := res.GetAnalysis().GetStatus(); got != richterv1.AnalysisStatus_ANALYSIS_STATUS_TRANSCRIPT_EXTRACTED {
+			t.Errorf("artifact ceiling: with 0 chunks/interactions want TRANSCRIPT_EXTRACTED, got %v", got)
+		}
+	})
+
+	t.Run("DoneCappedToChunksReadyWhenChunksButNoInteractions", func(t *testing.T) {
+		// A fresh lesson id for isolation would need a second setup; reuse by clearing
+		// then seeding chunks + a pipeline_run, no interactions → cap DONE→CHUNKS_READY.
+		insertTestTask(t, e.lessonID, "transcribe", "succeeded")
+		insertTestTask(t, e.lessonID, "pipeline_run", "succeeded")
+		insertTestChunk(t, e.lessonID, 0, "chunk transcript")
+
+		res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("GetLessonAnalysis: %v", err)
+		}
+		if got := res.GetAnalysis().GetStatus(); got != richterv1.AnalysisStatus_ANALYSIS_STATUS_CHUNKS_READY {
+			t.Errorf("artifact ceiling: with chunks but 0 interactions want CHUNKS_READY, got %v", got)
+		}
+	})
+}
+
+// TestAIGetLessonAnalysisTranscriptDuringPipeline covers the "transcript not shown
+// while the pipeline is still running" bug (Image #3): a Quick-Create runs as ONE
+// composite pipeline_run task that stays PROCESSING while its transcribe stage has
+// already saved segments to FDB (and produced chunks). GetLessonAnalysis must return
+// those segments — the old gate loaded the transcript only when a task had SUCCEEDED,
+// so mid-pipeline it returned zero segments and the step + video tab showed
+// "Đã có transcript" with no rows.
+func TestAIGetLessonAnalysisTranscriptDuringPipeline(t *testing.T) {
+	t.Parallel()
+	e := setupAIEnv(t)
+	ctx := context.Background()
+	kvSvc := do.MustInvoke[*kv.KVSvc](internal.Injector)
+
+	// Transcribe stage done → segments in FDB; chunking done → 1 chunk; but the
+	// composite pipeline task is still PROCESSING (generate stage in flight).
+	segs := []segment.Segment{
+		{StartSeconds: 0, EndSeconds: 5, Text: "Cells are the smallest living units."},
+		{StartSeconds: 5, EndSeconds: 10, Text: "All cells have a membrane."},
+	}
+	if err := segment.SaveSegments(kvSvc, e.lessonID, segs); err != nil {
+		t.Fatalf("save segments: %v", err)
+	}
+	if err := segment.SaveTranscript(kvSvc, e.lessonID, "Cells are the smallest living units. All cells have a membrane."); err != nil {
+		t.Fatalf("save transcript: %v", err)
+	}
+	insertTestChunk(t, e.lessonID, 0, "chunk 1 transcript")
+	insertTestTask(t, e.lessonID, "pipeline_run", "processing")
+
+	res, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+	if err != nil {
+		t.Fatalf("GetLessonAnalysis: %v", err)
+	}
+	// Pre-fix: 0 segments (canLoadTranscript required a SUCCEEDED task). After: 2.
+	if n := len(res.GetAnalysis().GetTranscriptSegments()); n != 2 {
+		t.Errorf("transcript must be available while pipeline is PROCESSING; want 2 segments, got %d", n)
+	}
+}
+
 // TestAIResetLessonContent covers the "Xoá toàn bộ nội dung" action that returns
 // a lesson to its blank pre-quick-create state: it must wipe the video pointer,
 // the analysis row, the chunks (+FDB transcripts), and the interactions, be
@@ -3177,6 +3538,55 @@ func TestAIResetLessonContent(t *testing.T) {
 			if len(b) != 0 {
 				t.Errorf("chunk %s transcript still present in FDB after reset", id)
 			}
+		}
+	})
+
+	// ── Reset must ALSO clear task history. GetLessonAnalysis derives the analysis
+	//    status from the LATEST task per kind, so a leftover SUCCEEDED transcribe/
+	//    chunk task made a fully-wiped lesson keep reporting CHUNKS_READY/DONE — the
+	//    stepper then showed "Đã có transcript" and let chunking run with no video
+	//    (bugs A + B). seedContent above inserts NO task rows, so the original
+	//    WipesEverything path never exercised this; real pipelines always leave
+	//    succeeded tasks, which is why the bug only reproduced in production. ──────
+	t.Run("Teacher/ClearsTaskHistory", func(t *testing.T) {
+		seedContent(t)
+		insertTestTask(t, e.lessonID, "transcribe", "succeeded")
+		insertTestTask(t, e.lessonID, "chunk", "succeeded")
+
+		// Precondition: with the leftover succeeded tasks, the lesson reports a
+		// completed-ish status (this is exactly what made the wiped stepper stale).
+		pre, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("analysis before reset: %v", err)
+		}
+		switch pre.GetAnalysis().GetStatus() {
+		case richterv1.AnalysisStatus_ANALYSIS_STATUS_TRANSCRIPT_EXTRACTED,
+			richterv1.AnalysisStatus_ANALYSIS_STATUS_CHUNKS_READY,
+			richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE:
+			// good — reproduces the "content exists" state
+		default:
+			t.Fatalf("precondition: want a completed-ish status before reset, got %v", pre.GetAnalysis().GetStatus())
+		}
+
+		if _, err := e.aiTeacher.ResetLessonContent(ctx, &richterv1.ResetLessonContentRequest{LessonId: e.lessonID}); err != nil {
+			t.Fatalf("ResetLessonContent: %v", err)
+		}
+
+		// After reset the leftover tasks must be gone, so GetLessonAnalysis no
+		// longer derives a transcript-extracted/chunks-ready/done status. With the
+		// video cleared and no tasks, it reads as never-analyzed.
+		post, err := e.aiTeacher.GetLessonAnalysis(ctx, &richterv1.GetLessonAnalysisRequest{LessonId: e.lessonID})
+		if err != nil {
+			t.Fatalf("analysis after reset: %v", err)
+		}
+		switch post.GetAnalysis().GetStatus() {
+		case richterv1.AnalysisStatus_ANALYSIS_STATUS_TRANSCRIPT_EXTRACTED,
+			richterv1.AnalysisStatus_ANALYSIS_STATUS_CHUNKS_READY,
+			richterv1.AnalysisStatus_ANALYSIS_STATUS_DONE:
+			t.Errorf("reset leaked task history: analysis still reports %v (want unanalyzed/pending)", post.GetAnalysis().GetStatus())
+		}
+		if n := len(post.GetAnalysis().GetTranscriptSegments()); n != 0 {
+			t.Errorf("want 0 transcript segments after reset, got %d", n)
 		}
 	})
 

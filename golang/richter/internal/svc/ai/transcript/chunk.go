@@ -43,6 +43,12 @@ func (s *Service) RunChunk(
 	if transcriptText == "" {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("no transcript found — run Step 2 (extract transcript) first"))
 	}
+	// Refuse to chunk a degenerate repetition-loop transcript — otherwise Gemini
+	// confabulates plausible-looking summaries over garbage. Guards a transcript
+	// stored before the VAD fix; a fresh re-extract will produce a clean one.
+	if IsDegenerateTranscript(transcriptText) {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("phiên âm bị lặp bất thường — vui lòng chạy lại bước phiên âm (Trích xuất transcript) trước khi phân đoạn"))
+	}
 
 	segmentsBytes := segment.LoadSegmentsPromptJSON(s.KV, lessonIDStr)
 	allSegs := segment.LoadSegments(s.KV, lessonIDStr)
