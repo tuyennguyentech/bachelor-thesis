@@ -32,6 +32,24 @@ const KIND_OPTIONS: ReadonlyArray<{
   { kind: InteractionKind.WRITING, label: "Bài viết", hint: "Viết đoạn văn theo đề", Icon: PenLineIcon },
 ];
 
+// FE mirror of the backend `CheckpointSecondsForChunk` (generation/helpers.go): a
+// manual exercise must default to a checkpoint a small margin BEFORE the chunk END —
+// the SAME position the AI uses — so it fires AFTER the student has watched the chunk's
+// content. Defaulting to chunk.startSeconds put the checkpoint at the chunk start (=
+// the previous chunk's end), firing before the content was seen (reported bug).
+const CHECKPOINT_END_SAFETY_SECONDS = 2;
+function defaultCheckpointSeconds(chunk: TranscriptChunk): number {
+  const start = chunk.startSeconds;
+  const end = chunk.endSeconds;
+  if (end > 0) {
+    const safe = end - CHECKPOINT_END_SAFETY_SECONDS;
+    if (safe > start) return safe;
+    if (end > start) return start + (end - start) / 2; // chunk shorter than margin → midpoint
+    return end;
+  }
+  return start > 0 ? start : 0;
+}
+
 interface ChunkAddFormProps {
   chunk: TranscriptChunk;
   lessonId: string;
@@ -93,7 +111,7 @@ export function ChunkAddForm({ chunk, lessonId, token, saving, error, onSave, on
       {/* Step 2 — fill in the details (InteractionForm renders the per-type editor) */}
       <InteractionForm
         key={kind}
-        initial={{ ...emptyFormForKind(kind), startSeconds: chunk.startSeconds }}
+        initial={{ ...emptyFormForKind(kind), startSeconds: defaultCheckpointSeconds(chunk) }}
         onSave={onSave}
         onCancel={onCancel}
         saving={saving}

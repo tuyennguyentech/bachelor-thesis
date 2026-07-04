@@ -148,6 +148,8 @@ export function NestedMcqEditor({ questionIndex, config, onChange, onRemove, hid
         <div key={oi} className="flex items-start gap-2">
           <button
             type="button"
+            data-testid="mcq-correct-toggle"
+            data-correct={config.correctAnswer === oi}
             title={config.correctAnswer === oi ? "Đáp án đúng" : "Chọn làm đáp án đúng"}
             onClick={() => onChange({ ...config, correctAnswer: oi })}
             className={`mt-1 shrink-0 size-5 rounded-full border-2 flex items-center justify-center transition-colors

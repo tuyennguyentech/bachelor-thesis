@@ -55,8 +55,13 @@ export type StreamRunState =
   | { phase: "idle" }
   | { phase: "starting" }
   | { phase: "syncing" }
-  | { phase: "running"; currentStep: AnalysisProgressStep | null }
-  | { phase: "stale"; currentStep: AnalysisProgressStep | null }
+  // `coarse` marks a run whose progress is only known at the COARSE pipeline-stage
+  // level (a Quick-Create RUN_PIPELINE stage reports "TRANSCRIBING"/"CHUNKING", not
+  // the fine sub-step). When true, the per-sub-step ProgressStrip is hidden and only
+  // the hero spinner + label is shown. Standalone (manual) runs leave it unset so the
+  // 4 detailed sub-steps render as usual.
+  | { phase: "running"; currentStep: AnalysisProgressStep | null; coarse?: boolean }
+  | { phase: "stale"; currentStep: AnalysisProgressStep | null; coarse?: boolean }
   | { phase: "done" }
   | { phase: "error"; failedAt: AnalysisProgressStep | null; message: string };
 
@@ -69,7 +74,13 @@ function getStepState(step: AnalysisProgressStep, run: StreamRunState): StepStat
   if (run.phase === "idle" || run.phase === "syncing" || run.phase === "starting" || run.phase === "stale") return "pending";
   if (run.phase === "done") return "done";
   if (run.phase === "error") {
-    if (run.failedAt === null || step < run.failedAt) return "done";
+    // failedAt unknown (null) ⟹ NO step may claim success — render all as
+    // pending. The old `null → every step "done"` rendered four green ✓ under a
+    // failed hero after a reload (the initializer can't know the failing step
+    // until the task poll attributes it — reported bug). Steps strictly BEFORE a
+    // KNOWN failure point genuinely completed, so those stay "done".
+    if (run.failedAt === null) return "pending";
+    if (step < run.failedAt) return "done";
     if (step === run.failedAt) return "error";
     return "pending";
   }
@@ -130,7 +141,7 @@ export function ProgressStrip({
           else if (state === "active") durationLabel = formatStepDuration(now - timing.start);
         }
         return (
-          <div key={step} className="flex items-center gap-2 text-xs">
+          <div key={step} data-testid="stream-step" data-step-state={state} className="flex items-center gap-2 text-xs">
             <span className={`size-4 flex items-center justify-center rounded-full shrink-0 ${stepColors[state]}`}>
               {state === "done" ? <CheckIcon className="size-2.5" /> :
                state === "active" ? <Loader2Icon className="size-2.5 animate-spin" /> :
@@ -568,10 +579,13 @@ export function WorkflowTaskSection({
   return (
     <section className="rounded-md border bg-muted/10 p-3">
       <div className="flex min-h-7 items-center gap-2">
-        <span className={`flex size-6 shrink-0 items-center justify-center rounded-full border ${iconClass}`}>
+        <span data-testid="task-section-icon" className={`flex size-6 shrink-0 items-center justify-center rounded-full border ${iconClass}`}>
           {state === "done" ? <CheckIcon className="size-3.5" /> :
             state === "error" ? <XIcon className="size-3.5" /> :
-            state === "active" ? <Loader2Icon className="size-3.5 animate-spin" /> :
+            // Active = a STATIC filled dot, not a spinner: the section title is just a
+            // label for the current task; the live "working" signal belongs to the hero
+            // spinner + the active sub-step below (avoids stacked concentric spinners).
+            state === "active" ? <span className="size-2 rounded-full bg-current" /> :
             state === "locked" ? <LockIcon className="size-3" /> :
             <ChevronRightIcon className="size-3.5" />}
         </span>

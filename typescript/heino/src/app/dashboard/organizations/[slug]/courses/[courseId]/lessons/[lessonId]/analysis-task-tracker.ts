@@ -90,6 +90,23 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
   // CHUNKING→GENERATING reload (below) fires once per pipeline instead of on
   // every 2.5s poll.
   const pipelineGenChunksLoadedRef = useRef<Set<string>>(new Set());
+  // Tracks pipelines whose transcript segments we've already loaded once the run
+  // left the TRANSCRIBING stage — so the "Phiên âm" panel (fed from live segments)
+  // syncs as soon as transcription finishes, not only at full-pipeline end.
+  const pipelineTranscriptLoadedRef = useRef<Set<string>>(new Set());
+  // Tracks tasks whose completed analysis (segments/chunks/interactions) we've already
+  // synced to client state — so the sync runs at most once per task even though it is
+  // NOT gated on having observed the task's active phase (see the ungated sync below).
+  const analysisSyncedRef = useRef<Set<string>>(new Set());
+  // Tracks EXTRACT tasks for which we've already wiped the stale transcript on first
+  // seeing them active — so a re-transcribe triggered out-of-band (another tab / RPC)
+  // clears the old transcript+chunks+interactions here too, exactly once (a fresh load
+  // on completion must not be re-wiped).
+  const extractClearedRef = useRef<Set<string>>(new Set());
+  // Tracks FAILED tasks whose failing sub-step we've already attributed to the
+  // reload-initialized error state (which starts with failedAt=null) — see the
+  // reload-attribution block below.
+  const failedAttributedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     for (const task of lessonTasks) {
@@ -115,6 +132,17 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
           setExtractState({ phase: "running", currentStep });
           if (currentStep != null) {
             setExtractTimings((prev) => updateStepTimings(prev, currentStep, taskStartMs));
+          }
+          // Mirror the server-side wipe (extract.go) the first time we see this
+          // extract active, so a re-transcribe kicked off elsewhere still clears the
+          // stale transcript from the step + video tab. The locally-triggered path
+          // (startExtract) already clears optimistically; this is the belt-and-braces
+          // for out-of-band triggers. Ref-guarded so the completion load isn't wiped.
+          if (!extractClearedRef.current.has(task.id)) {
+            extractClearedRef.current.add(task.id);
+            setSegments([]);
+            setChunks([]);
+            setInteractionsState([]);
           }
         } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
           setChunkState({ phase: "running", currentStep });
@@ -159,18 +187,104 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
               pipelineGenChunksLoadedRef.current.add(task.id);
               void reloadChunks();
             }
+            // Fast-path the transcript load too, in case the CHUNKING stage was
+            // too brief to be observed (short videos) — same once-per-run guard.
+            if (!pipelineTranscriptLoadedRef.current.has(task.id)) {
+              pipelineTranscriptLoadedRef.current.add(task.id);
+              void (async () => {
+                const r = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+                if (r?.analysis) setSegments(r.analysis.transcriptSegments);
+              })();
+            }
           } else if (stage.includes("CHUNKING")) {
             setExtractState({ phase: "done" });
-            setChunkState({ phase: "running", currentStep: null });
+            // Quick-Create reports only the coarse "CHUNKING" stage, not the fine
+            // sub-steps — mark coarse so the chunk ProgressStrip is hidden (single spinner).
+            setChunkState({ phase: "running", currentStep: null, coarse: true });
             setGenState({ phase: "idle" });
+            // Transcription just finished — load its segments ONCE so the video
+            // tab's "Phiên âm" panel (fed from live segments) syncs now, instead
+            // of staying empty until the whole pipeline terminally succeeds.
+            if (!pipelineTranscriptLoadedRef.current.has(task.id)) {
+              pipelineTranscriptLoadedRef.current.add(task.id);
+              void (async () => {
+                const r = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+                if (r?.analysis) setSegments(r.analysis.transcriptSegments);
+              })();
+            }
           } else {
             // TRANSCRIBING or the brief pre-stage window before the first label.
-            setExtractState({ phase: "running", currentStep: null });
+            // Quick-Create reports only the coarse stage, not the 4 transcribe
+            // sub-steps — mark coarse so the ProgressStrip is hidden (single spinner);
+            // the standalone re-transcribe path keeps the detailed 4-step strip.
+            setExtractState({ phase: "running", currentStep: null, coarse: true });
             setChunkState({ phase: "idle" });
             setGenState({ phase: "idle" });
           }
         }
         continue;
+      }
+
+      // Robust transcript/analysis sync (bug #12): whenever we observe a terminal
+      // SUCCEEDED transcript-producing task, refresh segments + chunks + interactions
+      // ONCE — even if we never saw its active phase (a fast/RPC-triggered extract, or
+      // the poll landing straight on SUCCEEDED). The transition-gated block below is
+      // skipped in that case, so without this the video-tab transcript never syncs
+      // after a manual re-transcribe. Ref-guarded → runs at most once per task.
+      if (
+        isTerminalTask &&
+        task.status === LessonTaskStatus.SUCCEEDED &&
+        (task.kind === LessonTaskKind.EXTRACT_TRANSCRIPT ||
+          task.kind === LessonTaskKind.CHUNK_TRANSCRIPT ||
+          task.kind === LessonTaskKind.RUN_PIPELINE) &&
+        !analysisSyncedRef.current.has(task.id)
+      ) {
+        analysisSyncedRef.current.add(task.id);
+        void (async () => {
+          const r = await aiClient.getLessonAnalysis({ lessonId }).catch(() => null);
+          const a = r?.analysis ?? null;
+          if (a) {
+            setSegments(a.transcriptSegments);
+            setChunks(r?.chunks ?? []);
+            setInteractionsState(a.interactions ?? []);
+          }
+        })();
+      }
+
+      // Reload attribution for PRE-EXISTING failures: the transition-gated FAILED
+      // branch below never fires for a task that was ALREADY failed at page load
+      // (previousStatus is unknown), so the reload initializer's failedAt=null
+      // survived and the sub-step strip could not mark the failing step (it
+      // rendered all-green pre-fix; all-grey post-getStepState-fix). Attribute the
+      // true failing sub-step from the task's progress_step — via a functional
+      // updater that ONLY upgrades a still-unattributed error, so it can never
+      // clobber a newer state (e.g. the user already clicked retry → "starting").
+      // Ref-guarded → at most once per task.
+      if (isTerminalTask && task.status === LessonTaskStatus.FAILED && !failedAttributedRef.current.has(task.id)) {
+        failedAttributedRef.current.add(task.id);
+        const attribute = (prev: StreamRunState): StreamRunState =>
+          prev.phase === "error" && prev.failedAt === null
+            ? {
+                phase: "error",
+                failedAt: analysisStepFromTask(task) ?? AnalysisProgressStep.ANALYZING,
+                message: task.errorMsg || task.message || prev.message,
+              }
+            : prev;
+        if (task.kind === LessonTaskKind.EXTRACT_TRANSCRIPT) {
+          setExtractState(attribute);
+        } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
+          setChunkState(attribute);
+        } else if (task.kind === LessonTaskKind.RUN_PIPELINE) {
+          const stage = task.progressStep;
+          if (stage.includes("CHUNKING")) {
+            setChunkState(attribute);
+          } else if (!stage.includes("GENERATING")) {
+            // Died in (or before) the transcribe stage — the extract card owns it.
+            setExtractState(attribute);
+          }
+          // GENERATING failures surface via genState, whose initializer already
+          // attributes them (status ERROR + chunks kept ⟹ generation failed).
+        }
       }
 
       const transitionedFromActive =
@@ -204,6 +318,13 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
               if (a) {
                 setSegments(a.transcriptSegments);
                 setChunks(fresh);
+                // A re-transcribe wipes chunks AND interactions server-side
+                // (extract.go). The client must mirror that: without this the
+                // stale interactions array keeps questionsGenerated=true, so the
+                // Phân đoạn/Bài tập steps stay falsely green and TabExercises
+                // shows the previous run's questions. Backend returns [] here.
+                setInteractionsState(a.interactions ?? []);
+                setGenState({ phase: "idle" });
               }
               dispatchStep({ type: "ADVANCE_AFTER_EXTRACT", hasChunks: fresh.length > 0 });
             } catch (err) {
@@ -254,9 +375,14 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
       } else if (task.status === LessonTaskStatus.FAILED || task.status === LessonTaskStatus.CANCELED) {
         const msg = task.errorMsg || task.message || "Tác vụ thất bại.";
         if (task.kind === LessonTaskKind.EXTRACT_TRANSCRIPT) {
-          setExtractState({ phase: "error", failedAt: null, message: msg });
+          // Attribute the failure to the sub-step the task died on (progress_step) so
+          // the ProgressStrip marks THAT step (+ downstream) as failed. failedAt=null
+          // made getStepState paint EVERY sub-step green on a failed transcribe (the
+          // "all green while the task failed" bug). Fall back to ANALYZING (the core
+          // transcription work) when the step is unknown, so nothing reads as success.
+          setExtractState({ phase: "error", failedAt: analysisStepFromTask(task) ?? AnalysisProgressStep.ANALYZING, message: msg });
         } else if (task.kind === LessonTaskKind.CHUNK_TRANSCRIPT) {
-          setChunkState({ phase: "error", failedAt: null, message: msg });
+          setChunkState({ phase: "error", failedAt: analysisStepFromTask(task) ?? AnalysisProgressStep.ANALYZING, message: msg });
         } else if (task.kind === LessonTaskKind.GENERATE_INTERACTIONS && !task.chunkId) {
           setGenState({ phase: "error", message: msg });
         } else if (task.kind === LessonTaskKind.RUN_PIPELINE) {
@@ -267,9 +393,14 @@ export function useAnalysisTaskTracker(input: UseAnalysisTaskTrackerInput): void
           if (stage.includes("GENERATING")) {
             setGenState({ phase: "error", message: msg });
           } else if (stage.includes("CHUNKING")) {
-            setChunkState({ phase: "error", failedAt: null, message: msg });
+            setChunkState({ phase: "error", failedAt: analysisStepFromTask(task) ?? AnalysisProgressStep.ANALYZING, message: msg });
           } else {
-            setExtractState({ phase: "error", failedAt: null, message: msg });
+            // Attribute the failure to the sub-step the task died on (progress_step) so
+          // the ProgressStrip marks THAT step (+ downstream) as failed. failedAt=null
+          // made getStepState paint EVERY sub-step green on a failed transcribe (the
+          // "all green while the task failed" bug). Fall back to ANALYZING (the core
+          // transcription work) when the step is unknown, so nothing reads as success.
+          setExtractState({ phase: "error", failedAt: analysisStepFromTask(task) ?? AnalysisProgressStep.ANALYZING, message: msg });
           }
         }
       }

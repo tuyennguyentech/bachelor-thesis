@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, AlertCircleIcon, Loader2Icon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, SparklesIcon, VideoIcon, EyeIcon, AlertCircleIcon, Loader2Icon, FileVideo2Icon } from "lucide-react";
 import {
   VideoProcessingStepper,
   WorkflowStepPanel,
@@ -70,8 +70,8 @@ function buildStepMeta(args: {
         stepNumber: 2,
         title: "Phiên âm bài giảng",
         description: hasSegments
-          ? "Kiểm tra và chỉnh transcript trước khi phân đoạn bài học."
-          : "Tạo transcript từ âm thanh video để làm dữ liệu cho các bước tiếp theo.",
+          ? "Kiểm tra và chỉnh bản phiên âm trước khi phân đoạn bài học."
+          : "Tạo bản phiên âm từ âm thanh video để làm dữ liệu cho các bước tiếp theo.",
       };
     case "chunks":
       return {
@@ -226,12 +226,24 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   // content the pipeline is about to delete-and-regenerate). Driving the body off
   // the stage hides that stale content until the generate stage is actually
   // reached. Outside a pipeline run we honour the user's chosen step.
-  const displayStep: WorkflowContentStepKey = pipelineStage
+  const pipelineStepView: WorkflowContentStepKey | null = pipelineStage
     ? pipelineStage === "transcribe"
       ? "transcript"
       : pipelineStage === "chunk"
         ? "chunks"
         : "exercises"
+    : null;
+  // During a pipeline run the body follows the live stage — but the user should
+  // still be able to click an already-completed step and READ it (Image #11:
+  // earlier steps felt "locked"/unclickable). manualStep is that read-only
+  // override; it resets when the run ends. Selecting is gated on status!=="locked"
+  // (below), so not-yet-reached steps (whose body would be stale) stay off-limits.
+  const [manualStep, setManualStep] = React.useState<WorkflowContentStepKey | null>(null);
+  React.useEffect(() => {
+    if (!pipelineStage) setManualStep(null);
+  }, [pipelineStage]);
+  const displayStep: WorkflowContentStepKey = pipelineStepView
+    ? (manualStep ?? pipelineStepView)
     : props.activeStep;
 
   const uploadStatus: WorkflowStatus = !props.videoStorageKey ? "active" : "done";
@@ -245,6 +257,10 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   const chunkStatus: WorkflowStatus =
     pipelineStage ? (pipelineStage === "transcribe" ? "locked" : pipelineStage === "chunk" ? "running" : "done") :
     transcribing ? "locked" :
+    // Pipeline invariant: a FAILED transcribe invalidates the transcript, so any
+    // leftover chunks are stale — the step must be LOCKED (blocked by the failed
+    // upstream), never "done". Defends the display even if stale chunks linger (bug #15).
+    props.extractState.phase === "error" ? "locked" :
     !props.hasTranscriptContent && !isComplete ? "locked" :
     props.chunkState.phase === "error" ? "error" :
     props.isChunking ? "running" :
@@ -253,6 +269,8 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
   const exerciseStatus: WorkflowStatus =
     pipelineStage ? (pipelineStage === "generate" ? "running" : "locked") :
     transcribing ? "locked" :
+    // Same invariant: a failed transcribe OR chunk blocks exercise generation.
+    props.extractState.phase === "error" || props.chunkState.phase === "error" ? "locked" :
     !props.hasChunks && !isComplete ? "locked" :
     props.genState.phase === "error" ? "error" :
     props.isGenerating ? "running" :
@@ -284,10 +302,16 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     {
       key: "transcript",
       title: "Phiên âm",
-      subtitle: props.isExtracting || props.isSyncing
+      // Error must win over "Sẵn sàng": a failed transcribe showed the red ✗ icon but
+      // the subtitle still read "Sẵn sàng" (reported bug — status contradicted the icon).
+      subtitle: transcriptStatus === "error" ? "Phiên âm thất bại"
+        : props.isExtracting || props.isSyncing
         ? "Đang xử lý"
-        : props.hasSegments ? `${segmentsCount} đoạn`
-        : props.hasTranscriptContent ? "Đã có transcript"
+        // "dòng" (transcript lines), NOT "đoạn" — step 3 "Phân đoạn" uses "đoạn" for
+        // CHUNKS and step 4 uses "câu" for questions; showing the transcript count as
+        // "N đoạn" here made it read like a chunk count (reported confusion).
+        : props.hasSegments ? `${segmentsCount} dòng`
+        : props.hasTranscriptContent ? "Đã phiên âm"
         : "Sẵn sàng",
       status: transcriptStatus,
       icon: <FileTextIcon className="size-3.5" />,
@@ -296,7 +320,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     {
       key: "chunks",
       title: "Phân đoạn",
-      subtitle: transcribing ? "Chờ phiên âm" : props.isChunking || props.isChunkSyncing ? "Đang xử lý" : props.hasChunks ? `${chunksCount} đoạn` : props.hasTranscriptContent ? "Sẵn sàng" : "Chưa sẵn sàng",
+      subtitle: chunkStatus === "error" ? "Phân đoạn thất bại" : transcribing ? "Chờ phiên âm" : props.isChunking || props.isChunkSyncing ? "Đang xử lý" : props.hasChunks ? `${chunksCount} đoạn` : props.hasTranscriptContent ? "Sẵn sàng" : "Chưa sẵn sàng",
       status: chunkStatus,
       icon: <ListTreeIcon className="size-3.5" />,
       targetStep: "chunks",
@@ -304,7 +328,7 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
     {
       key: "exercises",
       title: "Bài tập",
-      subtitle: transcribing ? "Chờ phiên âm" : props.isGenerating ? "Đang tạo" : props.questionsGenerated ? `${props.interactions.length} câu` : props.hasChunks ? "Sẵn sàng" : "Chưa tạo",
+      subtitle: exerciseStatus === "error" ? "Tạo bài tập thất bại" : transcribing ? "Chờ phiên âm" : props.isGenerating ? "Đang tạo" : props.questionsGenerated ? `${props.interactions.length} câu` : props.hasChunks ? "Sẵn sàng" : "Chưa tạo",
       status: exerciseStatus,
       icon: <SparklesIcon className="size-3.5" />,
       targetStep: "exercises",
@@ -324,7 +348,12 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
       router.push("?preview=1");
       return;
     }
-    if (step.targetStep) props.onGotoStep(step.targetStep);
+    if (step.targetStep) {
+      // While a pipeline run pins the body to the live stage, record a read-only
+      // manual override so clicking a completed step actually switches the body.
+      if (pipelineStage) setManualStep(step.targetStep);
+      props.onGotoStep(step.targetStep);
+    }
   }
 
   // The hero card's cancel button needs the actual task id of the
@@ -390,7 +419,6 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
         tasks={props.lessonTasks}
         activeStep={taskStepToPanelStep(displayStep)}
         hidePipelineTask
-        onRefresh={() => void props.onRefreshTasks()}
         onCancel={(taskId) => void props.onCancelTask(taskId)}
       />
       {/* During the auto-pipeline the slim banner + stepper already convey the
@@ -431,6 +459,22 @@ export function AnalysisWorkflowShell(props: AnalysisWorkflowShellProps) {
                 Tải lên hoặc thay thế tệp video dùng làm nguồn tạo nội dung bài học.
               </p>
             </div>
+            {/* Lightweight "video uploaded" indicator so this step doesn't look
+                empty (Image #9) — mirrors the quick-create dialog's post-upload
+                chip. No heavy embedded player; the full video is on the Bài giảng
+                tab. */}
+            {props.videoStorageKey && (
+              <div
+                data-testid="upload-step-video-preview"
+                className="flex items-center gap-3 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/10 px-3 py-2.5"
+              >
+                <FileVideo2Icon className="size-5 text-emerald-600 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-foreground">Đã tải video lên</p>
+                  <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{props.videoStorageKey}</p>
+                </div>
+              </div>
+            )}
             <VideoUpload
               lessonId={props.lessonId}
               hasVideo={!!props.videoStorageKey}

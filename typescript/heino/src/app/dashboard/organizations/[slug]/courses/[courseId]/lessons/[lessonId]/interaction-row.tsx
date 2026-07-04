@@ -66,7 +66,7 @@ export function emptyFormForKind(kind: InteractionKind): InteractionFormData {
       kind, prompt: "",
       config: {
         audioObjectKey: "", durationSeconds: 0, audioSourceText: "",
-        comprehensionQuestions: [{ question: "", options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: 0 }],
+        comprehensionQuestions: [{ question: "", options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: -1 }],
       } satisfies ListeningConfig,
       explanation: "", startSeconds: 0,
     };
@@ -88,13 +88,17 @@ export function emptyFormForKind(kind: InteractionKind): InteractionFormData {
   if (kind === InteractionKind.MULTIPLE_CHOICE) {
     return {
       kind, prompt: "",
-      config: { options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: -1, correctAnswers: [0] } satisfies McqConfig,
+      // Multiple choice: NO answer pre-marked (empty correctAnswers) — the teacher must
+      // pick every correct option. Defaulting to [0] pre-selected option A (reported bug).
+      config: { options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: -1, correctAnswers: [] } satisfies McqConfig,
       explanation: "", startSeconds: 0,
     };
   }
   return {
     kind: InteractionKind.SINGLE_CHOICE, prompt: "",
-    config: { options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: 0, correctAnswers: [] } satisfies McqConfig,
+    // Single choice: no auto-selected answer (correctAnswer -1, teacher must pick) and NO
+    // correctAnswers array — an empty [] made the shared editor mistake this for multiple.
+    config: { options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }], correctAnswer: -1 } satisfies McqConfig,
     explanation: "", startSeconds: 0,
   };
 }
@@ -270,6 +274,7 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
           }
           lessonId={lessonId}
           token={token}
+          kind={form.kind}
         />
       </div>
 
@@ -288,6 +293,7 @@ export function InteractionForm({ initial, onSave, onCancel, saving, error, less
         <div className="flex flex-col gap-1.5">
           <label className="text-sm text-muted-foreground">Thời điểm (giây)</label>
           <input
+            data-testid="interaction-start-seconds"
             type="number" min={0} step={1}
             value={form.startSeconds}
             onChange={(e) => setForm((f) => ({ ...f, startSeconds: parseFloat(e.target.value) || 0 }))}
@@ -510,11 +516,18 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
 
       {mcq && (
         <div className="grid grid-cols-1 gap-1 ml-6">
-          {mcq.options.map((opt, oi) => (
+          {mcq.options.map((opt, oi) => {
+            // Highlight correct answers for BOTH kinds: single choice stores the index in
+            // `correctAnswer`; multiple choice stores the indices in `correctAnswers` (and
+            // leaves correctAnswer = -1) — so checking only correctAnswer never lit up multiple.
+            const isCorrect = oi === mcq.correctAnswer || (mcq.correctAnswers ?? []).includes(oi);
+            return (
             <div
               key={oi}
+              data-testid="mcq-list-option"
+              data-correct={isCorrect ? "true" : "false"}
               className={`text-sm px-3 py-1.5 rounded-lg transition-colors ${
-                oi === mcq.correctAnswer
+                isCorrect
                   ? "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 font-medium border border-green-200 dark:border-green-800"
                   : "text-muted-foreground hover:bg-muted/30"
               }`}
@@ -522,7 +535,8 @@ export function InteractionRow({ interaction: it, index, lessonId, token, disabl
               <span className="font-mono text-xs mr-2">{String.fromCharCode(65 + oi)}.</span>
               {opt.text}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {fb && <p className="text-sm text-muted-foreground ml-6 font-mono bg-muted/30 rounded-lg px-3 py-2">{fb.template}</p>}

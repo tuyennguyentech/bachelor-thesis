@@ -144,7 +144,7 @@ export function InteractiveTranscript({ segments, videoRef, maxHeightClass = "ma
     try {
       await navigator.clipboard.writeText(fullText);
       setCopied(true);
-      toast.success("Đã copy toàn bộ transcript vào clipboard!");
+      toast.success("Đã copy toàn bộ bản phiên âm vào clipboard!");
       setTimeout(() => setCopied(false), uploadConfig.copyToastMs);
     } catch {
       toast.error("Không thể copy transcript");

@@ -110,6 +110,10 @@ export interface EditorViewProps<Config> {
   lessonId?: string;
   /** Optional: auth token — used by renderers that upload assets */
   token?: string;
+  /** The InteractionKind being edited. The MCQ editor is shared by SINGLE_CHOICE and
+   * MULTIPLE_CHOICE, so it must know the kind directly rather than guessing from config
+   * shape (an empty correctAnswers array is indistinguishable from a real multiple). */
+  kind?: InteractionKind;
 }
 
 export interface ReviewRowProps<Config, Response> {

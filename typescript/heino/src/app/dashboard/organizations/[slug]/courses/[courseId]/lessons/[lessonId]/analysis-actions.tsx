@@ -160,7 +160,7 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
     } else if (chunkPhase === "error") {
       action = {
         title: "Không thể phân đoạn bài học",
-        description: "Transcript đã có, nhưng bước chia nội dung gặp lỗi. Bạn có thể thử phân đoạn lại.",
+        description: "Bản phiên âm đã có, nhưng bước chia nội dung gặp lỗi. Bạn có thể thử phân đoạn lại.",
         primaryLabel: hasChunks ? "Phân đoạn lại" : "Phân đoạn bài học",
         onPrimary: () => { onGotoStep("chunks"); onStartChunk(); },
         secondaryLabel: "Mở phân đoạn",
@@ -179,8 +179,8 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
   } else if (isRunning) {
     if (isExtracting || isSyncing) {
       action = {
-        title: "Đang trích xuất transcript",
-        description: "Hệ thống đang xử lý video để tạo transcript.",
+        title: "Đang trích xuất phiên âm",
+        description: "Hệ thống đang xử lý video để tạo bản phiên âm.",
         primaryLabel: "Đang trích xuất...",
         onPrimary: () => onGotoStep("transcript"),
         primaryDisabled: true,
@@ -189,7 +189,7 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
     } else if (isChunking || isChunkSyncing) {
       action = {
         title: "Đang phân đoạn bài học",
-        description: "Hệ thống đang chia transcript thành các đoạn học tập có ngữ cảnh rõ ràng.",
+        description: "Hệ thống đang chia bản phiên âm thành các đoạn học tập có ngữ cảnh rõ ràng.",
         primaryLabel: "Đang phân đoạn...",
         onPrimary: () => onGotoStep("chunks"),
         primaryDisabled: true,
@@ -216,16 +216,16 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
       };
     } else if (!hasTranscriptContent) {
       action = {
-        title: "Tiếp theo: Trích xuất transcript",
-        description: "Hệ thống sẽ xử lý video để tạo transcript.",
-        primaryLabel: "Trích xuất transcript",
+        title: "Tiếp theo: Trích xuất phiên âm",
+        description: "Hệ thống sẽ xử lý video để tạo bản phiên âm.",
+        primaryLabel: "Trích xuất phiên âm",
         onPrimary: onStartExtract,
         tone: "default" as const,
       };
     } else if (!hasChunks) {
       action = {
         title: "Tiếp theo: Phân đoạn bài học",
-        description: "Transcript đã sẵn sàng. Chia bài học thành các đoạn nhỏ để tạo bài tập đúng ngữ cảnh.",
+        description: "Bản phiên âm đã sẵn sàng. Chia bài học thành các đoạn nhỏ để tạo bài tập đúng ngữ cảnh.",
         primaryLabel: "Phân đoạn bài học",
         onPrimary: () => { onGotoStep("chunks"); onStartChunk(); },
         secondaryLabel: "Xem transcript",
@@ -245,7 +245,7 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
     } else {
       action = {
         title: "Đã sẵn sàng dùng thử",
-        description: "Video, transcript, phân đoạn và bài tập đã được tạo. Bạn có thể xem thử với vai trò học viên.",
+        description: "Video, bản phiên âm, phân đoạn và bài tập đã được tạo. Bạn có thể xem thử với vai trò học viên.",
         primaryLabel: "Xem thử",
         onPrimary: () => router.push("?preview=1"),
         secondaryLabel: "Tạo thêm bài tập",
@@ -279,7 +279,15 @@ export function WorkflowNextAction(props: WorkflowNextActionProps) {
     // exist (it then becomes the forward "Tạo bài tập" prompt, not a duplicate).
     (activeStep === "chunks" && hasTranscriptContent && !hasChunks) ||
     (activeStep === "exercises" && hasChunks && genState.phase !== "error" && !isGenerating && !questionsGenerated) ||
-    (runningActionStep !== null && activeStep === runningActionStep);
+    (runningActionStep !== null && activeStep === runningActionStep) ||
+    // When a step has FAILED and the user is already viewing it, the step body's
+    // own error hero (ExtractProgressCard / ChunkProgressCard / TabExercises)
+    // already renders the retry CTA — this panel's identical retry was a duplicate
+    // (two "Thử lại" buttons on a failed transcribe). Keep the panel as a "go to
+    // the failing step" prompt only when the user is on a DIFFERENT step.
+    (activeStep === "transcript" && extractPhase === "error") ||
+    (activeStep === "chunks" && chunkPhase === "error") ||
+    (activeStep === "exercises" && genState.phase === "error");
 
   if (shouldHide) return null;
   return <WorkflowActionPanel {...action} />;

@@ -89,7 +89,10 @@ export const ExtractProgressCard = memo(function ExtractProgressCard({
   const isError = runState.phase === "error";
   const isDone = runState.phase === "done";
   const isIdle = runState.phase === "idle";
-  const showCta = (isIdle || isDone || isError) && !confirmReExtract;
+  // On error the hero already renders a "Thử lại" button, so DON'T also show this CTA —
+  // that produced two buttons with the same retry function (reported dup: "Thử lại" +
+  // "Trích xuất phiên âm"). CTA is only for the idle (first run) and done (re-extract) states.
+  const showCta = (isIdle || isDone) && !confirmReExtract;
   const isStartingOrSyncing = heroState === "starting" || heroState === "syncing";
 
   const currentStepLabel =
@@ -110,7 +113,7 @@ export const ExtractProgressCard = memo(function ExtractProgressCard({
     heroState === "running"   ? "Đang phiên âm" :
     heroState === "stale"     ? "Tác vụ có vẻ bị treo" :
     heroState === "error"     ? "Không thể phiên âm video" :
-    heroState === "done"      ? "Đã có transcript" :
+    heroState === "done"      ? "Đã phiên âm" :
     "";
   const heroSubtitle =
     heroState === "stale"
@@ -119,8 +122,8 @@ export const ExtractProgressCard = memo(function ExtractProgressCard({
         ? (runState.message || "Hãy thử lại hoặc kiểm tra video có âm thanh rõ ràng.")
       : heroState === "done"
         ? (segmentsCount > 0
-            ? `Transcript hiện có ${segmentsCount} đoạn. Bạn có thể chỉnh sửa trước khi phân đoạn.`
-            : "Transcript đã có sẵn cho bài học này. Nếu cần chỉnh từng đoạn theo thời gian, hãy trích xuất lại từ video.")
+            ? `Bản phiên âm hiện có ${segmentsCount} dòng. Bạn có thể chỉnh sửa trước khi phân đoạn.`
+            : "Bản phiên âm đã có sẵn cho bài học này. Nếu cần chỉnh từng dòng theo thời gian, hãy trích xuất lại từ video.")
       : currentStepLabel;
 
   const showElapsed = heroState === "running" || heroState === "stale" || heroState === "syncing";
@@ -150,15 +153,15 @@ export const ExtractProgressCard = memo(function ExtractProgressCard({
             className="inline-flex w-fit items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none"
           >
             {isStartingOrSyncing ? <Loader2Icon className="size-4 animate-spin" /> : <PlayIcon className="size-4" />}
-            {isStartingOrSyncing ? "Đang trích xuất..." : hasTranscriptContent ? "Trích xuất lại" : "Trích xuất transcript"}
+            {isStartingOrSyncing ? "Đang trích xuất..." : hasTranscriptContent ? "Trích xuất lại" : "Trích xuất phiên âm"}
           </button>
         )}
 
         {confirmReExtract && (
           <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs flex flex-col gap-2">
-            <p className="font-medium text-amber-800 dark:text-amber-300">Trích xuất lại transcript?</p>
+            <p className="font-medium text-amber-800 dark:text-amber-300">Trích xuất lại phiên âm?</p>
             <p className="text-amber-700 dark:text-amber-400">
-              Transcript, phân đoạn và bài tập hiện tại sẽ bị xoá vì chúng gắn với video cũ.
+              Bản phiên âm, phân đoạn và bài tập hiện tại sẽ bị xoá vì chúng gắn với video cũ.
             </p>
             <div className="flex gap-2">
               <button
@@ -192,7 +195,8 @@ export const ExtractProgressCard = memo(function ExtractProgressCard({
             retrying={retrying}
             testId="extract-progress"
           >
-            {heroState !== "done" && heroState !== "starting" && heroState !== "syncing" && (
+            {heroState !== "done" && heroState !== "starting" && heroState !== "syncing" &&
+              !(runState.phase === "running" && runState.coarse) && (
               <ProgressStrip steps={EXTRACT_STEPS} runState={runState} stepTimings={timings} now={now} />
             )}
           </WorkflowProgressHero>
@@ -282,7 +286,7 @@ export const ChunkProgressCard = memo(function ChunkProgressCard({
     heroState === "stale"
       ? `Không có cập nhật trong ${formatHeroElapsedShort(elapsedSec)}. Có thể worker gặp sự cố — hãy hủy và thử lại.`
       : heroState === "error" && runState.phase === "error"
-        ? (runState.message || "Transcript đã có, nhưng bước chia nội dung gặp lỗi. Hãy thử lại.")
+        ? (runState.message || "Bản phiên âm đã có, nhưng bước chia nội dung gặp lỗi. Hãy thử lại.")
       : heroState === "done"
         ? "Bài học hiện có các phân đoạn. Bạn có thể chỉnh sửa trước khi tạo bài tập."
         : currentStepLabel;
@@ -323,7 +327,8 @@ export const ChunkProgressCard = memo(function ChunkProgressCard({
             retrying={retrying}
             testId="chunk-progress"
           >
-            {heroState !== "done" && heroState !== "starting" && heroState !== "syncing" && (
+            {heroState !== "done" && heroState !== "starting" && heroState !== "syncing" &&
+              !(runState.phase === "running" && runState.coarse) && (
               <ProgressStrip steps={CHUNK_STEPS} runState={runState} stepTimings={timings} now={now} />
             )}
           </WorkflowProgressHero>
@@ -356,7 +361,7 @@ export const TranscriptEditorSection = memo(function TranscriptEditorSection({
 }: TranscriptEditorSectionProps) {
   return (
     <WorkflowTaskSection
-      title="Chỉnh sửa transcript"
+      title="Chỉnh sửa phiên âm"
       status={status}
       optional
       collapsible
@@ -467,7 +472,7 @@ export function TranscriptReadyState() {
     <WorkflowReadyState
       icon={<FileTextIcon className="size-4" />}
       title="Video sẵn sàng phiên âm"
-      description="Video đã được tải lên và có thể được xử lý để tạo transcript cho các bước phân đoạn và bài tập."
+      description="Video đã được tải lên và có thể được xử lý để tạo bản phiên âm cho các bước phân đoạn và bài tập."
     />
   );
 }
@@ -512,7 +517,7 @@ export function TranscriptLockedState() {
   return (
     <LockedStepCard
       title="Tính năng phiên âm chưa sẵn sàng"
-      description="Vui lòng hoàn thành Bước 1: Tải video trước để tải tệp bài giảng lên hệ thống. AI cần tệp video để bắt đầu quá trình trích xuất âm thanh và tự động tạo transcript."
+      description="Vui lòng hoàn thành Bước 1: Tải video trước để tải tệp bài giảng lên hệ thống. AI cần tệp video để bắt đầu quá trình trích xuất âm thanh và tự động tạo bản phiên âm."
     />
   );
 }
@@ -521,7 +526,7 @@ export function ChunkLockedState() {
   return (
     <LockedStepCard
       title="Tính năng phân đoạn chưa sẵn sàng"
-      description="Vui lòng hoàn thành Bước 2: Phiên âm trước để tạo văn bản bài giảng. Sau khi có transcript, AI sẽ tự động phân tích cấu trúc bài giảng để chia thành các phân đoạn ngữ cảnh rõ ràng."
+      description="Vui lòng hoàn thành Bước 2: Phiên âm trước để tạo văn bản bài giảng. Sau khi có bản phiên âm, AI sẽ tự động phân tích cấu trúc bài giảng để chia thành các phân đoạn ngữ cảnh rõ ràng."
     />
   );
 }

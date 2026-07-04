@@ -365,6 +365,14 @@ export function useLessonAnalysisState(input: UseLessonAnalysisStateInput): UseL
   const startExtract = useCallback(() => {
     setConfirmReExtract(false);
     dispatchStep({ type: "SET_STEP", step: "transcript" } satisfies StepperAction);
+    // A (re-)transcribe wipes the old transcript + chunks + interactions server-side
+    // (extract.go) the moment it starts. Clear them locally the instant the user
+    // confirms, so the "Chỉnh sửa transcript" step AND the video tab stop showing the
+    // stale transcript for the whole run — previously they kept the old content until
+    // (and sometimes past) completion, so a re-transcribe looked like a no-op.
+    setSegments([]);
+    setChunks([]);
+    setInteractionsState([]);
     setChunkState({ phase: "idle" });
     setChunkTimings({});
     setGenState({ phase: "idle" });

@@ -463,12 +463,30 @@ export default async function LessonDetailPage({
                           <h2 className="truncate text-sm font-semibold tracking-tight">Studio bài giảng</h2>
                         </div>
                         {lesson.videoStorageKey && (
-                          <Button asChild variant="outline" size="sm" className="gap-1.5 text-xs hover:bg-muted/70 shadow-sm">
-                            <Link href="?preview=1">
+                          // "Xem thử" (student preview) is meaningful only once the full lesson
+                          // exists: with a video + transcript but NO exercises it is identical to
+                          // just watching in the video tab. So gate it on interactions (all 4 steps
+                          // done) — matching the "Xem thử" workflow step — and disable it with a hint
+                          // until then. Name kept as "Xem thử" here too so both entry points agree.
+                          interactions.length > 0 ? (
+                            <Button asChild variant="outline" size="sm" className="gap-1.5 text-xs hover:bg-muted/70 shadow-sm">
+                              <Link href="?preview=1">
+                                <EyeIcon className="size-3.5" />
+                                Xem thử
+                              </Link>
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled
+                              title="Hoàn tất 4 bước (đến khi có bài tập) để xem thử ở chế độ học viên"
+                              className="gap-1.5 text-xs shadow-sm"
+                            >
                               <EyeIcon className="size-3.5" />
-                              Chế độ học viên
-                            </Link>
-                          </Button>
+                              Xem thử
+                            </Button>
+                          )
                         )}
                       </div>
                       {videoUrl ? (

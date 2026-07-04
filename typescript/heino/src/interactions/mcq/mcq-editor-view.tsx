@@ -1,11 +1,15 @@
 "use client";
 
 import { CheckIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { InteractionKind } from "buf/gen/richter/v1/interactions_pb";
 import type { EditorViewProps, McqConfig } from "../types";
 import { AutoTextarea } from "../_shared/auto-textarea";
 
-export function McqEditorView({ config, onChange }: EditorViewProps<McqConfig>) {
-  const isMultiple = Array.isArray(config.correctAnswers);
+export function McqEditorView({ config, onChange, kind }: EditorViewProps<McqConfig>) {
+  // Decide single vs multiple by the KIND, not by config shape: an empty correctAnswers
+  // array (the default for a fresh single choice) is indistinguishable from a real
+  // multiple, which made single-choice render checkboxes + default-mark option A.
+  const isMultiple = kind === InteractionKind.MULTIPLE_CHOICE;
   const options = config.options || [];
 
   function setOptionText(idx: number, text: string) {
@@ -88,6 +92,8 @@ export function McqEditorView({ config, onChange }: EditorViewProps<McqConfig>) 
             <div key={oi} className="flex items-start gap-2 group">
               <button
                 type="button"
+                data-testid="mcq-correct-toggle"
+                data-correct={isCorrect}
                 title={isCorrect ? "Đang là đáp án đúng" : "Chọn làm đáp án đúng"}
                 onClick={() => toggleCorrect(oi)}
                 className={`mt-1 shrink-0 size-5 rounded border-2 flex items-center justify-center transition-colors

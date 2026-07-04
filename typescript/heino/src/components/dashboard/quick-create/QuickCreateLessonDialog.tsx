@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Dialog,
   DialogContent,
@@ -229,8 +228,6 @@ export function QuickCreateLessonDialog({
   slug,
   existingLesson,
 }: QuickCreateLessonDialogProps) {
-  const router = useRouter();
-
   const storageClient = useRichterWebClient(StorageService, token);
   const lessonClient = useRichterWebClient(LessonService, token);
   const aiClient = useRichterWebClient(AIService, token);
@@ -308,8 +305,18 @@ export function QuickCreateLessonDialog({
 
   // ── Navigate to the lesson's processing tab (durable progress lives there) ──
   function goToProcessing(lessonId: string) {
-    router.push(`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lessonId}?tab=processing`);
     onOpenChange(false);
+    // Deterministic FULL-DOCUMENT navigation. A soft router.push here only changes
+    // the ?tab= query on the SAME route segment, which the App Router can serve from
+    // the client Router Cache WITHOUT re-running the Server Component → the
+    // just-uploaded videoStorageKey/videoUrl + activeTab stay stale (content tab
+    // frozen on "Chưa có video", stepper stuck at step 1, task poller disabled — the
+    // reported freeze). router.refresh() cannot be reliably sequenced after
+    // router.push (the push transition supersedes it), so we hard-navigate — exactly
+    // what the manual reload that "fixes" it does today, but automatic + race-free.
+    // Fires once at hand-off (not per tab-switch), so it doesn't reintroduce the
+    // heavy per-switch reload the client tabs were designed to avoid.
+    window.location.assign(`/dashboard/organizations/${slug}/courses/${courseId}/lessons/${lessonId}?tab=processing`);
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────

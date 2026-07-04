@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AlertCircleIcon, CheckIcon, Loader2Icon, RefreshCwIcon, StopCircleIcon, XIcon } from "lucide-react";
+import { AlertCircleIcon, CheckIcon, Loader2Icon, StopCircleIcon, XIcon } from "lucide-react";
 import { type LessonTask, LessonTaskKind, LessonTaskStatus } from "buf/gen/richter/v1/ai_pb";
 import { isLessonTaskActive } from "./use-lesson-tasks";
 import { analysisConfig } from "@/lib/client-config";
@@ -119,7 +119,6 @@ export function LessonTaskPanel({
   tasks,
   activeStep,
   hidePipelineTask = false,
-  onRefresh,
   onCancel,
 }: {
   tasks: LessonTask[];
@@ -136,7 +135,6 @@ export function LessonTaskPanel({
    * dedup below never catches it — this flag does.
    */
   hidePipelineTask?: boolean;
-  onRefresh: () => void;
   onCancel: (taskId: string) => void;
 }) {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
@@ -169,32 +167,33 @@ export function LessonTaskPanel({
   );
   if (visibleTasks.length === 0) return null;
 
-  // Hide active tasks that belong to the user's current step — the
-  // bottom ExtractProgressCard / ChunkProgressCard renders full live
-  // progress for that step, so showing the same task here would be
-  // pure duplication. Everything else (other-step running tasks and
-  // recent terminal results for any step) is still useful as a
-  // background/recency signal.
+  // Hide tasks that belong to the user's current step — REGARDLESS of status.
+  // The bottom step card owns that task's whole lifecycle: live progress while
+  // running AND the error/done hero once terminal (with the message and the
+  // retry CTA). Filtering only ACTIVE tasks here made a FAILED task of the
+  // current step reappear as a second row, so the same error message rendered
+  // twice (reported bug). Other-step tasks stay visible as the background /
+  // recency signal — that is this panel's actual job.
   const displayTasks = visibleTasks.filter((task) => {
-    if (hidePipelineTask && task.kind === LessonTaskKind.RUN_PIPELINE && isLessonTaskActive(task)) {
+    if (hidePipelineTask && task.kind === LessonTaskKind.RUN_PIPELINE) {
+      // The one-shot pipeline's lifecycle — including its failure — is fully
+      // represented by the auto-banner + stepper + the stage-attributed step
+      // heroes, in every state. Same dedup rationale as above.
       return false;
     }
-    return taskKindToStep(task.kind) !== activeStep || !isLessonTaskActive(task);
+    return taskKindToStep(task.kind) !== activeStep;
   });
   if (displayTasks.length === 0) return null;
 
   return (
     <section className="rounded-md border border-border/70 bg-card/60 p-3" data-testid="lesson-task-panel">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">Tác vụ khác</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Có thể rời trang hoặc tải lại, tiến trình vẫn được lưu theo tác vụ.
-          </p>
-        </div>
-        <Button variant="ghost" size="icon" className="size-8" onClick={onRefresh} title="Làm mới tác vụ">
-          <RefreshCwIcon className="size-4" />
-        </Button>
+      {/* No manual refresh button: the task list already auto-polls every few
+          seconds (use-lesson-tasks baseIntervalMs), so it was a no-op decoration. */}
+      <div>
+        <h3 className="text-sm font-semibold">Tác vụ chạy nền</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Tác vụ của các bước khác — có thể rời trang hoặc tải lại, tiến trình vẫn được lưu.
+        </p>
       </div>
       <div className="mt-3 grid gap-2">
         {displayTasks.map((task) => (

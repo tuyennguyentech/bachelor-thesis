@@ -11,7 +11,9 @@ import { NestedMcqEditor } from "../_shared/nested-mcq";
 const EMPTY_MCQ: McqConfig = {
   question: "",
   options: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }],
-  correctAnswer: 0,
+  // No answer pre-marked — the teacher must pick the correct option (defaulting to 0
+  // pre-selected option A, the reported bug).
+  correctAnswer: -1,
 };
 
 export function ListeningEditorView({ config, onChange, lessonId = "", token = "" }: EditorViewProps<ListeningConfig>) {

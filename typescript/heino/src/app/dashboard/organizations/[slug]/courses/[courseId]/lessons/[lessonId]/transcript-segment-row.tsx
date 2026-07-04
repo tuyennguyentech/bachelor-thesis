@@ -40,7 +40,10 @@ export function SegmentRow({ segment, index, lessonId, onUpdated, onSaved, disab
   }
 
   return (
-    <div className="flex gap-2 items-start rounded-md border border-border bg-muted/30 px-2 py-1.5 text-xs">
+    <div
+      data-testid={`edit-transcript-segment-${index}`}
+      className="flex gap-2 items-start rounded-md border border-border bg-muted/30 px-2 py-1.5 text-xs"
+    >
       <span className="text-muted-foreground shrink-0 tabular-nums pt-0.5">
         {formatTime(segment.startSeconds)}
       </span>
