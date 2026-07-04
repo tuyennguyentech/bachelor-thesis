@@ -165,5 +165,10 @@ Rarely needed:
 - **`… seed gen-ml-spec`** (same wrapper as above) — regenerates the committed ML course spec
   (`tu-hoc-ml.json` + `videos.json`) from the downloaded videos. Only needed after **changing
   the ML video set**; the spec is already committed, normal reseeds never run this.
+- **`… seed gen-exercises --lesson-title "…"`** — (re)generate exercises for ONE lesson through
+  the real generation service (`--kinds`, `--count`, `--difficulty`, `--force` — see `--help`).
+- **`… seed rescale-fixtures`** — re-fit the demo (non-ML) fixture lessons to their real video
+  durations, in place — repairs an older DB without a destructive reseed.
+- Bare **`… seed`** (no `--dev`) creates only the admin account from `richter.base.toml`.
 
 Full details: [docs/infra/portable-local-data.md](docs/infra/portable-local-data.md).

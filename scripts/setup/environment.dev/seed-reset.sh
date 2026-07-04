@@ -32,11 +32,15 @@ COMPOSE=(podman compose -f compose.yml)
 # the Whisper/Piper models on every reset.
 VOL_SUBDIRS=(postgres fdb-coordinator fdb-server-1 fdb-server-2 seaweedfs caddy-data caddy-config)
 
-echo "=== [1/4] Stop stack (down; DATA lives in ./volumes, wiped next) ==="
-# Plain `down` (no -v): there are no named volumes — all data is bind-mounted under
-# ./volumes. The model cache (volumes/hf-cache) is kept (not in VOL_SUBDIRS) so
-# resets don't re-download models.
-"${COMPOSE[@]}" down --remove-orphans || true
+echo "=== [1/4] Stop stack (down -v; DATA lives in ./volumes, wiped next) ==="
+# `down -v`: the -v removes the ANONYMOUS volumes podman creates for image-declared
+# VOLUME paths that no bind mount covers (e.g. the fdb-init sidecar runs the
+# foundationdb image, whose /var/fdb/data VOLUME is unbound there) — a plain `down`
+# leaves one dangling per reset cycle, so repeated resets never reproduce a truly
+# fresh machine. There are no named volumes, and the REAL data lives in ./volumes
+# BIND mounts, which -v never touches. The model cache (volumes/hf-cache) is kept
+# (not in VOL_SUBDIRS) so resets don't re-download models.
+"${COMPOSE[@]}" down -v --remove-orphans || true
 
 echo "=== [2/4] Wipe ./volumes data dirs ==="
 # postgres/fdb data is owned by the container's mapped subuid (via :U), which the
