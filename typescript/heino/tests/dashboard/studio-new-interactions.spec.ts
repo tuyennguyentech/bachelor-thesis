@@ -200,6 +200,9 @@ test.describe.serial("Interactive Video Quiz — New Features E2E Tests", () => 
     await form.getByPlaceholder("Lựa chọn B").fill("Luồng xoá khóa học");
     await form.getByPlaceholder("Lựa chọn C").fill("Luồng đổi mật khẩu");
     await form.getByPlaceholder("Lựa chọn D").fill("Luồng đổi theme");
+    // Listening's comprehension MCQ no longer auto-marks option A — pick the correct
+    // answer explicitly (else correctAnswer=-1 and the save is rejected).
+    await form.getByTitle("Chọn làm đáp án đúng").first().click({ force: true });
     await form.locator('input[type="number"]').first().fill("9992");
     await form.getByRole("button", { name: "Lưu" }).click({ force: true });
 

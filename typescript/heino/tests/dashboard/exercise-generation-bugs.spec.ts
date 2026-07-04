@@ -19,16 +19,6 @@
 import { test, expect, createAnalyzedLesson, InteractionKind, type Page } from "../fixtures";
 import type { Locator } from "@playwright/test";
 
-async function activePerChunkGenCount(page: Page, token: string, lessonId: string): Promise<number> {
-  const res = await page.request.post("/api/richter/richter.v1.AIService/ListLessonTasks", {
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    data: { lessonId, activeOnly: true, limit: 50, offset: 0 },
-  });
-  if (!res.ok()) return -1;
-  const body = (await res.json()) as { tasks?: Array<{ kind?: string | number; chunkId?: string; chunk_id?: string }> };
-  return (body.tasks ?? []).filter((t) => (t.kind === 3 || String(t.kind).includes("GENERATE_INTERACTIONS")) && !!(t.chunkId ?? t.chunk_id)).length;
-}
-
 /** Access token of the currently logged-in page (for direct RPC assertions). */
 async function pageToken(page: Page): Promise<string> {
   const token = (await page.context().cookies()).find((c) => c.name === "dyadia_access")?.value;
@@ -296,28 +286,41 @@ test.describe("AI exercise generation — concurrent per-chunk", () => {
     const { lessonUrl, lessonId, chunks } = await createAnalyzedLesson(undefined, 3);
     const base = lessonUrl.split("?")[0];
     await openExercisesStep(page, base);
-    const token = await pageToken(page);
     const section0 = page.getByTestId(`chunk-${chunks[0].id}`);
     const section1 = page.getByTestId(`chunk-${chunks[1].id}`);
 
-    // Start a REAL generation on chunk 0.
+    // Start a REAL generation on chunk 0 (real StartLessonTask → worker → mock engine).
     await startChunkGenerate(section0);
     await expect(section0.getByTestId("chunk-ai-btn")).toBeDisabled({ timeout: 10_000 });
 
-    // Observe an active per-chunk task, then wait > one client poll (2.5s) so the
-    // client's activeTasks (and thus isBusy) reflects it — this is when the regression
-    // disabled other chunks' buttons.
-    let sawActive = false;
-    for (let i = 0; i < 12; i++) {
-      if ((await activePerChunkGenCount(page, token, lessonId)) > 0) { sawActive = true; break; }
-      await page.waitForTimeout(300);
-    }
-    test.skip(!sawActive, "generation finished too fast to observe (set RICHTER_MOCK_LATENCY_MS high)");
-    await page.waitForTimeout(3000);
-    test.skip((await activePerChunkGenCount(page, token, lessonId)) === 0, "generation finished before the enabled-check");
+    // The real per-chunk task is genuinely in flight, but a fast mock can complete it
+    // before the client's 2.5s task-poll reflects it — the exact window the regression
+    // bit in. Previously the test SKIPPED when that timing was unlucky (or required a high
+    // global mock latency that would slow the whole suite). Instead, overlay ListLessonTasks
+    // so chunk 0 reads as RUNNING while we assert — deterministic, no skip. The real
+    // generation above still exercised the true backend enqueue + worker path.
+    await page.route("**/richter.v1.AIService/ListLessonTasks", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          tasks: [{
+            id: "00000000-0000-0000-0000-0000000000ab",
+            lessonId,
+            chunkId: chunks[0].id, // the in-flight per-chunk generation
+            kind: "LESSON_TASK_KIND_GENERATE_INTERACTIONS",
+            status: "LESSON_TASK_STATUS_RUNNING",
+          }],
+        }),
+      });
+    });
+    // Wait past one client task-poll (baseIntervalMs 2.5s) so activeTasks reflects the
+    // running per-chunk task — this is when the regression disabled other chunks' buttons.
+    await page.waitForTimeout(4000);
 
     // REGRESSION GUARD (real flow): chunk 1's AI button ENABLED while chunk 0 generates.
     await expect(section1.getByTestId("chunk-ai-btn")).toBeEnabled({ timeout: 3_000 });
+    await page.unroute("**/richter.v1.AIService/ListLessonTasks");
   });
 });
 

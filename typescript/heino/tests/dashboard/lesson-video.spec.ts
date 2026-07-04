@@ -42,10 +42,10 @@ async function goToLessonAsStudent(page: Page): Promise<string> {
 }
 
 async function enterPreviewMode(page: Page): Promise<void> {
-  // "Chế độ học viên" link is in the content tab (default tab).
+  // "Xem thử" link is in the content tab (default tab).
   // workflow-step-preview lives in the processing tab which is hidden by default,
-  // so we use the visible "Chế độ học viên" button in the Studio bài giảng section.
-  await page.getByRole("link", { name: "Chế độ học viên" }).click();
+  // so we use the visible "Xem thử" button in the Studio bài giảng section.
+  await page.getByRole("link", { name: "Xem thử" }).click();
   await expect(page.getByText("Đang xem thử dưới dạng học viên")).toBeVisible();
 }
 

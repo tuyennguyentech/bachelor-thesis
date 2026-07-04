@@ -634,6 +634,159 @@ export async function createAnalyzedLesson(
   return { courseId, moduleId, lessonId, lessonUrl, chunks: analysis.chunks, token, teacherEmail };
 }
 
+/**
+ * Seeds the EXACT mid-pipeline state that regressed the transcript display:
+ * lesson-level transcript SEGMENTS in FDB while the ONLY task is a PROCESSING
+ * `pipeline_run` (no succeeded task). Pre-fix, GetLessonAnalysis gated segment
+ * loading on a SUCCEEDED task, so this state returned zero segments and the
+ * transcript was blank on BOTH the "Xử lý video" step and the "Bài giảng" video
+ * tab even though the segments already existed in FDB.
+ *
+ * Built on createAnalyzedLesson (real teacher/course/lesson + uploaded video),
+ * then RE-SEEDED via the test endpoint into the mid-pipeline state. The seed
+ * endpoint deletes the prior succeeded tasks + chunks first, so afterwards ONLY
+ * the PROCESSING pipeline_run and the FDB segments remain — the deterministic
+ * reproduction that `createAnalyzedLesson` alone cannot produce (it always plants
+ * a synthetic SUCCEEDED task, which masks the bug).
+ */
+export async function seedMidPipelineTranscript(
+  baseURL?: string,
+  segmentTexts: string[] = [
+    "Xin chào, đây là dòng phiên âm thứ nhất của bài giảng.",
+    "Và đây là dòng phiên âm thứ hai, vẫn đang trong lúc xử lý.",
+  ],
+): Promise<{ courseId: string; lessonId: string; lessonUrl: string; token: string; segmentTexts: string[] }> {
+  const { courseId, lessonId, lessonUrl, token } = await createAnalyzedLesson(baseURL);
+  const seedResp = await fetch(`${rpcBaseUrl(baseURL)}/richter/v1/test/seed-analyzed-lesson`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      lesson_id: lessonId,
+      chunks: [],
+      segments: segmentTexts.map((text, i) => ({ text, start_seconds: i * 3, end_seconds: (i + 1) * 3 })),
+      pipeline_run_status: "processing",
+      pipeline_run_stage: "CHUNKING",
+    }),
+  });
+  if (!seedResp.ok) {
+    throw new Error(`seedMidPipelineTranscript: seed failed (${seedResp.status}): ${await seedResp.text()}`);
+  }
+  return { courseId, lessonId, lessonUrl, token, segmentTexts };
+}
+
+/**
+ * Seeds a lesson with a SINGLE in-progress task (no succeeded task) of a given
+ * task_type + progress_step. Deterministic, no Gemini/Whisper. Used to verify the
+ * transcript step's progress UI without racing a real pipeline:
+ *   - { taskType: "pipeline_run", stage: "TRANSCRIBING" } → Quick-Create: the 4
+ *     transcribe sub-steps are HIDDEN (coarse stage → single spinner).
+ *   - { taskType: "transcribe", stage: "ANALYSIS_PROGRESS_STEP_ANALYZING" } →
+ *     standalone re-transcribe: the detailed 4-step strip is SHOWN.
+ * Built on createAnalyzedLesson (real lesson + video), then re-seeded via the
+ * test endpoint (clears the succeeded tasks it planted, inserts the one in-progress task).
+ */
+export async function seedProcessingTask(opts: {
+  taskType: string;
+  stage: string;
+  baseURL?: string;
+}): Promise<{ courseId: string; lessonId: string; lessonUrl: string; token: string }> {
+  const { courseId, lessonId, lessonUrl, token } = await createAnalyzedLesson(opts.baseURL);
+  const resp = await fetch(`${rpcBaseUrl(opts.baseURL)}/richter/v1/test/seed-analyzed-lesson`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      lesson_id: lessonId,
+      chunks: [],
+      pipeline_run_status: "processing",
+      pipeline_run_stage: opts.stage,
+      pipeline_run_task_type: opts.taskType,
+    }),
+  });
+  if (!resp.ok) {
+    throw new Error(`seedProcessingTask: seed failed (${resp.status}): ${await resp.text()}`);
+  }
+  return { courseId, lessonId, lessonUrl, token };
+}
+
+/**
+ * Seeds the EXACT inconsistent DB state of the reported bug #8: STALE chunk rows
+ * physically present while the ONLY task row is a FAILED standalone transcribe
+ * (with a real error message). This is what an old binary left behind when a
+ * failed re-transcribe cleaned up only on success — the read path must render it
+ * as ONE coherent failed state (no "4 đoạn" under a padlock, no phantom
+ * generation error), regardless of how the rows got there.
+ */
+export async function seedFailedTranscribeWithStaleChunks(
+  baseURL?: string,
+  opts?: { errorMsg?: string; chunkCount?: number },
+): Promise<{ courseId: string; lessonId: string; lessonUrl: string; token: string }> {
+  const { courseId, lessonId, lessonUrl, token } = await createAnalyzedLesson(baseURL);
+  const count = opts?.chunkCount ?? 4;
+  const resp = await fetch(`${rpcBaseUrl(baseURL)}/richter/v1/test/seed-analyzed-lesson`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      lesson_id: lessonId,
+      chunks: Array.from({ length: count }, (_, i) => ({
+        transcript: `Stale chunk ${i + 1} left behind by a failed re-transcribe.`,
+        start_seconds: i * 7,
+        end_seconds: (i + 1) * 7,
+        summary: `Stale chunk ${i + 1}`,
+      })),
+      pipeline_run_status: "failed",
+      pipeline_run_task_type: "transcribe",
+      // The step the task died on (byte-matches the reported broken row): the
+      // download + audio-extract sub-steps completed, Whisper (ANALYZING) failed.
+      pipeline_run_stage: "ANALYSIS_PROGRESS_STEP_ANALYZING",
+      pipeline_run_error:
+        opts?.errorMsg ??
+        "phiên âm bị lặp bất thường — âm thanh có thể quá ngắn, nhiều nhạc/nhiễu, hoặc không rõ tiếng nói.",
+    }),
+  });
+  if (!resp.ok) {
+    throw new Error(`seedFailedTranscribeWithStaleChunks: seed failed (${resp.status}): ${await resp.text()}`);
+  }
+  return { courseId, lessonId, lessonUrl, token };
+}
+
+/**
+ * Uploads a video to a lesson via the presigned-URL flow and registers it on the
+ * lesson (no browser needed). Defaults to the light edu-sample-en.mp4; pass a
+ * different `videoPath` (e.g. fixtures/test-video.mp4, an invalid 1966-byte file)
+ * to make a subsequent transcribe deterministically FAIL. Returns the storage key.
+ */
+export async function uploadLessonVideo(
+  token: string,
+  lessonId: string,
+  opts?: { videoPath?: string; durationSeconds?: number; baseURL?: string },
+): Promise<string> {
+  const transport = createAuthedTransport(token, opts?.baseURL);
+  const videoKey = `lessons/${lessonId}/video.mp4`;
+  const storageClient = createClient(StorageService, transport);
+  const uploadRes = await storageClient.getUploadUrl({
+    key: videoKey,
+    contentType: "video/mp4",
+    expiresInSeconds: 3600,
+  });
+  const videoBytes = fs.readFileSync(opts?.videoPath ?? TEST_VIDEO_WITH_AUDIO);
+  const resp = await fetch(uploadRes.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "video/mp4" },
+    body: videoBytes,
+  });
+  if (!resp.ok) throw new Error(`uploadLessonVideo: upload failed (${resp.status})`);
+  const lessonClient = createClient(LessonService, transport);
+  await lessonClient.updateLessonVideo({
+    id: lessonId,
+    videoStorageKey: videoKey,
+    durationSeconds: opts?.durationSeconds ?? 7,
+  });
+  return videoKey;
+}
+
+/** Absolute path to the invalid 1966-byte mp4 that makes ffmpeg audio-extract fail. */
+export const INVALID_VIDEO = path.join(__dirname, "fixtures/test-video.mp4");
+
 export { expect };
 export type { Page };
 // Re-export enum types so callers only need to import from fixtures.

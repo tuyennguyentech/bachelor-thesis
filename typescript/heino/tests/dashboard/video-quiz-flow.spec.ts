@@ -178,8 +178,8 @@ test.describe("Video upload flow", () => {
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     await expect(page.getByText(/Đang tải lên/)).toBeVisible();
     // After upload, the component remounts with videoStorageKey set and the workflow advances to
-    // the transcript step. "Trích xuất transcript" is the stable post-upload indicator.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    // the transcript step. "Trích xuất phiên âm" is the stable post-upload indicator.
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
     // Navigate back to the upload step (step 1) to verify the button label changed to "Thay video".
     await page.getByTestId("workflow-step-upload").click();
     await expect(page.getByRole("button", { name: "Thay video" }).first()).toBeVisible();
@@ -195,7 +195,7 @@ test.describe("Video upload flow", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
     // After upload, authoring workflow appears with the transcript extract button.
     await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
@@ -218,12 +218,12 @@ test.describe("Video upload flow", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
     // Reload to ?tab=processing so the server re-renders with video_key set
     await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("video-workflow-stepper")).toBeVisible();
-    await expect(page.getByTestId("workflow-next-action")).toContainText("Tiếp theo: Trích xuất transcript");
+    await expect(page.getByTestId("workflow-next-action")).toContainText("Tiếp theo: Trích xuất phiên âm");
     await expect(page.getByTestId("workflow-step-transcript")).toBeVisible();
     await expect(page.getByTestId("workflow-step-chunks")).toBeDisabled();
     await expect(page.getByText("Video sẵn sàng phiên âm")).toBeVisible();
@@ -273,7 +273,7 @@ test.describe("Video player", () => {
     // Upload a real file so video_storage_key is set in DB
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step — confirms upload succeeded.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 60_000 });
     // Navigate to ?tab=content so the server fetches the presigned download URL and renders the video player
     await page.goto(`${lessonUrl}?tab=content`, { waitUntil: "domcontentloaded" });
     // Wait for the player to actually mount as the definitive "ready" signal before
@@ -319,12 +319,12 @@ test.describe("AI analysis", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
     // Navigate to ?tab=processing so server re-renders with video_key set → AI section appears
     await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible();
   });
 
   test("seeded lesson shows analysis status Hoàn thành", async ({ teacherPage: page }) => {
@@ -335,7 +335,7 @@ test.describe("AI analysis", () => {
     await expect(page.getByText("Tạo nội dung từ video")).toBeVisible();
     await expect(page.getByTestId("workflow-step-exercises")).toContainText(/\d+ câu/);
     await expect(page.getByText("Đã sẵn sàng dùng thử")).toBeVisible();
-    await expect(page.getByTestId("workflow-next-action")).not.toContainText("Trích xuất transcript");
+    await expect(page.getByTestId("workflow-next-action")).not.toContainText("Trích xuất phiên âm");
   });
 
   test("teacher sees questions with correct answers highlighted", async ({ teacherPage: page }) => {
@@ -355,7 +355,7 @@ test.describe("AI analysis", () => {
 // ── 4b. SSE streaming progress UI ─────────────────────────────────────────
 
 test.describe("AI analysis streaming progress", () => {
-  test("clicking Trích xuất transcript shows 4-step progress panel", async ({ teacherPage: page }) => {
+  test("clicking Trích xuất phiên âm shows 4-step progress panel", async ({ teacherPage: page }) => {
     const url = await createLesson(
       page, uid("Khóa học SSE"), uid("Chương SSE"), uid("Bài SSE"),
     );
@@ -365,9 +365,9 @@ test.describe("AI analysis streaming progress", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
 
     // Progress panel (the bottom hero card) appears immediately.
     const panel = page.locator('[data-testid="extract-progress"]');
@@ -397,9 +397,9 @@ test.describe("AI analysis streaming progress", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
     // The hero card is visible with the running state + cancel button.
     const hero = page.locator('[data-testid="extract-progress"]');
     await expect(hero).toBeVisible({ timeout: 5_000 });
@@ -424,9 +424,9 @@ test.describe("AI analysis streaming progress", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
     await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
 
     // Navigate back to ?tab=processing after reload so the pipeline UI is visible
@@ -936,10 +936,10 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" }).first()).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
     // After upload, the workflow advances to the transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
 
     // Step 1: Extract transcript
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
     // The running extract state is shown in the bottom hero card.
     const extractHero = page.locator('[data-testid="extract-progress"]');
     await expect(extractHero).toBeVisible({ timeout: 5_000 });
@@ -1174,8 +1174,8 @@ test.describe.serial("Full pipeline with audio fixture", () => {
     // Upload a replacement video (same format, triggers status → PENDING)
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO);
 
-    // AnalyzeButton state reset: button reverts to "Trích xuất transcript" (not "Trích xuất lại")
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+    // AnalyzeButton state reset: button reverts to "Trích xuất phiên âm" (not "Trích xuất lại")
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Trích xuất lại" })).not.toBeVisible();
 
     // Navigate to ?tab=content to confirm the VideoPlayer source changed and transcript cleared
@@ -1275,6 +1275,8 @@ test.describe.serial("Teacher question editing", () => {
     await page.getByPlaceholder("Lựa chọn B", { exact: true }).fill("Phương án B");
     await page.getByPlaceholder("Lựa chọn C", { exact: true }).fill("Phương án C");
     await page.getByPlaceholder("Lựa chọn D", { exact: true }).fill("Phương án D");
+    // Single choice no longer auto-marks option A (server rejects correct_answer < 0).
+    await page.getByTitle("Chọn làm đáp án đúng").first().click();
 
     await page.getByRole("button", { name: "Lưu" }).last().click();
     // Scope to step body to match the visible paragraph row, not hidden title bar preview.
@@ -1298,6 +1300,9 @@ test.describe.serial("Teacher question editing", () => {
       await page.getByPlaceholder("Lựa chọn B", { exact: true }).fill("B");
       await page.getByPlaceholder("Lựa chọn C", { exact: true }).fill("C");
       await page.getByPlaceholder("Lựa chọn D", { exact: true }).fill("D");
+      // Single choice no longer auto-marks option A (server rejects correct_answer < 0),
+      // so pick a correct answer before saving.
+      await page.getByTitle("Chọn làm đáp án đúng").first().click();
       await page.getByRole("button", { name: "Lưu" }).last().click();
       // Wait for form to close.
       await expect(page.getByPlaceholder("Nhập câu hỏi...")).not.toBeVisible({ timeout: 5_000 });
@@ -1337,6 +1342,8 @@ test.describe.serial("Teacher question editing", () => {
     await page.getByPlaceholder("Lựa chọn B", { exact: true }).fill("B");
     await page.getByPlaceholder("Lựa chọn C", { exact: true }).fill("C");
     await page.getByPlaceholder("Lựa chọn D", { exact: true }).fill("D");
+    // Single choice no longer auto-marks option A (server rejects correct_answer < 0).
+    await page.getByTitle("Chọn làm đáp án đúng").first().click();
     await page.getByRole("button", { name: "Lưu" }).last().click();
     await expect(page.getByText(deleteTarget)).toBeVisible({ timeout: 5_000 });
 

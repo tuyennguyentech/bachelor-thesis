@@ -108,11 +108,13 @@ test.describe("Video pipeline review fixes", () => {
     const outlineTab = page.getByRole("button", { name: "Dàn bài", exact: true });
     await outlineTab.click();
     const chunkButtons = page.locator("[data-testid^='outline-chunk-']");
+    // The outline renders its chunk buttons from client state after the tab switch;
+    // locator.count() does NOT auto-wait, so counting immediately raced the React
+    // re-render and returned 0 → the test skipped. The seeded Big-O lesson has chunks
+    // (verified: 5), so wait for the first button before counting — a genuine 0 here
+    // is a seed/env failure worth surfacing, not an expected skip.
+    await expect(chunkButtons.first()).toBeVisible({ timeout: 15_000 });
     const count = await chunkButtons.count();
-    if (count === 0) {
-      test.skip(true, "Lesson has no chunks to test against — analysis may not have run on the seed video");
-      return;
-    }
     // The LAST chunk is guaranteed to sit past the first unanswered checkpoint.
     const targetSeconds = Number(await chunkButtons.nth(count - 1).getAttribute("data-start-seconds"));
     expect(targetSeconds).toBeGreaterThan(5);

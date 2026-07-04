@@ -65,12 +65,12 @@ test.describe("Lesson tab — Bài giảng (content)", () => {
     await expect(page.getByText("Đã hoàn thành")).toHaveCount(0);
   });
 
-  test("?tab=content shows Chế độ học viên preview link", async ({ teacherPage: page }) => {
+  test("?tab=content shows Xem thử preview link", async ({ teacherPage: page }) => {
     const lessonHref = await goToSeededLesson(page, SEED_DSA_LESSON_BIG_O);
     await page.goto(`${lessonHref}?tab=content`, { waitUntil: "domcontentloaded" });
 
     // Seeded lesson has a video → preview button is visible
-    await expect(page.getByRole("link", { name: "Chế độ học viên" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Xem thử" })).toBeVisible();
   });
 });
 

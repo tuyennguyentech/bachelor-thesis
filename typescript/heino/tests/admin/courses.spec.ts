@@ -49,8 +49,15 @@ test.describe("Course list page", () => {
 
     // dialog closes after success
     await expect(page.getByRole("dialog")).not.toBeVisible();
-    // new course appears in table
-    await expect(page.getByRole("cell", { name: title })).toBeVisible();
+    // The new course appears in the table (ordered created_at DESC → newest first,
+    // so it lands on page 1). The dialog refreshes the list client-side via
+    // router.refresh(), but that revalidation can lag past a single 5s timeout
+    // under parallel load — re-navigate to page 1 in a toPass loop so the assertion
+    // reflects a fresh server render rather than the racy in-place refresh.
+    await expect(async () => {
+      await page.goto(COURSES_URL);
+      await expect(page.getByRole("cell", { name: title })).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
   });
 
   test("shows validation error when title is empty", async ({ adminPage: page }) => {
@@ -75,7 +82,13 @@ test.describe("Course detail page", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Tạo" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
 
-    // click Chi tiết for the new course
+    // Find the new course's row and open its detail. The post-create list refresh
+    // can lag under parallel load, so re-navigate to page 1 in a toPass loop until
+    // the row is present (newest-first ordering keeps it on page 1) before clicking.
+    await expect(async () => {
+      await page.goto(COURSES_URL);
+      await expect(page.getByRole("row").filter({ hasText: courseTitle })).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     const row = page.getByRole("row").filter({ hasText: courseTitle });
     await row.getByRole("link", { name: "Chi tiết" }).click();
     await expect(page.getByRole("heading", { name: courseTitle })).toBeVisible();

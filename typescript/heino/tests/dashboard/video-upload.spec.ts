@@ -157,9 +157,9 @@ test.describe("Video upload flow", () => {
       /* progress bar may have already advanced — the success assertion is authoritative */
     });
     // After upload + DB update, the component remounts with videoStorageKey set and the
-    // workflow advances to the transcript step. "Trích xuất transcript" is the stable
+    // workflow advances to the transcript step. "Trích xuất phiên âm" is the stable
     // post-upload indicator (the transient "done" toast disappears on remount).
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 60_000 });
   });
 
   test("button changes from Tải video lên to Thay video after upload", async ({ teacherPage: page }) => {
@@ -168,7 +168,7 @@ test.describe("Video upload flow", () => {
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     // After upload, the component remounts with videoStorageKey set and advances to step 2.
     // Navigate back to the upload step (step 1) to verify the button changed to "Thay video".
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("workflow-step-upload").click();
     await expect(page.getByRole("button", { name: "Thay video" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Tải video lên" })).not.toBeVisible();
@@ -179,7 +179,7 @@ test.describe("Video upload flow", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" })).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     // Wait for upload to complete: workflow advances to transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
     // Wait for router.refresh() to settle before hard-navigating
     await page.waitForLoadState("networkidle");
 
@@ -197,7 +197,7 @@ test.describe("Video upload flow", () => {
     await expect(page.getByRole("button", { name: "Tải video lên" })).toBeVisible();
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     // Wait for upload to complete: workflow advances to transcript step.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
     // Wait for router.refresh() to settle before hard-navigating
     await page.waitForLoadState("networkidle");
 
@@ -214,7 +214,7 @@ test.describe("Video upload flow", () => {
     // Second upload via the replace button (same hidden input, button label irrelevant to setInputFiles)
     await page.locator('input[type="file"][accept="video/*"]').setInputFiles(TEST_VIDEO);
     // After replace, workflow advances to transcript step again — confirms second upload succeeded.
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 30_000 });
     // Switch back to the upload step and confirm the label is still "Thay video".
     await expect(async () => {
       await page.getByTestId("workflow-step-upload").click();

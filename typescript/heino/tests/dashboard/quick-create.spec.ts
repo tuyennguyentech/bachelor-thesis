@@ -186,3 +186,99 @@ test("QuickCreate: video-less lesson shows quick-create + manual buttons", async
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByText(/Tạo nhanh:/)).toBeVisible();
 });
+
+// ── Test: EXISTING-lesson quick-create updates the video tab + stepper IN-PLACE ──
+// Regression for the "frozen after Tạo nhanh" bug: for an existing (video-less)
+// lesson, quick-create pushed ?tab=processing on the SAME pathname WITHOUT a
+// router.refresh(), so the App Router served stale SSR (videoStorageKey empty) —
+// the content tab stayed on "Chưa có video" and the stepper's step 1 stayed "Chờ
+// tải video" until a manual reload. The fix adds router.refresh() in goToProcessing.
+test.slow();
+test("QuickCreate: existing-lesson quick-create hands off with a fresh SSR read (video + stepper, no manual reload)", async ({ teacherPage: page, baseURL }) => {
+  const { courseId, moduleId, token } = await setupIsolatedCourse(baseURL);
+  await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
+
+  const lessonClient = createClient(LessonService, createAuthedTransport(token, baseURL));
+  const created = await lessonClient.createLesson({ moduleId, title: uid("QC-InPlace"), orderIndex: 0 });
+  const lessonId = created.lesson!.id;
+  const lessonUrl = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}/lessons/${lessonId}`;
+
+  await page.goto(lessonUrl, { waitUntil: "domcontentloaded" });
+  await expect(page.getByText(/Chưa có video/)).toBeVisible({ timeout: 10_000 });
+
+  // Tag the current document. The freeze's root cause is that the hand-off used a
+  // SOFT same-segment `?tab=` router.push (kept this document), which the App Router
+  // can serve from the stale client cache WITHOUT re-running the Server Component →
+  // stale videoStorageKey/activeTab (content stuck on "Chưa có video", stepper stuck
+  // at step 1, poller disabled). The fix hard-navigates so SSR always re-runs. This
+  // marker deterministically distinguishes the two: it SURVIVES a soft push (freeze,
+  // pre-fix) and is GONE after a full navigation (fixed) — independent of the flaky
+  // warm-cache timing that headless Playwright can't reproduce via symptoms alone.
+  await page.evaluate(() => { (window as unknown as { __preQc?: boolean }).__preQc = true; });
+
+  // Run quick-create scoped to THIS existing lesson.
+  await page.getByTestId("quick-create-lesson-trigger").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByTestId("qc-video-input").setInputFiles(TEST_VIDEO);
+  await expect(page.getByText(/edu-sample-en\.mp4/)).toBeVisible({ timeout: 5_000 });
+  await page.getByRole("button", { name: "Tăng Trắc nghiệm 1 đáp án" }).click();
+  await page.getByRole("button", { name: /Tạo.*chạy ngay/i }).click();
+
+  // Hands off to the processing tab.
+  await expect(page).toHaveURL(/\/lessons\/.*tab=processing/, { timeout: 120_000 });
+
+  // ROOT-CAUSE assertion (FAILS pre-fix): the hand-off must be a full-document
+  // navigation (fresh SSR). Pre-fix soft push keeps the document → marker survives.
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __preQc?: boolean }).__preQc ?? false), { timeout: 15_000 })
+    .toBe(false);
+
+  // Symptom fixed WITHOUT any test-side reload: auto-landed on the processing tab
+  // (SSR activeTab=processing), the video surfaced, and the pipeline is live.
+  await expect(page.getByTestId("lesson-tab-processing")).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+  await expect(page.getByTestId("workflow-step-upload")).toContainText(/Đã tải lên/, { timeout: 30_000 });
+  await expect(page.getByTestId("pipeline-auto-banner")).toBeVisible({ timeout: 30_000 });
+
+  // The content tab's VideoPlayer shows the video — no longer the empty "Chưa có video".
+  await page.getByTestId("lesson-tab-content").click();
+  await expect(page.getByTestId("video-player")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Chưa có video/)).toHaveCount(0);
+});
+
+// ── Test: after quick-create transcribes, the transcript shows on the step + video ──
+// tab, and the count is labelled "dòng" (transcript lines) — NOT "đoạn", which step 3
+// "Phân đoạn" uses for CHUNKS (the reported "N đoạn là cái gì" confusion). Runs the
+// real transcription (audio=en so it succeeds); chunk/gen use the test Gemini engine.
+test.slow();
+test("QuickCreate: transcript surfaces on the step + video tab after transcribing, labelled 'dòng' (not 'đoạn')", async ({ teacherPage: page, baseURL }) => {
+  test.setTimeout(360_000);
+  const { courseId, moduleId, token } = await setupIsolatedCourse(baseURL);
+  await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
+  const lessonClient = createClient(LessonService, createAuthedTransport(token, baseURL));
+  const lessonId = (await lessonClient.createLesson({ moduleId, title: uid("QC-Transcript"), orderIndex: 0 })).lesson!.id;
+
+  await page.goto(`/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}/lessons/${lessonId}`, { waitUntil: "domcontentloaded" });
+  await expect(page.getByText(/Chưa có video/)).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("quick-create-lesson-trigger").click();
+  await page.getByTestId("qc-video-input").setInputFiles(TEST_VIDEO);
+  await expect(page.getByText(/edu-sample-en\.mp4/)).toBeVisible({ timeout: 5_000 });
+  // Audio language = English (Radix Select) so Whisper transcribes edu-sample-en cleanly.
+  await page.getByTestId("qc-audio-language").click();
+  await page.getByRole("option", { name: /English/ }).click();
+  await page.getByRole("button", { name: "Tăng Trắc nghiệm 1 đáp án" }).click();
+  await page.getByRole("button", { name: /Tạo.*chạy ngay/i }).click();
+  await expect(page).toHaveURL(/\/lessons\/.*tab=processing/, { timeout: 120_000 });
+
+  // ISSUE 2: once transcription finishes, the transcript step reports its line count
+  // as "N dòng" (not "N đoạn"), so it no longer reads like the chunk step's count.
+  await expect(page.getByTestId("workflow-step-transcript")).toContainText(/\d+\s*dòng/, { timeout: 240_000 });
+  await expect(page.getByTestId("workflow-step-transcript")).not.toContainText(/\d+\s*đoạn/);
+
+  // ISSUE 1: the transcript actually renders — rows in the step, and the interactive
+  // transcript on the video tab — after quick-create (no manual reload).
+  await page.getByTestId("workflow-step-transcript").click();
+  await expect(page.locator('[data-testid^="edit-transcript-segment-"]').first()).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("lesson-tab-content").click();
+  await expect(page.getByTestId("interactive-transcript")).toBeVisible({ timeout: 20_000 });
+});

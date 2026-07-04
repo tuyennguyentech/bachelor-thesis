@@ -204,10 +204,10 @@ test.describe("Lesson task panel", () => {
     try {
       await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
       await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-      await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+      await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
 
       // Kick off the extract.
-      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
       await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
 
       // The bottom hero card is the single source of truth for live
@@ -232,10 +232,10 @@ test.describe("Lesson task panel", () => {
     createdLessonIds.push(lessonIdFromUrl(url));
     await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
 
     // Kick off the extract and wait for the hero.
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
     await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
 
     const hero = page.locator('[data-testid="extract-progress"]');
@@ -280,10 +280,10 @@ test.describe("Lesson task panel", () => {
     try {
       await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
       await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-      await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+      await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
 
       // Kick off the extract.
-      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
       await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 15_000 });
 
       // 1) The hero card is visible with title "Đang phiên âm"
@@ -343,10 +343,10 @@ test.describe("Lesson task panel", () => {
     try {
       await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
       await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-      await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+      await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
 
       // Kick off the extract.
-      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+      await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
       const hero = page.locator('[data-testid="extract-progress"]');
       await expect(hero).toBeVisible({ timeout: 15_000 });
       // The error summary must NOT appear while the task is running.
@@ -411,11 +411,11 @@ test.describe("Lesson task panel", () => {
     );
     await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
 
     await expect(page.getByTestId("workflow-step-chunks")).toBeDisabled();
     await expect(page.getByTestId("workflow-step-body")).not.toContainText("Phân đoạn bài học");
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible();
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible();
   });
 
   test("C. repeated same-kind task on the same chunk is idempotent", async ({ baseURL }) => {
@@ -535,7 +535,7 @@ test.describe("Lesson task panel", () => {
     );
     await page.goto(`${urlA}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
     const lessonIdA = lessonIdFromUrl(urlA);
 
     // Let the previous navigation settle so the next createLesson's
@@ -548,7 +548,7 @@ test.describe("Lesson task panel", () => {
     );
     await page.goto(`${urlB}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
     const lessonIdB = lessonIdFromUrl(urlB);
 
     const uploadedTasks: LessonTask[] = [];
@@ -613,9 +613,9 @@ test.describe("Lesson task panel", () => {
     );
     await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
     await page.locator('input[type="file"][accept="video/*"]').first().setInputFiles(TEST_VIDEO_WITH_AUDIO);
-    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" })).toBeVisible({ timeout: 150_000 });
+    await expect(page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" })).toBeVisible({ timeout: 150_000 });
 
-    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất transcript" }).click();
+    await page.getByTestId("workflow-next-action").getByRole("button", { name: "Trích xuất phiên âm" }).click();
     await expect(page.locator('[data-testid="extract-progress"]')).toBeVisible({ timeout: 5_000 });
     // We're on the transcript step, so the task panel filters out
     // the transcript task itself to avoid duplicate rendering. Use
