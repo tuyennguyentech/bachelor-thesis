@@ -11,9 +11,13 @@ services:
       FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
     platform: "linux/amd64"
     # Portable data: bind-mount into the working tree (volumes/) instead of an
-    # anonymous volume, so the whole dataset travels with the repo. :U makes
-    # podman chown the bind to the container user on each mount (portable across
-    # machines with different rootless uid maps); :Z relabels for SELinux.
+    # anonymous volume, so the whole dataset travels with the repo. NOTE: the
+    # :U/:Z bind flags below are silently STRIPPED by the external docker-compose
+    # provider that `podman compose` delegates to (HostConfig.Binds ends up as
+    # plain rw,rbind) — do NOT rely on them. Ownership must travel with the copy
+    # itself (`podman unshare tar`/`cp -a`, see README "Handover"). FDB, Postgres,
+    # Caddy and SeaweedFS run as container-root so a host-owned copy still works;
+    # only speaches runs non-root and genuinely needs ownership (see its mount).
     volumes:
       - ./volumes/fdb-coordinator:/var/fdb/data:U,Z
     # STATIC IP: in FDB_NETWORKING_MODE=container the process advertises `hostname -i`
@@ -90,8 +94,9 @@ services:
     volumes:
       - ./scripts/init/postgresql:/docker-entrypoint-initdb.d:Z
       # Postgres data dir (was an anonymous volume at /var/lib/postgresql). The
-      # entrypoint runs as root and re-chowns PGDATA to the postgres user, so :U
-      # (chown bind to container root) keeps it portable across machines.
+      # entrypoint runs as root and re-chowns PGDATA to the postgres user itself,
+      # which is what keeps it portable across machines (:U is stripped by the
+      # docker-compose provider — see the note on fdb-coordinator).
       - ./volumes/postgres:/var/lib/postgresql:U,Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dyadia -d dyadia"]
@@ -152,10 +157,15 @@ services:
     volumes:
       # HuggingFace model cache (Whisper + Piper), bind-mounted under volumes like
       # all other persistent data. The speaches image declares `USER ubuntu`
-      # (uid 1000), so :U chowns the bind to 1000 — writable by the runtime user
-      # (verified). Keeping it in volumes means the downloaded models travel with
-      # the portable dataset (no re-download on a copied-in stack); on a brand-new
-      # empty dir, speaches-init pulls them on first `up`.
+      # (uid 1000) — the ONLY non-root service in the stack — so this dir must be
+      # owned by userns uid 1000. :U would do that, but the docker-compose provider
+      # strips it (see fdb-coordinator note), so ownership must come from the copy
+      # (`podman unshare tar`/`cp -a`). A host-owned copy makes every STT request
+      # 500 (huggingface_hub PermissionError on refs/main); repair with:
+      #   podman unshare chown -R 1000:1000 volumes/hf-cache
+      # Keeping the cache in volumes means the models travel with the portable
+      # dataset (no re-download on a copied-in stack); on a brand-new empty dir,
+      # speaches-init pulls them on first `up`.
       - ./volumes/hf-cache:/home/ubuntu/.cache/huggingface/hub:U,Z
     restart: unless-stopped
     healthcheck:

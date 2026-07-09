@@ -16,7 +16,8 @@ gitignored files → `podman compose up`. No manual DB steps.
 
 ## Prerequisites
 
-- **OS: Linux or WSL2** — podman-native (rootless, `:U,Z` bind-mount flags; Docker lacks `:U`).
+- **OS: Linux or WSL2** — podman-native (rootless user namespaces; `volumes/` ownership is
+  handled via `podman unshare`).
 - `podman` + `podman compose` ([install guide](https://podman.io/docs/installation); rootless is fine).
 - Ports **8080** (HTTP) and **8443** (HTTPS) free — Caddy publishes there (no low-port `sysctl`, even rootless).
 - **GPU optional** — only to transcribe *new* uploads faster
@@ -44,8 +45,10 @@ git clone https://github.com/tuyennguyentech/bachelor-thesis.git dyadia && cd dy
 cp /path/to/richter.local.toml golang/richter/richter.local.toml
 cp /path/to/heino.env.local    typescript/heino/.env.local
 
-# 3. Provide the data — extract the handover archive OR symlink it
-tar -xzf volumes.tar.gz                 # → volumes/   (or: ln -s /path/to/volumes volumes)
+# 3. Provide the data — extract the handover archive OR symlink it.
+#    MUST be `podman unshare tar`, NOT plain tar: it restores container-user
+#    ownership; a host-owned extract breaks transcription (see "Handover" below).
+podman unshare tar -xzf volumes.tar.gz  # → volumes/   (or: ln -s /path/to/volumes volumes)
 
 # 4. Run (pulls the images; add "-f compose.gpu.yml" for GPU)
 podman compose -f compose.yml -f compose.dev.yml up -d
@@ -75,19 +78,34 @@ Config is mounted, never baked: richter reads `richter.base.toml` + `richter.loc
 
 ## Handover: package `volumes/`
 
-`volumes/` is gitignored and shipped separately. Archive it **from the repo root, stack stopped**,
-**inside the container user namespace** (the Postgres dir is owned by a container sub-uid the host
-can't otherwise read):
+`volumes/` is gitignored and shipped separately. File ownership must survive the copy, so **both
+directions run inside `podman unshare`** — follow these two commands and no ownership fixup is
+ever needed:
 
 ```sh
+# On the SOURCE machine — pack (stack stopped, from the repo root):
 podman compose -f compose.yml -f compose.dev.yml down
 podman unshare tar -czf volumes.tar.gz --sparse volumes/
+
+# On the TARGET machine — unpack (= step 3 of "Run with the pre-seeded data"):
+podman unshare tar -xzf volumes.tar.gz
 ```
 
-`podman unshare` maps container sub-uids to root so `tar` reads every volume; `--sparse` skips
-SeaweedFS's preallocated-but-empty space. Size scales with ingested media (mostly video, which
-gzips poorly) — check with `podman unshare du -sh --apparent-size volumes/`. Restore → step 3 above;
-ownership self-heals on `up` via the `:U` flag.
+`podman unshare` maps container sub-uids to root so `tar` can read every file when packing AND
+recreate its owner when unpacking; `--sparse` skips SeaweedFS's preallocated-but-empty space.
+Size scales with ingested media (mostly video, which gzips poorly) — check with
+`podman unshare du -sh --apparent-size volumes/`.
+
+**Troubleshooting — only if the archive was unpacked with plain `tar` (or copied with `cp -r`) by
+mistake:** every transcription fails with a 500 (`PermissionError` in
+`podman logs dyadia-speaches-1`), because the copy became host-owned and Speaches (uid 1000, the
+only non-root service) can't write its model cache. The `:U` flag in `compose.yml` won't repair
+it (the docker-compose provider silently strips it). Fix the bad copy in place on the target
+machine — no re-copy needed:
+
+```sh
+podman unshare chown -R 1000:1000 volumes/hf-cache
+```
 
 ## Git worktree checkout
 
@@ -103,6 +121,9 @@ ln -sr ../dyadia/volumes volumes
 - **Copy `richter.local.toml`, don't symlink it** — SELinux `:z` relabel can't follow a symlink's target.
 - One stack at a time per shared `volumes` (compose project name `dyadia` is shared); remove the link
   with `rm volumes` (**no trailing slash** — `rm -r volumes/` deletes the shared dataset).
+- If you want an **independent copy** of the data instead of the symlink, copy inside the user
+  namespace: `podman unshare cp -a ../dyadia/volumes volumes`. A plain `cp -r` leaves it host-owned
+  and breaks transcription (Speaches can't write its model cache — see "Handover" above).
 
 ## Build & push images (maintainers)
 

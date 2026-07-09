@@ -43,8 +43,10 @@ echo "=== [1/4] Stop stack (down -v; DATA lives in ./volumes, wiped next) ==="
 "${COMPOSE[@]}" down -v --remove-orphans || true
 
 echo "=== [2/4] Wipe ./volumes data dirs ==="
-# postgres/fdb data is owned by the container's mapped subuid (via :U), which the
-# host user cannot rm directly — delete inside the rootless user namespace.
+# postgres/fdb data is owned by the container's mapped subuid (the containers
+# chown/write it themselves; the compose :U flag is stripped by the docker-compose
+# provider), which the host user cannot rm directly — delete inside the rootless
+# user namespace.
 for d in "${VOL_SUBDIRS[@]}"; do
   podman unshare rm -rf "$ROOT/volumes/$d" 2>/dev/null || rm -rf "$ROOT/volumes/$d"
   mkdir -p "$ROOT/volumes/$d"

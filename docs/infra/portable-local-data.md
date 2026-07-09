@@ -16,23 +16,39 @@ AI pipeline.
 | `caddy-data/`, `caddy-config/` | caddy `/data`, `/config` | Caddy local CA + autosave |
 | `hf-cache/` | speaches `/home/ubuntu/.cache/huggingface/hub` | Whisper STT + Piper TTS model cache |
 
-Mounts use `:U,Z` so podman re-chowns the data to the container user on each
-machine (portable across different rootless UID maps) and relabels for SELinux.
+**Ownership travels with the copy, not with the mount flags.** The mounts carry
+`:U,Z`, but the external docker-compose provider that `podman compose` delegates
+to **silently strips both flags** (`podman inspect <ctr> --format
+'{{json .HostConfig.Binds}}'` shows plain `rw,rprivate,rbind`), so podman never
+re-chowns or relabels anything. Every copy/extract of `volumes/` must therefore
+run **inside the user namespace** — `podman unshare tar`, `podman unshare cp -a` —
+so container-uid ownership survives.
 
 **There are no named volumes** — everything, including the speaches model cache,
-is a `volumes/` bind mount. The speaches image declares `USER ubuntu` (uid 1000),
-so `:U` chowns the cache to 1000 and the runtime user can write it. Keeping the
-cache in `volumes/` means the downloaded models travel with the dataset (no
-re-download on a copied-in stack); on a brand-new empty dir, `speaches-init` pulls
-them on first `up` (needs internet once).
+is a `volumes/` bind mount. Postgres, FoundationDB, Caddy and SeaweedFS run as
+container-root, so they tolerate a host-owned copy. **Speaches is the only
+non-root service** (`USER ubuntu`, uid 1000): if `volumes/hf-cache` is host-owned,
+huggingface_hub can't write `refs/main` and **every STT request fails with a 500**
+("máy chủ phiên âm gặp sự cố nội bộ"). Repair such a copy with:
+
+```sh
+podman unshare chown -R 1000:1000 volumes/hf-cache
+```
+
+Keeping the cache in `volumes/` means the downloaded models travel with the
+dataset (no re-download on a copied-in stack); on a brand-new empty dir,
+`speaches-init` pulls them on first `up` (needs internet once).
 
 `volumes/` is gitignored (large) — copy the folder separately.
 
 > **Transfer size.** SeaweedFS pre-allocates its volume `.dat` files (≈1 GB each),
 > so `volumes/seaweedfs` shows ~15 GB on disk while the *actual* content is only
-> ~2 GB (`du --apparent-size volumes` to see the real size). Copy with a
-> sparse-aware tool so you move the content, not the pre-allocated zeros:
-> `rsync -aS volumes/ dest/`, or `tar --sparse -czf volumes.tgz volumes/`.
+> ~2 GB (`podman unshare du -sh --apparent-size volumes` to see the real size).
+> Copy with a sparse-aware tool, **inside the user namespace** (both directions —
+> pack AND unpack/copy — or ownership is lost, see above):
+> `podman unshare rsync -aS volumes/ dest/`, or
+> `podman unshare tar --sparse -czf volumes.tgz volumes/` +
+> `podman unshare tar -xzf volumes.tgz`.
 
 ## Handing the project to someone else
 
@@ -40,7 +56,8 @@ They need three things:
 
 1. **The repo** (tracked config travels with it: `.env`, `fdb.cluster`,
    `richter.base.toml`, `conf/`).
-2. **The `volumes/` folder** (the pre-seeded data — copy it alongside the repo).
+2. **The `volumes/` folder** (the pre-seeded data — copy it alongside the repo,
+   always via `podman unshare` so ownership survives; see above).
 3. **The gitignored secret files** (they hold secrets, so they are not in git —
    hand them over with the data):
    - `golang/richter/richter.local.toml` — richter's DB/S3/Gemini settings +
