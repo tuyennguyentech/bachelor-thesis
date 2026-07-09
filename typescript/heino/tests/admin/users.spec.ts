@@ -1,10 +1,29 @@
 import { test, expect, uid } from "../fixtures";
+import type { Page } from "@playwright/test";
 
 const USERS_URL = "/admin/users";
 const CREATE_USER_BUTTON = "Tạo người dùng";
 
 function uniqueEmail() {
   return `e2e.user.${uid("")}@test.local`;
+}
+
+// Firefox occasionally aborts a goto that races the previous navigation's
+// in-flight work (NS_BINDING_ABORTED) — retry, same as gotoMembers in
+// members.spec.ts. Seen on the detail-page goto right after Escape closes
+// the row actions menu.
+async function gotoRetry(page: Page, url: string) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(url);
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("NS_BINDING_ABORTED") && attempt < 2) {
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 test.describe("Users list page", () => {
@@ -109,17 +128,17 @@ test.describe("User detail page", () => {
     await expect(link).toBeVisible();
     userUrl = (await link.getAttribute("href"))!;
     await page.keyboard.press("Escape");
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
   });
 
   test("shows user name and email", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText(userEmail).first()).toBeVisible();
   });
 
   test("shows all sections", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await expect(page.getByText("Thông tin cá nhân")).toBeVisible();
     await expect(page.getByText("Tài khoản")).toBeVisible();
     await expect(page.getByText("Đổi mật khẩu")).toBeVisible();
@@ -127,7 +146,7 @@ test.describe("User detail page", () => {
   });
 
   test("edits first and last name", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await page.getByLabel("Họ").clear();
     await page.getByLabel("Họ").fill("Nguyễn");
     await page.getByLabel("Tên", { exact: true }).clear();
@@ -137,7 +156,7 @@ test.describe("User detail page", () => {
   });
 
   test("shows error when password mismatch", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await page.getByLabel("Mật khẩu mới").fill("NewPass123!");
     await page.getByLabel("Xác nhận mật khẩu").fill("DifferentPass999!");
     await page.getByRole("button", { name: "Đặt mật khẩu" }).click();
@@ -145,7 +164,7 @@ test.describe("User detail page", () => {
   });
 
   test("short password blocked by browser (minLength)", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await page.getByLabel("Mật khẩu mới").fill("short");
     await page.getByLabel("Xác nhận mật khẩu").fill("short");
     await page.getByRole("button", { name: "Đặt mật khẩu" }).click();
@@ -154,7 +173,7 @@ test.describe("User detail page", () => {
   });
 
   test("changes password successfully", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await page.getByLabel("Mật khẩu mới").fill("NewSecurePass123!");
     await page.getByLabel("Xác nhận mật khẩu").fill("NewSecurePass123!");
     await page.getByRole("button", { name: "Đặt mật khẩu" }).click();
@@ -162,7 +181,7 @@ test.describe("User detail page", () => {
   });
 
   test("updates user role", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     // Vai trò select is in the Tài khoản section
     const roleTrigger = page.locator("[data-slot='select-trigger']").first();
     await roleTrigger.click();
@@ -171,7 +190,7 @@ test.describe("User detail page", () => {
   });
 
   test("updates user status", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     // Trạng thái select is the second select in Tài khoản section
     const statusTrigger = page.locator("[data-slot='select-trigger']").nth(1);
     await statusTrigger.click();
@@ -180,7 +199,7 @@ test.describe("User detail page", () => {
   });
 
   test("deletes user and redirects to list", async ({ adminPage: page }) => {
-    await page.goto(userUrl);
+    await gotoRetry(page, userUrl);
     await page.getByRole("button", { name: "Xóa" }).click();
     await expect(page.getByRole("alertdialog")).toBeVisible();
     await expect(page.getByRole("alertdialog").getByText("Xóa người dùng?")).toBeVisible();

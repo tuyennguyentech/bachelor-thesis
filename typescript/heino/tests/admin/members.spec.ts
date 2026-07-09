@@ -116,9 +116,16 @@ test.describe("Member management", () => {
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Email").fill(memberEmail);
     // default role is Học viên
+    // The dialog closes only after the add RPC resolved (two RPCs under the
+    // hood), so a closed dialog means the membership is committed.
     await dialog.getByRole("button", { name: "Thêm" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-    await expect(page.getByRole("row").filter({ hasText: memberEmail })).toBeVisible();
+    await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 15000 });
+    // Re-navigate for a fresh SSR render instead of waiting on the menu's
+    // router.refresh(), which lags past the 5s expect timeout under parallel
+    // suite load. After the commit signal above this is a deterministic
+    // read-after-write, not a refresh race.
+    await gotoMembers(page);
+    await expect(page.getByRole("row").filter({ hasText: memberEmail })).toBeVisible({ timeout: 10000 });
   });
 
   test("added member appears in the table", async ({ adminPage: page }) => {
@@ -134,7 +141,14 @@ test.describe("Member management", () => {
     await openMemberActions(page, memberRow);
     await page.getByRole("menuitem", { name: "Đổi vai trò" }).hover();
     await page.getByRole("menuitem", { name: "Giảng viên" }).click();
-    await expect(memberRow.getByText("Giảng viên")).toBeVisible();
+    // The success toast fires only after the update RPC resolved — wait for it
+    // first so the navigation below cannot abort the in-flight mutation.
+    await expect(page.getByText("Đã cập nhật vai trò thành viên")).toBeVisible({ timeout: 15000 });
+    // router.refresh() lags under parallel suite load (the bare 5s in-place
+    // wait here flaked); a fresh navigation after the commit signal is a
+    // deterministic read-after-write.
+    await gotoMembers(page);
+    await expect(memberRow.getByText("Giảng viên")).toBeVisible({ timeout: 10000 });
   });
 
   test("updates member status", async ({ adminPage: page }) => {
@@ -143,7 +157,10 @@ test.describe("Member management", () => {
     await openMemberActions(page, memberRow);
     await page.getByRole("menuitem", { name: "Đổi trạng thái" }).hover();
     await page.getByRole("menuitem", { name: "Tạm khóa" }).click();
-    await expect(memberRow.getByText("Tạm khóa")).toBeVisible();
+    // Same pattern as the role test: toast = RPC committed, then re-navigate.
+    await expect(page.getByText("Đã cập nhật trạng thái thành viên")).toBeVisible({ timeout: 15000 });
+    await gotoMembers(page);
+    await expect(memberRow.getByText("Tạm khóa")).toBeVisible({ timeout: 10000 });
   });
 
   test("removes member via confirm dialog", async ({ adminPage: page }) => {
@@ -156,6 +173,12 @@ test.describe("Member management", () => {
     await expect(page.getByRole("alertdialog").getByText("Xóa thành viên?")).toBeVisible();
     await page.getByRole("alertdialog").getByRole("button", { name: "Xóa" }).click();
 
+    // Toast = remove RPC committed; re-navigate and anchor on the rendered
+    // heading before asserting absence, so a not-yet-loaded page can't
+    // produce a false pass.
+    await expect(page.getByText("Đã xóa thành viên khỏi tổ chức")).toBeVisible({ timeout: 15000 });
+    await gotoMembers(page);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Thành viên");
     await expect(page.getByRole("row").filter({ hasText: memberEmail })).not.toBeVisible();
   });
 });

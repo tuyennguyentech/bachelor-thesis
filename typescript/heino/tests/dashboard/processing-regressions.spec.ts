@@ -159,9 +159,17 @@ test.describe("Processing tab regressions", () => {
     //    surfaces (the completion auto-advances the body to the chunks step, so
     //    re-open the transcript step to render its editor). ──
     await transcriptPersisted();
-    await page.getByRole("tab", { name: /Xử lý video/i }).click();
-    await page.getByTestId("workflow-step-transcript").click();
-    await expect(stepSegments.first()).toBeVisible({ timeout: 90_000 });
+    // The in-place wait here flaked under full-suite load: the tracker's
+    // completion refetch can auto-advance the body back to the chunks step
+    // right after our manual transcript-step click, unmounting the editor —
+    // 90s of waiting on a step that is no longer open. The transcript is
+    // already asserted persisted above, so verify the re-sync from a fresh
+    // load, re-opening the step in a toPass loop.
+    await expect(async () => {
+      await page.goto(`${url}?tab=processing`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("workflow-step-transcript").click();
+      await expect(stepSegments.first()).toBeVisible({ timeout: 15_000 });
+    }).toPass({ timeout: 120_000 });
     await page.getByRole("tab", { name: /Bài giảng/i }).click();
     await expect(page.getByTestId("interactive-transcript").first()).toBeVisible({ timeout: 30_000 });
   });

@@ -20,10 +20,17 @@ import {
   TEACHER_EMAIL,
   USER_PASSWORD,
   getTeacherAuth,
+  getAdminAuth,
+  getToken,
+  createUser,
+  getOrgId,
+  addOrgMember,
   createAuthedTransport,
   createCourse,
   createCourseModule,
   SEED_HUST_CS_SLUG,
+  UserRole,
+  OrganizationRole,
 } from "../fixtures";
 import { OrganizationService } from "buf/gen/richter/v1/organizations_pb";
 import { LessonService } from "buf/gen/richter/v1/courses_pb";
@@ -52,6 +59,38 @@ async function setupIsolatedCourse(
   const moduleId = await createCourseModule(token, courseId, uid("QC-Module"), baseURL);
   const courseUrl = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}?tab=lessons`;
   return { courseUrl, courseId, moduleId, token, userId };
+}
+
+/**
+ * Like setupIsolatedCourse, but the course is owned by a FRESH teacher and the
+ * test's browser session must log in as them (returned `teacherEmail`).
+ *
+ * startLessonTask enforces a per-user active-task cap (MaxActivePerUser = 3,
+ * "bạn đã chạy quá nhiều tác vụ cùng lúc"). Quick-create submits the pipeline
+ * from the BROWSER session, and pipelines keep running server-side after their
+ * test ends — so tests sharing carol also share her cap with every still-running
+ * pipeline, and the LAST submit test in this file flaked on resource_exhausted.
+ * A fresh teacher per submit test gives each its own quota — the same pattern
+ * createAnalyzedLesson uses for its API-driven pipelines.
+ */
+async function setupIsolatedCourseAsFreshTeacher(
+  baseURL: string | undefined,
+): Promise<{ courseUrl: string; courseId: string; moduleId: string; token: string; userId: string; teacherEmail: string }> {
+  const { token: adminToken } = await getAdminAuth(baseURL);
+  const teacherEmail = `${uid("qc-teacher")}@test.local`;
+  const userId = await createUser(
+    adminToken,
+    { email: teacherEmail, firstName: "QC", lastName: "Teacher", role: UserRole.NORMAL },
+    baseURL,
+  );
+  const orgId = await getOrgId(adminToken, SEED_HUST_CS_SLUG, baseURL);
+  await addOrgMember(adminToken, orgId, userId, OrganizationRole.TEACHER, baseURL);
+  const token = await getToken(teacherEmail, USER_PASSWORD, baseURL);
+
+  const courseId = await createCourse(token, orgId, uid("QC-Course"), userId, baseURL);
+  const moduleId = await createCourseModule(token, courseId, uid("QC-Module"), baseURL);
+  const courseUrl = `/dashboard/organizations/${SEED_HUST_CS_SLUG}/courses/${courseId}?tab=lessons`;
+  return { courseUrl, courseId, moduleId, token, userId, teacherEmail };
 }
 
 // ── Test: dialog opens + form fields visible ─────────────────────────────────
@@ -132,8 +171,10 @@ test(
   "QuickCreate: submit uploads then navigates to the processing tab with auto-progress",
   async ({ teacherPage: page, baseURL }) => {
     const lessonTitle = uid("QC-Pipeline-Test");
-    const { courseUrl } = await setupIsolatedCourse(baseURL);
-    await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
+    // Fresh teacher: this test starts a durable pipeline (counts against the
+    // per-user task cap), so it must not share carol's quota.
+    const { courseUrl, teacherEmail } = await setupIsolatedCourseAsFreshTeacher(baseURL);
+    await loginAs(page, teacherEmail, USER_PASSWORD, baseURL ?? "http://caddy");
     await page.goto(courseUrl, { waitUntil: "domcontentloaded" });
 
     await page.getByTestId("quick-create-trigger").click();
@@ -195,8 +236,9 @@ test("QuickCreate: video-less lesson shows quick-create + manual buttons", async
 // tải video" until a manual reload. The fix adds router.refresh() in goToProcessing.
 test.slow();
 test("QuickCreate: existing-lesson quick-create hands off with a fresh SSR read (video + stepper, no manual reload)", async ({ teacherPage: page, baseURL }) => {
-  const { courseId, moduleId, token } = await setupIsolatedCourse(baseURL);
-  await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
+  // Fresh teacher: submits a pipeline — must not share carol's per-user task cap.
+  const { courseId, moduleId, token, teacherEmail } = await setupIsolatedCourseAsFreshTeacher(baseURL);
+  await loginAs(page, teacherEmail, USER_PASSWORD, baseURL ?? "http://caddy");
 
   const lessonClient = createClient(LessonService, createAuthedTransport(token, baseURL));
   const created = await lessonClient.createLesson({ moduleId, title: uid("QC-InPlace"), orderIndex: 0 });
@@ -252,8 +294,13 @@ test("QuickCreate: existing-lesson quick-create hands off with a fresh SSR read 
 test.slow();
 test("QuickCreate: transcript surfaces on the step + video tab after transcribing, labelled 'dòng' (not 'đoạn')", async ({ teacherPage: page, baseURL }) => {
   test.setTimeout(360_000);
-  const { courseId, moduleId, token } = await setupIsolatedCourse(baseURL);
-  await loginAs(page, TEACHER_EMAIL, USER_PASSWORD, baseURL ?? "http://caddy");
+  // Fresh teacher: submits a pipeline — must not share carol's per-user task cap.
+  // This test flaked exactly here: as the LAST submit test in the file it found
+  // carol's cap already filled by the earlier tests' still-running pipelines
+  // ("[resource_exhausted] bạn đã chạy quá nhiều tác vụ cùng lúc, giới hạn là 3"),
+  // so quick-create showed its error state and never navigated.
+  const { courseId, moduleId, token, teacherEmail } = await setupIsolatedCourseAsFreshTeacher(baseURL);
+  await loginAs(page, teacherEmail, USER_PASSWORD, baseURL ?? "http://caddy");
   const lessonClient = createClient(LessonService, createAuthedTransport(token, baseURL));
   const lessonId = (await lessonClient.createLesson({ moduleId, title: uid("QC-Transcript"), orderIndex: 0 })).lesson!.id;
 
