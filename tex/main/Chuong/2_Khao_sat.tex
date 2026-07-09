@@ -306,28 +306,29 @@ Quy trình bắt đầu khi giảng viên \emph{tạo bài giảng và tải vid
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{|>{\bfseries\raggedright\arraybackslash}p{2.6cm}|p{11.2cm}|}
 \hline
-Tên use case & Xem kết quả và phản hồi \\ \hline
-Tác nhân & Người học \\ \hline
-Mục đích & Cho phép người học xem lại điểm, câu trả lời, phản hồi chi tiết và theo dõi tiến độ hoàn thành của bản thân trong khóa học. \\ \hline
-Tiền điều kiện & Người học đã làm ít nhất một hoạt động tương tác hoặc đã nộp bài cho bài giảng. \\ \hline
+Tên use case & Tham gia khóa học \\ \hline
+Tác nhân & Người học, Giảng viên \\ \hline
+Mục đích & Cho phép người học tìm kiếm khóa học, gửi yêu cầu tham gia và theo dõi trạng thái yêu cầu cho đến khi được vào học. \\ \hline
+Tiền điều kiện & Người học là thành viên của tổ chức chứa khóa học nhưng chưa tham gia khóa học đó. \\ \hline
 Kịch bản chính & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
-1 & Người học & Mở bài giảng hoặc trang kết quả học tập cá nhân. \\[2pt]
-2 & Hệ thống & Tải các lần làm bài, điểm số, tiến độ xem video và phản hồi đã lưu. \\[2pt]
-3 & Người học & Chọn xem bảng theo dõi tiến độ học tập tổng quát của toàn khóa học. \\[2pt]
-4 & Người học & Chọn một lần làm bài cụ thể của bài giảng để xem chi tiết. \\[2pt]
-5 & Hệ thống & Hiển thị từng câu trả lời, điểm đạt được và nhận xét tương ứng của lần làm bài đó. \\[2pt]
-6 & Người học & Dựa trên phản hồi để xem lại đoạn video bài giảng hoặc thực hiện lượt làm bài tiếp theo nếu còn hạn. \\[2pt]
+1 & Người học & Tìm kiếm và xem thông tin khóa học muốn tham gia. \\[2pt]
+2 & Hệ thống & Hiển thị thông tin khóa học kèm nút gửi yêu cầu tham gia. \\[2pt]
+3 & Người học & Gửi yêu cầu tham gia khóa học. \\[2pt]
+4 & Hệ thống & Ghi nhận yêu cầu ở trạng thái chờ duyệt và chuyển tới giảng viên. \\[2pt]
+5 & Giảng viên & Chấp nhận yêu cầu tham gia. \\[2pt]
+6 & Hệ thống & Cập nhật trạng thái yêu cầu thành đã duyệt và thêm người học vào danh sách thành viên khóa học. \\[2pt]
+7 & Người học & Xem trạng thái yêu cầu đã được chấp nhận và bắt đầu học các bài giảng. \\[2pt]
 \end{tabular} \\ \hline
 Kịch bản khác (Luồng sự kiện thay thế) & \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{2.0cm}p{7.3cm}@{}}
 \textbf{STT} & \textbf{Thực hiện bởi} & \textbf{Hành động} \\[2pt]
-2a & Hệ thống & Nếu chưa có dữ liệu làm bài, hệ thống hiển thị giao diện trống và hướng dẫn người học bắt đầu bài học. \\[2pt]
-5a & Hệ thống & Nếu cấu hình phản hồi của bài giảng chưa cho phép xem đáp án, hệ thống chỉ hiển thị điểm và nhận xét phù hợp. \\[2pt]
+5a & Giảng viên & Từ chối yêu cầu; hệ thống cập nhật trạng thái bị từ chối và không thêm người học vào khóa học. \\[2pt]
+7a & Người học & Xem trạng thái yêu cầu đang chờ duyệt hoặc bị từ chối; nội dung khóa học vẫn bị khóa. \\[2pt]
 \end{tabular} \\ \hline
-Hậu điều kiện & Người học nắm được kết quả học tập cá nhân và tiến độ hoàn thành khóa học để tiếp tục cải thiện. \\ \hline
+Hậu điều kiện & Người học trở thành thành viên khóa học và truy cập được các bài giảng. \\ \hline
 \end{tabular}
-\caption{Đặc tả use case Tham gia khoá học}
-\label{table:pl_uc_xemketqua}
+\caption{Đặc tả use case Tham gia khóa học}
+\label{table:uc_thamgia}
 \end{table}
 
 \subsection{Đặc tả use case Học bài giảng tương tác}
